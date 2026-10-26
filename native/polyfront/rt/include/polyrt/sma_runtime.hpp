@@ -139,13 +139,21 @@ POLYREGION_RT_PROTECT inline void mapReadwrite(SMA &sma, void *origin, const ptr
   sma.invalidateLocal(origin);
 }
 
+struct ArenaImage {
+  uintptr_t base;
+  std::vector<ArenaRemote> remotes;
+};
+
 // lays the capture graph into the device arena, pointers rewritten to arena offsets, with the capture at offset 0
 template <typename SMA>
-POLYREGION_RT_PROTECT inline uintptr_t arenaMarshal(SMA &sma, const void *capture, const runtime::TypeLayout &layout) {
+POLYREGION_RT_PROTECT inline ArenaImage arenaMarshal(SMA &sma, const void *capture, const runtime::TypeLayout &layout,
+                                                     const RemoteRangeOf &remoteOf) {
   sma.genArenaReset();
   sma.genArenaObjectSlack = invoke::overReadPadBytes(currentDevice->features());
+  sma.genArenaRemoteOf = remoteOf;
   sma.genArenaMirror(static_cast<const char *>(capture), 1, 1, layout, layout.sizeInBytes);
-  return sma.genArenaFinish();
+  sma.genArenaRemoteOf = {};
+  return {sma.genArenaFinish(), sma.genArenaRemotes};
 }
 
 // the SMA of the library that hosts this runtime, for launches whose captures the runtime marshals itself
@@ -156,7 +164,7 @@ struct CaptureMarshal {
   virtual void readAlloc(const void *local) = 0;
   virtual uintptr_t mirror(const void *capture, const runtime::TypeLayout &layout) = 0;
   virtual void readMirror(void *capture) = 0;
-  virtual uintptr_t arena(const void *capture, const runtime::TypeLayout &layout) = 0;
+  virtual ArenaImage arena(const void *capture, const runtime::TypeLayout &layout, const RemoteRangeOf &remoteOf) = 0;
   virtual void readArena() = 0;
 };
 
@@ -173,7 +181,9 @@ public:
     sma.syncRemoteToLocalAfterLaunch(capture);
     sma.disassociate(capture);
   }
-  uintptr_t arena(const void *capture, const runtime::TypeLayout &layout) override { return arenaMarshal(sma, capture, layout); }
+  ArenaImage arena(const void *capture, const runtime::TypeLayout &layout, const RemoteRangeOf &remoteOf) override {
+    return arenaMarshal(sma, capture, layout, remoteOf);
+  }
   void readArena() override { sma.genArenaReadback(); }
 };
 

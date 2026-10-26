@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -22,6 +23,14 @@
 #include "polyrt/page_guard.hpp"
 
 namespace polyregion::polyrt {
+
+struct ArenaRemote {
+  uintptr_t remote;
+  uint64_t offset;
+  size_t sizeInBytes;
+};
+
+using RemoteRangeOf = std::function<std::optional<std::pair<uintptr_t, size_t>>(uintptr_t)>;
 
 struct PtrQuery {
   size_t sizeInBytes;
@@ -915,8 +924,11 @@ public:
   // host regions of resident leaves to H2D this launch, applied after any arena growth
   std::vector<std::tuple<const char *, uint64_t, size_t>> genArenaHostUploads{};
   std::vector<uint64_t> genArenaTouched{}; // leaf offsets this kernel reached
+  std::vector<ArenaRemote> genArenaRemotes{};
+  RemoteRangeOf genArenaRemoteOf{};
 
   void genArenaReset() {
+    genArenaRemotes.clear();
     genArenaUploads.clear();
     genArenaHostUploads.clear();
     genArenaTouched.clear();
@@ -940,6 +952,12 @@ public:
                      const runtime::AggregateMember::ResolvePtrSize resolve, const bool readOnly) {
     uint64_t childOff = arenaNull;
     if (const char *target = readPtrValue(hostBase + hostOff); target) {
+      const auto address = reinterpret_cast<uintptr_t>(target);
+      if (const auto remote = genArenaRemoteOf ? genArenaRemoteOf(address) : std::nullopt) {
+        childOff = genArenaBindRemote(remote->first, remote->second) + (address - remote->first);
+        std::memcpy(genArenaStaging.data() + arenaPtrOff, &childOff, sizeof(uint64_t));
+        return;
+      }
       // interior pointer into an already-mirrored object (e.g. an SSO string's `_M_p` -> its own
       // `_M_local_buf`): point at that object's interior, don't re-mirror or fall to arenaNull
       for (auto &r : genArenaRecs)
@@ -1064,6 +1082,17 @@ public:
     return off;
   }
 
+  uint64_t genArenaBindRemote(const uintptr_t remote, const size_t size) {
+    for (const auto &r : genArenaRemotes)
+      if (r.remote == remote) return r.offset;
+    constexpr size_t align = alignof(std::max_align_t);
+    if (const size_t pad = (align - genArenaStaging.size() % align) % align; pad) genArenaStaging.resize(genArenaStaging.size() + pad);
+    const uint64_t off = genArenaStaging.size();
+    genArenaStaging.resize(off + size + genArenaObjectSlack);
+    genArenaRemotes.push_back({remote, off, size});
+    return off;
+  }
+
   uintptr_t genArenaFinish() {
     const size_t need = genArenaStaging.size() + 1;
     if (!genArenaActive || need > genArenaDevCapacity) {
@@ -1170,6 +1199,8 @@ public:
     if (off == arenaNull) return static_cast<const char *>(nullptr);
     for (const auto &r : genArenaRecs)
       if (off >= r.off && off < r.off + r.size) return r.host + (off - r.off);
+    for (const auto &r : genArenaRemotes)
+      if (off >= r.offset && off <= r.offset + r.sizeInBytes) return reinterpret_cast<const char *>(r.remote + (off - r.offset));
     return std::nullopt;
   }
 

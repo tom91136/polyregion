@@ -668,12 +668,14 @@ static void remoteLaunch(void *context, const char *moduleName, const char *kern
   }
 }
 
-static bool remoteAllocation(polyregion::polyrt::ExecutionContext &execution, const uintptr_t pointer) {
+static std::optional<std::pair<uintptr_t, size_t>> remoteAllocation(polyregion::polyrt::ExecutionContext &execution,
+                                                                    const uintptr_t pointer) {
   const std::lock_guard lock(execution.transaction);
   const auto upper = execution.remoteAllocations.upper_bound(pointer);
-  if (upper == execution.remoteAllocations.begin()) return false;
+  if (upper == execution.remoteAllocations.begin()) return std::nullopt;
   const auto &[base, allocation] = *std::prev(upper);
-  return pointer - base <= allocation.bytes;
+  if (pointer - base > allocation.bytes) return std::nullopt;
+  return std::pair{base, allocation.bytes};
 }
 
 static bool pointerBearing(const polyregion::runtime::TypeLayout *layout) {
@@ -704,6 +706,7 @@ static void remoteLaunchMarshalled(void *context, const char *moduleName, const 
   auto *marshal = !marshalling || hostThreaded || mode == sma::MirrorMode::Off ? nullptr : sma::captureMarshal();
   std::vector<size_t> mirroredCaptures, ensuredPointers;
   std::optional<size_t> arenaCapture;
+  sma::ArenaImage arena{};
   const auto release = [&]() noexcept {
     std::exception_ptr failure;
     for (auto &mirror : mirrors) {
@@ -724,7 +727,11 @@ static void remoteLaunchMarshalled(void *context, const char *moduleName, const 
       if (mirrorKinds[i] != 1 || !marshal || !pointerBearing(layouts ? layouts[i] : nullptr)) continue;
       if (mode == sma::MirrorMode::Arena) {
         if (arenaCapture) throw std::logic_error(fmt::format("{}: launch of {} has more than one arena capture", __func__, kernelName));
-        marshalled[i] = marshal->arena(argPtrs[i], *layouts[i]);
+        arena = marshal->arena(argPtrs[i], *layouts[i], [&](const uintptr_t pointer) { return remoteAllocation(execution, pointer); });
+        for (const auto &bound : arena.remotes)
+          execution.queue->enqueueDeviceToDeviceAsync(bound.remote, 0, arena.base, bound.offset, bound.sizeInBytes, {});
+        if (!arena.remotes.empty()) execution.queue->enqueueWaitBlocking();
+        marshalled[i] = arena.base;
         arenaCapture = i;
       } else {
         marshalled[i] = marshal->mirror(argPtrs[i], *layouts[i]);
@@ -765,7 +772,12 @@ static void remoteLaunchMarshalled(void *context, const char *moduleName, const 
     if (marshal) marshal->visitClear();
     for (const auto i : mirroredCaptures)
       marshal->readMirror(argPtrs[i]);
-    if (arenaCapture) marshal->readArena();
+    if (arenaCapture) {
+      for (const auto &bound : arena.remotes)
+        execution.queue->enqueueDeviceToDeviceAsync(arena.base, bound.offset, bound.remote, 0, bound.sizeInBytes, {});
+      if (!arena.remotes.empty()) execution.queue->enqueueWaitBlocking();
+      marshal->readArena();
+    }
     for (const auto i : ensuredPointers)
       marshal->readAlloc(*static_cast<void *const *>(argPtrs[i]));
     for (size_t i = 0; i < argCount; ++i)
