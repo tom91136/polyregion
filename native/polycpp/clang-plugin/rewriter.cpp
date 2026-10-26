@@ -6,6 +6,7 @@
 #include <future>
 #include <map>
 #include <memory>
+#include <numeric>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -412,12 +413,17 @@ static clang::VarDecl *mkStaticByteArray(clang::ASTContext &C, clang::DeclContex
                            llvm::StringRef(bytes.empty() ? "" : reinterpret_cast<const char *>(bytes.data()), bytes.size()));
 }
 
+struct BoundInterfaceGroup {
+  std::string entryName;
+  std::string suffix;
+  const polyast::CompileBundle *compiled;
+  std::vector<InterfaceModuleResource> resources;
+};
+
 static void materializeInterfaceCall(clang::CompilerInstance &CI, clang::ASTContext &C, const PreparedInterfaceCall &prepared,
-                                     const polyast::CompileBundle &compiled, const std::vector<InterfaceModuleResource> &resources) {
+                                     const std::vector<BoundInterfaceGroup> &groups) {
   const auto &site = prepared.site;
   const auto &argumentTypes = prepared.argumentTypes;
-  const auto &suffix = prepared.suffix;
-  const auto &entryName = prepared.entryName;
   auto &S = CI.getSema();
   std::vector<clang::QualType> entryTypes;
   std::vector<clang::Expr *> entryArgs;
@@ -444,7 +450,6 @@ static void materializeInterfaceCall(clang::CompilerInstance &CI, clang::ASTCont
     entryTypes.emplace_back(C.getPointerType(type));
     entryArgs.emplace_back(S.CreateBuiltinUnaryOp({}, clang::UO_AddrOf, mkDeclRef(C, resultDecl)).get());
   }
-  auto *entry = mkExternCFn(C, entryName, C.VoidTy, entryTypes);
   auto *contextAcquire = mkExternCppFn(C, "polyrt_context_acquire_or_throw", C.VoidTy, {C.VoidPtrTy});
   auto *contextRelease = mkExternCppFn(C, "polyrt_context_release_or_throw", C.VoidTy, {C.VoidPtrTy});
   auto *fallback = hasInterfaceFallback(site.callee) ? site.callee->getBody() : nullptr;
@@ -463,54 +468,77 @@ static void materializeInterfaceCall(clang::CompilerInstance &CI, clang::ASTCont
   auto *remoteLoad = mkExternCFn(C, "polyrt_remote_load", C.BoolTy,
                                  {C.VoidPtrTy, constCharStarTy(C), C.IntTy, C.IntTy, C.getSizeType(), C.getPointerType(constCharStarTy(C)),
                                   C.getSizeType(), C.getPointerType(C.getConstType(C.UnsignedCharTy))});
-  std::map<std::string, clang::VarDecl *> loadedModules;
-  for (size_t index = 0; index < compiled.remoteModules.size(); ++index) {
-    const auto &object = compiled.remoteModules[index];
-    const auto &moduleName = object.moduleName;
-    auto [loadedEntry, inserted] = loadedModules.try_emplace(moduleName, nullptr);
-    if (inserted) {
-      auto *loaded = clang::VarDecl::Create(
-          C, site.callee, {}, {}, &C.Idents.get("__polyregion_package_loaded_" + suffix + "_" + std::to_string(loadedModules.size() - 1)),
-          C.BoolTy, C.getTrivialTypeSourceInfo(C.BoolTy), clang::SC_None);
-      loaded->setInit(boolLit(false));
-      loadedEntry->second = loaded;
-      statements.emplace_back(new (C) clang::DeclStmt(clang::DeclGroupRef(loaded), {}, {}));
+  const auto joinAnd = [&](clang::Expr *acc, clang::Expr *next) -> clang::Expr * {
+    return S.CreateBuiltinBinOp({}, clang::BO_LAnd, acc, next).get();
+  };
+  std::vector<std::map<std::string, clang::VarDecl *>> groupLoaded(groups.size());
+  for (size_t group = 0; group < groups.size(); ++group) {
+    const auto &[entryName, suffix, compiled, resources] = groups[group];
+    auto &loadedModules = groupLoaded[group];
+    for (size_t index = 0; index < compiled->remoteModules.size(); ++index) {
+      const auto &object = compiled->remoteModules[index];
+      const auto &moduleName = object.moduleName;
+      auto [loadedEntry, inserted] = loadedModules.try_emplace(moduleName, nullptr);
+      if (inserted) {
+        auto *loaded = clang::VarDecl::Create(
+            C, site.callee, {}, {}, &C.Idents.get("__polyregion_package_loaded_" + suffix + "_" + std::to_string(loadedModules.size() - 1)),
+            C.BoolTy, C.getTrivialTypeSourceInfo(C.BoolTy), clang::SC_None);
+        loaded->setInit(boolLit(false));
+        loadedEntry->second = loaded;
+        statements.emplace_back(new (C) clang::DeclStmt(clang::DeclGroupRef(loaded), {}, {}));
+      }
+      auto *image = resources[index].image;
+      clang::Expr *featureData = mkNullPtrLit(C, constCharStarTy(C));
+      if (!object.features.empty()) {
+        auto *features = resources[index].features;
+        featureData = mkArrayToPtrDecay(C, C.getPointerType(constCharStarTy(C)), mkDeclRef(C, features));
+      }
+      auto *load =
+          mkCall(C, remoteLoad,
+                 {contextArg, mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, moduleName)),
+                  mkIntLit(C, C.IntTy, static_cast<int>(object.kind)), mkIntLit(C, C.IntTy, static_cast<int>(object.format)),
+                  mkIntLit(C, C.getSizeType(), object.features.size()), featureData, mkIntLit(C, C.getSizeType(), object.image.size()),
+                  mkArrayToPtrDecay(C, C.getPointerType(C.getConstType(C.UnsignedCharTy)), mkDeclRef(C, image))});
+      auto *loaded = loadedEntry->second;
+      auto *anyLoaded = S.CreateBuiltinBinOp({}, clang::BO_LOr, load, mkLoad(C, loaded)).get();
+      statements.emplace_back(S.CreateBuiltinBinOp({}, clang::BO_Assign, mkDeclRef(C, loaded), anyLoaded).get());
     }
-    auto *image = resources[index].image;
-    clang::Expr *featureData = mkNullPtrLit(C, constCharStarTy(C));
-    if (!object.features.empty()) {
-      auto *features = resources[index].features;
-      featureData = mkArrayToPtrDecay(C, C.getPointerType(constCharStarTy(C)), mkDeclRef(C, features));
-    }
-    auto *load =
-        mkCall(C, remoteLoad,
-               {contextArg, mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, moduleName)),
-                mkIntLit(C, C.IntTy, static_cast<int>(object.kind)), mkIntLit(C, C.IntTy, static_cast<int>(object.format)),
-                mkIntLit(C, C.getSizeType(), object.features.size()), featureData, mkIntLit(C, C.getSizeType(), object.image.size()),
-                mkArrayToPtrDecay(C, C.getPointerType(C.getConstType(C.UnsignedCharTy)), mkDeclRef(C, image))});
-    auto *loaded = loadedEntry->second;
-    auto *anyLoaded = S.CreateBuiltinBinOp({}, clang::BO_LOr, load, mkLoad(C, loaded)).get();
-    statements.emplace_back(S.CreateBuiltinBinOp({}, clang::BO_Assign, mkDeclRef(C, loaded), anyLoaded).get());
   }
-  if (fallback) {
-    auto *remoteLoaded = mkExternCFn(C, "polyrt_remote_loaded", C.BoolTy, {constCharStarTy(C), C.BoolTy});
-    auto *allLoaded =
-        loadedModules | fold_left(static_cast<clang::Expr *>(boolLit(true)), [&](clang::Expr *acc, const auto &module) {
-          auto *loaded =
-              mkCall(C, remoteLoaded, {mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, module.first)), mkLoad(C, module.second)});
-          return S.CreateBuiltinBinOp({}, clang::BO_LAnd, acc, loaded).get();
-        });
-    const std::vector<clang::Stmt *> run{mkCall(C, entry, entryArgs),
-                                         S.CreateBuiltinBinOp({}, clang::BO_Assign, mkDeclRef(C, boundDecl), boolLit(true)).get()};
-    statements.emplace_back(clang::IfStmt::Create(C, {}, clang::IfStatementKind::Ordinary, nullptr, nullptr, allLoaded, {}, {},
-                                                  clang::CompoundStmt::Create(C, run, {}, {}, {})));
-  } else {
-    auto *requireLoaded = mkExternCFn(C, "polyrt_remote_require_loaded", C.VoidTy, {C.VoidPtrTy, constCharStarTy(C), C.BoolTy});
-    for (const auto &[moduleName, loaded] : loadedModules) {
-      statements.emplace_back(
+  auto *remoteLoaded = mkExternCFn(C, "polyrt_remote_loaded", C.BoolTy, {constCharStarTy(C), C.BoolTy});
+  auto *requireLoaded = mkExternCFn(C, "polyrt_remote_require_loaded", C.VoidTy, {C.VoidPtrTy, constCharStarTy(C), C.BoolTy});
+  const auto allLoaded = [&](const size_t group) -> clang::Expr * {
+    return groupLoaded[group] | fold_left(static_cast<clang::Expr *>(boolLit(true)), [&](clang::Expr *acc, const auto &module) {
+             return joinAnd(acc, mkCall(C, remoteLoaded,
+                                        {mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, module.first)), mkLoad(C, module.second)}));
+           });
+  };
+  const auto requireAllLoaded = [&](const size_t group) {
+    std::vector<clang::Stmt *> required;
+    for (const auto &[moduleName, loaded] : groupLoaded[group])
+      required.emplace_back(
           mkCall(C, requireLoaded, {contextArg, mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, moduleName)), mkLoad(C, loaded)}));
+    return required;
+  };
+  const auto entryCall = [&](const size_t group) {
+    return mkCall(C, mkExternCFn(C, groups[group].entryName, C.VoidTy, entryTypes), entryArgs);
+  };
+  if (!fallback && groups.size() == 1) {
+    for (auto *required : requireAllLoaded(0))
+      statements.emplace_back(required);
+    statements.emplace_back(entryCall(0));
+  } else {
+    std::vector<size_t> order(groups.size());
+    std::iota(order.begin(), order.end(), size_t{0});
+    std::stable_partition(order.begin(), order.end(), [&](const size_t group) { return !groupLoaded[group].empty(); });
+    clang::Stmt *chain = nullptr;
+    if (!fallback) chain = clang::CompoundStmt::Create(C, requireAllLoaded(order.back()), {}, {}, {});
+    for (auto group = order.rbegin(); group != order.rend(); ++group) {
+      std::vector<clang::Stmt *> run{entryCall(*group)};
+      if (fallback) run.emplace_back(S.CreateBuiltinBinOp({}, clang::BO_Assign, mkDeclRef(C, boundDecl), boolLit(true)).get());
+      chain = clang::IfStmt::Create(C, {}, clang::IfStatementKind::Ordinary, nullptr, nullptr, allLoaded(*group), {}, {},
+                                    clang::CompoundStmt::Create(C, run, {}, {}, {}), {}, chain);
     }
-    statements.emplace_back(mkCall(C, entry, entryArgs));
+    statements.emplace_back(chain);
   }
   std::vector<clang::Stmt *> protectedStatements(statements.begin() + protectedBegin, statements.end());
   statements.erase(statements.begin() + protectedBegin, statements.end());
@@ -565,12 +593,6 @@ static void compileInterfaceCalls(const polyfront::Options &opts, clang::Compile
     return;
   }
   const auto groups = polyfront::package::capabilityGroups(declaredCapabilities, opts.targets);
-  if (groups.size() > 1) {
-    emit(D, prepared.front().site.call->getExprLoc(), clang::DiagnosticsEngine::Error,
-         POLYREGION_DIAG_POLYSTL "device targets resolve to different library capabilities");
-    return;
-  }
-  const auto &capabilities = groups.front().capabilities;
   const auto &targetCPU = CI.getTarget().getTargetOpts().CPU;
   auto *translationUnit = C.getTranslationUnitDecl();
   // Each interface call is an independent package root.  Keep it isolated through package linking and backend
@@ -585,67 +607,92 @@ static void compileInterfaceCalls(const polyfront::Options &opts, clang::Compile
   }
   // a bundle with unfit reasons keeps the call, so the interface's inline fallback body runs
   using CompileResult = polyfront::package::Checked<CompileBundle>;
+  using GroupResults = std::vector<CompileResult>;
   const auto unfit = [](std::string reason) -> CompileResult { return {CompileBundle({}, {}, {}, {std::move(reason)}), {}}; };
-  const auto compile = [&](const PreparedInterfaceCall &item) -> CompileResult {
+  const auto entryNameFor = [&](const PreparedInterfaceCall &item, const size_t group) {
+    return item.entryName + polyfront::package::groupEntrySuffix(groups.size(), group);
+  };
+  const auto compile = [&](const PreparedInterfaceCall &item) -> GroupResults {
     const bool fallback = hasInterfaceFallback(item.site.callee);
     if (fallback && !item.archive->entriesByDeclaration.contains(item.site.declaration))
-      return unfit(polyfront::package::undeclaredReason(*item.archive, item.site.declaration));
+      return GroupResults(groups.size(), unfit(polyfront::package::undeclaredReason(*item.archive, item.site.declaration)));
     auto selected = polyfront::package::loadPackageSelection(*item.archive, item.site.declaration);
-    if (!selected) return {{}, std::move(selected.errors)};
-    if (fallback && !polyfront::package::satisfiable(*selected.value, item.site.declaration, capabilities))
-      return unfit(polyfront::package::unsatisfiedReason(capabilities));
-    const auto request =
-        ProgramLinkRequest({std::move(*selected.value)}, polyfront::packageProgram(item.consumerFunctions, item.consumerDefinitions),
-                           capabilities, item.typeSizes);
-    auto compiled =
-        polyfront::package::compileProgram(request, opts.executable, *entryTarget,
-                                           polyfront::objectCPUFor(CI.getTarget().getTriple(), targetCPU), opts.targets, opts.stackDepth);
-    if (!compiled) return {{}, std::move(compiled.errors)};
-    return compiled;
+    if (!selected) return {CompileResult{{}, std::move(selected.errors)}};
+    GroupResults results;
+    for (size_t group = 0; group < groups.size(); ++group) {
+      const auto &capabilities = groups[group].capabilities;
+      if (fallback && !polyfront::package::satisfiable(*selected.value, item.site.declaration, capabilities)) {
+        results.emplace_back(unfit(polyfront::package::unsatisfiedReason(capabilities)));
+        continue;
+      }
+      const auto entryName = entryNameFor(item, group);
+      auto consumerFunctions = item.consumerFunctions;
+      for (auto &function : consumerFunctions)
+        if (function.decl.name == Sym({item.entryName})) function.decl.name = Sym({entryName});
+      const auto request = ProgramLinkRequest({*selected.value}, polyfront::packageProgram(consumerFunctions, item.consumerDefinitions),
+                                              capabilities, item.typeSizes);
+      auto compiled = polyfront::package::compileProgram(request, opts.executable, *entryTarget,
+                                                         polyfront::objectCPUFor(CI.getTarget().getTriple(), targetCPU),
+                                                         groups[group].targets, opts.stackDepth);
+      results.emplace_back(std::move(compiled));
+    }
+    return results;
   };
-  const auto consume = [&](const PreparedInterfaceCall &item, CompileResult result) {
-    if (!result) {
-      emit(D, item.site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0", result.errors ^ mk_string("; "));
+  const auto consume = [&](const PreparedInterfaceCall &item, GroupResults results) {
+    const auto location = item.site.call->getExprLoc();
+    if (const auto failed = std::find_if(results.begin(), results.end(), [](const auto &result) { return !result; });
+        failed != results.end()) {
+      emit(D, location, clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0", failed->errors ^ mk_string("; "));
       return;
     }
-    auto &compiled = result.value;
-    if (!compiled->unfit.empty()) {
-      if (!hasInterfaceFallback(item.site.callee)) {
-        emit(D, item.site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0",
-             compiled->unfit ^ mk_string("; "));
+    const auto fallback = hasInterfaceFallback(item.site.callee);
+    std::vector<size_t> bound;
+    for (size_t group = 0; group < results.size(); ++group)
+      if (results[group].value->unfit.empty()) bound.emplace_back(group);
+    if (bound.empty()) {
+      const auto reasons = results ^ flat_map([](const auto &result) { return result.value->unfit; }) ^ distinct() ^ mk_string("; ");
+      if (!fallback) {
+        emit(D, location, clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0", reasons);
         return;
       }
-      const auto outcome = "uses the inline body: " + (compiled->unfit ^ mk_string("; "));
+      const auto outcome = "uses the inline body: " + reasons;
       remarkInterfaceSite(D, item.site, outcome);
       outcomes.emplace(item.site.callee->getCanonicalDecl(), outcome);
       return;
     }
-    const auto outcome = "bound to " + item.site.packageName
-                         + (compiled->implementations.empty() ? std::string{} : " (" + (compiled->implementations ^ mk_string(", ")) + ")");
+    const auto implementations = bound ^ flat_map([&](const auto group) { return results[group].value->implementations; }) ^ distinct();
+    const auto outcome =
+        "bound to " + item.site.packageName + (implementations.empty() ? std::string{} : " (" + (implementations ^ mk_string(", ")) + ")");
     remarkInterfaceSite(D, item.site, outcome);
     outcomes.emplace(item.site.callee->getCanonicalDecl(), outcome);
-    packageProgramBitcodes.emplace_back(std::move(compiled->hostObject));
-    std::vector<InterfaceModuleResource> resources;
-    resources.reserve(compiled->remoteModules.size());
-    for (size_t index = 0; index < compiled->remoteModules.size(); ++index) {
-      const auto &object = compiled->remoteModules[index];
-      auto *image =
-          mkStaticByteArray(C, translationUnit, "__polyregion_package_image_" + item.suffix + "_" + std::to_string(index), object.image);
-      translationUnit->addDecl(image);
-      CI.getASTConsumer().HandleTopLevelDecl(clang::DeclGroupRef(image));
-      clang::VarDecl *features = nullptr;
-      if (!object.features.empty()) {
-        features = mkStaticVarDecl(C, translationUnit, "__polyregion_package_features_" + item.suffix + "_" + std::to_string(index),
-                                   mkConstArrTy(C, constCharStarTy(C), object.features.size()),
-                                   object.features | map([&](const auto &feature) -> clang::Expr * {
-                                     return mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, feature));
-                                   }) | to_vector());
-        translationUnit->addDecl(features);
-        CI.getASTConsumer().HandleTopLevelDecl(clang::DeclGroupRef(features));
+    std::vector<BoundInterfaceGroup> boundGroups;
+    for (const auto group : bound) {
+      auto &compiled = results[group].value;
+      const auto suffix = item.suffix + polyfront::package::groupEntrySuffix(groups.size(), group);
+      packageProgramBitcodes.emplace_back(std::move(compiled->hostObject));
+      std::vector<InterfaceModuleResource> resources;
+      resources.reserve(compiled->remoteModules.size());
+      for (size_t index = 0; index < compiled->remoteModules.size(); ++index) {
+        const auto &object = compiled->remoteModules[index];
+        auto *image =
+            mkStaticByteArray(C, translationUnit, "__polyregion_package_image_" + suffix + "_" + std::to_string(index), object.image);
+        translationUnit->addDecl(image);
+        CI.getASTConsumer().HandleTopLevelDecl(clang::DeclGroupRef(image));
+        clang::VarDecl *features = nullptr;
+        if (!object.features.empty()) {
+          features = mkStaticVarDecl(C, translationUnit, "__polyregion_package_features_" + suffix + "_" + std::to_string(index),
+                                     mkConstArrTy(C, constCharStarTy(C), object.features.size()),
+                                     object.features | map([&](const auto &feature) -> clang::Expr * {
+                                       return mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, feature));
+                                     }) | to_vector());
+          translationUnit->addDecl(features);
+          CI.getASTConsumer().HandleTopLevelDecl(clang::DeclGroupRef(features));
+        }
+        resources.emplace_back(InterfaceModuleResource{image, features});
       }
-      resources.emplace_back(InterfaceModuleResource{image, features});
+      boundGroups.emplace_back(BoundInterfaceGroup{entryNameFor(item, group), suffix, &*compiled, std::move(resources)});
     }
-    materializeInterfaceCall(CI, C, item, *compiled, resources);
+    materializeInterfaceCall(CI, C, item, boundGroups);
   };
   if (jobs == 1) {
     for (const auto &item : prepared)
@@ -653,7 +700,7 @@ static void compileInterfaceCalls(const polyfront::Options &opts, clang::Compile
     return;
   }
   llvm::StdThreadPool pool(llvm::hardware_concurrency(jobs));
-  using Pending = std::pair<const PreparedInterfaceCall *, std::shared_future<std::unique_ptr<CompileResult>>>;
+  using Pending = std::pair<const PreparedInterfaceCall *, std::shared_future<std::unique_ptr<GroupResults>>>;
   std::deque<Pending> pending;
   const auto consumeOldest = [&] {
     auto [item, result] = std::move(pending.front());
@@ -662,7 +709,7 @@ static void compileInterfaceCalls(const polyfront::Options &opts, clang::Compile
   };
   for (const auto &item : prepared) {
     const auto *itemPtr = &item;
-    pending.emplace_back(itemPtr, pool.async([&compile, itemPtr] { return std::make_unique<CompileResult>(compile(*itemPtr)); }));
+    pending.emplace_back(itemPtr, pool.async([&compile, itemPtr] { return std::make_unique<GroupResults>(compile(*itemPtr)); }));
     if (pending.size() >= jobs) consumeOldest();
   }
   while (!pending.empty())
