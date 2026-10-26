@@ -635,6 +635,7 @@ set(POLYREGION_TEST_BINARIES
         polyinvoke-tests
         polyrt-tests
         polyreflect-rt-tests
+        polyreflect-rt-service-tests
         polycpp-tests)
 if (POLYREGION_HAS_FLANG)
     list(APPEND POLYREGION_TEST_BINARIES polyfc-tests)

@@ -15,6 +15,7 @@
   #include <shared_mutex>
 
   #include "rt_hashmap.hpp"
+  #include "rt_index.hpp"
   #include "rt_protected.hpp"
 
   #ifdef _WIN32
@@ -177,7 +178,9 @@ inline constexpr auto TraceEnv = "POLYREFLECT_TRACE";
 class ReflectService {
 
   HashMap<uintptr_t, PtrRecord> data;
+  IntervalIndex<PtrRecord> index;
   std::shared_mutex mutex{};
+  mutable std::atomic<size_t> probes{0};
   std::FILE *trace{};
   time_point<steady_clock> start;
 
@@ -187,16 +190,11 @@ class ReflectService {
     if (!allowSubrange) return nullptr;
     // XXX Prefer strict containment; fall back to past-end (`int xs[n]; xs + n` is legitimate).
     // Without the preference one record's past-end would hijack the next record's base lookup.
-    const PtrRecord *pastEnd = nullptr;
-    data.walk([&](uintptr_t, const PtrRecord *value) {
-      if (ptr >= value->info.base && ptr < value->info.base + value->info.size) {
-        result = value;
-        return true;
-      }
-      if (ptr == value->info.base + value->info.size) pastEnd = value;
-      return false;
-    });
-    return result ? result : pastEnd;
+    size_t visited = 0;
+    result = index.containing(ptr, visited);
+    if (!result) result = index.endingAt(ptr, visited);
+    probes.fetch_add(visited, std::memory_order_relaxed);
+    return result;
   }
 
 public:
@@ -212,9 +210,11 @@ public:
     std::unique_lock lock(mutex);
     // XXX upsert: foreign HeapFree paths can recycle addresses without notifying us.
     if (!data.emplace(info.base, PtrRecord{now, info})) {
+      index.erase(info.base);
       data.erase(info.base);
       data.emplace(info.base, PtrRecord{now, info});
     }
+    index.insert(info.base, info.size, data.find(info.base));
   }
 
   __RT_ODR void blockingRelease(const uintptr_t ptr, const Type type, const time_point<steady_clock> now = steady_clock::now()) {
@@ -227,6 +227,7 @@ public:
                      rec->info.base, rec->info.size, to_string(rec->info.type),
                      duration_cast<microseconds>(rec->point.time_since_epoch()).count(),
                      duration_cast<microseconds>(now - rec->point).count());
+      index.erase(ptr);
       data.erase(ptr);
       return;
     }
@@ -253,6 +254,8 @@ public:
   }
 
   __RT_ODR PtrMeta blockingQuery(const void *ptr) { return blockingQuery(reinterpret_cast<uintptr_t>(ptr)); }
+
+  __RT_ODR size_t subrangeProbes() const { return probes.load(std::memory_order_relaxed); }
 
   __RT_ODR ~ReflectService() = default;
 };

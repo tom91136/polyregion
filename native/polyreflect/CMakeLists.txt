@@ -8,6 +8,7 @@ target_sources(polyreflect-rt
         FILES
         reflect-rt/rt.hpp
         reflect-rt/rt_hashmap.hpp
+        reflect-rt/rt_index.hpp
         reflect-rt/rt_protected.hpp
         reflect-rt/rt_reflect.hpp
 )
@@ -33,6 +34,13 @@ if (APPLE)
 endif ()
 add_test(NAME polyreflect-rt-tests COMMAND polyreflect-rt-tests)
 polyregion_test_dist_record(NAME polyreflect-rt-tests COMMAND :bin:polyreflect-rt-tests)
+
+add_executable(polyreflect-rt-service-tests test/service.cpp)
+target_include_directories(polyreflect-rt-service-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(polyreflect-rt-service-tests PRIVATE Catch2::Catch2WithMain ${CMAKE_DL_LIBS})
+polyregion_apply_common_options(polyreflect-rt-service-tests)
+add_test(NAME polyreflect-rt-service-tests COMMAND polyreflect-rt-service-tests)
+polyregion_test_dist_record(NAME polyreflect-rt-service-tests COMMAND :bin:polyreflect-rt-service-tests)
 
 # Plugin source is statically linked into polycpp/polyfc under fused builds; no .so needed.
 if (NOT POLYREGION_FUSED_DRIVER)
