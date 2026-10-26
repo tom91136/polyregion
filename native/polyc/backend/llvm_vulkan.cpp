@@ -18,6 +18,7 @@ using namespace polyregion::backend;
 using namespace polyregion::backend::details;
 
 static constexpr unsigned VkStorageBufferAS = 11;
+static constexpr unsigned VkUniformAS = 12;
 // SPIR-V StorageClass::StorageBuffer, distinct from the address space
 static constexpr unsigned VkStorageClassStorageBuffer = 12;
 
@@ -136,7 +137,7 @@ llvm::Value *VulkanLowering::scalarValueOf(const Term::Select &select) {
   if (!slot) return nullptr;
   const auto &[memberIdx, tpe] = *slot;
   auto *ty = cg.resolveType(tpe);
-  auto *ptr = cg.B.CreateIntrinsic(llvm::Intrinsic::spv_resource_getpointer, {cg.B.getPtrTy(VkStorageBufferAS), scalarBlock->getType()},
+  auto *ptr = cg.B.CreateIntrinsic(llvm::Intrinsic::spv_resource_getpointer, {cg.B.getPtrTy(VkUniformAS), scalarBlock->getType()},
                                    {scalarBlock, cg.B.getInt32(memberIdx)});
   if (tpe.is<Type::Bool1>())
     return cg.B.CreateICmpNE(cg.C.load(cg.B, ptr, ty), llvm::ConstantInt::get(llvm::Type::getInt1Ty(cg.C.actual), 0, true));

@@ -607,6 +607,40 @@ TEST_CASE("Vulkan folds a byte offset into a buffer pointer into the resource in
   CHECK(byteOffsets == 0);
 }
 
+TEST_CASE("SPIR-V reads glcompute scalar arguments through the uniform block", "[backend][spirv][vulkan]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Named out("out", Type::Ptr(Type::IntS32(), TypeSpace::Global())), scale("scale", Type::IntS32());
+  const Function entry = mkFn("scale_store", {Arg(out, {}), Arg(scale, {})}, Type::Unit0(),
+                              {Mut(Term::Select(out, {PathStep::Deref().widen()}, Type::IntS32()),
+                                   Expr::Alias(Term::Select(scale, {}, Type::IntS32()).widen()).widen())
+                                   .widen(),
+                               Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
+                              FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const auto compiled = polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}),
+                                                      {Target::Object_LLVM_SPIRV_GLCompute, ""}, OptLevel::O0);
+  REQUIRE(compiled.binary);
+
+  const auto instructions = spirvInstructions(spirvWords(std::string(compiled.binary->begin(), compiled.binary->end())));
+  std::vector<uint32_t> uniformObjects, scalarAccessTypes;
+  for (const auto &x : instructions) {
+    const auto op = x[0] & 0xFFFFu;
+    if (op == spv::OpVariable && x[3] == spv::StorageClassUniform) uniformObjects.push_back(x[2]);
+    else if (op == spv::OpCopyObject && (uniformObjects ^ contains(x[3]))) uniformObjects.push_back(x[2]);
+    else if ((op == spv::OpAccessChain || op == spv::OpInBoundsAccessChain) && (uniformObjects ^ contains(x[3])))
+      scalarAccessTypes.push_back(x[1]);
+  }
+  const auto storageClassOf = [&](const uint32_t id) {
+    for (const auto &x : instructions)
+      if ((x[0] & 0xFFFFu) == spv::OpTypePointer && x[1] == id) return x[2];
+    return 0u;
+  };
+  REQUIRE_FALSE(scalarAccessTypes.empty());
+  for (const auto tpe : scalarAccessTypes)
+    CHECK(storageClassOf(tpe) == spv::StorageClassUniform);
+}
+
 TEST_CASE("CPU remote-operation ABI follows the target pointer width", "[backend]") {
   polyregion::compiler::initialise();
   using namespace polyregion::polyast::dsl;
