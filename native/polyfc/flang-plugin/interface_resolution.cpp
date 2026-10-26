@@ -1,7 +1,9 @@
 #include "interface_resolution.h"
 
 #include <algorithm>
+#include <functional>
 #include <map>
+#include <numeric>
 #include <optional>
 #include <string>
 #include <vector>
@@ -120,6 +122,51 @@ Checked<std::string> writeBitcode(const std::vector<int8_t> &bytes) {
   return result;
 }
 
+std::vector<std::string> declaredCapabilities(const polyfront::Options &opts) {
+  return std::vector<std::string>(opts.libraryCapabilities.begin(), opts.libraryCapabilities.end());
+}
+
+Checked<polyregion::polyfc::interface_resolution::LinkedPackage>
+linkGroups(const polyfront::Options &opts, const std::vector<polyast::Package> &packages, const std::vector<polyast::Function> &functions,
+           const std::vector<std::string> &entryNames, const std::vector<polyast::StructDef> &definitions,
+           const std::vector<polyast::ProgramTypeSize> &typeSizes, std::vector<std::string> &bitcodeFiles,
+           const std::function<std::optional<std::string>(const std::vector<std::string> &)> &unfitReason) {
+  using polyregion::polyfc::interface_resolution::LinkedGroup;
+  using polyregion::polyfc::interface_resolution::LinkedPackage;
+  LinkedPackage linked;
+  const auto groups = polyfront::package::capabilityGroups(declaredCapabilities(opts), opts.targets);
+  for (size_t index = 0; index < groups.size(); ++index) {
+    const auto &group = groups[index];
+    if (const auto reason = unfitReason ? unfitReason(group.capabilities) : std::nullopt) {
+      linked.unfit.emplace_back(*reason);
+      continue;
+    }
+    const auto suffix = polyfront::package::groupEntrySuffix(groups.size(), index);
+    auto renamed = functions;
+    for (auto &function : renamed)
+      if (entryNames ^ exists([&](const auto &name) { return function.decl.name == polyast::Sym({name}); }))
+        function.decl.name = polyast::Sym({function.decl.name.fqn.front() + suffix});
+    const auto request =
+        polyast::ProgramLinkRequest(packages, polyfront::packageProgram(std::move(renamed), definitions), group.capabilities, typeSizes);
+    auto compiled = polyfront::package::compileProgram(request, opts.executable, compiletime::Target::Object_LLVM_HOST, "native",
+                                                       group.targets, opts.stackDepth);
+    if (!compiled) return {{}, std::move(compiled.errors)};
+    if (!compiled.value->unfit.empty()) {
+      linked.unfit ^= concat(compiled.value->unfit);
+      continue;
+    }
+    const auto bitcode = writeBitcode(compiled.value->hostObject);
+    if (!bitcode) return {{}, bitcode.errors};
+    bitcodeFiles.emplace_back(*bitcode.value);
+    linked.implementations ^= concat(compiled.value->implementations);
+    linked.groups.emplace_back(LinkedGroup{suffix, std::move(*compiled.value)});
+  }
+  linked.implementations = linked.implementations ^ distinct();
+  linked.unfit = linked.unfit ^ distinct();
+  if (!linked.groups.empty()) linked.unfit.clear();
+  return {{std::move(linked)}, {}};
+}
+
 struct PreparedInterface {
   func::FuncOp function;
   polyfront::package::Archive archive;
@@ -224,21 +271,12 @@ void polyregion::polyfc::interface_resolution::resolveInterfaces(clang::Diagnost
     for (const auto &size : item.typeSizes)
       if (std::find(typeSizes.begin(), typeSizes.end(), size) == typeSizes.end()) typeSizes.emplace_back(size);
   }
-  const auto capabilities = std::vector<std::string>(opts.libraryCapabilities.begin(), opts.libraryCapabilities.end());
-  const auto request =
-      ProgramLinkRequest(std::move(packages), polyfront::packageProgram(std::move(roots), {}), capabilities, std::move(typeSizes));
-  const auto compiled = polyfront::package::compileProgram(request, opts.executable, compiletime::Target::Object_LLVM_HOST, "native",
-                                                           opts.targets, opts.stackDepth);
-  if (!compiled || !compiled.value->unfit.empty()) {
-    emitErrors(diag, prepared.front().function.getLoc(), compiled ? compiled.value->unfit : compiled.errors);
+  const auto entryNames = prepared ^ map([](const auto &item) { return item.entryName; });
+  const auto linked = linkGroups(opts, packages, roots, entryNames, {}, typeSizes, bitcodeFiles, {});
+  if (!linked || !linked.value->unfit.empty()) {
+    emitErrors(diag, prepared.front().function.getLoc(), linked ? linked.value->unfit : linked.errors);
     return;
   }
-  const auto bitcode = writeBitcode(compiled.value->hostObject);
-  if (!bitcode) {
-    emitErrors(diag, prepared.front().function.getLoc(), bitcode.errors);
-    return;
-  }
-  bitcodeFiles.emplace_back(*bitcode.value);
 
   for (auto &item : prepared) {
     auto function = item.function;
@@ -274,7 +312,7 @@ void polyregion::polyfc::interface_resolution::resolveInterfaces(clang::Diagnost
       resultSlot = fir::AllocaOp::create(builder, function.getLoc(), type).getResult();
       entryArgs.emplace_back(resultSlot);
     }
-    interface_resolution::emitPackageCall(builder, module, function.getLoc(), entryName, entryArgs, *compiled.value, false);
+    interface_resolution::emitPackageCall(builder, module, function.getLoc(), entryArgs, entriesFor(*linked.value, entryName), false);
     if (resultSlot && !erasedResult) {
       const auto value = fir::LoadOp::create(builder, function.getLoc(), resultSlot).getResult();
       func::ReturnOp::create(builder, function.getLoc(), value);
@@ -282,9 +320,14 @@ void polyregion::polyfc::interface_resolution::resolveInterfaces(clang::Diagnost
   }
 }
 
+std::vector<polyregion::polyfc::interface_resolution::PackageEntry>
+polyregion::polyfc::interface_resolution::entriesFor(const LinkedPackage &linked, const std::string &entryName) {
+  return linked.groups ^ map([&](const auto &group) { return PackageEntry{entryName + group.suffix, &group.compiled}; });
+}
+
 Value polyregion::polyfc::interface_resolution::emitPackageCall(OpBuilder &builder, ModuleOp &module, const Location loc,
-                                                                const std::string &entryName, const std::vector<Value> &args,
-                                                                const polyast::CompileBundle &compiled, const bool fallback) {
+                                                                const std::vector<Value> &args, const std::vector<PackageEntry> &entries,
+                                                                const bool fallback) {
   std::vector<Value> entryArgs;
   std::vector<mlir::Type> entryTypes;
   const auto contextType = fir::ReferenceType::get(builder.getI8Type());
@@ -314,57 +357,84 @@ Value polyregion::polyfc::interface_resolution::emitPackageCall(OpBuilder &build
     auto body = fir::IfOp::create(b, loc, failed.getResult(), false).getThenBodyBuilder();
     fir::CallOp::create(body, loc, contextAbort, ValueRange{});
   };
-  const auto entry = declare(entryName, entryTypes, {});
   const auto sizeType = builder.getI64Type();
   const auto call = [&](OpBuilder &b, const Value bound) {
     checkContextStatus(b, fir::CallOp::create(b, loc, contextAcquire, ValueRange{context}).getResult(0));
-    std::map<std::string, Value> loadedModules;
-    for (const auto &object : compiled.remoteModules) {
-      const auto &moduleName = object.moduleName;
-      const auto moduleNameValue = polyfc::strConst(b, module, moduleName, true);
-      const auto imageValue = polyfc::strConst(b, module, std::string(object.image.begin(), object.image.end()), false);
-      Value featureData = polyfc::nullConst(b);
-      if (!object.features.empty()) {
-        featureData = LLVM::AllocaOp::create(b, loc, pointerType, polyfc::intConst(b, sizeType, object.features.size()),
-                                             b.getI64IntegerAttr(sizeof(void *)), pointerType);
-        for (size_t index = 0; index < object.features.size(); ++index) {
-          const auto slot =
-              LLVM::GEPOp::create(b, loc, pointerType, pointerType, featureData, ValueRange{polyfc::intConst(b, sizeType, index)}).getRes();
-          LLVM::StoreOp::create(b, loc, polyfc::strConst(b, module, object.features[index], true), slot);
+    std::vector<std::map<std::string, Value>> groupLoaded(entries.size());
+    for (size_t group = 0; group < entries.size(); ++group) {
+      auto &loadedModules = groupLoaded[group];
+      for (const auto &object : entries[group].compiled->remoteModules) {
+        const auto &moduleName = object.moduleName;
+        const auto moduleNameValue = polyfc::strConst(b, module, moduleName, true);
+        const auto imageValue = polyfc::strConst(b, module, std::string(object.image.begin(), object.image.end()), false);
+        Value featureData = polyfc::nullConst(b);
+        if (!object.features.empty()) {
+          featureData = LLVM::AllocaOp::create(b, loc, pointerType, polyfc::intConst(b, sizeType, object.features.size()),
+                                               b.getI64IntegerAttr(sizeof(void *)), pointerType);
+          for (size_t index = 0; index < object.features.size(); ++index) {
+            const auto slot =
+                LLVM::GEPOp::create(b, loc, pointerType, pointerType, featureData, ValueRange{polyfc::intConst(b, sizeType, index)})
+                    .getRes();
+            LLVM::StoreOp::create(b, loc, polyfc::strConst(b, module, object.features[index], true), slot);
+          }
         }
+        const auto remoteLoad =
+            declare("polyrt_remote_load",
+                    {contextType, pointerType, builder.getI32Type(), builder.getI32Type(), sizeType, pointerType, sizeType, pointerType},
+                    {builder.getI1Type()});
+        const auto loaded = func::CallOp::create(b, loc, remoteLoad,
+                                                 ValueRange{context, moduleNameValue,
+                                                            polyfc::intConst(b, b.getI32Type(), static_cast<int32_t>(object.kind)),
+                                                            polyfc::intConst(b, b.getI32Type(), static_cast<int32_t>(object.format)),
+                                                            polyfc::intConst(b, sizeType, object.features.size()), featureData,
+                                                            polyfc::intConst(b, sizeType, object.image.size()), imageValue})
+                                .getResult(0);
+        const auto found = loadedModules.find(moduleName);
+        if (found == loadedModules.end()) loadedModules.emplace(moduleName, loaded);
+        else found->second = arith::OrIOp::create(b, loc, found->second, loaded).getResult();
       }
-      const auto remoteLoad =
-          declare("polyrt_remote_load",
-                  {contextType, pointerType, builder.getI32Type(), builder.getI32Type(), sizeType, pointerType, sizeType, pointerType},
-                  {builder.getI1Type()});
-      const auto loaded =
-          func::CallOp::create(b, loc, remoteLoad,
-                               ValueRange{context, moduleNameValue, polyfc::intConst(b, b.getI32Type(), static_cast<int32_t>(object.kind)),
-                                          polyfc::intConst(b, b.getI32Type(), static_cast<int32_t>(object.format)),
-                                          polyfc::intConst(b, sizeType, object.features.size()), featureData,
-                                          polyfc::intConst(b, sizeType, object.image.size()), imageValue})
-              .getResult(0);
-      const auto found = loadedModules.find(moduleName);
-      if (found == loadedModules.end()) loadedModules.emplace(moduleName, loaded);
-      else found->second = arith::OrIOp::create(b, loc, found->second, loaded).getResult();
     }
-    if (bound) {
-      const auto allLoaded = loadedModules | fold_left(polyfc::boolConst(b, true), [&](const Value acc, const auto &loaded) -> Value {
-                               const auto remoteLoaded = declare("polyrt_remote_loaded", {pointerType, b.getI1Type()}, {b.getI1Type()});
-                               const auto name = polyfc::strConst(b, module, loaded.first, true);
-                               const auto checked =
-                                   func::CallOp::create(b, loc, remoteLoaded, ValueRange{name, loaded.second}).getResult(0);
-                               return arith::AndIOp::create(b, loc, acc, checked).getResult();
-                             });
-      auto run = fir::IfOp::create(b, loc, allLoaded, false).getThenBodyBuilder();
-      fir::CallOp::create(run, loc, entry, entryArgs);
-      LLVM::StoreOp::create(run, loc, polyfc::boolConst(run, true), bound);
-    } else {
-      for (const auto &[moduleName, loaded] : loadedModules) {
-        const auto requireLoaded = declare("polyrt_remote_require_loaded", {contextType, pointerType, b.getI1Type()}, {});
-        func::CallOp::create(b, loc, requireLoaded, ValueRange{context, polyfc::strConst(b, module, moduleName, true), loaded});
+    const auto allLoaded = [&](OpBuilder &at, const size_t group) -> Value {
+      return groupLoaded[group] | fold_left(polyfc::boolConst(at, true), [&](const Value acc, const auto &loaded) -> Value {
+               const auto remoteLoaded = declare("polyrt_remote_loaded", {pointerType, at.getI1Type()}, {at.getI1Type()});
+               const auto name = polyfc::strConst(at, module, loaded.first, true);
+               const auto checked = func::CallOp::create(at, loc, remoteLoaded, ValueRange{name, loaded.second}).getResult(0);
+               return arith::AndIOp::create(at, loc, acc, checked).getResult();
+             });
+    };
+    const auto requireAllLoaded = [&](OpBuilder &at, const size_t group) {
+      for (const auto &[moduleName, loaded] : groupLoaded[group]) {
+        const auto requireLoaded = declare("polyrt_remote_require_loaded", {contextType, pointerType, at.getI1Type()}, {});
+        func::CallOp::create(at, loc, requireLoaded, ValueRange{context, polyfc::strConst(at, module, moduleName, true), loaded});
       }
-      fir::CallOp::create(b, loc, entry, entryArgs);
+    };
+    const auto callEntry = [&](OpBuilder &at, const size_t group) {
+      const auto entry = declare(entries[group].entryName, entryTypes, {});
+      fir::CallOp::create(at, loc, entry, entryArgs);
+    };
+    if (!bound && entries.size() == 1) {
+      requireAllLoaded(b, 0);
+      callEntry(b, 0);
+    } else {
+      std::vector<size_t> order(entries.size());
+      std::iota(order.begin(), order.end(), size_t{0});
+      std::stable_partition(order.begin(), order.end(), [&](const size_t group) { return !groupLoaded[group].empty(); });
+      const std::function<void(OpBuilder &, size_t)> dispatch = [&](OpBuilder &at, const size_t position) {
+        if (position == order.size()) {
+          if (!bound) requireAllLoaded(at, order.back());
+          return;
+        }
+        const auto group = order[position];
+        auto branch = fir::IfOp::create(at, loc, allLoaded(at, group), position + 1 < order.size() || !bound);
+        auto run = branch.getThenBodyBuilder();
+        callEntry(run, group);
+        if (bound) LLVM::StoreOp::create(run, loc, polyfc::boolConst(run, true), bound);
+        if (position + 1 < order.size() || !bound) {
+          auto rest = branch.getElseBodyBuilder();
+          dispatch(rest, position + 1);
+        }
+      };
+      dispatch(b, 0);
     }
     checkContextStatus(b, fir::CallOp::create(b, loc, contextRelease, ValueRange{context}).getResult(0));
   };
@@ -377,39 +447,34 @@ Value polyregion::polyfc::interface_resolution::emitPackageCall(OpBuilder &build
                          .getRes();
   LLVM::StoreOp::create(builder, loc, polyfc::boolConst(builder, false), bound);
   const auto contextAvailable = declare("polyrt_context_available", {contextType, pointerType}, {builder.getI1Type()});
-  const auto available =
-      func::CallOp::create(builder, loc, contextAvailable, ValueRange{context, polyfc::strConst(builder, module, entryName, true)})
-          .getResult(0);
+  const auto available = func::CallOp::create(builder, loc, contextAvailable,
+                                              ValueRange{context, polyfc::strConst(builder, module, entries.front().entryName, true)})
+                             .getResult(0);
   auto acquired = fir::IfOp::create(builder, loc, available, false).getThenBodyBuilder();
   call(acquired, bound);
   return LLVM::LoadOp::create(builder, loc, builder.getI1Type(), bound).getResult();
 }
 
-polyfront::package::Checked<polyast::CompileBundle> polyregion::polyfc::interface_resolution::linkPackageProgram(
-    const polyfront::Options &opts, const polyfront::package::Archive &archive, const polyast::Function &root,
-    std::vector<polyast::Function> consumerFunctions, std::vector<polyast::StructDef> consumerDefs,
-    std::vector<polyast::ProgramTypeSize> typeSizes, std::vector<std::string> &bitcodeFiles) {
+polyfront::package::Checked<polyregion::polyfc::interface_resolution::LinkedPackage>
+polyregion::polyfc::interface_resolution::linkPackageProgram(const polyfront::Options &opts, const polyfront::package::Archive &archive,
+                                                             const polyast::Function &root,
+                                                             std::vector<polyast::Function> consumerFunctions,
+                                                             std::vector<polyast::StructDef> consumerDefs,
+                                                             std::vector<polyast::ProgramTypeSize> typeSizes,
+                                                             std::vector<std::string> &bitcodeFiles) {
   const auto declaration = root.implements ? polyast::fqcn(*root.implements) : std::string{};
-  const auto capabilities = std::vector<std::string>(opts.libraryCapabilities.begin(), opts.libraryCapabilities.end());
-  const auto unfit = [](std::string reason) -> polyfront::package::Checked<polyast::CompileBundle> {
-    return {polyast::CompileBundle({}, {}, {}, {std::move(reason)}), {}};
+  const auto unfit = [](std::string reason) -> polyfront::package::Checked<LinkedPackage> {
+    return {{LinkedPackage{{}, {}, {std::move(reason)}}}, {}};
   };
   if (archive.entriesByDeclaration.count(declaration) == 0) return unfit(polyfront::package::undeclaredReason(archive, declaration));
   auto selected = polyfront::package::loadPackageSelection(archive, declaration);
   if (!selected) return {{}, std::move(selected.errors)};
-  if (!polyfront::package::satisfiable(*selected.value, declaration, capabilities))
-    return unfit(polyfront::package::unsatisfiedReason(capabilities));
   consumerFunctions.insert(consumerFunctions.begin(), root);
-  const auto request = polyast::ProgramLinkRequest({std::move(*selected.value)},
-                                                   polyfront::packageProgram(std::move(consumerFunctions), std::move(consumerDefs)),
-                                                   capabilities, std::move(typeSizes));
-  auto compiled = polyfront::package::compileProgram(request, opts.executable, compiletime::Target::Object_LLVM_HOST, "native",
-                                                     opts.targets, opts.stackDepth);
-  if (!compiled || !compiled.value->unfit.empty()) return compiled;
-  const auto bitcode = writeBitcode(compiled.value->hostObject);
-  if (!bitcode) return {{}, bitcode.errors};
-  bitcodeFiles.emplace_back(*bitcode.value);
-  return compiled;
+  return linkGroups(opts, {*selected.value}, consumerFunctions, {root.decl.name.fqn.front()}, consumerDefs, typeSizes, bitcodeFiles,
+                    [&](const std::vector<std::string> &capabilities) -> std::optional<std::string> {
+                      if (polyfront::package::satisfiable(*selected.value, declaration, capabilities)) return {};
+                      return polyfront::package::unsatisfiedReason(capabilities);
+                    });
 }
 
 std::optional<polyfront::package::Archive> polyregion::polyfc::interface_resolution::corePackage(clang::DiagnosticsEngine &diag,
@@ -430,6 +495,7 @@ bool polyregion::polyfc::interface_resolution::implements(const polyfront::packa
                                                           const polyfront::Options &opts) {
   if (archive.entriesByDeclaration.count(declaration) == 0) return false;
   const auto selected = polyfront::package::loadPackageSelection(archive, declaration);
-  const auto capabilities = std::vector<std::string>(opts.libraryCapabilities.begin(), opts.libraryCapabilities.end());
-  return selected && polyfront::package::satisfiable(*selected.value, declaration, capabilities);
+  if (!selected) return false;
+  return polyfront::package::capabilityGroups(declaredCapabilities(opts), opts.targets)
+         ^ exists([&](const auto &group) { return polyfront::package::satisfiable(*selected.value, declaration, group.capabilities); });
 }

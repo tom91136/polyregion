@@ -484,7 +484,7 @@ public:
       return {};
     }
     const auto declaration = polyast::fqcn(*root.implements);
-    if (!linked.value->unfit.empty()) {
+    if (linked.value->groups.empty()) {
       emit(diag, clang::DiagnosticsEngine::Remark, POLYREGION_DIAG_POLYFC "%0: %1 uses the inline body: %2", diagLoc, declaration,
            linked.value->unfit ^ mk_string("; "));
       return {};
@@ -492,6 +492,7 @@ public:
     emit(diag, clang::DiagnosticsEngine::Remark, POLYREGION_DIAG_POLYFC "%0: %1 bound to polyregion.core (%2)", diagLoc, declaration,
          linked.value->implementations ^ mk_string(", "));
 
+    const auto entries = interface_resolution::entriesFor(*linked.value, entryName);
     Binder binder(B, dco, FReduction, moduleId, region);
     if (int64_t binderSize = L.getTypeSize(binder.structType()); binderSize != region.captureLayout.sizeInBytes)
       raise(fmt::format("Capture and binder type size mismatch, expecting {} but binder gave {}", region.captureLayout.sizeInBytes,
@@ -515,7 +516,7 @@ public:
     const auto count = LLVM::AllocaOp::create(B, uLoc(B), ptrTy(B), intConst(B, i64, 1), B.getI64IntegerAttr(8), i64).getRes();
     LLVM::StoreOp::create(B, uLoc(B), tripCount, count);
     if (!reduction) {
-      const auto bound = interface_resolution::emitPackageCall(B, M, uLoc(B), entryName, {count, capture}, *linked.value, true);
+      const auto bound = interface_resolution::emitPackageCall(B, M, uLoc(B), {count, capture}, entries, true);
       binder.releaseTemporaries(B);
       return bound;
     }
@@ -537,7 +538,7 @@ public:
       const auto type = llvm::cast<fir::ReferenceType>(reduction->slots[index].getType()).getEleTy();
       LLVM::StoreOp::create(B, uLoc(B), reduceIdentity(B, type, reduction->operations[index]), field(B, init, index));
     }
-    const auto bound = interface_resolution::emitPackageCall(B, M, uLoc(B), entryName, {count, init, capture, result}, *linked.value, true);
+    const auto bound = interface_resolution::emitPackageCall(B, M, uLoc(B), {count, init, capture, result}, entries, true);
     auto stores = fir::IfOp::create(B, uLoc(B), bound, false).getThenBodyBuilder();
     for (size_t index = 0; index < reduction->slots.size(); ++index) {
       const auto slot = reduction->slots[index];
