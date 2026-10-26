@@ -34,7 +34,7 @@
 #pragma region case: fallback-without-capability
 #pragma region offload-only
 #pragma region do: {package_fixture} {output}.packages
-#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCAPABLE -fstdpar-library-path={output}.packages -o {output} {input}
+#pragma region do: POLYFRONT_LIBRARY_CAPABILITIES= polycpp {polycpp_defaults} {polycpp_stdpar} -DCAPABLE -fstdpar-library-path={output}.packages -o {output} {input}
 #pragma region stderr-count: 1 uses the inline body: capability not satisfied (capabilities: none)
 #pragma region do: {output}
 #pragma region requires: 141
