@@ -688,8 +688,35 @@ TEST_CASE("opencl source accepts configured subgroup emulation", "[backend]") {
   REQUIRE(c.binary != std::nullopt);
   const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
   CHECK(source ^ contains_slice("[256]"));
-  CHECK(source ^ contains_slice("get_local_id(0)"));
+  CHECK(source ^ contains_slice("get_local_id(0u)"));
   CHECK(source ^ contains_slice("barrier(CLK_LOCAL_MEM_FENCE)"));
+}
+
+TEST_CASE("C source suffixes integer constants by their width", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Named s64("s64", Type::IntS64());
+  const Named u64("u64", Type::IntU64());
+  const Named u32("u32", Type::IntU32());
+  const Function entry = mkFn("constants", {}, Type::Unit0(),
+                              {Var(s64, Expr::Alias(Term::IntS64Const(INT64_MIN).widen()).widen(), false).widen(),
+                               Var(u64, Expr::Alias(Term::IntU64Const(1ull << 63).widen()).widen(), false).widen(),
+                               Var(u32, Expr::Alias(Term::IntU32Const(UINT32_MAX).widen()).widen(), false).widen(),
+                               Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
+                              FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const Program p(entry, {}, {}, PassPhase::Initial(), {});
+  polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
+  opts.pipelineSpec = "FullOpt(level=0)";
+
+  const auto c = polyregion::compiler::compile(p, opts, OptLevel::O0);
+  INFO(repr(c));
+  REQUIRE(c.binary != std::nullopt);
+  const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
+  INFO(source);
+  CHECK(source ^ contains_slice("(-9223372036854775807l - 1)"));
+  CHECK(source ^ contains_slice("9223372036854775808ul"));
+  CHECK(source ^ contains_slice("4294967295u"));
 }
 
 TEST_CASE("C source preserves same-width scalar field reinterpretation", "[backend]") {
@@ -1140,7 +1167,7 @@ TEST_CASE("C source demotes an immediately-read cross-space pointer merge", "[ba
     INFO(repr(c));
     REQUIRE(c.binary);
     const std::string source(c.binary->begin(), c.binary->end());
-    CHECK(source ^ contains_slice("_v2 = _v0[0];"));
+    CHECK(source ^ contains_slice("_v2 = _v0[0l];"));
     CHECK(source ^ contains_slice("_v2 = _v1;"));
   }
 
@@ -4203,7 +4230,7 @@ TEST_CASE("OpenCL source materialises the address of a scalar constant", "[backe
   INFO(repr(c));
   REQUIRE(c.binary != std::nullopt);
   const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
-  CHECK(source ^ contains_slice("uint _v0 = 1;"));
+  CHECK(source ^ contains_slice("uint _v0 = 1u;"));
   CHECK(source ^ contains_slice("private uint* _v1 = &(_v0"));
   CHECK_FALSE(source ^ contains_slice("&(1 /*uint*/)"));
 }
@@ -4229,7 +4256,7 @@ TEST_CASE("Metal source materialises the address of a scalar constant", "[backen
   const auto c = polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), opts, OptLevel::O0);
   REQUIRE(c.binary != std::nullopt);
   const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
-  CHECK(source ^ contains_slice("uint32_t _v0 = 1;"));
+  CHECK(source ^ contains_slice("uint32_t _v0 = 1u;"));
   CHECK(source ^ contains_slice("thread uint32_t* _v1 = &(_v0"));
   CHECK_FALSE(source ^ contains_slice("&(1 /*uint32_t*/)"));
 }
@@ -4255,7 +4282,7 @@ TEST_CASE("Metal source materialises scalar references assigned through captures
   const auto c = polyregion::compiler::compile(Program(entry, {}, {boxDef}, PassPhase::Initial(), {}), opts, OptLevel::O0);
   REQUIRE(c.binary != std::nullopt);
   const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
-  CHECK(source ^ contains_slice("uint32_t _v1 = 3;"));
+  CHECK(source ^ contains_slice("uint32_t _v1 = 3u;"));
   CHECK_FALSE(source ^ contains_slice("&(3 /*uint32_t*/)"));
 }
 

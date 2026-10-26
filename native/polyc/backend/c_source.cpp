@@ -27,6 +27,11 @@ std::string cFloatLiteral(double v, const std::string &suffix) {
   return s + suffix;
 }
 
+template <typename T> std::string cSignedLiteral(T v, const char *suffix) {
+  if (v == std::numeric_limits<T>::min()) return fmt::format("({}{} - 1)", v + 1, suffix);
+  return fmt::format("{}{}", v, suffix);
+}
+
 std::string escapeCString(const std::string &s) {
   return s ^ mk_string("", [](char c) -> std::string {
            if (c == '"' || c == '\\') return fmt::format("\\{}", c);
@@ -369,15 +374,15 @@ std::string backend::CSource::mkTerm(const Term::Any &term) {
                           [](const Term::Float32Const &x) { return cFloatLiteral(x.value, "f"); }, //
                           [](const Term::Float64Const &x) { return cFloatLiteral(x.value, ""); },  //
 
-                          [](const Term::IntU8Const &x) { return fmt::format("{}", x.value); },  //
-                          [](const Term::IntU16Const &x) { return fmt::format("{}", x.value); }, //
-                          [](const Term::IntU32Const &x) { return fmt::format("{}", x.value); }, //
-                          [](const Term::IntU64Const &x) { return fmt::format("{}", x.value); }, //
+                          [](const Term::IntU8Const &x) { return fmt::format("{}", x.value); },                           //
+                          [](const Term::IntU16Const &x) { return fmt::format("{}", x.value); },                          //
+                          [](const Term::IntU32Const &x) { return fmt::format("{}u", static_cast<uint32_t>(x.value)); },  //
+                          [](const Term::IntU64Const &x) { return fmt::format("{}ul", static_cast<uint64_t>(x.value)); }, //
 
-                          [](const Term::IntS8Const &x) { return fmt::format("{}", x.value); },  //
-                          [](const Term::IntS16Const &x) { return fmt::format("{}", x.value); }, //
-                          [](const Term::IntS32Const &x) { return fmt::format("{}", x.value); }, //
-                          [](const Term::IntS64Const &x) { return fmt::format("{}", x.value); }, //
+                          [](const Term::IntS8Const &x) { return fmt::format("{}", x.value); },    //
+                          [](const Term::IntS16Const &x) { return fmt::format("{}", x.value); },   //
+                          [](const Term::IntS32Const &x) { return cSignedLiteral(x.value, ""); },  //
+                          [](const Term::IntS64Const &x) { return cSignedLiteral(x.value, "l"); }, //
 
                           [](const Term::Unit0Const &) { return "/*void*/"s; },                   //
                           [](const Term::Bool1Const &x) { return x.value ? "true"s : "false"s; }, //
