@@ -539,6 +539,31 @@ TEST_CASE("SPIR-V normalises narrowed integer operands", "[backend][spirv]") {
   CHECK(normalisedExtendedWords[extendedWords.size() + 4] == ((4u << 16) | spv::OpNot));
 }
 
+TEST_CASE("SPIR-V kernels load and store Bool fields as bytes", "[backend][spirv]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Sym flagsName({"BoolFlags"});
+  const auto flagsType = Type::Struct(flagsName, {}).widen();
+  const StructDef flagsDef(flagsName, {}, {Named("pad", Type::IntS8()), Named("flag", Type::Bool1())}, {}, false);
+  const Named flags("flags", Type::Ptr(flagsType, TypeSpace::Global()));
+  const auto flagField = [&] { return Term::Select(flags, {PathStep::Deref().widen(), PathStep::Field("flag").widen()}, Type::Bool1()); };
+  const Function entry = mkFn(
+      "copy_flag", {Arg(flags, {})}, Type::Unit0(),
+      {Mut(flagField(), Expr::Alias(flagField().widen()).widen()).widen(), Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
+      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  const auto compiled = polyregion::compiler::compile(Program(entry, {}, {flagsDef}, PassPhase::Initial(), {}),
+                                                      {Target::Object_LLVM_SPIRV64_Kernel, ""}, OptLevel::O0);
+  REQUIRE(compiled.binary);
+  const auto &ir = llvmIrOf(compiled);
+  CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("load i8"));
+  CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("icmp ne i8"));
+  CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("store i8"));
+  CHECK_THAT(ir, !Catch::Matchers::ContainsSubstring("load i1"));
+  CHECK_THAT(ir, !Catch::Matchers::ContainsSubstring("store i1"));
+}
+
 TEST_CASE("CPU remote-operation ABI follows the target pointer width", "[backend]") {
   polyregion::compiler::initialise();
   using namespace polyregion::polyast::dsl;

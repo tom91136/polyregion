@@ -87,6 +87,11 @@ ValPtr arrElemPtr(CodeGen &gen, llvm::Type *arrTy, const Type::Any &comp, llvm::
   return arrElemPtr(gen, arrTy, base, gen.i64SExt(offset), key, [&] { return elemStepPtr(gen, comp, base, gen.i64SExt(offset), key); });
 }
 
+ValPtr loadBool(CodeGen &gen, llvm::Value *ptr, llvm::Type *ty) {
+  auto *storedTy = gen.C.isSpirv() ? llvm::Type::getInt8Ty(gen.C.actual) : ty;
+  return gen.B.CreateICmpNE(gen.C.load(gen.B, ptr, storedTy), llvm::ConstantInt::get(storedTy, 0, true));
+}
+
 ValPtr physicalIndexVal(CodeGen &gen, const Expr::Index &x, const std::string &key) {
   auto &B = gen.B;
   auto &C = gen.C;
@@ -106,9 +111,7 @@ ValPtr physicalIndexVal(CodeGen &gen, const Expr::Index &x, const std::string &k
         const auto basePtr = gen.mkTermVal(*lhs);
         const auto ptr =
             B.CreateInBoundsGEP(arrLlvmTy, basePtr, {ConstantInt::get(C.i32Ty(), 0), gen.i64SExt(gen.mkTermVal(x.idx))}, key + "_idx_ptr");
-        if (innerArr->comp.is<Type::Bool1>()) {
-          return B.CreateICmpNE(C.load(B, ptr, compLlvmTy), ConstantInt::get(llvm::Type::getInt1Ty(C.actual), 0, true));
-        }
+        if (innerArr->comp.is<Type::Bool1>()) return loadBool(gen, ptr, compLlvmTy);
         return C.load(B, ptr, compLlvmTy);
       } else {
         const auto ty = gen.resolveType(arrTpe->comp);
@@ -121,9 +124,7 @@ ValPtr physicalIndexVal(CodeGen &gen, const Expr::Index &x, const std::string &k
         } else {
           ptr = B.CreateInBoundsGEP(ty, basePtr, gen.i64SExt(gen.mkTermVal(x.idx)), key + "_idx_ptr");
         }
-        if (arrTpe->comp.is<Type::Bool1>()) {
-          return B.CreateICmpNE(C.load(B, ptr, ty), ConstantInt::get(llvm::Type::getInt1Ty(C.actual), 0, true));
-        }
+        if (arrTpe->comp.is<Type::Bool1>()) return loadBool(gen, ptr, ty);
         if (gen.structByPtr() && arrTpe->comp.template is<Type::Struct>()) return ptr;
         return C.load(B, ptr, ty);
       }
@@ -731,11 +732,7 @@ ValPtr CodeGen::mkTermVal(const Term::Any &term, const std::string &key) {
           return mkSelectPtr(x);
         }
         if (structByPtr() && x.tpe.template is<Type::Struct>()) return mkSelectPtr(x);
-        if (C.isVulkan() && x.tpe.template is<Type::Bool1>() && !x.steps.empty()) {
-          auto *physicalTy = llvm::Type::getInt8Ty(C.actual);
-          auto *value = C.load(B, mkSelectPtr(x), physicalTy);
-          return B.CreateICmpNE(value, llvm::ConstantInt::get(physicalTy, 0, true));
-        }
+        if (C.isSpirv() && x.tpe.template is<Type::Bool1>() && !x.steps.empty()) return loadBool(*this, mkSelectPtr(x), resolveType(x.tpe));
         return C.load(B, mkSelectPtr(x), resolveType(x.tpe));
       });
 }
@@ -1341,7 +1338,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         }
         const auto slotTpe = resolveType(lhs.tpe);
         auto *storedTpe = slotTpe;
-        if (C.isVulkan() && lhs.tpe.template is<Type::Bool1>() && !lhs.steps.empty()) {
+        if (C.isSpirv() && lhs.tpe.template is<Type::Bool1>() && !lhs.steps.empty()) {
           storedTpe = llvm::Type::getInt8Ty(C.actual);
           rhs = B.CreateZExt(rhs, storedTpe);
         }
