@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000012 Mon Sep 17 00:00:00 2001
+From: polyregion <noreply@polyregion>
+Date: Mon, 26 Oct 2026 00:00:00 +0000
+Subject: [PATCH] [SPIRV] Support structurizing nested break chains (666f22b6aa5b, #222459)
+
+partialOrderVisit aborts with "No valid candidate in the queue" after critical
+edges are split, so walk the construct with the preorder visit() instead.
+
+---
+ llvm/lib/Target/SPIRV/SPIRVStructurizer.cpp | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/llvm/lib/Target/SPIRV/SPIRVStructurizer.cpp b/llvm/lib/Target/SPIRV/SPIRVStructurizer.cpp
+--- a/llvm/lib/Target/SPIRV/SPIRVStructurizer.cpp
++++ b/llvm/lib/Target/SPIRV/SPIRVStructurizer.cpp
+@@ -324,7 +324,7 @@
+                                                      BasicBlock *Merge) {
+       assert(DT.dominates(Header, Merge));
+       std::vector<BasicBlock *> Output;
+-      partialOrderVisit(*Header, [&](BasicBlock *BB) {
++      visit(*Header, [&](BasicBlock *BB) {
+         if (BB == Merge)
+           return false;
+         if (DT.dominates(Merge, BB) || !DT.dominates(Header, BB))
+@@ -350,7 +350,7 @@
+       }
+ 
+       std::vector<BasicBlock *> Output;
+-      partialOrderVisit(*Node->Header, [&](BasicBlock *BB) {
++      visit(*Node->Header, [&](BasicBlock *BB) {
+         if (OutsideBlocks.count(BB) != 0)
+           return false;
+         if (DT.dominates(Node->Merge, BB) || !DT.dominates(Node->Header, BB))
