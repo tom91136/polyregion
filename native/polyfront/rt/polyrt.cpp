@@ -349,7 +349,8 @@ template <class Fn> bool runtimeStatus(const char *operation, Fn &&fn) noexcept 
 } // namespace
 
 polyregion::polyrt::ExecutionContext::~ExecutionContext() {
-  const std::lock_guard lock(transaction);
+  const std::unique_lock lock(transaction, std::try_to_lock);
+  if (!lock) return;
   try {
     retryPendingCleanups(*this);
   } catch (...) {

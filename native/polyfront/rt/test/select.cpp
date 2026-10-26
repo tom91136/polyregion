@@ -1,5 +1,7 @@
+#include <cstdlib>
 #include <deque>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -26,7 +28,7 @@ struct ProbeResult {
   std::string stderrText;
 };
 
-ProbeResult probe(const std::string &testName, const std::vector<std::pair<std::string, std::string>> &env) {
+ProbeResult probe(const std::string &testName, const std::vector<std::pair<std::string, std::string>> &env, unsigned secondsToWait = 0) {
   std::deque<polyregion::env::ScopedEnv> scoped;
   for (const auto &[name, value] : env)
     scoped.emplace_back(name, value.c_str());
@@ -35,8 +37,8 @@ ProbeResult probe(const std::string &testName, const std::vector<std::pair<std::
   const auto self = llvm::sys::fs::getMainExecutable(nullptr, reinterpret_cast<void *>(&selfAnchor));
   const std::vector<llvm::StringRef> args{self, testName};
   std::string executionError;
-  const int code =
-      llvm::sys::ExecuteAndWait(self, args, std::nullopt, {std::nullopt, llvm::StringRef(), errorPath.str()}, 0, 0, &executionError);
+  const int code = llvm::sys::ExecuteAndWait(self, args, std::nullopt, {std::nullopt, llvm::StringRef(), errorPath.str()}, secondsToWait, 0,
+                                             &executionError);
   std::string errors = executionError;
   if (const auto buffer = llvm::MemoryBuffer::getFile(errorPath)) errors += (*buffer)->getBuffer().str();
   llvm::sys::fs::remove(errorPath);
@@ -73,6 +75,19 @@ TEST_CASE("strict selection leaves an unrecognised platform to the fallback") {
   const auto [code, errors] = probe("select probe: initialise", env);
   INFO(errors);
   CHECK(code == 0);
+}
+
+TEST_CASE("select probe: exit during transaction", "[.probe]") {
+  auto *context = polyregion::polyrt::currentContext();
+  REQUIRE(context);
+  REQUIRE(polyrt_context_acquire(context));
+  std::thread([] { std::exit(9); }).join();
+}
+
+TEST_CASE("process exit does not wait on a transaction held by another thread") {
+  const auto [code, errors] = probe("select probe: exit during transaction", {}, 20);
+  INFO(errors);
+  CHECK(code == 9);
 }
 
 #ifdef POLYRT_TESTS_POLYDCO
