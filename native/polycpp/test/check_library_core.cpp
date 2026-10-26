@@ -81,6 +81,15 @@
 #pragma region do: {output}
 #pragma region requires: 55 94
 
+#pragma region case: core-device-package-pointer-reference
+#pragma region offload-only
+#pragma region do: {package_fixture} --device-core {output}.packages
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DPOINTER_REFERENCE -fstdpar-library-path={output}.packages -o {output} {input}
+#pragma region stderr-count: 2 bound to polyregion.core
+#pragma region stderr-count: 0 uses the inline body
+#pragma region do: {output}
+#pragma region requires: 9 5149
+
 #include <algorithm>
 #include <array>
 #include <cstdio>
@@ -139,6 +148,18 @@ int main() {
   std::for_each(std::execution::par_unseq, xs.begin(), xs.end(), [p](int &x) { x += p[0] + 1; });
   const int sum = std::transform_reduce(std::execution::par_unseq, xs.begin(), xs.end(), 0, std::plus<>(), [p](int x) { return x + p[1]; });
   std::printf("%d %d", xs[7], sum);
+  return 0;
+}
+#elif defined(POINTER_REFERENCE)
+int main() {
+  const int n = 100;
+  const std::vector<std::string> words{"a", "bb", "ccc"};
+  std::vector<int> ids(n), out(n, 0);
+  std::iota(ids.begin(), ids.end(), 0);
+  int *p = out.data();
+  std::for_each(std::execution::par_unseq, ids.begin(), ids.end(), [&](int i) { p[i] = i + static_cast<int>(words[i % 3].size()); });
+  const int sum = std::transform_reduce(std::execution::par_unseq, ids.begin(), ids.end(), 0, std::plus<>(), [&](int i) { return p[i]; });
+  std::printf("%d %d", out[7], sum);
   return 0;
 }
 #elif defined(STD_CAPTURES)

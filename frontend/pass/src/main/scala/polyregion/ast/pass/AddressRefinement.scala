@@ -1216,6 +1216,14 @@ private[pass] object AddressRefinement {
           case _ => Nil
         }
 
+    def bearsPointers(tpe: p.Type, seen: Set[p.Sym] = Set.empty): Boolean = tpe match {
+      case _: p.Type.Ptr               => true
+      case p.Type.Arr(component, _, _) => bearsPointers(component, seen)
+      case p.Type.Struct(symbol, _) if !seen(symbol) =>
+        members.getOrElse(symbol, Map.empty).valuesIterator.exists(bearsPointers(_, seen + symbol))
+      case _ => false
+    }
+
     // an aggregate copied out of memory carries the pointer graphs stored there, read as that memory's pointers;
     // a pointer to plain data is bound as its own launch argument and patched into the copy instead
     def loadedSlots(
@@ -1231,7 +1239,7 @@ private[pass] object AddressRefinement {
       else
         pointerSlots(tpe, Nil, maxSlotDepth - target.path.size).collect {
           case (path, slotType @ p.Type.Ptr(pointee, _))
-              if pointerSlotDepth(pointee) > 0 && !known(Query.Slot(target.root, target.path ++ path)) =>
+              if bearsPointers(pointee) && !known(Query.Slot(target.root, target.path ++ path)) =>
             Query.Slot(target.root, target.path ++ path) ->
               termFact(state, p.Term.Select(sourceRoot, sourcePrefix ++ path, slotType))
         }

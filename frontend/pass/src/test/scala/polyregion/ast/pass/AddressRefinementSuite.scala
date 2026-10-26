@@ -685,6 +685,58 @@ class AddressRefinementSuite extends munit.FunSuite {
     assertEquals(encoding(analysis, pointer), Some(Encoding.Absolute))
   }
 
+  test("a pointer to a pointer copied out of the capture reads as the capture's pointer") {
+    val holderSym = sym("Holder")
+    val holderTpe = p.Type.Struct(holderSym, Nil)
+    val slotTpe   = p.Type.Ptr(ptrTpe, p.Type.Space.Global)
+    val cap       = named(p.Conventions.CaptureArg, capPtr)
+    def solveLoad(copies: Int) = {
+      val chain  = (0 until copies).toList.map(i => named(s"copy$i", holderTpe))
+      val holder = p.Term.Select(cap, List(p.PathStep.Field("holder")), holderTpe).asInstanceOf[p.Term.Select]
+      val roots  = chain.scanLeft(holder)((_, copy) => selectT(copy))
+      val loaded = named("loaded", ptrTpe)
+      val e = entry(
+        args = List(p.Arg(cap)),
+        body =
+          chain.zip(roots).map((copy, source) => p.Stmt.Var(copy, Some(p.Expr.Alias(source)), isMutable = true)) :::
+            List(
+              p.Stmt.Var(
+                loaded,
+                Some(
+                  p.Expr.Index(
+                    p.Term.Select(roots.last.root, roots.last.steps :+ p.PathStep.Field("slot"), slotTpe),
+                    p.Term.IntS64Const(0),
+                    ptrTpe
+                  )
+                ),
+                false
+              ),
+              p.Stmt.Update(selectT(loaded), p.Term.IntS64Const(0), p.Term.IntS32Const(1)),
+              p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+            )
+      )
+      val analysis = AddressRefinement.solve(
+        program(
+          e,
+          defs = List(
+            p.StructDef(capSym, Nil, List(named("holder", holderTpe)), Nil),
+            p.StructDef(holderSym, Nil, List(named("slot", slotTpe)), Nil)
+          )
+        ),
+        e
+      )
+      analysis -> loaded
+    }
+
+    val (direct, directLoaded) = solveLoad(0)
+    assertEquals(direct.diagnostics, Nil)
+    List(1, 2).foreach { copies =>
+      val (analysis, loaded) = solveLoad(copies)
+      assertEquals(analysis.diagnostics, Nil)
+      assertEquals(encoding(analysis, loaded), encoding(direct, directLoaded))
+    }
+  }
+
   test("taking the address of a pointer binding and loading it preserves the stored encoding") {
     val cap     = named(p.Conventions.CaptureArg, capPtr)
     val pointer = named("pointer", ptrTpe)
