@@ -57,6 +57,18 @@ int main(int argc, char **argv) {
                             });
     return mismatches == 0 ? 0 : 21;
   }
+  if (argc == 3 && std::string(argv[1]) == "--assert-no-array-value-bindings") {
+    const auto source = llvm::MemoryBuffer::getFile(argv[2]);
+    if (!source) return 28;
+    const auto bytes = (*source)->getBuffer();
+    const auto program =
+        hashed_program_from_msgpack(reinterpret_cast<const uint8_t *>(bytes.begin()), reinterpret_cast<const uint8_t *>(bytes.end()));
+    const auto bindings = program.collect_all<Stmt::Var>()
+                          ^ filter([](const auto &variable) { return variable.expr && variable.name.tpe.template is<Type::Arr>(); });
+    for (const auto &binding : bindings)
+      llvm::errs() << "Whole-array value binding: " << repr(binding) << '\n';
+    return bindings.empty() ? 0 : 28;
+  }
   if (argc == 3 && std::string(argv[1]) == "--remove-prefix") {
     llvm::SmallString<256> directory(argv[2]);
     llvm::sys::path::remove_filename(directory);

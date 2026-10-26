@@ -51,6 +51,7 @@ struct Remapper {
   std::unordered_map<std::string, polyast::Function> userFuncs;
   void handleFunc(mlir::func::FuncOp funcOp);
   polyast::Term::Select newVar(const std::variant<polyast::Expr::Any, polyast::Type::Any> &expr);
+  polyast::Term::Any termOf(const polyast::Expr::Any &expr);
 
   Remapper(mlir::ModuleOp &M, mlir::DataLayout &L, mlir::Operation *perimeter, const std::vector<polyast::Named> &captureRoot);
   std::optional<FType> fTypeOf(const mlir::Type &type);

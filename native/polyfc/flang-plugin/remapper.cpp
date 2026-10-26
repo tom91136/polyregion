@@ -176,6 +176,11 @@ Term::Select polyfc::Remapper::newVar(const std::variant<Expr::Any, Type::Any> &
              });
 }
 
+Term::Any polyfc::Remapper::termOf(const Expr::Any &expr) {
+  if (const auto alias = expr.get<Expr::Alias>()) return alias->ref;
+  return newVar(expr).widen();
+}
+
 Type::Any polyfc::Remapper::handleType(const mlir::Type type, const bool captureBoundary) {
 
   auto handleSeq = [&](fir::SequenceType t) -> Type::Any { return Type::Ptr(handleType(t.getEleTy()), TypeSpace::Global()); };
@@ -749,7 +754,7 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
             // the start; RefTo(Ptr(Arr),off) would index within one element (stride 1)
             if (const auto fac = handleValue(c.getRef()) ^ get_maybe<FArrayCoord>()) {
               const int32_t stride = fac->comp.get<Type::Arr>() ^ fold([](const auto &a) { return a.length; }, [] { return 1; });
-              const auto arrU8 = newVar(Expr::Cast(newVar(fac->array), u8p).widen());
+              const auto arrU8 = newVar(Expr::Cast(termOf(fac->array), u8p).widen());
               const auto offT = newVar(fac->offset);
               const auto elemByte = newVar(Expr::IntrOp(Intr::Mul(offT, Term::IntS64Const(stride).widen(), Type::IntS64())).widen());
               const auto byteIdx = newVar(Expr::IntrOp(Intr::Add(elemByte, idxT, Type::IntS64())).widen());
@@ -818,7 +823,7 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
                               [&](const FArrayCoord &a) {
                                 auto it = aggLoadCache.find(c.getRef());
                                 auto elem = it != aggLoadCache.end() ? it->second : [&] {
-                                  auto base = newVar(a.array);
+                                  auto base = termOf(a.array);
                                   auto off = newVar(a.offset);
                                   auto e = newVar(Expr::Index(base, off, a.comp).widen());
                                   aggLoadCache.try_emplace(c.getRef(), e);
@@ -1121,7 +1126,7 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
               ^ foreach_total([&](const Expr::Any &e) { witness(l.getResult(), index0(e)); },               //
                               [&](const FVar &e) { witness(l.getResult(), Expr::Alias(e.value).widen()); }, //
                               [&](const FArrayCoord &e) {
-                                auto base = newVar(e.array);
+                                auto base = termOf(e.array);
                                 auto off = newVar(e.offset);
                                 witness(l.getResult(), Expr::Index(base, off, e.comp).widen());
                               }, //
