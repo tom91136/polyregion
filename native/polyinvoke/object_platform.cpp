@@ -309,11 +309,17 @@ RelocatableDevice::RelocatableDevice() {
 
   processJD = &es->createBareJITDylib("<process>");
 
+  const std::pair<const char *, llvm::orc::ExecutorAddr> runtimeSymbols[] = {
+      {"malloc", llvm::orc::ExecutorAddr::fromPtr(&malloc_)},
+      {"__polyregion_host_thread_global_idx", llvm::orc::ExecutorAddr::fromPtr(&__polyregion_host_thread_global_idx)},
+      {"__polyregion_host_thread_global_size", llvm::orc::ExecutorAddr::fromPtr(&__polyregion_host_thread_global_size)},
+  };
   llvm::orc::SymbolMap absSyms;
-  absSyms[es->intern(withGlobalPrefix(globalPrefix, "malloc"))] = llvm::orc::ExecutorSymbolDef(
-      llvm::orc::ExecutorAddr::fromPtr(&malloc_), llvm::JITSymbolFlags::Exported | llvm::JITSymbolFlags::Callable);
+  for (const auto &[name, addr] : runtimeSymbols)
+    absSyms[es->intern(withGlobalPrefix(globalPrefix, name))] =
+        llvm::orc::ExecutorSymbolDef(addr, llvm::JITSymbolFlags::Exported | llvm::JITSymbolFlags::Callable);
   if (auto err = processJD->define(llvm::orc::absoluteSymbols(std::move(absSyms))))
-    POLYINVOKE_FATAL(RELOBJ_PREFIX, "Cannot define malloc override: %s", toString(std::move(err)).c_str());
+    POLYINVOKE_FATAL(RELOBJ_PREFIX, "Cannot define runtime symbols: %s", toString(std::move(err)).c_str());
 
   // libm::exportAll (from invoke::init) registers sincosf et al. via sys::DynamicLibrary; this generator picks them up
   if (auto gen = llvm::orc::DynamicLibrarySearchGenerator::GetForCurrentProcess(globalPrefix)) processJD->addGenerator(std::move(*gen));
