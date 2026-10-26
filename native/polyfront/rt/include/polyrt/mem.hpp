@@ -206,6 +206,7 @@ class SynchronisedMemAllocation {
                    static_cast<const void *>(hostData), offsetInBytes, count, devicePtr, tl.name, tl.sizeInBytes, tl.memberCount,
                    writeBody);
     if (writeBody) remoteWrite(hostData + offsetInBytes, devicePtr, offsetInBytes, tl.sizeInBytes * count);
+    if (tl.memberCount == 0) return devicePtr;
     for (size_t idx = 0; idx < count; ++idx) {
       for (size_t m = 0; m < tl.memberCount; ++m) {
         const auto member = tl.members[m];
@@ -241,6 +242,7 @@ class SynchronisedMemAllocation {
       const size_t cachedSize = alloc->remote.sizeInBytes;
       const size_t requiredSize = staleFloor(l.sizeInBytes * count, hostAllocSizeInBytes);
       const bool stale = eligible && cachedSize < requiredSize;
+      if (eligible && !stale) adoptLayout(*alloc, l);
       if (stale) {
         reclaim(hostData, /*forWrite*/ true);
         disassociate(hostData);
@@ -378,6 +380,21 @@ public:
       if (member.ptrIndirection > 0 || (member.type && !pointerFree(member.type))) return false;
     }
     return true;
+  }
+
+  static inline const runtime::TypeLayout plainLayout{.name = "plain",
+                                                      .sizeInBytes = 1,
+                                                      .alignmentInBytes = 1,
+                                                      .attrs = runtime::LayoutAttrs::Opaque | runtime::LayoutAttrs::Primitive,
+                                                      .memberCount = 0,
+                                                      .members = nullptr};
+
+  static void adoptLayout(RemoteAllocation &alloc, const runtime::TypeLayout &view) {
+    if (!pointerFree(&view)) {
+      if (alloc.layout && pointerFree(alloc.layout)) alloc.layout = nullptr;
+    } else if (!alloc.layout && !alloc.hasDevicePtrs && view.sizeInBytes != 0 && alloc.remote.sizeInBytes % view.sizeInBytes == 0) {
+      alloc.layout = &view;
+    }
   }
 
 private:
@@ -655,7 +672,7 @@ public:
 
       // XXX skip writeback when host page is RO; cuMemcpyDtoH/hsa fault, and the pointer-rewrite walk would too.
       if (!alloc->hostReadOnly) {
-        const bool walkable = tl ? !isSet(tl->attrs, runtime::LayoutAttrs::Opaque) : true;
+        const bool walkable = tl ? !isSet(tl->attrs, runtime::LayoutAttrs::Opaque) && !pointerFree(tl) : true;
         // snapshot the original outgoing pointers before the read-back overwrites them with device addresses
         std::vector<void *> origPtrs;
         // snapshot for readSubObject to restore a slot the read-back leaves untranslatable
@@ -752,7 +769,7 @@ public:
 
   static size_t staleFloor(size_t reflectedSize, size_t minBytes) { return std::max(reflectedSize, minBytes); }
 
-  std::optional<std::pair<uintptr_t, size_t>> ensureMirroredBase(const void *local, size_t minSize) {
+  std::optional<std::pair<uintptr_t, size_t>> ensureMirroredBase(const void *local, size_t minSize, const bool scalarPointee) {
     const PtrQuery meta = localReflect(local);
     if (meta.deviceAccessible) return std::nullopt;
     const auto query = queryLocal(local, /*allowPastEnd*/ true);
@@ -761,6 +778,7 @@ public:
     if (cacheHit) {
       if (sz <= query->first->remote.sizeInBytes) {
         auto *alloc = query->first;
+        if (scalarPointee && !alloc->layout && !alloc->hasDevicePtrs) alloc->layout = &plainLayout;
         if (localSyncVisited.insert(alloc->remote.ptr).second || alloc->localModified) {
           const auto *base = static_cast<const char *>(local) - query->second;
           refresh(base, *alloc);
@@ -774,14 +792,14 @@ public:
     if (sz == 0) return std::nullopt;
     const size_t off = meta.sizeInBytes == 0 ? 0 : meta.offsetInBytes;
     const char *base = static_cast<const char *>(local) - off;
-    const uintptr_t baseRemote = createDeviceAllocation(base, sz, nullptr, meta.hostReadOnly);
+    const uintptr_t baseRemote = createDeviceAllocation(base, sz, scalarPointee ? &plainLayout : nullptr, meta.hostReadOnly);
     localSyncVisited.insert(baseRemote);
     remoteWrite(base, baseRemote, 0, sz);
     return std::pair{baseRemote, off};
   }
 
-  uintptr_t mirrorEnsure(const void *local, size_t minSize = 0) {
-    const auto r = ensureMirroredBase(local, minSize);
+  uintptr_t mirrorEnsure(const void *local, size_t minSize = 0, const bool scalarPointee = false) {
+    const auto r = ensureMirroredBase(local, minSize, scalarPointee);
     return r ? r->first + r->second : 0;
   }
 
@@ -825,7 +843,7 @@ public:
       // skip an interior pointer into an alloc carrying translated device pointers (a mirrored struct, or one
       // the compile-time mirror patched - an SSO string's _M_p, or an array of them): a raw copy-back clobbers
       // them. pure raw data has none - MSVC over-aligns big std::vector, so read its interior data pointer back
-      if (offset != 0 && (alloc->layout || alloc->hasDevicePtrs)) return;
+      if (offset != 0 && (!pointerFree(alloc->layout) || alloc->hasDevicePtrs)) return;
       const char *base = static_cast<const char *>(local) - offset;
       if (pointerFree(alloc->layout) && !alloc->hasDevicePtrs) settle(base, *alloc);
       else remoteRead(const_cast<char *>(base), alloc->remote.ptr, 0, alloc->remote.sizeInBytes);

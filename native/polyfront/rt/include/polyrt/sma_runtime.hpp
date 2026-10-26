@@ -174,7 +174,7 @@ template <typename SMA> class CaptureMarshalOf final : public CaptureMarshal {
 public:
   explicit CaptureMarshalOf(SMA &sma) : sma(sma) {}
   void visitClear() override { sma.unmirrorVisitClear(); }
-  uintptr_t ensure(const void *local, const size_t minSize) override { return sma.mirrorEnsure(local, minSize); }
+  uintptr_t ensure(const void *local, const size_t minSize) override { return sma.mirrorEnsure(local, minSize, minSize != 0); }
   void readAlloc(const void *local) override { sma.unmirrorReadAlloc(local); }
   uintptr_t mirror(const void *capture, const runtime::TypeLayout &layout) override { return sma.syncLocalToRemote(capture, layout); }
   void readMirror(void *capture) override {
@@ -200,7 +200,7 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT CaptureMarshal *captureMarshal();
   }                                                                                                                                        \
   POLYREGION_EXPORT extern "C" uintptr_t polyrt_sma_ensure(const void *local) { return (allocations).mirrorEnsure(local); }                \
   POLYREGION_EXPORT extern "C" uintptr_t polyrt_sma_ensure_min(const void *local, const uint64_t minSize) {                                \
-    return (allocations).mirrorEnsure(local, minSize);                                                                                     \
+    return (allocations).mirrorEnsure(local, minSize, true);                                                                               \
   }                                                                                                                                        \
   POLYREGION_EXPORT extern "C" uint64_t polyrt_sma_pointee_size(const void *local) { return (allocations).mirrorPointeeSize(local); }      \
   POLYREGION_EXPORT extern "C" uintptr_t polyrt_sma_ensure_deep(const void *local, const size_t depth) {                                   \

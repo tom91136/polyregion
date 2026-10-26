@@ -615,11 +615,12 @@ template <typename T> StructWithStorage liftToStruct(const char *name, std::init
 const static TypeLayout floatType = NamedType(float);
 const static TypeLayout int32Type = NamedType(int32_t);
 const static TypeLayout int64Type = NamedType(int64_t);
+const static TypeLayout doubleType = NamedType(double);
 
 struct Fixture {
   std::unordered_map<uintptr_t, size_t> localAllocations, remoteAllocations;
   std::unordered_set<uintptr_t> heapAllocations;
-  size_t remoteWrites = 0, remoteReads = 0;
+  size_t remoteWrites = 0, remoteReads = 0, remoteWriteBytes = 0, reflectQueries = 0;
   // stretches device-to-host copies the way a real transfer does, page by page
   std::chrono::microseconds remoteReadPause{0};
   std::function<void(void *)> duringRemoteRead;
@@ -634,6 +635,7 @@ struct Fixture {
   Fixture()
       : allocation(
             [&](const void *ptr) -> polyregion::polyrt::PtrQuery {
+              reflectQueries++;
               const uintptr_t localPtr = reinterpret_cast<uintptr_t>(ptr);
               if (const auto it = localAllocations.find(localPtr); it != localAllocations.end()) {
                 return polyregion::polyrt::PtrQuery{
@@ -664,6 +666,7 @@ struct Fixture {
             }, //
             [&](const void *src, uintptr_t dst, size_t dstOffset, size_t size) {
               remoteWrites++;
+              remoteWriteBytes += size;
               return std::memcpy(reinterpret_cast<char *>(dst) + dstOffset, src, size);
             }, //
             [](uintptr_t remotePtr) { std::free(reinterpret_cast<void *>(remotePtr)); }, false) {}
@@ -787,6 +790,87 @@ TEST_CASE("resident heap blocks fault their device copy back and upload again on
   fixture.allocation.disassociate(xs, false);
   xs[count / 2] = 9;
   CHECK(xs[count / 2] == 9);
+}
+
+TEST_CASE("typed read-back of a pointer-free array first mirrored without a layout queries a bounded number of records") {
+  struct Capture {
+    double *xs;
+  };
+  auto captureMeta = Struct_(Capture, StructMember_(Capture, xs, &doubleType));
+
+  Fixture fixture;
+  const size_t count = 64 * polyregion::polyrt::guard::pageSize() / sizeof(double);
+  auto xs = fixture.mallocLocalHeap<double>(count);
+  std::fill(xs, xs + count, 1.0);
+  Capture capture{xs};
+
+  fixture.allocation.unmirrorVisitClear();
+  auto remote = reinterpret_cast<double *>(fixture.allocation.mirrorEnsure(xs));
+  std::fill(remote, remote + count, 2.0);
+  fixture.allocation.unmirrorVisitClear();
+  fixture.allocation.unmirrorReadAlloc(xs);
+  CHECK(xs[count - 1] == 2.0);
+
+  const auto remoteCapture = fixture.localToRemote(&capture, *captureMeta);
+  REQUIRE(remoteCapture->xs == remote);
+  std::fill(remote, remote + count, 3.0);
+  fixture.allocation.unmirrorVisitClear();
+  fixture.reflectQueries = 0;
+  fixture.allocation.syncRemoteToLocalAfterLaunch(&capture);
+  CHECK(fixture.reflectQueries <= 8);
+  fixture.allocation.disassociate(&capture, false);
+
+  const auto relaunch = [&](const auto &kernel) {
+    fixture.allocation.unmirrorVisitClear();
+    const auto before = fixture.remoteWriteBytes;
+    auto r = reinterpret_cast<double *>(fixture.allocation.mirrorEnsure(xs));
+    kernel(r);
+    fixture.allocation.unmirrorVisitClear();
+    fixture.allocation.unmirrorReadAlloc(xs);
+    return fixture.remoteWriteBytes - before;
+  };
+  CHECK(relaunch([&](double *r) { CHECK(r[count / 2] == 3.0); }) <= 4 * polyregion::polyrt::guard::pageSize());
+  CHECK(xs[0] == 3.0);
+  CHECK(xs[count - 1] == 3.0);
+
+  xs[count / 2] = 9.0;
+  CHECK(relaunch([&](double *r) { CHECK(r[count / 2] == 9.0); }) >= count * sizeof(double) / 2);
+  CHECK(relaunch([&](double *r) { CHECK(r[count / 2] == 9.0); }) <= 4 * polyregion::polyrt::guard::pageSize());
+  fixture.allocation.disassociate(xs, false);
+}
+
+TEST_CASE("a pointer-bearing view of a record settled as pointer-free restores pointer translation") {
+  struct Holder {
+    int32_t *p;
+    int32_t *q;
+  };
+  struct Plain {
+    double *d;
+  };
+  struct Typed {
+    Holder *h;
+  };
+  auto holderMeta = Struct_(Holder, StructMember_(Holder, p, &int32Type), StructMember_(Holder, q, &int32Type));
+  auto plainMeta = Struct_(Plain, StructMember_(Plain, d, &doubleType));
+  auto typedMeta = Struct_(Typed, StructMember_(Typed, h, &*holderMeta));
+
+  Fixture fixture;
+  auto ys = fixture.mallocLocal<int32_t>(4);
+  std::fill(ys, ys + 4, 5);
+  auto block = new (fixture.mallocLocal<Holder>()) Holder{ys, ys + 2};
+
+  fixture.allocation.unmirrorVisitClear();
+  fixture.allocation.mirrorEnsure(block, sizeof(double), true);
+  Plain plain{reinterpret_cast<double *>(block)};
+  fixture.localToRemote(&plain, *plainMeta);
+  fixture.allocation.disassociate(&plain, false);
+
+  Typed typed{block};
+  const auto remoteTyped = fixture.localToRemote(&typed, *typedMeta);
+  REQUIRE(remoteTyped->h != block);
+  CHECK(remoteTyped->h->p != ys);
+  CHECK(remoteTyped->h->q == remoteTyped->h->p + 2);
+  CHECK(*remoteTyped->h->p == 5);
 }
 
 TEST_CASE("resident heap blocks reclaim before code that bypasses the fault path") {
