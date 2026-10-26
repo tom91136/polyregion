@@ -3,13 +3,11 @@
 #include <algorithm>
 #include <cinttypes>
 #include <cstring>
-#include <unordered_map>
 #include <utility>
 
 #include "aspartame/all.hpp"
 #include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
-#include "spirv/unified1/spirv.hpp"
 
 #include "polyinvoke/spirv.h"
 
@@ -36,66 +34,6 @@ using namespace polyregion::invoke::vulkan;
 static constexpr const char *PREFIX = "Vulkan";
 
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
-
-// XXX lavapipe mis-vectorises a multi-subgroup work-group once the per-invocation private footprint is large
-static constexpr uint32_t lavapipeMaxFunctionPrivateBytes = 768;
-
-// total bytes of Function-storage OpVariables - the kernel's per-invocation private (stack) memory
-static uint32_t spirvFunctionPrivateBytes(const std::vector<uint32_t> &w) {
-  if (w.size() < 5) return 0;
-  auto op = [](uint32_t x) { return uint16_t(x & 0xFFFF); };
-  auto wc = [](uint32_t x) { return uint16_t(x >> 16); };
-  struct Inst {
-    const uint32_t *p;
-    uint16_t n;
-  };
-  std::vector<Inst> insts;
-  for (size_t i = 5; i < w.size();) {
-    const uint16_t n = wc(w[i]);
-    if (n == 0 || i + n > w.size()) break;
-    insts.push_back({&w[i], n});
-    i += n;
-  }
-  std::unordered_map<uint32_t, uint32_t> typeSize, constVal, ptrPointee;
-  for (const auto &in : insts)
-    if (op(in.p[0]) == spv::OpConstant && in.n >= 4) constVal[in.p[2]] = in.p[3];
-  for (bool more = true; more;) {
-    more = false;
-    for (const auto &in : insts) {
-      const uint32_t *p = in.p;
-      const uint16_t n = in.n, o = op(p[0]);
-      const uint32_t id = n > 1 ? p[1] : 0;
-      if (!id || typeSize.count(id)) continue;
-      auto put = [&](uint32_t v) { typeSize[id] = v, more = true; };
-      if ((o == spv::OpTypeInt || o == spv::OpTypeFloat) && n >= 3) put(p[2] / 8);
-      else if (o == spv::OpTypeBool) put(1);
-      else if ((o == spv::OpTypeVector || o == spv::OpTypeMatrix) && typeSize.count(p[2])) put(typeSize[p[2]] * p[3]);
-      else if (o == spv::OpTypeArray && typeSize.count(p[2]) && constVal.count(p[3])) put(typeSize[p[2]] * constVal[p[3]]);
-      else if (o == spv::OpTypeStruct) {
-        uint32_t s = 0;
-        bool all = true;
-        for (uint16_t m = 2; m < n; ++m)
-          if (!typeSize.count(p[m])) {
-            all = false;
-            break;
-          } else s += typeSize[p[m]];
-        if (all) put(s);
-      } else if (o == spv::OpTypePointer && n >= 4) {
-        ptrPointee[id] = p[3];
-        if (typeSize.count(p[3])) put(8);
-      }
-    }
-  }
-  uint32_t total = 0;
-  for (const auto &in : insts) {
-    const uint32_t *p = in.p;
-    if (op(p[0]) == spv::OpVariable && in.n >= 4 && p[3] == spv::StorageClassFunction) {
-      const auto it = ptrPointee.find(p[1]);
-      if (it != ptrPointee.end() && typeSize.count(it->second)) total += typeSize[it->second];
-    }
-  }
-  return total;
-}
 
 static std::vector<const char *> commonExtensions = {VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME};
 
@@ -244,11 +182,10 @@ static vk::raii::Device createDevice(const vk::raii::PhysicalDevice &dev, uint32
 
 polyregion::invoke::vulkan::details::Resolved::Resolved(uint32_t computeQueueId,
                                                         const std::shared_ptr<vk::raii::ShaderModule> &shaderModule, //
-                                                        uint32_t maxWorkGroupX,                                      //
                                                         const std::vector<vk::DescriptorSetLayoutBinding> &bindings, //
                                                         const std::vector<vk::DescriptorPoolSize> &sizes,
                                                         const vk::raii::Device &ctx) //
-    : shaderModule(shaderModule), maxWorkGroupX(maxWorkGroupX),                      //
+    : shaderModule(shaderModule),                                                    //
       dscLayout(ctx.createDescriptorSetLayout({{}, bindings})),                      //
       dscPool(ctx.createDescriptorPool(
           vk::DescriptorPoolCreateInfo(vk::DescriptorPoolCreateFlags{vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet}, 1, sizes))), //
@@ -288,9 +225,7 @@ VulkanDevice::VulkanDevice(vk::raii::Instance &instance,              //
             std::copy(s.begin(), s.end(), reinterpret_cast<char *>(data.data()));
             auto module = std::make_shared<vk::raii::ShaderModule>(
                 ctx.createShaderModule({vk::ShaderModuleCreateFlags(), sizeof(uint32_t) * data.size(), data.data()}));
-            uint32_t maxWgX = UINT32_MAX;
-            if (lavapipe && spirvFunctionPrivateBytes(data) > lavapipeMaxFunctionPrivateBytes) maxWgX = deviceSubgroupSize;
-            return polyregion::invoke::vulkan::details::LoadedModule{module, maxWgX, spirv::arenaViewStart(data)};
+            return polyregion::invoke::vulkan::details::LoadedModule{module, spirv::arenaViewStart(data)};
           },
           [this](const auto &m, const auto &name, const auto &types) {
             POLYINVOKE_TRACE();
@@ -310,8 +245,7 @@ VulkanDevice::VulkanDevice(vk::raii::Instance &instance,              //
             if (storages != 0) sizes.emplace_back(vk::DescriptorType::eStorageBuffer, storages);
             if (scalars != 0) sizes.emplace_back(vk::DescriptorType::eUniformBuffer, scalars);
 
-            return polyregion::invoke::vulkan::details::Resolved(this->computeQueueId.first, m.module, m.maxWorkGroupX, bindings, sizes,
-                                                                 ctx);
+            return polyregion::invoke::vulkan::details::Resolved(this->computeQueueId.first, m.module, bindings, sizes, ctx);
           }) {
   POLYINVOKE_TRACE();
 }
@@ -600,7 +534,6 @@ void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
       {2, 2 * sizeof(uint32_t), sizeof(uint32_t)},
   };
   auto specValues = std::vector<uint32_t>{uint32_t(local.x), uint32_t(local.y), uint32_t(local.z)};
-  specValues[0] = std::min(specValues[0], fn.maxWorkGroupX);
   if (scratchCount > 0) {
     specEntries.emplace_back(3, 3 * sizeof(uint32_t), sizeof(uint32_t));
     specValues.emplace_back(uint32_t(sharedMem));

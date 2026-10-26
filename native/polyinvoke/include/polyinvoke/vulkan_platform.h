@@ -49,7 +49,6 @@ namespace details {
 
 struct Resolved {
   std::shared_ptr<vk::raii::ShaderModule> shaderModule;
-  uint32_t maxWorkGroupX;
   vk::raii::DescriptorSetLayout dscLayout;
   vk::raii::DescriptorPool dscPool;
   vk::raii::DescriptorSet dscSet;
@@ -61,7 +60,6 @@ struct Resolved {
 
   Resolved(uint32_t computeQueueId,
            const std::shared_ptr<vk::raii::ShaderModule> &shaderModule, //
-           uint32_t maxWorkGroupX,                                      //
            const std::vector<vk::DescriptorSetLayoutBinding> &bindings, //
            const std::vector<vk::DescriptorPoolSize> &size,             //
            const vk::raii::Device &ctx);
@@ -82,7 +80,6 @@ struct Enqueued {
 
 struct LoadedModule {
   std::shared_ptr<vk::raii::ShaderModule> module;
-  uint32_t maxWorkGroupX;
   std::optional<size_t> arenaViewStart;
 };
 using VulkanModuleStore = detail::ModuleStore<LoadedModule, Resolved>;
@@ -100,7 +97,7 @@ class POLYREGION_EXPORT VulkanDevice final : public Device {
   VmaAllocator allocator;
   size_t deviceMaxAllocSize;
   uint32_t deviceMaxWorkGroupInvocations;
-  bool lavapipe; // XXX Mesa llvmpipe vectorisation bug: we need to caps high-footprint work-groups
+  bool lavapipe;
   uint32_t deviceSubgroupSize;
 
   //  std::shared_ptr<vk::raii::CommandPool> computeCmdPool;

@@ -17,6 +17,7 @@
 #include "kernels/generated_opencl_source_args.hpp"
 #include "kernels/generated_opencl_spirv_args.hpp"
 #include "kernels/generated_vulkan_args.hpp"
+#include "kernels/generated_vulkan_scratch.hpp"
 #include "test_utils.h"
 
 using namespace polyregion::invoke;
@@ -155,6 +156,26 @@ void runNullPointerArg(Context &, Backend, Platform &platform, Device &device, c
   waitAll([&](auto &h) { q->enqueueInvokeAsync("arg1", "main", buffer, {}, h); });
 }
 
+void runPrivateBytesLaunch(Context &ctx, Backend backend, Platform &, Device &device, const ImageGroup &imageGroup) {
+  for (auto &[module_, data] : imageGroup)
+    device.loadModule(module_, data);
+  auto q = device.createQueue(std::chrono::seconds(10));
+  constexpr size_t groups = 10, block = 512, n = groups * block;
+  auto out_d = device.template mallocDeviceTyped<uint32_t>(n, Access::RW);
+  const std::vector<uint32_t> sentinel(n, ~uint32_t(0));
+  waitAll([&](auto &h) { q->enqueueHostToDeviceAsyncTyped(sentinel.data(), out_d, n, h); });
+  ArgBuffer buffer;
+  buffer.append({{Type::Ptr, &out_d}, {Type::Void, {}}});
+  waitAll([&](auto &h) { q->enqueueInvokeAsync("scratch", "main", buffer, Policy{Dim3{groups, 1, 1}, {{Dim3{block, 1, 1}, 0}}}, h); });
+  std::vector<uint32_t> out(n);
+  waitAll([&](auto &h) { q->enqueueDeviceToHostAsyncTyped(out_d, out.data(), n, h); });
+  size_t written = 0;
+  for (size_t i = 0; i < n; ++i)
+    written += out[i] == uint32_t(i + (i & 255));
+  POLYTEST_CHECK_S(ctx, written == n, "{} wrote {} of {} elements", magic_enum::enum_name(backend), written, n);
+  device.freeDevice(out_d);
+}
+
 void runDeviceLimits(Context &ctx, Backend backend, Platform &, Device &device, const ImageGroup &) {
   POLYTEST_CHECK_S(ctx, device.maxThreadsPerBlock() > 0, "{} reports no work-group size", magic_enum::enum_name(backend));
   POLYTEST_CHECK_S(ctx, device.localMemoryBytes() > 0, "{} reports no local memory", magic_enum::enum_name(backend));
@@ -175,6 +196,7 @@ std::vector<Task> discoverAll() {
       {"device-limits-hsa", generated::hsa::args, {Backend::HSA}, &runDeviceLimits},
       {"device-limits-hip", generated::hsa::args, {Backend::HIP}, &runDeviceLimits},
       {"device-limits-vulkan", generated::vulkan::args, {Backend::Vulkan}, &runDeviceLimits},
+      {"private-bytes-vulkan", generated::vulkan::scratch, {Backend::Vulkan}, &runPrivateBytesLaunch},
       {"args-levelzero", generated::opencl_spirv::args, {Backend::LevelZero}, &runArgs},
       {"args-opencl-source-offset", openClOffsetImages(), {Backend::OpenCL}, &runOpenClOffsetArgs, skipHasSpirv},
 #endif
