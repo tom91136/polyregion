@@ -162,8 +162,10 @@ struct Options {
     if (auto require = maybeRequireOffload) opts.requireOffload = *require == "1";
     if (auto emit = maybeEmitLibrary) opts.emitLibraryPath = *emit;
     if (auto path = maybeLibraryPath) opts.libraryPath = *path;
-    if (auto capabilities = maybeLibraryCapabilities)
+    if (auto capabilities = maybeLibraryCapabilities) {
       opts.libraryCapabilities = *capabilities ^ split(',') ^ filter([](const auto &x) { return !x.empty(); }) ^ to<std::set>();
+      capabilityErrors(std::vector<std::string>(opts.libraryCapabilities.begin(), opts.libraryCapabilities.end())) ^ append_to(errors);
+    }
     if (auto exe = maybeExe) opts.executable = *exe;
     else errors.emplace_back("exe argument missing");
     if (auto depth = maybeStackDepth) {

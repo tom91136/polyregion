@@ -635,14 +635,30 @@ int main(int argc, char **argv) {
       FunctionDecl(remoteAssertKernelName, {}, {}, {}, {}, {}, Type::Unit0(), FunctionAffinity::Offload()),
       {let("asserted") = Expr::SpecOp(Spec::Assert(Term::IntU32Const(1).widen(), Term::StringConst("remote").widen())).widen(), ret()},
       FunctionVisibility::Internal(), FunctionFpMode::Relaxed(), CallConvention::OffloadEntry());
-  const auto interface = Interface(
-      Sym({"foo"}), {publicDecl, copyDecl, applyDecl, combineDecl, capableDecl, remoteDecl, publicDecl.withName(remoteAssertName)}, {});
+  const auto targetedName = Sym({"bar", "targeted_increment"});
+  const auto targetedVariant = [&](const std::string &variant, const int32_t delta) {
+    const auto kernelName = Sym({"bar", "implementation", "targeted_" + variant + "_kernel"});
+    const auto launch = remoteLaunch.withKernel(Term::Poison(Type::FnRef(kernelName)).widen());
+    const auto implementation =
+        Function(remoteImplementationDecl.withName(Sym({"bar", "implementation", "targeted_increment_" + variant})),
+                 {let("launched") = Expr::SpecOp(launch).widen(), ret(call(Intr::Add(x, Term::IntS32Const(delta).widen(), i32)))},
+                 FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), CallConvention::RegularCall());
+    const auto kernel = Function(FunctionDecl(kernelName, {}, {}, {}, {}, {}, Type::Unit0(), FunctionAffinity::Offload()), {ret()},
+                                 FunctionVisibility::Internal(), FunctionFpMode::Relaxed(), CallConvention::OffloadEntry());
+    return std::pair{implementation.withImplements(targetedName).withRequiredCapabilities({"demo." + variant}), kernel};
+  };
+  const auto [targetedA, targetedAKernel] = targetedVariant("a", 1);
+  const auto [targetedB, targetedBKernel] = targetedVariant("b", 2);
+  const auto interface = Interface(Sym({"foo"}),
+                                   {publicDecl, copyDecl, applyDecl, combineDecl, capableDecl, remoteDecl,
+                                    publicDecl.withName(remoteAssertName), publicDecl.withName(targetedName)},
+                                   {});
   const auto program = polyregion::polyfront::packageProgram(
       {implementation.withImplements(publicName), copyImplementation.withImplements(copyName),
        applyImplementation.withImplements(applyName), combineImplementation.withImplements(combineName),
        capableImplementation.withImplements(capableName).withRequiredCapabilities({"demo"}),
        remoteImplementation.withImplements(remoteName), remoteKernel, remoteAssertImplementation.withImplements(remoteAssertName),
-       remoteAssertKernel},
+       remoteAssertKernel, targetedA, targetedAKernel, targetedB, targetedBKernel},
       {});
 
   const auto i64 = Type::IntS64().widen();

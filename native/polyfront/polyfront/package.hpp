@@ -26,6 +26,7 @@
 #include "aspartame/all.hpp"
 
 #include "polyregion/env_keys.h"
+#include "polyregion/types.h"
 
 #include "ast.h"
 #include "polyast_codec.h"
@@ -363,6 +364,39 @@ inline std::string undeclaredReason(const Archive &archive, const std::string &d
 
 inline std::string unsatisfiedReason(const std::vector<std::string> &capabilities) {
   return "capability not satisfied (capabilities: " + (capabilities.empty() ? std::string("none") : capabilities ^ mk_string(", ")) + ")";
+}
+
+struct CapabilityGroup {
+  std::vector<std::pair<compiletime::Target, std::string>> targets;
+  std::vector<std::string> capabilities;
+};
+
+inline std::vector<std::string> capabilitiesFor(const std::vector<std::string> &capabilities, const compiletime::Target target) {
+  return capabilities ^ collect([&](const auto &capability) -> std::optional<std::string> {
+           const auto qualified = capability ^ split_once('@');
+           if (!qualified) return capability;
+           const auto spec = compiletime::TargetSpec::findByName(qualified->second);
+           return spec && spec->codegen == target ? std::optional(qualified->first) : std::nullopt;
+         })
+         ^ distinct();
+}
+
+inline std::vector<CapabilityGroup> capabilityGroups(const std::vector<std::string> &capabilities,
+                                                     const std::vector<std::pair<compiletime::Target, std::string>> &targets) {
+  std::vector<CapabilityGroup> groups;
+  for (const auto &[target, arch] : targets) {
+    auto resolved = capabilitiesFor(capabilities, target);
+    const auto key = resolved ^ sort();
+    auto group = std::find_if(groups.begin(), groups.end(), [&](const auto &existing) { return (existing.capabilities ^ sort()) == key; });
+    if (group == groups.end()) groups.push_back({{{target, arch}}, std::move(resolved)});
+    else group->targets.emplace_back(target, arch);
+  }
+  if (groups.empty()) groups.push_back({{}, capabilities ^ filter([](const auto &capability) { return !(capability ^ contains('@')); })});
+  return groups;
+}
+
+inline std::string groupEntrySuffix(const size_t groups, const size_t index) {
+  return groups == 1 ? std::string{} : "_g" + std::to_string(index);
 }
 
 inline bool satisfiable(const polyast::Package &package, const std::string &declaration, const std::vector<std::string> &capabilities) {

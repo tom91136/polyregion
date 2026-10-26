@@ -556,9 +556,21 @@ static void compileInterfaceCalls(const polyfront::Options &opts, clang::Compile
          CI.getTarget().getTriple().getArchName());
     return;
   }
-  const auto capabilities = opts.libraryCapabilities.empty()
-                                ? polyfront::package::packageCapabilities()
-                                : std::vector<std::string>(opts.libraryCapabilities.begin(), opts.libraryCapabilities.end());
+  const auto declaredCapabilities = opts.libraryCapabilities.empty()
+                                        ? polyfront::package::packageCapabilities()
+                                        : std::vector<std::string>(opts.libraryCapabilities.begin(), opts.libraryCapabilities.end());
+  if (const auto errors = polyfront::capabilityErrors(declaredCapabilities); !errors.empty()) {
+    emit(D, prepared.front().site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0",
+         errors ^ mk_string("; "));
+    return;
+  }
+  const auto groups = polyfront::package::capabilityGroups(declaredCapabilities, opts.targets);
+  if (groups.size() > 1) {
+    emit(D, prepared.front().site.call->getExprLoc(), clang::DiagnosticsEngine::Error,
+         POLYREGION_DIAG_POLYSTL "device targets resolve to different library capabilities");
+    return;
+  }
+  const auto &capabilities = groups.front().capabilities;
   const auto &targetCPU = CI.getTarget().getTargetOpts().CPU;
   auto *translationUnit = C.getTranslationUnitDecl();
   // Each interface call is an independent package root.  Keep it isolated through package linking and backend
