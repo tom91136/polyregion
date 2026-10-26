@@ -5,6 +5,7 @@
 #include "llvm/Bitcode/BitcodeReader.h"
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/IntrinsicsSPIRV.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
@@ -562,6 +563,48 @@ TEST_CASE("SPIR-V kernels load and store Bool fields as bytes", "[backend][spirv
   CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("store i8"));
   CHECK_THAT(ir, !Catch::Matchers::ContainsSubstring("load i1"));
   CHECK_THAT(ir, !Catch::Matchers::ContainsSubstring("store i1"));
+}
+
+TEST_CASE("Vulkan folds a byte offset into a buffer pointer into the resource index", "[backend][spirv][vulkan]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Named buf("buf", Type::Ptr(Type::IntS8(), TypeSpace::Global()));
+  const Named offset("offset", Type::IntS64());
+  const Named cursor("cursor", Type::Ptr(Type::IntS8(), TypeSpace::Global()));
+  const auto refTo = [&](const Named &base, const Term::Any &index) {
+    return Expr::RefTo(selectNamed(base).widen(), index, Type::IntS8(), TypeSpace::Global(), Region::Opaque()).widen();
+  };
+  const Function entry = mkFn("read_byte", {Arg(buf, {}), Arg(offset, {})}, Type::IntS8(),
+                              {Var(cursor, refTo(buf, Term::IntS32Const(0).widen()), false).widen(),
+                               Mut(selectNamed(cursor), refTo(buf, selectNamed(offset).widen())).widen(),
+                               Mut(selectNamed(cursor), refTo(cursor, selectNamed(offset).widen())).widen(),
+                               ret(Expr::Index(selectNamed(cursor).widen(), selectNamed(offset).widen(), Type::IntS8()).widen())},
+                              FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  const auto compiled = polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}),
+                                                      {Target::Object_LLVM_SPIRV_GLCompute, ""}, OptLevel::O0);
+  REQUIRE(compiled.binary);
+
+  llvm::LLVMContext context;
+  llvm::SMDiagnostic diagnostic;
+  const auto module = llvm::parseAssemblyString(eventDataOf(compiled, "llvm_to_spirv_ir"), diagnostic, context);
+  REQUIRE(module);
+  const auto isResourcePointer = [](const llvm::Value *v) {
+    if (auto *cast = llvm::dyn_cast<llvm::AddrSpaceCastInst>(v)) v = cast->getOperand(0);
+    auto *call = llvm::dyn_cast<llvm::CallInst>(v);
+    return call && call->getIntrinsicID() == llvm::Intrinsic::spv_resource_getpointer;
+  };
+  size_t resourcePointers = 0, byteOffsets = 0;
+  for (const auto &F : *module)
+    for (const auto &I : llvm::instructions(F)) {
+      if (isResourcePointer(&I)) ++resourcePointers;
+      if (auto *gep = llvm::dyn_cast<llvm::GetElementPtrInst>(&I);
+          gep && gep->getSourceElementType()->isIntegerTy(8) && isResourcePointer(gep->getPointerOperand()))
+        ++byteOffsets;
+    }
+  CHECK(resourcePointers > 0);
+  CHECK(byteOffsets == 0);
 }
 
 TEST_CASE("CPU remote-operation ABI follows the target pointer width", "[backend]") {

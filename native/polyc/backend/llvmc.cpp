@@ -999,6 +999,53 @@ static void restoreSubobjectGeps(llvm::Function &F) {
   }
 }
 
+static bool isByteGep(const llvm::Value *v) {
+  auto *gep = llvm::dyn_cast<llvm::GetElementPtrInst>(v);
+  return gep && gep->getSourceElementType()->isIntegerTy(8) && gep->getNumIndices() == 1;
+}
+
+static bool foldResourceByteOffsets(llvm::Function &F) {
+  auto *i8 = llvm::Type::getInt8Ty(F.getContext());
+  auto *i32 = llvm::Type::getInt32Ty(F.getContext());
+  auto *i64 = llvm::Type::getInt64Ty(F.getContext());
+  const auto byteGeps = llvm::instructions(F) ^ collect([](llvm::Instruction &I) -> std::optional<llvm::GetElementPtrInst *> {
+                          auto *gep = llvm::dyn_cast<llvm::GetElementPtrInst>(&I);
+                          if (!gep || !isByteGep(gep)) return std::nullopt;
+                          return gep;
+                        });
+  bool folded = false;
+  for (auto *gep : byteGeps) {
+    llvm::SmallVector<llvm::Value *> offsets{gep->getOperand(1)};
+    auto *base = gep->getPointerOperand();
+    while (true) {
+      if (auto *cast = llvm::dyn_cast<llvm::AddrSpaceCastInst>(base)) base = cast->getOperand(0);
+      else if (isByteGep(base)) {
+        auto *inner = llvm::cast<llvm::GetElementPtrInst>(base);
+        offsets.push_back(inner->getOperand(1));
+        base = inner->getPointerOperand();
+      } else break;
+    }
+    auto *resource = llvm::dyn_cast<llvm::CallInst>(base);
+    if (!resource || resource->getIntrinsicID() != llvm::Intrinsic::spv_resource_getpointer) continue;
+    auto *handle = llvm::dyn_cast<llvm::TargetExtType>(resource->getArgOperand(0)->getType());
+    if (!handle || handle->getNumTypeParameters() == 0) continue;
+    auto *elements = llvm::dyn_cast<llvm::ArrayType>(handle->getTypeParameter(0));
+    if (!elements || elements->getElementType() != i8) continue;
+
+    llvm::IRBuilder<> B(gep);
+    auto *sum = B.CreateSExt(resource->getArgOperand(1), i64);
+    for (auto *offset : offsets)
+      sum = B.CreateAdd(sum, B.CreateSExtOrTrunc(offset, i64));
+    auto *element = llvm::cast<llvm::CallInst>(B.Insert(resource->clone()));
+    element->setArgOperand(1, B.CreateTrunc(sum, i32));
+    llvm::Value *replacement = element;
+    if (element->getType() != gep->getType()) replacement = B.CreateAddrSpaceCast(element, gep->getType());
+    gep->replaceAllUsesWith(replacement);
+    folded = true;
+  }
+  return folded;
+}
+
 // LLVM's SPIR-V backend retypes an aggregate alloca as its leading scalar when that scalar is loaded or stored without a
 // GEP, shrinking the variable below the aggregate copies that fill it
 void llvmc::restoreLeafGeps(llvm::Function &F) {
@@ -1096,6 +1143,10 @@ static void scalariseForSpirv(llvm::TargetMachine &TM, llvm::Module &M, const bo
         FAM.invalidate(F, llvm::PreservedAnalyses::none());
         cleanup.run(F, FAM);
         normaliseUnitSignSelects(F);
+        if (foldResourceByteOffsets(F)) {
+          FAM.invalidate(F, llvm::PreservedAnalyses::none());
+          cleanup.run(F, FAM);
+        }
         restoreSubobjectGeps(F);
       }
       llvmc::restoreLeafGeps(F);
