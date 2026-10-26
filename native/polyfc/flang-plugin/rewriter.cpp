@@ -13,6 +13,7 @@
 #include "flang/Optimizer/Support/InternalNames.h"
 #include "flang/Optimizer/Support/Utils.h"
 #include "flang/Optimizer/Transforms/Passes.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Path.h"
@@ -21,6 +22,7 @@
 #include "mlir/Dialect/LLVMIR/LLVMTypes.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/Dominance.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Interfaces/CallInterfaces.h"
 #include "mlir/Pass/PassManager.h"
@@ -741,11 +743,6 @@ public:
 };
 
 constexpr auto DoConcurrentAsWritten = "dco-as-written";
-// XXX file-scope rather than function-scope so inner-class methods (HoistInductionStore) can
-// access them; MSVC's strict conformance rejects nested-class access to enclosing function
-// constexpr names (C2326).
-constexpr auto InductionStoreHoisted = "dco-induction-store-hoisted";
-constexpr auto HoistedStoreOp = "dco-hoisted-store-op";
 
 void demoteCoreReduce(fir::DoLoopOp doLoop) {
   auto m = doLoop->getParentOfType<ModuleOp>();
@@ -800,71 +797,108 @@ void demoteCoreReduce(fir::DoLoopOp doLoop) {
   doLoop->removeAttr(CoreReduceAttr);
 }
 
-void doRewrite(ModuleOp op) {
+Value storageRoot(Value v) {
+  while (true) {
+    if (auto declare = v.getDefiningOp<fir::DeclareOp>()) v = declare.getMemref();
+    else if (auto declare = v.getDefiningOp<hlfir::DeclareOp>()) v = declare.getMemref();
+    else if (auto convert = v.getDefiningOp<fir::ConvertOp>()) v = convert.getValue();
+    else return v;
+  }
+}
 
-  // this is OK because redefinition of DO variable is not legal (e.g. so we don't expect a store)
-  struct HoistInductionStore : OpRewritePattern<fir::DoLoopOp> {
-    using OpRewritePattern ::OpRewritePattern;
-    LogicalResult matchAndRewrite(fir::DoLoopOp loopOp, PatternRewriter &R) const override {
-      if (!loopOp->hasAttr(DoConcurrentAsWritten) || loopOp->hasAttr(InductionStoreHoisted)) return failure();
-      const auto induction = loopOp.getInductionVar();
-      // XXX find the convert+store-to-IV-storage pattern among ALL uses of induction; reduce
-      // lowering adds extra uses (ArrayCoor for the scratch slot) so a strict hasOneUse check
-      // would skip the rewrite and leave the IV storage as a shared race across threads.
-      const auto match =
-          induction.getUsers() ^ collect_first([](const auto &user) -> std::optional<std::pair<fir::ConvertOp, fir::StoreOp>> {
-            auto cv = llvm::dyn_cast<fir::ConvertOp>(user);
-            if (!cv) return std::nullopt;
-            return cv->getUsers() ^ collect_first([&](const auto &cvUser) -> std::optional<std::pair<fir::ConvertOp, fir::StoreOp>> {
-                     if (auto st = llvm::dyn_cast<fir::StoreOp>(cvUser)) return std::pair{cv, st};
-                     return std::nullopt;
-                   });
-          });
-      if (!match) return failure();
-      auto convertOp = match->first;
-      auto storeOp = match->second;
-      auto inductionRef = storeOp.getMemref(); // this is the outer scope induction capture
-      // XXX walk the whole body (nested loops/regions too) and follow fir.declare wrappers.
-      // Inlined callees may load the iv-alloca via a chain of declares emitted by hlfir-lowering;
-      // a flat single-level check would leave those reads pointed at the stale alloca and the
-      // per-thread iv value would never reach the inlined body.
-      llvm::SmallVector<fir::LoadOp> loadsToReplace;
-      loopOp.walk([&](fir::LoadOp loadOp) {
-        mlir::Value mem = loadOp.getMemref();
-        while (mem != inductionRef) {
-          if (auto declareOp = mem.getDefiningOp<fir::DeclareOp>()) mem = declareOp.getMemref();
-          else if (auto convOp = mem.getDefiningOp<fir::ConvertOp>()) mem = convOp.getValue();
-          else return;
-        }
-        loadsToReplace.push_back(loadOp);
-      });
-      loadsToReplace ^ for_each([&](auto loadOp) { R.replaceAllUsesWith(loadOp.getRes(), convertOp.getRes()); });
+bool isLoopIndex(Value v, fir::DoLoopOp outer) {
+  while (auto convert = v.getDefiningOp<fir::ConvertOp>())
+    v = convert.getValue();
+  if (const auto arg = llvm::dyn_cast<BlockArgument>(v)) {
+    auto loop = llvm::dyn_cast<fir::DoLoopOp>(arg.getOwner()->getParentOp());
+    if (!loop) return false;
+    return loop == outer ? arg.getArgNumber() == 0 : outer->isProperAncestor(loop);
+  }
+  auto loop = llvm::dyn_cast_or_null<fir::DoLoopOp>(v.getDefiningOp());
+  return loop && outer->isProperAncestor(loop);
+}
 
-      // XXX Stop at the innermost loop holding the inductionRef alloca; hoisting past it would
-      // place the store outside the alloca's scope (LLVM Translation: "operand does not dominate").
-      auto *refDef = inductionRef.getDefiningOp();
-      Operation *parentLoopOp = loopOp;
-      while (const auto parentLoop = llvm::dyn_cast<fir::DoLoopOp>(parentLoopOp->getParentOp())) {
-        if (refDef && parentLoop->isProperAncestor(refDef)) break;
-        parentLoopOp = parentLoop;
-      }
-      R.setInsertionPointAfter(parentLoopOp);
-      auto cvt = fir::ConvertOp::create(R, R.getUnknownLoc(), fir::unwrapRefType(inductionRef.getType()), loopOp.getUpperBound());
-      fir::StoreOp::create(R, R.getUnknownLoc(), cvt, inductionRef)->setAttr(HoistedStoreOp, R.getUnitAttr());
-      loopOp->setAttr(InductionStoreHoisted, R.getUnitAttr());
-      R.eraseOp(storeOp);
-      return success();
-    }
+bool hasAliasingAttrs(Operation *declare) {
+  const auto isAliasing = [](const auto attrs) {
+    return attrs && bitEnumContainsAny(*attrs, fir::FortranVariableFlagsEnum::target | fir::FortranVariableFlagsEnum::pointer);
   };
+  if (auto d = llvm::dyn_cast<fir::DeclareOp>(declare)) return isAliasing(d.getFortranAttrs());
+  if (auto d = llvm::dyn_cast<hlfir::DeclareOp>(declare)) return isAliasing(d.getFortranAttrs());
+  return false;
+}
 
-  RewritePatternSet patterns(op.getContext());
-  patterns.add<HoistInductionStore>(op.getContext());
+bool isDirectAccess(Operation *user, Value address) {
+  if (llvm::isa<fir::LoadOp>(user)) return true;
+  auto store = llvm::dyn_cast<fir::StoreOp>(user);
+  return store && store.getMemref() == address && store.getValue() != address;
+}
 
-#if LLVM_VERSION_MAJOR >= 20
-  auto _ = applyPatternsGreedily(op, FrozenRewritePatternSet(std::move(patterns)));
-#else
-  auto _ = applyPatternsAndFoldGreedily(op, FrozenRewritePatternSet(std::move(patterns)));
-#endif
+void privatiseIndex(fir::DoLoopOp loop, fir::AllocaOp storage) {
+  llvm::SetVector<Value> aliases;
+  aliases.insert(storage.getResult());
+  for (size_t i = 0; i < aliases.size(); ++i) {
+    for (auto *user : aliases[i].getUsers()) {
+      if (llvm::isa<fir::DeclareOp, hlfir::DeclareOp>(user)) {
+        if (hasAliasingAttrs(user)) return;
+        for (auto result : user->getResults())
+          aliases.insert(result);
+      } else if (auto convert = llvm::dyn_cast<fir::ConvertOp>(user)) aliases.insert(convert.getResult());
+      else if (!loop->isProperAncestor(user) && !isDirectAccess(user, aliases[i])) return;
+    }
+  }
+
+  OpBuilder B(loop.getBody(), loop.getBody()->begin());
+  Value local = fir::AllocaOp::create(B, storage.getLoc(), storage.getInType()).getResult();
+  for (auto alias : aliases) {
+    const auto replacement =
+        alias.getType() == local.getType() ? local : fir::ConvertOp::create(B, storage.getLoc(), alias.getType(), local).getResult();
+    alias.replaceUsesWithIf(replacement, [&](OpOperand &use) { return loop->isProperAncestor(use.getOwner()); });
+  }
+
+  fir::StoreOp definition;
+  llvm::SmallVector<fir::LoadOp> loads;
+  llvm::SmallVector<Operation *> forwarding;
+  llvm::SmallVector<Value> pending{local};
+  while (!pending.empty()) {
+    const auto value = pending.pop_back_val();
+    for (auto *user : value.getUsers()) {
+      if (auto load = llvm::dyn_cast<fir::LoadOp>(user)) loads.push_back(load);
+      else if (llvm::isa<fir::DeclareOp, hlfir::DeclareOp, fir::ConvertOp>(user)) {
+        forwarding.push_back(user);
+        for (auto result : user->getResults())
+          pending.push_back(result);
+      } else if (auto store = llvm::dyn_cast<fir::StoreOp>(user); store && !definition && store.getMemref() == value) definition = store;
+      else return;
+    }
+  }
+  if (!definition || definition->getBlock() != loop.getBody()) return;
+  auto convert = definition.getValue().getDefiningOp<fir::ConvertOp>();
+  if (!convert || convert.getValue() != loop.getInductionVar()) return;
+  DominanceInfo dominance(loop);
+  if (!(loads ^ forall([&](auto load) {
+          return load.getType() == definition.getValue().getType() && dominance.properlyDominates(definition.getOperation(), load);
+        })))
+    return;
+  for (auto load : loads) {
+    load.getResult().replaceAllUsesWith(definition.getValue());
+    load.erase();
+  }
+  definition.erase();
+  for (auto *op : llvm::reverse(forwarding))
+    op->erase();
+  local.getDefiningOp()->erase();
+}
+
+void privatiseLoopIndices(fir::DoLoopOp loop) {
+  llvm::SmallVector<fir::AllocaOp> storages;
+  loop.walk([&](fir::StoreOp store) {
+    if (!isLoopIndex(store.getValue(), loop)) return;
+    auto alloca = storageRoot(store.getMemref()).getDefiningOp<fir::AllocaOp>();
+    if (!alloca || loop->isAncestor(alloca) || !llvm::isa<IntegerType>(alloca.getInType())) return;
+    if (!(storages ^ contains(alloca))) storages.push_back(alloca);
+  });
+  for (auto storage : storages)
+    privatiseIndex(loop, storage);
 }
 
 } // namespace
@@ -1275,6 +1309,12 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
     doLoop->setAttr(DoConcurrentAsWritten, UnitAttr::get(m->getContext()));
   });
 
+  llvm::SmallVector<fir::DoLoopOp> concurrentLoops;
+  m.walk<WalkOrder::PreOrder>([&](fir::DoLoopOp doLoop) {
+    if (doLoop->hasAttr(DoConcurrentAsWritten)) concurrentLoops.push_back(doLoop);
+  });
+  concurrentLoops ^ for_each([](auto doLoop) { privatiseLoopIndices(doLoop); });
+
   // XXX orphan declare_reduction trips LLVM Translation when body SSA refs no longer resolve.
   llvm::SmallVector<fir::DeclareReductionOp> deadReductions;
   m.walk([&](fir::DeclareReductionOp op) {
@@ -1299,7 +1339,6 @@ void polyfc::rewriteFIR(clang::DiagnosticsEngine &diag, ModuleOp &m, std::vector
 
   interface_resolution::resolveInterfaces(diag, m, opts, bitcodeFiles);
 
-  doRewrite(m);
   OpBuilder B(m);
   Rewriter rewriter(m);
   const auto core = interface_resolution::corePackage(diag, opts);
