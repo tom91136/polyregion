@@ -566,6 +566,55 @@ TEST_CASE("SPIR-V kernels load and store Bool fields as bytes", "[backend][spirv
   CHECK_THAT(ir, !Catch::Matchers::ContainsSubstring("store i1"));
 }
 
+TEST_CASE("SPIR-V kernels read a global pointer field through a private pointer without a space cast", "[backend][spirv]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto iterSym = Sym({"Iter"});
+  const auto iterTpe = Type::Struct(iterSym, {}).widen();
+  const auto globalPtr = Type::Ptr(Type::IntS32(), TypeSpace::Global()).widen();
+  const StructDef iterDef(iterSym, {}, {Named("_Ptr", globalPtr)}, {}, false);
+  const auto privateIterPtr = Type::Ptr(iterTpe, TypeSpace::Private()).widen();
+  const Named base("base", globalPtr), offset("offset", Type::IntS64()), it("it", iterTpe), view("view", privateIterPtr),
+      cursor("cursor", globalPtr);
+  const auto field = [&] { return Term::Select(view, {PathStep::Field("_Ptr").widen()}, globalPtr); };
+  const Function entry = mkFn(
+      "kernel", {Arg(base, {}), Arg(offset, {})}, Type::Unit0(),
+      {
+          Var(it, std::optional<Expr::Any>{}, true).widen(),
+          Var(view, Expr::RefTo(Term::Select(it, {}, iterTpe).widen(), {}, iterTpe, TypeSpace::Private(), Region::Opaque()).widen(), true)
+              .widen(),
+          Mut(field(), Expr::Alias(Term::Select(base, {}, globalPtr).widen()).widen()).widen(),
+          Var(cursor,
+              Expr::RefTo(field().widen(), Term::Select(offset, {}, Type::IntS64()).widen(), Type::IntS32(), TypeSpace::Global(),
+                          Region::Opaque())
+                  .widen(),
+              false)
+              .widen(),
+          Mut(field(), Expr::Alias(Term::Select(cursor, {}, globalPtr).widen()).widen()).widen(),
+          Update(Term::Select(cursor, {}, globalPtr), Term::IntS64Const(0).widen(), Term::IntS32Const(42).widen()).widen(),
+          Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen(),
+      },
+      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  const auto compiled = polyregion::compiler::compile(Program(entry, {}, {iterDef}, PassPhase::Initial(), {}),
+                                                      {Target::Object_LLVM_SPIRV64_Kernel, ""}, OptLevel::O0);
+  REQUIRE(compiled.binary);
+
+  llvm::LLVMContext context;
+  llvm::SMDiagnostic diagnostic;
+  const auto module = llvm::parseAssemblyString(eventDataOf(compiled, "llvm_to_spirv_ir"), diagnostic, context);
+  REQUIRE(module);
+  size_t privateCasts = 0, integerCasts = 0;
+  for (const auto &F : *module)
+    for (const auto &I : llvm::instructions(F)) {
+      if (auto *cast = llvm::dyn_cast<llvm::AddrSpaceCastInst>(&I); cast && cast->getSrcAddressSpace() == 0) ++privateCasts;
+      if (llvm::isa<llvm::PtrToIntInst>(&I) || llvm::isa<llvm::IntToPtrInst>(&I)) ++integerCasts;
+    }
+  CHECK(privateCasts == 0);
+  CHECK(integerCasts == 0);
+}
+
 TEST_CASE("Vulkan folds a byte offset into a buffer pointer into the resource index", "[backend][spirv][vulkan]") {
   polyregion::compiler::initialise();
   using namespace polyregion::polyast::dsl;

@@ -319,7 +319,7 @@ ValPtr selectPtrImpl(CodeGen &gen, const Term::Select &select, const bool oneGep
       const auto &step = select.steps[i];
       if (step.template is<PathStep::Deref>()) {
         if (const auto p = probeTpe.template get<Type::Ptr>()) {
-          preferredPointerStep = i;
+          if (i > 0) preferredPointerStep = i;
           probeTpe = p->comp;
         }
         continue;
@@ -331,7 +331,7 @@ ValPtr selectPtrImpl(CodeGen &gen, const Term::Select &select, const bool oneGep
       const auto field = step.template get<PathStep::Field>();
       if (!field) continue;
       if (const auto p = probeTpe.template get<Type::Ptr>()) {
-        preferredPointerStep = i;
+        if (i > 0) preferredPointerStep = i;
         probeTpe = p->comp;
       }
       if (const auto a = probeTpe.template get<Type::Arr>()) probeTpe = a->comp;
