@@ -13,6 +13,8 @@
 
 #include "fmt/format.h"
 
+#include "polyregion/env_keys.h"
+
 #include "polyast_codec.h"
 
 namespace polyregion::polyfront::package {
@@ -86,8 +88,10 @@ Checked<polyast::CompileBundle> invokeCompiler(const std::vector<uint8_t> &reque
   for (const auto &arg : ownedArgs)
     args.emplace_back(arg);
   std::string executionError;
+  const std::optional<llvm::StringRef> stderrFile =
+      std::getenv(polyregion::env::PolyregionPassLog) ? std::nullopt : std::optional(errorPath.str());
   const int code =
-      llvm::sys::ExecuteAndWait(executable, args, std::nullopt, {std::nullopt, std::nullopt, errorPath.str()}, 0, 0, &executionError);
+      llvm::sys::ExecuteAndWait(executable, args, std::nullopt, {std::nullopt, std::nullopt, stderrFile}, 0, 0, &executionError);
   if (code != 0) {
     std::string diagnostic;
     if (const auto buffer = llvm::MemoryBuffer::getFile(errorPath)) diagnostic = (*buffer)->getBuffer().str();
