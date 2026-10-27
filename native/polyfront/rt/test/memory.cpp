@@ -839,6 +839,43 @@ TEST_CASE("typed read-back of a pointer-free array first mirrored without a layo
   fixture.allocation.disassociate(xs, false);
 }
 
+TEST_CASE("reading back a typed pointer-free array directly after a launch settles it on the device") {
+  struct Capture {
+    double *xs;
+  };
+  auto captureMeta = Struct_(Capture, StructMember_(Capture, xs, &doubleType));
+
+  Fixture fixture;
+  const size_t count = 64 * polyregion::polyrt::guard::pageSize() / sizeof(double);
+  auto xs = fixture.mallocLocalHeap<double>(count);
+  std::fill(xs, xs + count, 1.0);
+  Capture capture{xs};
+
+  const auto launch = [&](const double value) {
+    fixture.allocation.unmirrorVisitClear();
+    const auto before = fixture.remoteWriteBytes;
+    const auto remoteCapture = fixture.localToRemote(&capture, *captureMeta);
+    const auto bytes = fixture.remoteWriteBytes - before;
+    std::fill(remoteCapture->xs, remoteCapture->xs + count, value);
+    fixture.allocation.unmirrorVisitClear();
+    fixture.allocation.syncRemoteToLocalAfterLaunch(xs);
+    fixture.allocation.disassociate(&capture, false);
+    return bytes;
+  };
+
+  launch(2.0);
+  CHECK(xs[count - 1] == 2.0);
+  CHECK(launch(3.0) <= 8 * polyregion::polyrt::guard::pageSize());
+  CHECK(xs[count / 2] == 3.0);
+
+  xs[count / 2] = 9.0;
+  fixture.allocation.unmirrorVisitClear();
+  const auto remoteCapture = fixture.localToRemote(&capture, *captureMeta);
+  CHECK(remoteCapture->xs[count / 2] == 9.0);
+  fixture.allocation.disassociate(&capture, false);
+  fixture.allocation.disassociate(xs, false);
+}
+
 TEST_CASE("a pointer-bearing view of a record settled as pointer-free restores pointer translation") {
   struct Holder {
     int32_t *p;

@@ -639,8 +639,10 @@ public:
       // a layout-less runtime mirror is an array of pointers, which must be translated back rather than copied
       if (alloc->layout && pointerFree(alloc->layout) && !alloc->hasDevicePtrs && !alloc->hostReadOnly) {
         const char *base = static_cast<const char *>(p) - offsetInBytes;
-        if (afterLaunch && !syncVisited.empty()) {
+        if (afterLaunch) {
+          const bool topLevel = syncVisited.empty();
           if (syncVisited.insert(alloc->remote.ptr).second) settle(base, *alloc);
+          if (topLevel) syncVisited.clear();
           return alloc->remote.ptr + offsetInBytes;
         }
         if (!afterLaunch && guardAt(reinterpret_cast<uintptr_t>(base))) {
