@@ -220,7 +220,13 @@ object Traversal {
 
   given [A, B](using t: Traversal[A, B]): Traversal[List[A], B] = new Traversal[List[A], B] {
     extension (xs: List[A]) {
-      def visitAll(f: B => Unit): Unit = xs.foreach(t.visitAll(_)(f))
+      def visitAll(f: B => Unit): Unit = {
+        var it = xs
+        while (it.nonEmpty) {
+          t.visitAll(it.head)(f)
+          it = it.tail
+        }
+      }
       def collectFirst_[C](f: PartialFunction[B, C]): Option[C] =
         xs.view.map(t.collectFirst_(_)(f)).collectFirst { case Some(x) => x }
       def modifyAll(f: B => B): List[A]         = xs.map(t.modifyAll(_)(f))
@@ -243,7 +249,13 @@ object Traversal {
 
   given [A, B](using t: Traversal[A, B]): Traversal[Vector[A], B] = new Traversal[Vector[A], B] {
     extension (xs: Vector[A]) {
-      def visitAll(f: B => Unit): Unit = xs.foreach(t.visitAll(_)(f))
+      def visitAll(f: B => Unit): Unit = {
+        var i = 0
+        while (i < xs.length) {
+          t.visitAll(xs(i))(f)
+          i += 1
+        }
+      }
       def collectFirst_[C](f: PartialFunction[B, C]): Option[C] =
         xs.view.map(t.collectFirst_(_)(f)).collectFirst { case Some(x) => x }
       def modifyAll(f: B => B): Vector[A]         = xs.map(t.modifyAll(_)(f))
@@ -264,7 +276,7 @@ object Traversal {
 
   given [A, B](using t: Traversal[A, B]): Traversal[Option[A], B] = new Traversal[Option[A], B] {
     extension (o: Option[A]) {
-      def visitAll(f: B => Unit): Unit                          = o.foreach(t.visitAll(_)(f))
+      def visitAll(f: B => Unit): Unit                          = if (o.isDefined) t.visitAll(o.get)(f)
       def collectFirst_[C](f: PartialFunction[B, C]): Option[C] = o.fold(None)(t.collectFirst_(_)(f))
       def modifyAll(f: B => B): Option[A]                       = o.map(t.modifyAll(_)(f))
       def modifyAllInternal(f: B => B): Option[A]               = o.map(t.modifyAll(_)(f))
