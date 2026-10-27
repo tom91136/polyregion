@@ -30,6 +30,7 @@ struct ProbeResult {
 
 ProbeResult probe(const std::string &testName, const std::vector<std::pair<std::string, std::string>> &env, unsigned secondsToWait = 0) {
   std::deque<polyregion::env::ScopedEnv> scoped;
+  scoped.emplace_back(polyregion::env::PolyinvokeTestLock, "0");
   for (const auto &[name, value] : env)
     scoped.emplace_back(name, value.c_str());
   llvm::SmallString<128> errorPath;
