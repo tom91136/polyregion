@@ -170,6 +170,7 @@ struct CodeGen {
   // SPIR-V kernels share one module workgroup arena; size it before emitting any body from the maximum
   // fixed Local storage reachable by an entry point, so helper/emission order cannot change the ABI.
   uint64_t sharedDynamicLocalBytes = 0;
+  uint64_t hostLocalCursor = 0;
   // logical SPIR-V cannot reinterpret one byte arena, so each element type gets its own share of it
   Set<Type::Any> sharedDynamicLocalTypes{};
 

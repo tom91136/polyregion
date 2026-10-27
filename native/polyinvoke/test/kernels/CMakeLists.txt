@@ -333,6 +333,8 @@ macro(_emit_cpu VARIANT PROGRAM)
     list(APPEND ALL_HEADERS ${_hdr})
 endmacro()
 
+set(RELOC_ONLY_PROGRAMS groups)
+
 foreach (C_SRC ${C_SRC_FILES})
     get_filename_component(PROGRAM ${C_SRC} NAME_WE)
 
@@ -390,65 +392,67 @@ foreach (C_SRC ${C_SRC_FILES})
     endforeach ()
     _emit_cpu(cpu_reloc ${PROGRAM})
 
-    # SharedObject (.so / .dylib / .dll)
-    set(_ENTRIES_LIN_X86 "")
-    set(_ENTRIES_LIN_ARM "")
-    set(_ENTRIES_LIN_ARM32 "")
-    set(_ENTRIES_LIN_RISCV64 "")
-    set(_ENTRIES_LIN_PPC64LE "")
-    set(_ENTRIES_WIN_X86 "")
-    set(_ENTRIES_WIN_ARM "")
-    set(_ENTRIES_MAC_X86 "")
-    set(_ENTRIES_MAC_ARM "")
-    set(_ALL_CPU_BINS "")
-    foreach (A ${CPU_ARCHS_X86})
-        _cpu_compile_one(cpu_shared ${C_SRC} ${PROGRAM} shobj_lin_x86 ${A} x86_64-pc-linux-gnu "-fPIC;-shared" _e)
-        list(APPEND _ENTRIES_LIN_X86 ${_e})
-        _cpu_dll_one(cpu_shared ${C_SRC} ${PROGRAM} shobj_w11_x86 ${A} x86_64-pc-windows-msvc ${C_SRC} _e)
-        list(APPEND _ENTRIES_WIN_X86 ${_e})
-        _cpu_compile_one(cpu_shared ${C_SRC} ${PROGRAM} shobj_mac_x86 ${A} x86_64-apple-darwin
-                "-shared;-fuse-ld=lld;-nostdlib;-Wl,-undefined,dynamic_lookup" _e)
-        list(APPEND _ENTRIES_MAC_X86 ${_e})
-    endforeach ()
-    foreach (A ${CPU_ARCHS_ARM})
-        _cpu_compile_one(cpu_shared ${C_SRC} ${PROGRAM} shobj_lin_arm ${A} aarch64-pc-linux-gnu
-                "-fPIC;-shared;-fuse-ld=lld;-nostdlib" _e)
-        list(APPEND _ENTRIES_LIN_ARM ${_e})
-        _cpu_dll_one(cpu_shared ${C_SRC} ${PROGRAM} shobj_w11_arm ${A} aarch64-pc-windows-msvc ${C_SRC} _e)
-        list(APPEND _ENTRIES_WIN_ARM ${_e})
-        _cpu_compile_one(cpu_shared ${C_SRC} ${PROGRAM} shobj_mac_arm ${A} arm64-apple-darwin
-                "-shared;-fuse-ld=lld;-nostdlib;-Wl,-undefined,dynamic_lookup" _e)
-        list(APPEND _ENTRIES_MAC_ARM ${_e})
-    endforeach ()
-    foreach (A ${CPU_ARCHS_ARM32})
-        _cpu_compile_one(cpu_shared ${C_SRC} ${PROGRAM} shobj_lin_arm32 ${A} arm-linux-gnueabihf
-                "-fPIC;-shared;-fuse-ld=lld;-nostdlib" _e)
-        list(APPEND _ENTRIES_LIN_ARM32 ${_e})
-    endforeach ()
-    foreach (A ${CPU_ARCHS_RISCV64})
-        _cpu_compile_one(cpu_shared ${C_SRC} ${PROGRAM} shobj_lin_riscv64 ${A} riscv64-linux-gnu
-                "-fPIC;-shared;-fuse-ld=lld;-nostdlib" _e)
-        list(APPEND _ENTRIES_LIN_RISCV64 ${_e})
-    endforeach ()
-    foreach (A ${CPU_ARCHS_PPC64LE})
-        _cpu_compile_one(cpu_shared ${C_SRC} ${PROGRAM} shobj_lin_ppc64le ${A} powerpc64le-linux-gnu
-                "-fPIC;-shared;-fuse-ld=lld;-nostdlib" _e)
-        list(APPEND _ENTRIES_LIN_PPC64LE ${_e})
-    endforeach ()
-    foreach (_b IN LISTS _ENTRIES_LIN_X86
-                         _ENTRIES_LIN_ARM
-                         _ENTRIES_LIN_ARM32
-                         _ENTRIES_LIN_RISCV64
-                         _ENTRIES_LIN_PPC64LE
-                         _ENTRIES_WIN_X86
-                         _ENTRIES_WIN_ARM
-                         _ENTRIES_MAC_X86
-                         _ENTRIES_MAC_ARM)
-        string(REPLACE "|" ";" _parts "${_b}")
-        list(GET _parts 2 _binpath)
-        list(APPEND _ALL_CPU_BINS ${_binpath})
-    endforeach ()
-    _emit_cpu(cpu_shared ${PROGRAM})
+    if (NOT PROGRAM IN_LIST RELOC_ONLY_PROGRAMS)
+        # SharedObject (.so / .dylib / .dll)
+        set(_ENTRIES_LIN_X86 "")
+        set(_ENTRIES_LIN_ARM "")
+        set(_ENTRIES_LIN_ARM32 "")
+        set(_ENTRIES_LIN_RISCV64 "")
+        set(_ENTRIES_LIN_PPC64LE "")
+        set(_ENTRIES_WIN_X86 "")
+        set(_ENTRIES_WIN_ARM "")
+        set(_ENTRIES_MAC_X86 "")
+        set(_ENTRIES_MAC_ARM "")
+        set(_ALL_CPU_BINS "")
+        foreach (A ${CPU_ARCHS_X86})
+            _cpu_compile_one(cpu_shared ${C_SRC} ${PROGRAM} shobj_lin_x86 ${A} x86_64-pc-linux-gnu "-fPIC;-shared" _e)
+            list(APPEND _ENTRIES_LIN_X86 ${_e})
+            _cpu_dll_one(cpu_shared ${C_SRC} ${PROGRAM} shobj_w11_x86 ${A} x86_64-pc-windows-msvc ${C_SRC} _e)
+            list(APPEND _ENTRIES_WIN_X86 ${_e})
+            _cpu_compile_one(cpu_shared ${C_SRC} ${PROGRAM} shobj_mac_x86 ${A} x86_64-apple-darwin
+                    "-shared;-fuse-ld=lld;-nostdlib;-Wl,-undefined,dynamic_lookup" _e)
+            list(APPEND _ENTRIES_MAC_X86 ${_e})
+        endforeach ()
+        foreach (A ${CPU_ARCHS_ARM})
+            _cpu_compile_one(cpu_shared ${C_SRC} ${PROGRAM} shobj_lin_arm ${A} aarch64-pc-linux-gnu
+                    "-fPIC;-shared;-fuse-ld=lld;-nostdlib" _e)
+            list(APPEND _ENTRIES_LIN_ARM ${_e})
+            _cpu_dll_one(cpu_shared ${C_SRC} ${PROGRAM} shobj_w11_arm ${A} aarch64-pc-windows-msvc ${C_SRC} _e)
+            list(APPEND _ENTRIES_WIN_ARM ${_e})
+            _cpu_compile_one(cpu_shared ${C_SRC} ${PROGRAM} shobj_mac_arm ${A} arm64-apple-darwin
+                    "-shared;-fuse-ld=lld;-nostdlib;-Wl,-undefined,dynamic_lookup" _e)
+            list(APPEND _ENTRIES_MAC_ARM ${_e})
+        endforeach ()
+        foreach (A ${CPU_ARCHS_ARM32})
+            _cpu_compile_one(cpu_shared ${C_SRC} ${PROGRAM} shobj_lin_arm32 ${A} arm-linux-gnueabihf
+                    "-fPIC;-shared;-fuse-ld=lld;-nostdlib" _e)
+            list(APPEND _ENTRIES_LIN_ARM32 ${_e})
+        endforeach ()
+        foreach (A ${CPU_ARCHS_RISCV64})
+            _cpu_compile_one(cpu_shared ${C_SRC} ${PROGRAM} shobj_lin_riscv64 ${A} riscv64-linux-gnu
+                    "-fPIC;-shared;-fuse-ld=lld;-nostdlib" _e)
+            list(APPEND _ENTRIES_LIN_RISCV64 ${_e})
+        endforeach ()
+        foreach (A ${CPU_ARCHS_PPC64LE})
+            _cpu_compile_one(cpu_shared ${C_SRC} ${PROGRAM} shobj_lin_ppc64le ${A} powerpc64le-linux-gnu
+                    "-fPIC;-shared;-fuse-ld=lld;-nostdlib" _e)
+            list(APPEND _ENTRIES_LIN_PPC64LE ${_e})
+        endforeach ()
+        foreach (_b IN LISTS _ENTRIES_LIN_X86
+                             _ENTRIES_LIN_ARM
+                             _ENTRIES_LIN_ARM32
+                             _ENTRIES_LIN_RISCV64
+                             _ENTRIES_LIN_PPC64LE
+                             _ENTRIES_WIN_X86
+                             _ENTRIES_WIN_ARM
+                             _ENTRIES_MAC_X86
+                             _ENTRIES_MAC_ARM)
+            string(REPLACE "|" ";" _parts "${_b}")
+            list(GET _parts 2 _binpath)
+            list(APPEND _ALL_CPU_BINS ${_binpath})
+        endforeach ()
+        _emit_cpu(cpu_shared ${PROGRAM})
+    endif ()
 endforeach ()
 
 add_custom_target(polyinvoke-regen-kernels DEPENDS ${ALL_HEADERS})

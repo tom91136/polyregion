@@ -1,4 +1,8 @@
+#include <algorithm>
+#include <atomic>
+#include <condition_variable>
 #include <cstdio>
+#include <memory>
 #include <mutex>
 #include <system_error>
 #include <thread>
@@ -37,6 +41,7 @@
 #include "polyregion/compat.h"
 #include "polyregion/env_keys.h"
 #include "polyregion/llvm_utils.hpp"
+#include "polyregion/types.h"
 
 // keep last: libffi pollutes the global namespace with macros
 #include "ffi_wrapped.h"
@@ -48,10 +53,90 @@ using namespace polyregion::invoke::object;
 namespace {
 thread_local uint64_t hostThreadGlobalIdx = 0;
 thread_local uint64_t hostThreadGlobalSize = 1;
+thread_local uint64_t hostLocalSize = 1;
+
+constexpr size_t HostGroupLocalBytes = polyregion::program_meta::HostWorkgroupMemoryBytes;
+
+struct HostGroup {
+  std::mutex mutex;
+  std::condition_variable released;
+  size_t expected;
+  size_t arrived = 0;
+  uint64_t generation = 0;
+  alignas(64) std::byte local[HostGroupLocalBytes]{};
+
+  explicit HostGroup(const size_t lanes) : expected(lanes) {}
+
+  void release() {
+    arrived = 0;
+    ++generation;
+    released.notify_all();
+  }
+  void arrive() {
+    std::unique_lock lock(mutex);
+    if (++arrived == expected) return release();
+    const auto seen = generation;
+    released.wait(lock, [&] { return generation != seen; });
+  }
+  void retire() {
+    const std::lock_guard lock(mutex);
+    --expected;
+    if (expected > 0 && arrived == expected) release();
+  }
+};
+
+thread_local HostGroup *hostGroup = nullptr;
+thread_local std::unique_ptr<std::byte[]> hostTaskLocal;
 } // namespace
 
 extern "C" POLYREGION_EXPORT uint64_t __polyregion_host_thread_global_idx() { return hostThreadGlobalIdx; }
 extern "C" POLYREGION_EXPORT uint64_t __polyregion_host_thread_global_size() { return hostThreadGlobalSize; }
+extern "C" POLYREGION_EXPORT uint64_t __polyregion_host_local_idx() { return hostThreadGlobalIdx % hostLocalSize; }
+extern "C" POLYREGION_EXPORT uint64_t __polyregion_host_local_size() { return hostLocalSize; }
+extern "C" POLYREGION_EXPORT uint64_t __polyregion_host_group_idx() { return hostThreadGlobalIdx / hostLocalSize; }
+extern "C" POLYREGION_EXPORT uint64_t __polyregion_host_group_size() { return hostThreadGlobalSize / hostLocalSize; }
+extern "C" POLYREGION_EXPORT void __polyregion_host_group_barrier() {
+  if (hostGroup) hostGroup->arrive();
+}
+extern "C" POLYREGION_EXPORT void *__polyregion_host_group_local(const uint64_t offset) {
+  if (hostGroup) return hostGroup->local + offset;
+  if (!hostTaskLocal) hostTaskLocal = std::make_unique<std::byte[]>(HostGroupLocalBytes);
+  return hostTaskLocal.get() + offset;
+}
+
+static bool groupedPolicy(const Policy &policy) { return policy.local && policy.local->first.x > 1; }
+
+static void groupedLaunch(const size_t groups, const size_t lanes, const MaybeCallback &cb, std::function<void(size_t)> task) {
+  if (groups == 0) {
+    if (cb) (*cb)();
+    return;
+  }
+  const size_t slots = std::clamp<size_t>(std::max<size_t>(1, std::thread::hardware_concurrency()) / lanes, 1, groups);
+  auto pending = std::make_shared<std::atomic_size_t>(slots);
+  auto run = std::make_shared<std::function<void(size_t)>>(std::move(task));
+  for (size_t slot = 0; slot < slots; ++slot) {
+    std::thread([=]() {
+      for (size_t group = slot; group < groups; group += slots) {
+        HostGroup state(lanes);
+        std::vector<std::thread> workers;
+        workers.reserve(lanes);
+        for (size_t lane = 0; lane < lanes; ++lane)
+          workers.emplace_back([&state, run, lanes, tid = group * lanes + lane]() {
+            struct Retire {
+              HostGroup &group;
+              ~Retire() { group.retire(); }
+            } retire{state};
+            hostLocalSize = lanes;
+            hostGroup = &state;
+            (*run)(tid);
+          });
+        for (auto &worker : workers)
+          worker.join();
+      }
+      if (--*pending == 0 && cb) (*cb)();
+    }).detach();
+  }
+}
 
 static void ffiInvoke(const char *prefix, uint64_t symbolAddress, const std::vector<Type> &types, std::vector<void *> &args) {
   const auto toFFITpe = [prefix](const Type &tpe) -> ffi_type * {
@@ -313,6 +398,12 @@ RelocatableDevice::RelocatableDevice() {
       {"malloc", llvm::orc::ExecutorAddr::fromPtr(&malloc_)},
       {"__polyregion_host_thread_global_idx", llvm::orc::ExecutorAddr::fromPtr(&__polyregion_host_thread_global_idx)},
       {"__polyregion_host_thread_global_size", llvm::orc::ExecutorAddr::fromPtr(&__polyregion_host_thread_global_size)},
+      {"__polyregion_host_local_idx", llvm::orc::ExecutorAddr::fromPtr(&__polyregion_host_local_idx)},
+      {"__polyregion_host_local_size", llvm::orc::ExecutorAddr::fromPtr(&__polyregion_host_local_size)},
+      {"__polyregion_host_group_idx", llvm::orc::ExecutorAddr::fromPtr(&__polyregion_host_group_idx)},
+      {"__polyregion_host_group_size", llvm::orc::ExecutorAddr::fromPtr(&__polyregion_host_group_size)},
+      {"__polyregion_host_group_barrier", llvm::orc::ExecutorAddr::fromPtr(&__polyregion_host_group_barrier)},
+      {"__polyregion_host_group_local", llvm::orc::ExecutorAddr::fromPtr(&__polyregion_host_group_local)},
   };
   llvm::orc::SymbolMap absSyms;
   for (const auto &[name, addr] : runtimeSymbols)
@@ -444,24 +535,24 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
       }
     }
   }
-  this->threadedLaunch(
-      policyTasks(policy),
-      [cb, token = latch.acquire()]() {
-        if (cb) (*cb)();
-      },
-      [symAddr, types, argData, global = policyTasks(policy)](size_t tid) {
-        hostThreadGlobalIdx = tid;
-        hostThreadGlobalSize = global;
-        auto argData_ = argData;
-        auto argPtrs = detail::argDataAsPointers(types, argData_);
-        if (types[0] != Type::IntS64) {
-          POLYINVOKE_FATAL(RELOBJ_PREFIX, "Expecting first argument as index: %s, but was %s", magic_enum::enum_name(Type::IntS64).data(),
-                           magic_enum::enum_name(types[0]).data());
-        }
-        auto _tid = int64_t(tid);
-        argPtrs[0] = &_tid;
-        ffiInvoke(RELOBJ_PREFIX, symAddr, types, argPtrs);
-      });
+  const auto done = [cb, token = latch.acquire()]() {
+    if (cb) (*cb)();
+  };
+  const auto task = [symAddr, types, argData, global = policyTasks(policy)](size_t tid) {
+    hostThreadGlobalIdx = tid;
+    hostThreadGlobalSize = global;
+    auto argData_ = argData;
+    auto argPtrs = detail::argDataAsPointers(types, argData_);
+    if (types[0] != Type::IntS64) {
+      POLYINVOKE_FATAL(RELOBJ_PREFIX, "Expecting first argument as index: %s, but was %s", magic_enum::enum_name(Type::IntS64).data(),
+                       magic_enum::enum_name(types[0]).data());
+    }
+    auto _tid = int64_t(tid);
+    argPtrs[0] = &_tid;
+    ffiInvoke(RELOBJ_PREFIX, symAddr, types, argPtrs);
+  };
+  if (groupedPolicy(policy)) groupedLaunch(policy.global.x, policy.local->first.x, done, task);
+  else this->threadedLaunch(policyTasks(policy), done, task);
 }
 
 static constexpr const char *SHOBJ_PREFIX = "SharedObject";
@@ -581,19 +672,19 @@ void SharedDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
     symbolTable.emplace_hint(it, symbol, address);
   }
 
-  this->threadedLaunch(
-      policyTasks(policy),
-      [cb, token = latch.acquire()]() {
-        if (cb) (*cb)();
-      },
-      [address, types, argData, global = policyTasks(policy)](size_t tid) {
-        hostThreadGlobalIdx = tid;
-        hostThreadGlobalSize = global;
-        auto argData_ = argData;
-        auto argPtrs = detail::argDataAsPointers(types, argData_);
-        auto _tid = int64_t(tid);
-        argPtrs[0] = &_tid;
-        ffiInvoke(SHOBJ_PREFIX, address, types, argPtrs);
-      });
+  const auto done = [cb, token = latch.acquire()]() {
+    if (cb) (*cb)();
+  };
+  const auto task = [address, types, argData, global = policyTasks(policy)](size_t tid) {
+    hostThreadGlobalIdx = tid;
+    hostThreadGlobalSize = global;
+    auto argData_ = argData;
+    auto argPtrs = detail::argDataAsPointers(types, argData_);
+    auto _tid = int64_t(tid);
+    argPtrs[0] = &_tid;
+    ffiInvoke(SHOBJ_PREFIX, address, types, argPtrs);
+  };
+  if (groupedPolicy(policy)) groupedLaunch(policy.global.x, policy.local->first.x, done, task);
+  else this->threadedLaunch(policyTasks(policy), done, task);
   POLYINVOKE_TRACE();
 }

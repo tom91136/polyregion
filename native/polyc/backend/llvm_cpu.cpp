@@ -182,6 +182,18 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
     auto *value = cg.B.CreateCall(external("__polyregion_host_thread_global_size", i64, {}));
     return cg.B.CreateZExtOrTrunc(value, i32);
   };
+  const auto hostId = [&](const char *name) -> ValPtr {
+    auto *value = cg.B.CreateCall(external(std::string("__polyregion_host_") + name, i64, {}));
+    return cg.B.CreateZExtOrTrunc(value, i32);
+  };
+  const auto groupBarrier = [&]() -> ValPtr {
+    cg.B.CreateCall(external("__polyregion_host_group_barrier", unit, {}));
+    return noop();
+  };
+  const auto fence = [&]() -> ValPtr {
+    cg.B.CreateFence(llvm::AtomicOrdering::SequentiallyConsistent);
+    return noop();
+  };
   const auto asSize = [&](const Term::Any &term) -> ValPtr {
     auto *value = cg.mkTermVal(term);
     return value->getType()->isPointerTy() ? cg.B.CreatePtrToInt(value, sizeTy) : cg.B.CreateZExtOrTrunc(value, sizeTy);
@@ -209,21 +221,18 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
   return expr.op.match_total( //
       [&](const Spec::Assert &) -> ValPtr {
         throw BackendException("assert reached codegen; the StructuredExit pass must run before the backend");
-      },                                                                //
-      [&](const Spec::GpuBarrierGlobal &) -> ValPtr { return noop(); }, //
-      [&](const Spec::GpuBarrierLocal &) -> ValPtr { return noop(); },  //
-      [&](const Spec::GpuBarrierAll &) -> ValPtr { return noop(); },    //
-      [&](const Spec::GpuFenceGlobal &) -> ValPtr { return noop(); },   //
-      [&](const Spec::GpuFenceLocal &) -> ValPtr { return noop(); },    //
-      [&](const Spec::GpuFenceAll &) -> ValPtr { return noop(); },      //
-      // HostThreaded models each host task as a one-work-item workgroup: execution barriers are
-      // therefore no-ops, while dimension-zero global/group topology reflects the dispatch.
+      },
+      [&](const Spec::GpuBarrierGlobal &) -> ValPtr { return groupBarrier(); },
+      [&](const Spec::GpuBarrierLocal &) -> ValPtr { return groupBarrier(); },
+      [&](const Spec::GpuBarrierAll &) -> ValPtr { return groupBarrier(); },
+      [&](const Spec::GpuFenceGlobal &) -> ValPtr { return fence(); }, [&](const Spec::GpuFenceLocal &) -> ValPtr { return fence(); },
+      [&](const Spec::GpuFenceAll &) -> ValPtr { return fence(); },
       [&](const Spec::GpuGlobalIdx &v) -> ValPtr { return dimensionZero(v.dim, threadId(), k(v, 0)); },    //
       [&](const Spec::GpuGlobalSize &v) -> ValPtr { return dimensionZero(v.dim, globalSize(), k(v, 1)); }, //
-      [&](const Spec::GpuGroupIdx &v) -> ValPtr { return dimensionZero(v.dim, threadId(), k(v, 0)); },     //
-      [&](const Spec::GpuGroupSize &v) -> ValPtr { return dimensionZero(v.dim, globalSize(), k(v, 1)); },  //
-      [&](const Spec::GpuLocalIdx &v) -> ValPtr { return k(v, 0); },                                       //
-      [&](const Spec::GpuLocalSize &v) -> ValPtr { return k(v, 1); },                                      //
+      [&](const Spec::GpuGroupIdx &v) -> ValPtr { return dimensionZero(v.dim, hostId("group_idx"), k(v, 0)); },
+      [&](const Spec::GpuGroupSize &v) -> ValPtr { return dimensionZero(v.dim, hostId("group_size"), k(v, 1)); },
+      [&](const Spec::GpuLocalIdx &v) -> ValPtr { return dimensionZero(v.dim, hostId("local_idx"), k(v, 0)); },
+      [&](const Spec::GpuLocalSize &v) -> ValPtr { return dimensionZero(v.dim, hostId("local_size"), k(v, 1)); },
       [&](const Spec::GpuLaneIdx &) -> ValPtr { return llvm::ConstantInt::get(i32, 0); },
       [&](const Spec::GpuSubgroupSize &) -> ValPtr { return llvm::ConstantInt::get(i32, 1); },
       [&](const Spec::GpuShuffleDown &v) -> ValPtr { return cg.mkTermVal(v.value); },

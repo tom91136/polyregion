@@ -1238,6 +1238,15 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
               g->setAlignment(llvm::Align(16));
               stackPtr = g;
             }
+          } else if (localArr && !dynShared && LLVMBackend::isCpuTarget(C.options.target)) {
+            const auto bytes = M.getDataLayout().getTypeAllocSize(allocTy).getFixedValue();
+            const auto offset = (hostLocalCursor + 15) & ~uint64_t(15);
+            if (offset + bytes > program_meta::HostWorkgroupMemoryBytes)
+              throw BackendException(
+                  fmt::format("workgroup storage exceeds host capacity of {} bytes", program_meta::HostWorkgroupMemoryBytes));
+            hostLocalCursor = offset + bytes;
+            stackPtr = B.CreateCall(M.getOrInsertFunction("__polyregion_host_group_local", B.getPtrTy(0), B.getInt64Ty()),
+                                    {B.getInt64(offset)}, x.name.symbol + "_wg");
           } else if (localArr && (!C.isSpirv() || C.isSpirvKernel())) {
             // zero-init not undef/poison: a __shared__ slot one thread writes and another reads after a barrier is
             // a store the optimiser cannot connect cross-thread, so an un-analysed read falls back to the initialiser.
@@ -1714,6 +1723,7 @@ Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program, c
 
   sharedDynamicLocalBytes = 0;
   sharedDynamicLocalTypes.clear();
+  hostLocalCursor = 0;
   if (!LLVMBackend::isCpuTarget(C.options.target)) {
     std::vector<uint64_t> ownStaticBytes(allFns.size(), 0);
     Map<Signature, size_t> functionBySignature;
