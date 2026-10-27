@@ -1,5 +1,6 @@
 #include "polyinvoke/metal_platform.h"
 
+#include <algorithm>
 #include <cinttypes>
 #include <cstring>
 
@@ -99,7 +100,7 @@ MetalDevice::MetalDevice(decltype(device) device_)
             POLYINVOKE_TRACE();
             f->release();
           }),
-      memoryObjects(device_->hasUnifiedMemory()) {
+      memoryObjects(device_->hasUnifiedMemory()), threadsPerBlockLimit(device_->maxThreadsPerThreadgroup().width) {
   POLYINVOKE_TRACE();
 }
 
@@ -127,7 +128,7 @@ bool MetalDevice::singleEntryPerModule() {
   POLYINVOKE_TRACE();
   return false;
 }
-size_t MetalDevice::maxThreadsPerBlock() { return device->maxThreadsPerThreadgroup().width; }
+size_t MetalDevice::maxThreadsPerBlock() { return threadsPerBlockLimit; }
 size_t MetalDevice::localMemoryBytes() { return device->maxThreadgroupMemoryLength(); }
 size_t MetalDevice::globalMemoryBytes() { return device->recommendedMaxWorkingSetSize(); }
 size_t MetalDevice::computeUnits() {
@@ -151,6 +152,17 @@ std::vector<std::string> MetalDevice::features() {
 void MetalDevice::loadModule(const std::string &name, const std::string &image) {
   POLYINVOKE_TRACE();
   store.loadModule(name, image);
+  auto *library = *store.find(name);
+  auto *names = library->functionNames();
+  for (NS::UInteger i = 0; i < names->count(); ++i) {
+    auto *fnName = names->object<NS::String>(i);
+    auto *fn = NOT_NIL(library->newFunction(fnName), "function (" + to_string(fnName) + ")");
+    const auto kind = fn->functionType();
+    fn->release();
+    if (kind != MTL::FunctionTypeKernel) continue;
+    auto *pipeline = store.resolveFunction(name, to_string(fnName), {});
+    threadsPerBlockLimit = std::min<size_t>(threadsPerBlockLimit, pipeline->maxTotalThreadsPerThreadgroup());
+  }
 }
 bool MetalDevice::moduleLoaded(const std::string &name) {
   POLYINVOKE_TRACE();

@@ -56,6 +56,7 @@ class POLYREGION_EXPORT MetalDevice final : public Device {
   bool unified;
   MetalModuleStore store;
   MetalMemoryObjects memoryObjects;
+  size_t threadsPerBlockLimit;
 
 public:
   explicit MetalDevice(decltype(device) device);

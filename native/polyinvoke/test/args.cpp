@@ -59,6 +59,17 @@ kernel void logical_pointer(global int *out) {
   return ImageGroups{{"", std::vector<uint8_t>(source.begin(), source.end())}};
 }
 
+ImageGroups metalPipelineLimitImages() {
+  const std::string source = R"MSL(
+#include <metal_stdlib>
+using namespace metal;
+[[max_total_threads_per_threadgroup(256)]] kernel void limit_fill(device uint *out [[buffer(0)]], uint i [[thread_position_in_grid]]) {
+  out[i] = i;
+}
+)MSL";
+  return ImageGroups{{"", std::vector<uint8_t>(source.begin(), source.end())}};
+}
+
 void runOpenClOffsetArgs(Context &ctx, Backend, Platform &, Device &device, const ImageGroup &imageGroup) {
   POLYTEST_REQUIRE_S(ctx, imageGroup.size() == 1, "expected one OpenCL source image, got {}", imageGroup.size());
   device.loadModule("offset-module", imageGroup[0].second);
@@ -182,6 +193,28 @@ void runDeviceLimits(Context &ctx, Backend backend, Platform &, Device &device, 
   POLYTEST_CHECK_S(ctx, device.globalMemoryBytes() > 0, "{} reports no global memory", magic_enum::enum_name(backend));
 }
 
+void runMetalPipelineLimit(Context &ctx, Backend backend, Platform &, Device &device, const ImageGroup &imageGroup) {
+  for (auto &[module_, data] : imageGroup)
+    device.loadModule(module_, data);
+  const size_t block = device.maxThreadsPerBlock();
+  POLYTEST_REQUIRE_S(ctx, block <= 256, "{} reports {} threads per block, above the 256 limit of the loaded kernel",
+                     magic_enum::enum_name(backend), block);
+  auto q = device.createQueue(std::chrono::seconds(10));
+  constexpr size_t groups = 4;
+  const size_t n = groups * block;
+  auto out_d = device.template mallocDeviceTyped<uint32_t>(n, Access::RW);
+  ArgBuffer buffer;
+  buffer.append({{Type::Ptr, &out_d}, {Type::Void, {}}});
+  waitAll([&](auto &h) { q->enqueueInvokeAsync("", "limit_fill", buffer, Policy{Dim3{groups, 1, 1}, {{Dim3{block, 1, 1}, 0}}}, h); });
+  std::vector<uint32_t> out(n);
+  waitAll([&](auto &h) { q->enqueueDeviceToHostAsyncTyped(out_d, out.data(), n, h); });
+  size_t written = 0;
+  for (size_t i = 0; i < n; ++i)
+    written += out[i] == uint32_t(i);
+  POLYTEST_CHECK_S(ctx, written == n, "{} wrote {} of {} elements", magic_enum::enum_name(backend), written, n);
+  device.freeDevice(out_d);
+}
+
 std::vector<Task> discoverAll() {
   return discoverMatrix({
 #ifndef __APPLE__
@@ -202,6 +235,7 @@ std::vector<Task> discoverAll() {
 #endif
 #ifdef RUNTIME_ENABLE_METAL
       {"args-metal", generated::metal::args, {Backend::Metal}, &runArgs},
+      {"device-limits-metal", metalPipelineLimitImages(), {Backend::Metal}, &runMetalPipelineLimit},
 #endif
       {"args-cpu-reloc", generated::cpu_reloc::args, {Backend::RelocatableObject}, &runArgs},
       {"args-cpu-shared", generated::cpu_shared::args, {Backend::SharedObject}, &runArgs},
