@@ -1077,7 +1077,9 @@ bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelOb
   bool missingFeature = false;
   for (size_t i = 0; i < object.featureCount; ++i) {
     std::string_view req(object.features[i]);
-    if (req != "fp64" && req != "fp16" && req != "int64") continue;
+    if (req != "fp64" && req != "fp16" && req != "int64" && req != "storage8" && req != "storage16" && req != "uniform8"
+        && req != "uniform16")
+      continue;
     if (!hasFeature(*currentDevice, req)) {
       skipReasons().lacks(currentDevice->name(), std::string(req));
       log(DebugLevel::Debug, "Device %s lacks required feature `%s` for module `%s`; skipping", currentDevice->name().c_str(),

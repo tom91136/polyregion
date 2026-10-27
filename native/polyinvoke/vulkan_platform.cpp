@@ -172,7 +172,8 @@ static vk::raii::Device createDevice(const vk::raii::PhysicalDevice &dev, uint32
   queueCreateInfos.emplace_back(vk::DeviceQueueCreateFlags(), computeQueueId, 1, &priority);
   if (computeQueueId != transferQueueId) queueCreateInfos.emplace_back(vk::DeviceQueueCreateFlags(), transferQueueId, 1, &priority);
 
-  auto features = dev.getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceShaderFloat16Int8Features>();
+  auto features = dev.getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceShaderFloat16Int8Features,
+                                   vk::PhysicalDevice16BitStorageFeatures, vk::PhysicalDevice8BitStorageFeatures>();
   vk::DeviceCreateInfo info{{}, queueCreateInfos};
   info.pNext = &features.get<vk::PhysicalDeviceFeatures2>();
   return dev.createDevice(info);
@@ -327,12 +328,19 @@ std::vector<Property> VulkanDevice::properties() {
 std::vector<std::string> VulkanDevice::features() {
   POLYINVOKE_TRACE();
   std::vector<std::string> out{"vulkan", "spirv_glcompute", normaliseVendor(device.getProperties().deviceName)};
-  const auto f2 = device.getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceShaderFloat16Int8Features>();
+  const auto f2 = device.getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceShaderFloat16Int8Features,
+                                      vk::PhysicalDevice16BitStorageFeatures, vk::PhysicalDevice8BitStorageFeatures>();
   const auto &f = f2.get<vk::PhysicalDeviceFeatures2>().features;
   if (f.shaderFloat64) out.emplace_back("fp64");
   if (f.shaderInt64) out.emplace_back("int64");
   if (f.shaderInt16) out.emplace_back("int16");
   if (f2.get<vk::PhysicalDeviceShaderFloat16Int8Features>().shaderFloat16) out.emplace_back("fp16");
+  const auto &f16 = f2.get<vk::PhysicalDevice16BitStorageFeatures>();
+  const auto &f8 = f2.get<vk::PhysicalDevice8BitStorageFeatures>();
+  if (f16.storageBuffer16BitAccess) out.emplace_back("storage16");
+  if (f16.uniformAndStorageBuffer16BitAccess) out.emplace_back("uniform16");
+  if (f8.storageBuffer8BitAccess) out.emplace_back("storage8");
+  if (f8.uniformAndStorageBuffer8BitAccess) out.emplace_back("uniform8");
   out.emplace_back(fmt::format("paging:{}", magic_enum::enum_name(pagingMode())));
   // XXX lavapipe's unpredicated SIMD-remainder lanes over-read past buffer/arena ends; pad like the OpenCL path (cl_platform.cpp
   // resolveQuirks)

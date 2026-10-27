@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cstring>
+#include <set>
 
 #include "llvm/AsmParser/Parser.h"
 #include "llvm/Bitcode/BitcodeReader.h"
@@ -724,6 +725,46 @@ TEST_CASE("Vulkan work-group barriers use acquire-release semantics on the match
       }
     CHECK(barriers == 1);
   }
+}
+
+TEST_CASE("Vulkan declares storage buffer access capabilities for 8 and 16-bit loads", "[backend][spirv][vulkan]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto compileCopy = [&](const Type::Any &tpe) {
+    const Named in("in", Type::Ptr(tpe, TypeSpace::Global())), out("out", Type::Ptr(tpe, TypeSpace::Global())), v("v", tpe), s("s", tpe);
+    const Function entry = mkFn("copy", {Arg(in, {}), Arg(out, {}), Arg(s, {})}, Type::Unit0(),
+                                {Var(v, Expr::Index(selectNamed(in).widen(), Term::IntS32Const(0).widen(), tpe).widen(), false).widen(),
+                                 Update(selectNamed(out), Term::IntS32Const(0).widen(), selectNamed(v).widen()).widen(),
+                                 Update(selectNamed(out), Term::IntS32Const(1).widen(), selectNamed(s).widen()).widen(), ret()},
+                                FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+    return polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), {Target::Object_LLVM_SPIRV_GLCompute, ""},
+                                         OptLevel::O0);
+  };
+  const auto capabilitiesOf = [](const auto &compiled) {
+    const auto instructions = spirvInstructions(spirvWords(std::string(compiled.binary->begin(), compiled.binary->end())));
+    std::set<uint32_t> capabilities;
+    for (const auto &x : instructions)
+      if ((x[0] & 0xFFFFu) == spv::OpCapability) capabilities.insert(x[1]);
+    return capabilities;
+  };
+
+  const auto narrow16 = compileCopy(Type::IntU16().widen());
+  REQUIRE(narrow16.binary);
+  CHECK(capabilitiesOf(narrow16).count(spv::CapabilityStorageBuffer16BitAccess) == 1);
+  CHECK(narrow16.features ^ contains("storage16"));
+
+  const auto narrow8 = compileCopy(Type::IntU8().widen());
+  REQUIRE(narrow8.binary);
+  CHECK(capabilitiesOf(narrow8).count(spv::CapabilityStorageBuffer8BitAccess) == 1);
+  CHECK(narrow8.features ^ contains("storage8"));
+
+  const auto wide = compileCopy(Type::IntU32().widen());
+  REQUIRE(wide.binary);
+  CHECK(capabilitiesOf(wide).count(spv::CapabilityStorageBuffer16BitAccess) == 0);
+  CHECK(capabilitiesOf(wide).count(spv::CapabilityStorageBuffer8BitAccess) == 0);
+  CHECK(!(wide.features ^ contains("storage16")));
+  CHECK(!(wide.features ^ contains("storage8")));
 }
 
 TEST_CASE("CPU remote-operation ABI follows the target pointer width", "[backend]") {

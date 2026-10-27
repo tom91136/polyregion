@@ -392,6 +392,103 @@ static std::string lowerSpirvControlBarrierCalls(std::string spv) {
   return {reinterpret_cast<const char *>(out.data()), out.size() * sizeof(uint32_t)};
 }
 
+static std::string declareSpirvNarrowAccess(std::string spv) {
+  if (spv.size() < 5 * sizeof(uint32_t)) return spv;
+  auto *src = reinterpret_cast<const uint32_t *>(spv.data());
+  const size_t nWords = spv.size() / sizeof(uint32_t);
+  auto opcode = [](uint32_t inst) { return static_cast<uint16_t>(inst & 0xFFFF); };
+  auto wcount = [](uint32_t inst) { return static_cast<uint16_t>(inst >> 16); };
+  constexpr uint32_t narrow8 = 1, narrow16 = 2;
+  std::unordered_map<uint32_t, uint32_t> scalarBits;
+  std::unordered_map<uint32_t, std::vector<uint32_t>> children;
+  std::unordered_map<uint32_t, uint32_t> pointee;
+  std::unordered_set<uint32_t> declared;
+  std::unordered_set<std::string_view> extensions;
+  std::vector<std::pair<uint32_t, uint32_t>> blocks;
+  size_t capabilitiesEnd = 0;
+  for (size_t i = 5; i < nWords;) {
+    const uint16_t wc = wcount(src[i]), op = opcode(src[i]);
+    if (wc == 0 || i + wc > nWords) return spv;
+    switch (op) {
+      case spv::OpCapability:
+        declared.insert(src[i + 1]);
+        capabilitiesEnd = i + wc;
+        break;
+      case spv::OpExtension: extensions.insert(reinterpret_cast<const char *>(&src[i + 1])); break;
+      case spv::OpTypeInt:
+      case spv::OpTypeFloat: scalarBits[src[i + 1]] = src[i + 2] == 8 ? narrow8 : src[i + 2] == 16 ? narrow16 : 0; break;
+      case spv::OpTypeVector:
+      case spv::OpTypeArray:
+      case spv::OpTypeRuntimeArray: children[src[i + 1]] = {src[i + 2]}; break;
+      case spv::OpTypeStruct: children[src[i + 1]] = std::vector<uint32_t>(src + i + 2, src + i + wc); break;
+      case spv::OpTypePointer: pointee[src[i + 1]] = src[i + 3]; break;
+      case spv::OpVariable:
+        if (src[i + 3] == spv::StorageClassStorageBuffer || src[i + 3] == spv::StorageClassUniform)
+          blocks.emplace_back(src[i + 1], src[i + 3]);
+        break;
+      default: break;
+    }
+    i += wc;
+  }
+  if (capabilitiesEnd == 0) return spv;
+
+  const auto narrowBits = [&](const auto &self, uint32_t type) -> uint32_t {
+    if (const auto scalar = scalarBits.find(type); scalar != scalarBits.end()) return scalar->second;
+    uint32_t bits = 0;
+    if (const auto composite = children.find(type); composite != children.end())
+      for (const uint32_t child : composite->second)
+        bits |= self(self, child);
+    return bits;
+  };
+  std::vector<uint32_t> add;
+  std::vector<std::string_view> addExtensions;
+  const auto require = [&](uint32_t capability, std::string_view extension) {
+    if (declared.insert(capability).second) add.push_back(capability);
+    if (!extensions.count(extension) && !(addExtensions ^ contains(extension))) addExtensions.push_back(extension);
+  };
+  for (const auto &[pointerType, storageClass] : blocks) {
+    const auto target = pointee.find(pointerType);
+    if (target == pointee.end()) continue;
+    const bool uniform = storageClass == spv::StorageClassUniform;
+    const uint32_t bits = narrowBits(narrowBits, target->second);
+    if (bits & narrow8)
+      require(uniform ? spv::CapabilityUniformAndStorageBuffer8BitAccess : spv::CapabilityStorageBuffer8BitAccess, "SPV_KHR_8bit_storage");
+    if (bits & narrow16)
+      require(uniform ? spv::CapabilityUniformAndStorageBuffer16BitAccess : spv::CapabilityStorageBuffer16BitAccess,
+              "SPV_KHR_16bit_storage");
+  }
+  if (add.empty()) return spv;
+  std::vector<uint32_t> out(src, src + capabilitiesEnd);
+  for (const uint32_t capability : add) {
+    out.push_back((2u << 16) | spv::OpCapability);
+    out.push_back(capability);
+  }
+  for (const auto extension : addExtensions) {
+    const size_t words = extension.size() / sizeof(uint32_t) + 1;
+    out.push_back(static_cast<uint32_t>((1 + words) << 16) | spv::OpExtension);
+    const size_t at = out.size();
+    out.resize(at + words, 0);
+    std::memcpy(&out[at], extension.data(), extension.size());
+  }
+  out.insert(out.end(), src + capabilitiesEnd, src + nWords);
+  return {reinterpret_cast<const char *>(out.data()), out.size() * sizeof(uint32_t)};
+}
+
+static std::vector<std::string> spirvNarrowAccessFeatures(const std::string &spv) {
+  std::vector<std::string> out;
+  if (spv.size() < 5 * sizeof(uint32_t)) return out;
+  const auto *words = reinterpret_cast<const uint32_t *>(spv.data());
+  const size_t nWords = spv.size() / sizeof(uint32_t);
+  const std::pair<uint32_t, const char *> tags[] = {{spv::CapabilityStorageBuffer8BitAccess, "storage8"},
+                                                    {spv::CapabilityStorageBuffer16BitAccess, "storage16"},
+                                                    {spv::CapabilityUniformAndStorageBuffer8BitAccess, "uniform8"},
+                                                    {spv::CapabilityUniformAndStorageBuffer16BitAccess, "uniform16"}};
+  for (size_t i = 5; i < nWords && static_cast<uint16_t>(words[i] & 0xFFFF) == spv::OpCapability; i += words[i] >> 16)
+    for (const auto &[capability, tag] : tags)
+      if (words[i + 1] == capability) out.emplace_back(tag);
+  return out;
+}
+
 // the Vulkan/GLSL memory model assumes distinct OpVariables don't alias unless decorated Aliased. the arena
 // binds ONE VkBuffer to all typed views, so they genuinely alias - without the decoration an optimiser may
 // reorder a store past a load at the same byte (type-punning: std::list node membuf, widened tails).
@@ -1378,6 +1475,7 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
         // only Vulkan's logical memory model assumes no-alias by default; OpenCL is C-like (may-alias), already sound
         if (TM.getTargetTriple().getOS() == llvm::Triple::Vulkan) {
           spvBlob = lowerSpirvControlBarrierCalls(std::move(spvBlob));
+          spvBlob = declareSpirvNarrowAccess(std::move(spvBlob));
           spvBlob = patchSpirvAliased(std::move(spvBlob));
           spvBlob = llvmc::patchSpirvWorkgroupSpecConstant(std::move(spvBlob));
         }
@@ -1526,6 +1624,8 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
                             std::vector<polyast::CompileEvent>{});
       }
       features ^= concat(collectPrecisionFeatures(M));
+      if (info.triple.getOS() == llvm::Triple::Vulkan)
+        features ^= concat(spirvNarrowAccessFeatures(std::string(object.begin(), object.end())));
       return {binary, features, events, {}, "", {}};
     }
   }
