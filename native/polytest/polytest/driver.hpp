@@ -360,6 +360,11 @@ inline StepResult runStep(const Task &task, const DriverConfig &cfg, const std::
   return {code, std::move(stdoutText), std::move(stderrText), std::move(cmdline)};
 }
 
+inline std::string skipReason(const std::string &stderrText, const std::string &fallback) {
+  return (stderrText ^ split('\n')) ^ find_last([](const auto &line) { return line ^ starts_with("polyrt: no compatible target:"); })
+         ^ map([](const auto &line) { return line ^ trim(); }) ^ get_or_else(fallback);
+}
+
 inline void absorbStep(TaskOutcome &o, StepResult &&r) {
   o.cmdline = std::move(r.cmdline);
   o.stdoutCapture = std::move(r.stdoutText);
@@ -444,7 +449,8 @@ inline TaskOutcome compileTask(const Task &task, const DriverConfig &cfg) {
     if (exit == 0) o.failReason = "compile unexpectedly succeeded", o.status = TaskStatus::Fail;
     else if (o.stderrCapture.find(*task.compileFailure) == std::string::npos)
       o.failReason = fmt::format("compile failed without expected diagnostic '{}'", *task.compileFailure), o.status = TaskStatus::Fail;
-  } else if (exit == 77) o.failReason = "polyrt: no compatible target during compile (exit 77)", o.status = TaskStatus::Skip;
+  } else if (exit == 77)
+    o.failReason = skipReason(o.stderrCapture, "polyrt: no compatible target during compile (exit 77)"), o.status = TaskStatus::Skip;
   else if (exit != 0) o.failReason = fmt::format("compile failed (exit {})", exit), o.status = TaskStatus::Fail;
   else if (!reproReason.empty()) o.failReason = reproReason, o.status = TaskStatus::Fail;
   else checkStderrCounts(task.runs[0], o);
@@ -461,7 +467,7 @@ inline TaskOutcome runTask(const Task &task, const DriverConfig &cfg) {
     absorbStep(o, std::move(r));
     if (exit == 77) {
       o.status = TaskStatus::Skip;
-      o.failReason = "polyrt: no compatible target (exit 77)";
+      o.failReason = skipReason(o.stderrCapture, "polyrt: no compatible target (exit 77)");
       break;
     }
     if (exit != 0) {

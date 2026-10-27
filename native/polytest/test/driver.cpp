@@ -119,3 +119,29 @@ TEST_CASE("Cache and library locations reach the child environment") {
   CHECK(has("XDG_CACHE_HOME=/polytest/xdg"));
   CHECK(has("POCL_CACHE_DIR=/polytest/pocl"));
 }
+
+TEST_CASE("Skip reason is the last runtime reason line on stderr") {
+  using namespace polyregion::polytest;
+  const std::string fallback = "polyrt: no compatible target (exit 77)";
+  CHECK(detail::skipReason("noise\npolyrt: no compatible target: SwiftShader Device lacks int64\r\ntrailer\n", fallback)
+        == "polyrt: no compatible target: SwiftShader Device lacks int64");
+  CHECK(detail::skipReason("polyrt: no compatible target: no device\npolyrt: no compatible target: X lacks fp64\n", fallback)
+        == "polyrt: no compatible target: X lacks fp64");
+  CHECK(detail::skipReason("", fallback) == fallback);
+  CHECK(detail::skipReason("unrelated skip\n", fallback) == fallback);
+}
+
+#ifndef _WIN32
+TEST_CASE("A run step exiting 77 reports the runtime reason as the skip reason") {
+  using namespace polyregion::polytest;
+  TempDir dir;
+  std::ofstream(dir.file("skip.sh")) << "#!/bin/sh\necho 'polyrt: no compatible target: SwiftShader Device lacks int64' >&2\nexit 77\n";
+  llvm::sys::fs::setPermissions(dir.file("skip.sh"), llvm::sys::fs::perms::all_all);
+  const auto cfg = testConfig(dir.path);
+  const Task task{
+      Mode::Offload, "check_x.cpp", "c", {}, dir.file("out"), std::nullopt, {{"compile", {}, {}}, {dir.file("skip.sh"), {}, {}}}, {}};
+  const auto outcome = detail::runTask(task, cfg);
+  CHECK(outcome.status == TaskStatus::Skip);
+  CHECK(outcome.failReason == "polyrt: no compatible target: SwiftShader Device lacks int64");
+}
+#endif

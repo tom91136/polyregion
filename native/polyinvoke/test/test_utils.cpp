@@ -158,7 +158,10 @@ int runOnTarget(invoke::Backend backend, std::string_view arch, const std::vecto
   static auto *processDeviceLocks = new ProcessDeviceLocks();
   try {
     auto platform = invoke::Platform::maybe(backend);
-    if (!platform) return 77;
+    if (!platform) {
+      fmt::print(stderr, "polyinvoke: no compatible target: no device: {} platform unavailable\n", magic_enum::enum_name(backend));
+      return 77;
+    }
     const bool archAsFeature = backend != invoke::Backend::RelocatableObject && backend != invoke::Backend::SharedObject;
     std::unique_ptr<invoke::Device> device;
     for (auto &d : platform->enumerate()) {
@@ -173,7 +176,11 @@ int runOnTarget(invoke::Backend backend, std::string_view arch, const std::vecto
       device = std::move(d);
       break;
     }
-    if (!device) return 77;
+    if (!device) {
+      fmt::print(stderr, "polyinvoke: no compatible target: no device: no {} device matches '{}' with [{}]\n",
+                 magic_enum::enum_name(backend), arch, requiredFeatures ^ mk_string(", "));
+      return 77;
+    }
     if (serialise) {
       const auto physical = device->physicalDevice();
       std::lock_guard guard(processDeviceLocks->mutex);
@@ -181,7 +188,10 @@ int runOnTarget(invoke::Backend backend, std::string_view arch, const std::vecto
         processDeviceLocks->locks.emplace_back(physical, std::make_unique<invoke::DeviceLock>(physical));
     }
     auto imageGroup = findTestImage(images, backend, device->features());
-    if (imageGroup.empty()) return 77;
+    if (imageGroup.empty()) {
+      fmt::print(stderr, "polyinvoke: no compatible target: {} lacks a test image for its features\n", device->name());
+      return 77;
+    }
     runner(ctx, backend, *platform, *device, imageGroup);
   } catch (const SkipRequested &) {
     return 77;

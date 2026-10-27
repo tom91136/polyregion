@@ -60,7 +60,8 @@ TEST_CASE("strict selection skips when the selected backend fails to initialise"
   const auto [code, errors] = probe("select probe: initialise", failingBackend("1"));
   INFO(errors);
   CHECK(code == 77);
-  CHECK(errors.find("Backend CUDA selected by POLYRT_PLATFORM failed to initialise (strict), exiting 77 (skip)") != std::string::npos);
+  CHECK(errors.find("polyrt: no compatible target: Backend CUDA selected by POLYRT_PLATFORM failed to initialise (strict)")
+        != std::string::npos);
 }
 
 TEST_CASE("non-strict selection continues without a platform when the backend fails to initialise") {
@@ -75,6 +76,34 @@ TEST_CASE("strict selection leaves an unrecognised platform to the fallback") {
   const auto [code, errors] = probe("select probe: initialise", env);
   INFO(errors);
   CHECK(code == 0);
+}
+
+TEST_CASE("skip names the features the device lacks, once per feature") {
+  const auto [code, errors] = probe("skip probe: device lacks required features", {{polyregion::env::PolyrtDebug, "0"}});
+  INFO(errors);
+  CHECK(code == 77);
+  CHECK(errors.find("polyrt: no compatible target: stub lacks int64, fp64, fp16\n") != std::string::npos);
+}
+
+TEST_CASE("skip names the image format the device cannot load") {
+  const auto [code, errors] = probe("skip probe: device format differs from every image", {{polyregion::env::PolyrtDebug, "0"}});
+  INFO(errors);
+  CHECK(code == 77);
+  CHECK(errors.find("polyrt: no compatible target: stub cannot load Object images\n") != std::string::npos);
+}
+
+TEST_CASE("skip without any offered image says so") {
+  const auto [code, errors] = probe("skip probe: nothing was offered", {{polyregion::env::PolyrtDebug, "0"}});
+  INFO(errors);
+  CHECK(code == 77);
+  CHECK(errors.find("polyrt: no compatible target: no image offered\n") != std::string::npos);
+}
+
+TEST_CASE("skip without a device says so") {
+  const auto [code, errors] = probe("skip probe: no device", {{polyregion::env::PolyrtDebug, "0"}});
+  INFO(errors);
+  CHECK(code == 77);
+  CHECK(errors.find("polyrt: no compatible target: no device\n") != std::string::npos);
 }
 
 TEST_CASE("select probe: exit during transaction", "[.probe]") {
@@ -97,7 +126,8 @@ TEST_CASE("polydco host fallback skips when host fallback is disabled") {
   const auto [code, errors] = probe("select probe: polydco host fallback", {{polyregion::env::PolyrtHostFallback, "0"}});
   INFO(errors);
   CHECK(code == 77);
-  CHECK(errors.find("host fallback is disabled, exiting 77 (skip)") != std::string::npos);
+  CHECK(errors.find("polyrt: no compatible target: polydco_host_fallback: no backend ran the loop and host fallback is disabled")
+        != std::string::npos);
 }
 
 TEST_CASE("polydco host fallback runs the host loop by default") {

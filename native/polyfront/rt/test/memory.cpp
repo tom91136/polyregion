@@ -8,6 +8,8 @@
 #include <functional>
 #include <future>
 #include <numeric>
+#include <optional>
+#include <string>
 #include <thread>
 #include <unordered_set>
 #include <vector>
@@ -47,6 +49,7 @@ struct StubDevice final : object::ObjectDevice {
   uint32_t cudaMajor = 9;
   uint32_t cudaMinor = 1;
   ModuleFormat format;
+  std::optional<std::vector<std::string>> advertised;
   bool failRemoteFree = false;
   bool failRemoteMalloc = false;
   bool reuseRemoteAddress = false;
@@ -57,6 +60,7 @@ struct StubDevice final : object::ObjectDevice {
                       const ModuleFormat format = ModuleFormat::Object)
       : shared(shared), cpu(cpu), threads(threads), subgroup(subgroup), format(format) {}
   std::string name() override { return "stub"; }
+  std::vector<std::string> features() override { return advertised ? *advertised : ObjectDevice::features(); }
   PhysicalDevice physicalDevice() override { return cpu ? PhysicalDevice::host() : PhysicalDevice::synthetic(Backend::Metal, 0); }
   bool sharedAddressSpace() override { return shared; }
   ModuleFormat moduleFormat() override { return format; }
@@ -1536,3 +1540,68 @@ TEST_CASE("polydco managed launches leave no device allocations behind") {
 }
 
 #endif
+
+TEST_CASE("skip probe: device lacks required features", "[.probe]") {
+  WithStubDevice device(false);
+  WithStubManagedPlatform platform;
+  device.stub->advertised = std::vector<std::string>{"x87"};
+  const unsigned char image = 0;
+  std::array<const char *, 3> features{"int64", "fp64", "fp16"};
+  const polyregion::runtime::KernelObject object{PlatformKind::Managed,
+                                                 ModuleFormat::Object,
+                                                 features.size(),
+                                                 features.data(),
+                                                 sizeof(image),
+                                                 &image,
+                                                 polyregion::compiletime::Target::Object_LLVM_HOST,
+                                                 "",
+                                                 "",
+                                                 polyregion::compiletime::OptLevel::O3,
+                                                 0,
+                                                 nullptr};
+  REQUIRE_FALSE(polyregion::polyrt::loadKernelObject("lacking", object));
+  REQUIRE_FALSE(polyregion::polyrt::loadKernelObject("lacking-again", object));
+  polyregion::polyrt::noCompatibleKernelExit(__func__);
+}
+
+TEST_CASE("skip probe: device format differs from every image", "[.probe]") {
+  WithStubDevice device(false, false, 511, 64, ModuleFormat::SPIRV_GLCompute);
+  WithStubManagedPlatform platform;
+  const unsigned char image = 0;
+  const polyregion::runtime::KernelObject object{PlatformKind::Managed,
+                                                 ModuleFormat::Object,
+                                                 0,
+                                                 nullptr,
+                                                 sizeof(image),
+                                                 &image,
+                                                 polyregion::compiletime::Target::Object_LLVM_HOST,
+                                                 "",
+                                                 "",
+                                                 polyregion::compiletime::OptLevel::O3,
+                                                 0,
+                                                 nullptr};
+  REQUIRE_FALSE(polyregion::polyrt::loadKernelObject("mismatch", object));
+  polyregion::polyrt::noCompatibleKernelExit(__func__);
+}
+
+TEST_CASE("skip probe: nothing was offered", "[.probe]") { polyregion::polyrt::noCompatibleKernelExit(__func__); }
+
+TEST_CASE("skip probe: no device", "[.probe]") {
+  polyregion::polyrt::initialise();
+  polyregion::polyrt::currentDevice.reset();
+  const unsigned char image = 0;
+  const polyregion::runtime::KernelObject object{PlatformKind::Managed,
+                                                 ModuleFormat::Object,
+                                                 0,
+                                                 nullptr,
+                                                 sizeof(image),
+                                                 &image,
+                                                 polyregion::compiletime::Target::Object_LLVM_HOST,
+                                                 "",
+                                                 "",
+                                                 polyregion::compiletime::OptLevel::O3,
+                                                 0,
+                                                 nullptr};
+  REQUIRE_FALSE(polyregion::polyrt::loadKernelObject("deviceless", object));
+  polyregion::polyrt::noCompatibleKernelExit(__func__);
+}

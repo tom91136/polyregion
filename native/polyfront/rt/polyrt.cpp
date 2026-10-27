@@ -45,6 +45,7 @@
 #include "polyrt/sma_runtime.hpp"
 
 #include "jit_policy.hpp"
+#include "skip_reasons.hpp"
 
 // XXX __RT_IMPL defines polyreflect-rt singletons in this TU so SMA's localReflect can resolve
 // captured pointers. On Windows the HashMap allocator routes through HeapAlloc (rt_protected.hpp)
@@ -303,7 +304,7 @@ POLYREGION_EXPORT extern "C" bool polyrt_context_available(void *context, const 
 namespace {
 polyregion::polyrt::ExecutionContext &requireContext(void *context, const char *site) {
   if (auto *value = static_cast<polyregion::polyrt::ExecutionContext *>(context)) return *value;
-  polyregion::polyrt::skipExit(fmt::format("{}: no execution context", site).c_str());
+  polyregion::polyrt::skipExit(fmt::format("no device: {} has no execution context", site).c_str());
 }
 
 void forgetTemporaryAllocation(polyregion::polyrt::ExecutionContext &execution, const uintptr_t pointer) {
@@ -837,14 +838,20 @@ POLYREGION_EXPORT extern "C" bool polyrt_remote_launch_marshalled(void *context,
   });
 }
 
+static polyregion::polyrt::SkipReasons &skipReasons() {
+  static auto *reasons = new polyregion::polyrt::SkipReasons();
+  return *reasons;
+}
+
 void polyregion::polyrt::noCompatibleKernelExit(const char *site) {
-  std::fprintf(stderr, "[PolyRT] %s: no kernel object matched any enumerated device, exiting 77 (skip)\n", site);
+  log(DebugLevel::Debug, "<%s> No kernel object matched any enumerated device", site);
+  std::fprintf(stderr, "%s\n", skipReasons().line().c_str());
   std::fflush(stderr);
   std::_Exit(77);
 }
 
 void polyregion::polyrt::skipExit(const char *reason) {
-  std::fprintf(stderr, "[PolyRT] %s, exiting 77 (skip)\n", reason);
+  std::fprintf(stderr, "polyrt: no compatible target: %s\n", reason);
   std::fflush(stderr);
   std::_Exit(77);
 }
@@ -1048,11 +1055,13 @@ bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelOb
                                           const TypeLayout *interfaceLayout, std::string *loadedModuleName) {
   initialise();
   if (!currentPlatform || !currentDevice || !currentQueue) {
+    skipReasons().noDevice();
     log(DebugLevel::Info, "No device/queue in %s", __func__);
     return false;
   }
 
   if (currentPlatform->kind() != object.kind || currentDevice->moduleFormat() != object.format) {
+    skipReasons().cannotLoad(currentDevice->name(), std::string(magic_enum::enum_name(object.format)));
     log(DebugLevel::Debug, "Skipping incompatible image: %s [%s] (targeting %s [%s])",
         magic_enum::enum_name(object.kind).data(),   //
         magic_enum::enum_name(object.format).data(), //
@@ -1065,15 +1074,18 @@ bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelOb
       magic_enum::enum_name(object.format).data(), //
       magic_enum::enum_name(currentPlatform->kind()).data(), magic_enum::enum_name(currentDevice->moduleFormat()).data());
 
+  bool missingFeature = false;
   for (size_t i = 0; i < object.featureCount; ++i) {
     std::string_view req(object.features[i]);
     if (req != "fp64" && req != "fp16" && req != "int64") continue;
     if (!hasFeature(*currentDevice, req)) {
+      skipReasons().lacks(currentDevice->name(), std::string(req));
       log(DebugLevel::Debug, "Device %s lacks required feature `%s` for module `%s`; skipping", currentDevice->name().c_str(),
           std::string(req).c_str(), moduleName);
-      return false;
+      missingFeature = true;
     }
   }
+  if (missingFeature) return false;
 
   SpecConsts specStorage;
   std::string effectiveModuleName(moduleName);
@@ -1104,9 +1116,13 @@ bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelOb
     if (object.imageLength > 0 && object.image) {
       image.assign(reinterpret_cast<const char *>(object.image), object.imageLength);
     } else if (object.programLength > 0 && object.program) {
-      if (!jitCompileObject(effectiveModuleName.c_str(), object, specStorage.values, image)) return false;
+      if (!jitCompileObject(effectiveModuleName.c_str(), object, specStorage.values, image)) {
+        skipReasons().cannotPrepare(currentDevice->name(), "jit");
+        return false;
+      }
     } else {
       log(DebugLevel::Debug, "Object for `%s` carries neither a prebuilt image nor a JIT program", moduleName);
+      skipReasons().cannotPrepare(currentDevice->name(), "image");
       return false;
     }
     if (auto dumpDir = std::getenv(polyregion::env::PolyrtDumpKernel)) {
