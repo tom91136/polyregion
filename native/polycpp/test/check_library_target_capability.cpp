@@ -30,7 +30,7 @@
 #pragma region case: multi-target-binds-each-group
 #pragma region offload-only
 #pragma region do: {package_fixture} {output}.packages
-#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -fstdpar-arch={polycpp_arch};x86_64@native -fstdpar-library-path={output}.packages -fstdpar-library-capabilities=demo.a@host,demo.a@cuda,demo.a@opencl1_1,demo.a@opencl2_0,demo.a@spirv64_kernel,demo.a@spirv_glcompute,demo.a@metal1_0,demo.b@x86_64 -o {output} {input}
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -fstdpar-arch={polycpp_arch};c11@native -fstdpar-library-path={output}.packages -fstdpar-library-capabilities=demo.a@host,demo.a@cuda,demo.a@opencl1_1,demo.a@opencl2_0,demo.a@spirv64_kernel,demo.a@spirv_glcompute,demo.a@metal1_0,demo.b@c11 -o {output} {input}
 #pragma region stderr-count: 1 bound to foo (bar.implementation.targeted_increment_a, bar.implementation.targeted_increment_b)
 #pragma region do: {output}
 #pragma region requires: 42
@@ -38,7 +38,7 @@
 #pragma region case: multi-target-binds-satisfiable-group
 #pragma region offload-only
 #pragma region do: {package_fixture} {output}.packages
-#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -fstdpar-arch={polycpp_arch};x86_64@native -fstdpar-library-path={output}.packages -fstdpar-library-capabilities=demo.a@host,demo.a@cuda,demo.a@opencl1_1,demo.a@opencl2_0,demo.a@spirv64_kernel,demo.a@spirv_glcompute,demo.a@metal1_0 -o {output} {input}
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -fstdpar-arch={polycpp_arch};c11@native -fstdpar-library-path={output}.packages -fstdpar-library-capabilities=demo.a@host,demo.a@cuda,demo.a@opencl1_1,demo.a@opencl2_0,demo.a@spirv64_kernel,demo.a@spirv_glcompute,demo.a@metal1_0 -o {output} {input}
 #pragma region stderr-count: 1 bound to foo (bar.implementation.targeted_increment_a)
 #pragma region do: {output}
 #pragma region requires: 42
@@ -46,7 +46,7 @@
 #pragma region case: multi-target-without-capability
 #pragma region offload-only
 #pragma region do: {package_fixture} {output}.packages
-#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -fstdpar-arch={polycpp_arch};x86_64@native -fstdpar-library-path={output}.packages -fstdpar-library-capabilities=demo.a@c11 -o {output} {input}
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -fstdpar-arch={polycpp_arch};c11@native -fstdpar-library-path={output}.packages -fstdpar-library-capabilities=demo.a@spirv32_kernel -o {output} {input}
 #pragma region stderr-count: 1 uses the inline body: capability not satisfied (capabilities: none)
 #pragma region do: {output}
 #pragma region requires: 141

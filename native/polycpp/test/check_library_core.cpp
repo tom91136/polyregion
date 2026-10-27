@@ -111,7 +111,7 @@
 #pragma region case: core-device-package-iterator-copy-multi-target
 #pragma region offload-only
 #pragma region do: {package_fixture} --device-core {output}.packages
-#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -fstdpar-arch={polycpp_arch};x86_64@native -DITERATOR_COPY -fstdpar-library-path={output}.packages -o {output} {input}
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -fstdpar-arch={polycpp_arch};c11@native -DITERATOR_COPY -fstdpar-library-path={output}.packages -o {output} {input}
 #pragma region stderr-count: 2 bound to polyregion.core
 #pragma region stderr-count: 0 uses the inline body
 #pragma region do: {output}
