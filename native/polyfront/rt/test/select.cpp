@@ -83,6 +83,10 @@ TEST_CASE("skip names the features the device lacks, once per feature") {
   INFO(errors);
   CHECK(code == 77);
   CHECK(errors.find("polyrt: no compatible target: stub lacks int64, fp64, fp16\n") != std::string::npos);
+  CHECK(
+      errors.find(
+          R"("module":"lacking","kind":"Managed","format":"Object","features":["int64","fp64","fp16"],"outcome":"lacks","detail":["int64","fp64","fp16"])")
+      != std::string::npos);
 }
 
 TEST_CASE("skip names the image format the device cannot load") {
@@ -90,6 +94,7 @@ TEST_CASE("skip names the image format the device cannot load") {
   INFO(errors);
   CHECK(code == 77);
   CHECK(errors.find("polyrt: no compatible target: stub cannot load Object images\n") != std::string::npos);
+  CHECK(errors.find(R"("outcome":"format","detail":["Object"])") != std::string::npos);
 }
 
 TEST_CASE("skip without any offered image says so") {
@@ -97,6 +102,7 @@ TEST_CASE("skip without any offered image says so") {
   INFO(errors);
   CHECK(code == 77);
   CHECK(errors.find("polyrt: no compatible target: no image offered\n") != std::string::npos);
+  CHECK(errors.find(R"(polyrt-skip: {"device":null,"attempts":[]})") != std::string::npos);
 }
 
 TEST_CASE("skip without a device says so") {
@@ -104,6 +110,7 @@ TEST_CASE("skip without a device says so") {
   INFO(errors);
   CHECK(code == 77);
   CHECK(errors.find("polyrt: no compatible target: no device\n") != std::string::npos);
+  CHECK(errors.find(R"("outcome":"no-device")") != std::string::npos);
 }
 
 TEST_CASE("select probe: exit during transaction", "[.probe]") {

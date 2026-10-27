@@ -845,7 +845,7 @@ static polyregion::polyrt::SkipReasons &skipReasons() {
 
 void polyregion::polyrt::noCompatibleKernelExit(const char *site) {
   log(DebugLevel::Debug, "<%s> No kernel object matched any enumerated device", site);
-  std::fprintf(stderr, "%s\n", skipReasons().line().c_str());
+  std::fprintf(stderr, "%s\n%s\n", skipReasons().record().c_str(), skipReasons().line().c_str());
   std::fflush(stderr);
   std::_Exit(77);
 }
@@ -1054,14 +1054,25 @@ static bool jitCompileObject(const char *moduleName, const polyregion::runtime::
 bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelObject &object, const void *capture,
                                           const TypeLayout *interfaceLayout, std::string *loadedModuleName) {
   initialise();
+  std::optional<SkipReasons::Device> on;
+  if (currentPlatform && currentDevice)
+    on = SkipReasons::Device{currentPlatform->name(), currentDevice->name(), std::string(magic_enum::enum_name(currentPlatform->kind())),
+                             std::string(magic_enum::enum_name(currentDevice->moduleFormat()))};
+  const auto note = [&](const char *outcome, std::vector<std::string> detail = {}) {
+    std::vector<std::string> features;
+    for (size_t i = 0; i < object.featureCount; ++i)
+      features.emplace_back(object.features[i]);
+    skipReasons().attempt(on, {moduleName, std::string(magic_enum::enum_name(object.kind)),
+                               std::string(magic_enum::enum_name(object.format)), std::move(features), outcome, std::move(detail)});
+  };
   if (!currentPlatform || !currentDevice || !currentQueue) {
-    skipReasons().noDevice();
+    note("no-device");
     log(DebugLevel::Info, "No device/queue in %s", __func__);
     return false;
   }
 
   if (currentPlatform->kind() != object.kind || currentDevice->moduleFormat() != object.format) {
-    skipReasons().cannotLoad(currentDevice->name(), std::string(magic_enum::enum_name(object.format)));
+    note("format", {std::string(magic_enum::enum_name(object.format))});
     log(DebugLevel::Debug, "Skipping incompatible image: %s [%s] (targeting %s [%s])",
         magic_enum::enum_name(object.kind).data(),   //
         magic_enum::enum_name(object.format).data(), //
@@ -1074,20 +1085,20 @@ bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelOb
       magic_enum::enum_name(object.format).data(), //
       magic_enum::enum_name(currentPlatform->kind()).data(), magic_enum::enum_name(currentDevice->moduleFormat()).data());
 
-  bool missingFeature = false;
+  std::vector<std::string> missing;
   for (size_t i = 0; i < object.featureCount; ++i) {
     std::string_view req(object.features[i]);
-    if (req != "fp64" && req != "fp16" && req != "int64" && req != "storage8" && req != "storage16" && req != "uniform8"
-        && req != "uniform16")
-      continue;
+    if (!polyregion::runtime::deviceGatedFeature(req)) continue;
     if (!hasFeature(*currentDevice, req)) {
-      skipReasons().lacks(currentDevice->name(), std::string(req));
       log(DebugLevel::Debug, "Device %s lacks required feature `%s` for module `%s`; skipping", currentDevice->name().c_str(),
           std::string(req).c_str(), moduleName);
-      missingFeature = true;
+      missing.emplace_back(req);
     }
   }
-  if (missingFeature) return false;
+  if (!missing.empty()) {
+    note("lacks", std::move(missing));
+    return false;
+  }
 
   SpecConsts specStorage;
   std::string effectiveModuleName(moduleName);
@@ -1119,12 +1130,12 @@ bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelOb
       image.assign(reinterpret_cast<const char *>(object.image), object.imageLength);
     } else if (object.programLength > 0 && object.program) {
       if (!jitCompileObject(effectiveModuleName.c_str(), object, specStorage.values, image)) {
-        skipReasons().cannotPrepare(currentDevice->name(), "jit");
+        note("unprepared", {"jit"});
         return false;
       }
     } else {
       log(DebugLevel::Debug, "Object for `%s` carries neither a prebuilt image nor a JIT program", moduleName);
-      skipReasons().cannotPrepare(currentDevice->name(), "image");
+      note("unprepared", {"image"});
       return false;
     }
     if (auto dumpDir = std::getenv(polyregion::env::PolyrtDumpKernel)) {
@@ -1137,6 +1148,7 @@ bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelOb
     }
     currentDevice->loadModule(effectiveModuleName, image);
   }
+  note("loaded");
   return true;
 }
 

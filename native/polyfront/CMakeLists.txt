@@ -16,6 +16,7 @@ target_sources(polyfront-options
         TYPE HEADERS
         BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}
         FILES
+        polyfront/image_manifest.hpp
         polyfront/options.hpp
         polyfront/options_backend.hpp
         polyfront/options_frontend.hpp

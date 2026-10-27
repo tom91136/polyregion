@@ -7,6 +7,7 @@ target_sources(polytest
         polytest/ctest_emit.hpp
         polytest/profile.hpp
         polytest/lit.hpp
+        polytest/skip_proof.hpp
         polytest/driver.hpp
         polytest/test_case.hpp
         polytest/test_runner.hpp)

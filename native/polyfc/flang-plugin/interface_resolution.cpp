@@ -19,6 +19,7 @@
 #include "aspartame/all.hpp"
 #include "fmt/format.h"
 
+#include "polyfront/image_manifest.hpp"
 #include "polyfront/package.hpp"
 #include "polyfront/package_program.hpp"
 #include "polyfront/polyc_client.hpp"
@@ -365,6 +366,7 @@ Value polyregion::polyfc::interface_resolution::emitPackageCall(OpBuilder &build
       auto &loadedModules = groupLoaded[group];
       for (const auto &object : entries[group].compiled->remoteModules) {
         const auto &moduleName = object.moduleName;
+        polyfront::recordRemoteImage(moduleName, object.kind, object.format, object.features);
         const auto moduleNameValue = polyfc::strConst(b, module, moduleName, true);
         const auto imageValue = polyfc::strConst(b, module, std::string(object.image.begin(), object.image.end()), false);
         Value featureData = polyfc::nullConst(b);

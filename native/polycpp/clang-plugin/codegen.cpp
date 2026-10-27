@@ -146,15 +146,15 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
     // the deferred path decides before lowering, so a raise counts too: both end up writing the #error buffer
     const bool jitAsserts =
         !program.template collect_all<polyast::Spec::Assert>().empty() || !program.template collect_all<polyast::Stmt::Raise>().empty();
-    return polyfront::KernelBundle{moduleId,
-                                   jitObjects,
-                                   layouts,
-                                   remapper.readOnlyMembers,
-                                   program_to_json(program).dump(),
-                                   {},
-                                   {},
-                                   jitAsserts,
-                                   std::string(packed.begin(), packed.end())};
+    return polyfront::recorded(polyfront::KernelBundle{moduleId,
+                                                       jitObjects,
+                                                       layouts,
+                                                       remapper.readOnlyMembers,
+                                                       program_to_json(program).dump(),
+                                                       {},
+                                                       {},
+                                                       jitAsserts,
+                                                       std::string(packed.begin(), packed.end())});
   }
 
   const auto compiled =
@@ -234,8 +234,8 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
   if (mir.error)
     emit(diag, loc, clang::DiagnosticsEngine::Level::Warning, POLYREGION_DIAG_POLYSTL "Host mirroring compile failed [%0]: %1", moduleId,
          *mir.error);
-  return polyfront::KernelBundle{moduleId,    objects,      layouts, remapper.readOnlyMembers, program_to_json(program).dump(),
-                                 mir.bitcode, mir.mirrorId, asserts};
+  return polyfront::recorded(polyfront::KernelBundle{moduleId, objects, layouts, remapper.readOnlyMembers, program_to_json(program).dump(),
+                                                     mir.bitcode, mir.mirrorId, asserts});
 }
 
 void polystl::compilePackageProgram(const polyfront::Options &opts,                                //

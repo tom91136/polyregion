@@ -1,4 +1,5 @@
 #include <cstdio>
+#include <optional>
 #include <string>
 
 #include "aspartame/all.hpp"
@@ -6,6 +7,7 @@
 #include "magic_enum/magic_enum.hpp"
 
 #include "polyinvoke/runtime.h"
+#include "polyregion/types.h"
 
 #include "fire.hpp"
 
@@ -29,13 +31,49 @@ void dumpDevice(Device &d, const size_t i, const std::string &indent) {
   }
 }
 
+std::string quote(const std::string_view s) {
+  std::string out = "\"";
+  for (const char c : s) {
+    if (c == '"' || c == '\\') out += '\\', out += c;
+    else if (static_cast<unsigned char>(c) < 0x20) out += ' ';
+    else out += c;
+  }
+  return out + "\"";
+}
+
 } // namespace
 
 int fired_main( //
-    bool list = fire::arg({"-l", "--list", "List backends and their devices by name only, like `clinfo -l`"})) {
+    bool list = fire::arg({"-l", "--list", "List backends and their devices by name only, like `clinfo -l`"}),
+    bool json = fire::arg({"--json", "Print one JSON object per backend, devices with their features, one per line"}),
+    fire::optional<std::string> select = fire::arg({"--select", "Only enumerate the backend a POLYRT_PLATFORM selector names"})) {
+
+  std::optional<Backend> only;
+  if (select) {
+    const auto parsed = polyregion::compiletime::TargetSpec::parse(select.value());
+    if (!parsed) return fmt::print(stderr, "polyinfo: '{}' names no backend\n", select.value()), EXIT_FAILURE;
+    only = parsed->spec.runtime;
+  }
 
   magic_enum::enum_values<Backend>() | zip_with_index<size_t>() | for_each([&](const auto &backend, const auto &backendIdx) {
+    if (only && *only != backend) return;
     auto r = Platform::of(backend);
+    if (json) {
+      fmt::print("{{\"backend\":{}", quote(magic_enum::enum_name(backend)));
+      if (const auto err = r ^ get_maybe<std::string>()) {
+        fmt::print(",\"error\":{}}}\n", quote(*err));
+        return;
+      }
+      auto platform = std::move(std::get<std::unique_ptr<Platform>>(r));
+      const auto devices = platform->enumerate() ^ mk_string(",", [](const auto &d) {
+                             return fmt::format("{{\"name\":{},\"format\":{},\"features\":[{}]}}", quote(d->name()),
+                                                quote(magic_enum::enum_name(d->moduleFormat())),
+                                                d->features() ^ mk_string(",", [](const auto &f) { return quote(f); }));
+                           });
+      fmt::print(",\"platform\":{},\"kind\":{},\"devices\":[{}]}}\n", quote(platform->name()),
+                 quote(magic_enum::enum_name(platform->kind())), devices);
+      return;
+    }
     if (const auto err = r ^ get_maybe<std::string>()) {
       if (!list) fmt::print("Backend #{} {}: unavailable ({})\n", backendIdx, magic_enum::enum_name(backend), *err);
       return;

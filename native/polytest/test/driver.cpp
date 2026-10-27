@@ -120,28 +120,130 @@ TEST_CASE("Cache and library locations reach the child environment") {
   CHECK(has("POCL_CACHE_DIR=/polytest/pocl"));
 }
 
-TEST_CASE("Skip reason is the last runtime reason line on stderr") {
-  using namespace polyregion::polytest;
-  const std::string fallback = "polyrt: no compatible target (exit 77)";
-  CHECK(detail::skipReason("noise\npolyrt: no compatible target: SwiftShader Device lacks int64\r\ntrailer\n", fallback)
-        == "polyrt: no compatible target: SwiftShader Device lacks int64");
-  CHECK(detail::skipReason("polyrt: no compatible target: no device\npolyrt: no compatible target: X lacks fp64\n", fallback)
-        == "polyrt: no compatible target: X lacks fp64");
-  CHECK(detail::skipReason("", fallback) == fallback);
-  CHECK(detail::skipReason("unrelated skip\n", fallback) == fallback);
+#ifndef _WIN32
+namespace {
+
+constexpr const char *SwiftShaderInventory =
+    R"({"backend":"Vulkan","platform":"Vulkan","kind":"Managed","devices":[{"name":"SwiftShader Device","format":"SPIRV_GLCompute","features":["vulkan","spirv_glcompute","unknown"]}]})";
+
+constexpr const char *Selector = "spirv_glcompute@!spirv_glcompute@*SwiftShader*";
+
+void script(const TempDir &dir, const std::string &name, const std::string &body) {
+  std::ofstream(dir.file(name)) << "#!/bin/sh\n" << body << "\n";
+  llvm::sys::fs::setPermissions(dir.file(name), llvm::sys::fs::perms::all_all);
 }
 
-#ifndef _WIN32
-TEST_CASE("A run step exiting 77 reports the runtime reason as the skip reason") {
+polyregion::polytest::Task skippingTask(const TempDir &dir, const std::string &record, const std::string &manifest,
+                                        const std::string &selector = Selector) {
+  using namespace polyregion::polytest;
+  script(dir, "polyinfo", std::string("cat <<'EOF'\n") + SwiftShaderInventory + "\nEOF");
+  script(dir, "skip.sh", "cat <<'EOF' >&2\n" + record + "\nEOF\nexit 77");
+  std::ofstream(dir.file("out.images")) << manifest;
+  return {Mode::Offload,
+          "check_x.cpp",
+          "c",
+          {{"arch", selector}},
+          dir.file("out"),
+          std::nullopt,
+          {{"compile", {}, {}}, {dir.file("skip.sh"), {}, {}}},
+          {}};
+}
+
+constexpr const char *Fp64Manifest = R"({"module":"m","images":[{"kind":"Managed","format":"SPIRV_GLCompute","features":["fp64"]}]})";
+constexpr const char *PlainManifest = R"({"module":"m","images":[{"kind":"Managed","format":"SPIRV_GLCompute","features":[]}]})";
+
+std::string record(const std::string &device, const std::string &kind, const std::string &format, const std::string &features,
+                   const std::string &outcome, const std::string &detail) {
+  return R"(polyrt-skip: {"device":{"platform":"Vulkan","name":")" + device + R"(","kind":"Managed","format":"SPIRV_GLCompute"},)"
+         + R"("attempts":[{"module":"m","kind":")" + kind + R"(","format":")" + format + R"(","features":[)" + features + R"(],"outcome":")"
+         + outcome + R"(","detail":[)" + detail + R"(]}]})";
+}
+
+} // namespace
+
+TEST_CASE("A skip whose device lacks the feature its image requires stays a skip") {
   using namespace polyregion::polytest;
   TempDir dir;
-  std::ofstream(dir.file("skip.sh")) << "#!/bin/sh\necho 'polyrt: no compatible target: SwiftShader Device lacks int64' >&2\nexit 77\n";
-  llvm::sys::fs::setPermissions(dir.file("skip.sh"), llvm::sys::fs::perms::all_all);
-  const auto cfg = testConfig(dir.path);
-  const Task task{
-      Mode::Offload, "check_x.cpp", "c", {}, dir.file("out"), std::nullopt, {{"compile", {}, {}}, {dir.file("skip.sh"), {}, {}}}, {}};
-  const auto outcome = detail::runTask(task, cfg);
+  const auto task =
+      skippingTask(dir, record("SwiftShader Device", "Managed", "SPIRV_GLCompute", "\"fp64\"", "lacks", "\"fp64\""), Fp64Manifest);
+  const auto outcome = detail::runTask(task, testConfig(dir.path));
+  INFO(outcome.failReason);
   CHECK(outcome.status == TaskStatus::Skip);
-  CHECK(outcome.failReason == "polyrt: no compatible target: SwiftShader Device lacks int64");
+  CHECK(outcome.failReason.find("SwiftShader Device lacks a feature its image requires") != std::string::npos);
+}
+
+TEST_CASE("A skip on a device that has every required feature fails") {
+  using namespace polyregion::polytest;
+  TempDir dir;
+  const auto task = skippingTask(dir, record("SwiftShader Device", "Managed", "SPIRV_GLCompute", "", "lacks", "\"fp64\""), PlainManifest);
+  const auto outcome = detail::runTask(task, testConfig(dir.path));
+  CHECK(outcome.status == TaskStatus::Fail);
+  CHECK(outcome.failReason.find("has every feature") != std::string::npos);
+}
+
+TEST_CASE("A skip whose selector matches no device fails") {
+  using namespace polyregion::polytest;
+  TempDir dir;
+  const auto task = skippingTask(dir, record("SwiftShader Device", "Managed", "SPIRV_GLCompute", "\"fp64\"", "lacks", "\"fp64\""),
+                                 Fp64Manifest, "spirv_glcompute@!spirv_glcompute@*NoSuchGpu*");
+  const auto outcome = detail::runTask(task, testConfig(dir.path));
+  CHECK(outcome.status == TaskStatus::Fail);
+  CHECK(outcome.failReason.find("matched 0 of 1") != std::string::npos);
+}
+
+TEST_CASE("A skip with no image for the device format fails") {
+  using namespace polyregion::polytest;
+  TempDir dir;
+  const std::string objectManifest = R"({"module":"m","images":[{"kind":"HostThreaded","format":"Object","features":["fp64"]}]})";
+  const auto task =
+      skippingTask(dir, record("SwiftShader Device", "HostThreaded", "Object", "\"fp64\"", "format", "\"Object\""), objectManifest);
+  const auto outcome = detail::runTask(task, testConfig(dir.path));
+  CHECK(outcome.status == TaskStatus::Fail);
+  CHECK(outcome.failReason.find("no image for Managed/SPIRV_GLCompute") != std::string::npos);
+}
+
+TEST_CASE("A skip without a runtime record fails") {
+  using namespace polyregion::polytest;
+  TempDir dir;
+  const auto task = skippingTask(dir, "polyrt: no compatible target: Selector 'x' matched none (strict)", Fp64Manifest);
+  const auto outcome = detail::runTask(task, testConfig(dir.path));
+  CHECK(outcome.status == TaskStatus::Fail);
+  CHECK(outcome.failReason.find("without a skip record") != std::string::npos);
+}
+
+TEST_CASE("A skip with no manifest from the compile step fails") {
+  using namespace polyregion::polytest;
+  TempDir dir;
+  const auto task = skippingTask(dir, record("SwiftShader Device", "Managed", "SPIRV_GLCompute", "\"fp64\"", "lacks", "\"fp64\""), "");
+  const auto outcome = detail::runTask(task, testConfig(dir.path));
+  CHECK(outcome.status == TaskStatus::Fail);
+  CHECK(outcome.failReason.find("no compile-time image manifest") != std::string::npos);
+}
+
+TEST_CASE("A module with no image for the device does not mask a justified module") {
+  using namespace polyregion::polytest;
+  const auto manifest =
+      skip::parseManifest(R"({"module":"a","images":[{"kind":"Managed","format":"SPIRV_GLCompute","features":["int64"]}]})"
+                          "\n"
+                          R"({"module":"b","images":[{"kind":"HostThreaded","format":"Source","features":[]}]})");
+  const auto attempts =
+      R"(polyrt-skip: {"device":{"platform":"Vulkan","name":"SwiftShader Device","kind":"Managed","format":"SPIRV_GLCompute"},"attempts":[)"
+      R"({"module":"a","kind":"Managed","format":"SPIRV_GLCompute","features":["int64"],"outcome":"lacks","detail":["int64"]},)"
+      R"({"module":"b","kind":"HostThreaded","format":"Source","features":[],"outcome":"format","detail":["Source"]}]})";
+  const auto inventory = skip::parseInventory(SwiftShaderInventory);
+  CHECK(skip::judge(Selector, inventory, manifest, attempts).justified);
+  const auto onlyB = skip::parseManifest(R"({"module":"b","images":[{"kind":"HostThreaded","format":"Source","features":[]}]})");
+  const auto bAttempt =
+      R"(polyrt-skip: {"device":{"platform":"Vulkan","name":"SwiftShader Device","kind":"Managed","format":"SPIRV_GLCompute"},"attempts":[)"
+      R"({"module":"b","kind":"HostThreaded","format":"Source","features":[],"outcome":"format","detail":["Source"]}]})";
+  CHECK_FALSE(skip::judge(Selector, inventory, onlyB, bAttempt).justified);
+}
+
+TEST_CASE("A compile step exiting 77 fails") {
+  using namespace polyregion::polytest;
+  TempDir dir;
+  script(dir, "compile.sh", "exit 77");
+  const Task task{Mode::Offload, "check_x.cpp", "c", {}, dir.file("out"), std::nullopt, {{dir.file("compile.sh"), {}, {}}}, {}};
+  CHECK(detail::compileTask(task, testConfig(dir.path)).status == TaskStatus::Fail);
 }
 #endif

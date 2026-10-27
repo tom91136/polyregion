@@ -41,15 +41,15 @@ polyfront::KernelBundle polyfc::compileRegion( //
         | to_vector();
     const auto packed = polyast::hashed_program_to_msgpack(region.program);
     const bool jitAsserts = !region.program.template collect_all<polyast::Spec::Assert>().empty();
-    return polyfront::KernelBundle{moduleId,
-                                   jitObjects,
-                                   region.layouts,
-                                   {},
-                                   polyast::program_to_json(region.program).dump(),
-                                   {},
-                                   {},
-                                   jitAsserts,
-                                   std::string(packed.begin(), packed.end())};
+    return polyfront::recorded(polyfront::KernelBundle{moduleId,
+                                                       jitObjects,
+                                                       region.layouts,
+                                                       {},
+                                                       polyast::program_to_json(region.program).dump(),
+                                                       {},
+                                                       {},
+                                                       jitAsserts,
+                                                       std::string(packed.begin(), packed.end())});
   }
   const auto compiled =
       opts.targets                                                                                            //
@@ -120,9 +120,8 @@ polyfront::KernelBundle polyfc::compileRegion( //
   auto mir = polyfront::compileManagedHostMirror(opts, region.program, kind, moduleId);
   if (mir.error)
     emit(diag, Level::Warning, "%0 " POLYREGION_DIAG_POLYDCO "Host mirroring compile failed [%1]: %2", diagLoc, moduleId, *mir.error);
-  return polyfront::KernelBundle{
-      moduleId,    objects,      region.layouts, /*readOnlyMembers*/ {}, polyast::program_to_json(region.program).dump(),
-      mir.bitcode, mir.mirrorId, asserts};
+  return polyfront::recorded(polyfront::KernelBundle{moduleId, objects, region.layouts, /*readOnlyMembers*/ {},
+                                                     polyast::program_to_json(region.program).dump(), mir.bitcode, mir.mirrorId, asserts});
 }
 
 void polyfc::compilePackageProgram(clang::DiagnosticsEngine &diag, const polyfront::Options &opts, mlir::ModuleOp &m, mlir::DataLayout &L,

@@ -36,6 +36,7 @@
 #include "magic_enum/magic_enum.hpp"
 
 #include "polyfront/diag.hpp"
+#include "polyfront/image_manifest.hpp"
 #include "polyfront/package.hpp"
 #include "polyfront/package_program.hpp"
 #include "polyfront/polyc_client.hpp"
@@ -487,6 +488,7 @@ static void materializeInterfaceCall(clang::CompilerInstance &CI, clang::ASTCont
         loadedEntry->second = loaded;
         statements.emplace_back(new (C) clang::DeclStmt(clang::DeclGroupRef(loaded), {}, {}));
       }
+      polyfront::recordRemoteImage(moduleName, object.kind, object.format, object.features);
       auto *image = resources[index].image;
       clang::Expr *featureData = mkNullPtrLit(C, constCharStarTy(C));
       if (!object.features.empty()) {

@@ -26,6 +26,7 @@
 #include "polyregion/mirror_names.h"
 #include "polyregion/types.h"
 
+#include "image_manifest.hpp"
 #include "options.hpp"
 #include "pass_specs.hpp"
 #include "polyast_codec.h"
@@ -136,6 +137,14 @@ struct KernelBundle {
   bool asserts = false;
   std::string program{};
 };
+
+inline KernelBundle recorded(KernelBundle bundle) {
+  auto images = nlohmann::json::array();
+  for (const auto &object : bundle.objects)
+    images.push_back(imageJson(object.kind, object.format, object.features));
+  recordImages(bundle.moduleName, images);
+  return bundle;
+}
 
 struct Options {
   using Target = std::pair<compiletime::Target, std::string>;

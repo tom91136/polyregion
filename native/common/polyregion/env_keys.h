@@ -25,6 +25,7 @@ inline constexpr auto PolyfrontLibraryPath = "POLYFRONT_LIBRARY_PATH";
 inline constexpr auto PolyfrontLibraryCapabilities = "POLYFRONT_LIBRARY_CAPABILITIES";
 inline constexpr auto PolyfrontRequireOffload = "POLYFRONT_REQUIRE_OFFLOAD";
 inline constexpr auto PolyfrontJit = "POLYFRONT_JIT";
+inline constexpr auto PolyfrontImageManifest = "POLYFRONT_IMAGE_MANIFEST";
 
 inline constexpr auto PolycppDriver = "POLYCPP_DRIVER";
 inline constexpr auto PolycppLinkThreads = "POLYCPP_LINK_THREADS";

@@ -34,6 +34,7 @@
 #include "polytest/ctest_emit.hpp"
 #include "polytest/lit.hpp"
 #include "polytest/profile.hpp"
+#include "polytest/skip_proof.hpp"
 
 // XXX on Apple, clang++/flang-new default to the triple they were themselves built with when no
 // --target= is given, which is wrong for a cross-built dist so we pin directly
@@ -149,6 +150,11 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
   put(cfg.driverEnvVar, cfg.driverPath);
   put(polyregion::env::PolyrtPlatform, archFor(t, cfg));
   put(polyregion::env::PolyrtHostFallback, "0");
+  {
+    llvm::SmallString<256> manifest(t.output + ".images");
+    llvm::sys::fs::make_absolute(manifest);
+    put(polyregion::env::PolyfrontImageManifest, std::string(manifest));
+  }
   if (const auto v = std::getenv(polyregion::env::PolyrtStrictSelect); v && v[0]) put(polyregion::env::PolyrtStrictSelect, v);
   else put(polyregion::env::PolyrtStrictSelect, "1");
   // XXX NVIDIA's shader disk cache (~/.cache/nvidia/GLCache) bloats to 100k+ files across a sweep and the
@@ -360,9 +366,21 @@ inline StepResult runStep(const Task &task, const DriverConfig &cfg, const std::
   return {code, std::move(stdoutText), std::move(stderrText), std::move(cmdline)};
 }
 
-inline std::string skipReason(const std::string &stderrText, const std::string &fallback) {
-  return (stderrText ^ split('\n')) ^ find_last([](const auto &line) { return line ^ starts_with("polyrt: no compatible target:"); })
-         ^ map([](const auto &line) { return line ^ trim(); }) ^ get_or_else(fallback);
+inline skip::Verdict skipVerdict(const Task &task, const DriverConfig &cfg, const std::string &stderrText) {
+  const auto selector = archFor(task, cfg);
+  std::optional<skip::Inventory> inventory;
+  if (compiletime::TargetSpec::parse(selector)) {
+    const std::vector<std::string> args{resolveBin("polyinfo", cfg), "--json", "--select", selector};
+    const auto envs = baseEnvs(task, cfg, false);
+    const std::vector<llvm::StringRef> envRefs = envs ^ map([](const auto &x) -> llvm::StringRef { return x; });
+    const std::vector<llvm::StringRef> argRefs = args ^ map([](const auto &x) -> llvm::StringRef { return x; });
+    const auto outPath = task.output + ".inventory";
+    llvm::FileRemover outRemover(outPath);
+    std::string execErr;
+    if (llvm::sys::ExecuteAndWait(args[0], argRefs, envRefs, {std::nullopt, outPath, llvm::StringRef()}, 120, 0, &execErr) == 0)
+      inventory = skip::parseInventory(polyregion::read_string(outPath));
+  }
+  return skip::judge(selector, inventory, skip::parseManifest(polyregion::read_string(task.output + ".images")), stderrText);
 }
 
 inline void absorbStep(TaskOutcome &o, StepResult &&r) {
@@ -449,8 +467,7 @@ inline TaskOutcome compileTask(const Task &task, const DriverConfig &cfg) {
     if (exit == 0) o.failReason = "compile unexpectedly succeeded", o.status = TaskStatus::Fail;
     else if (o.stderrCapture.find(*task.compileFailure) == std::string::npos)
       o.failReason = fmt::format("compile failed without expected diagnostic '{}'", *task.compileFailure), o.status = TaskStatus::Fail;
-  } else if (exit == 77)
-    o.failReason = skipReason(o.stderrCapture, "polyrt: no compatible target during compile (exit 77)"), o.status = TaskStatus::Skip;
+  } else if (exit == 77) o.failReason = "compile step exited 77: no compile-time skip can be justified", o.status = TaskStatus::Fail;
   else if (exit != 0) o.failReason = fmt::format("compile failed (exit {})", exit), o.status = TaskStatus::Fail;
   else if (!reproReason.empty()) o.failReason = reproReason, o.status = TaskStatus::Fail;
   else checkStderrCounts(task.runs[0], o);
@@ -466,8 +483,9 @@ inline TaskOutcome runTask(const Task &task, const DriverConfig &cfg) {
     const auto exit = r.exitCode;
     absorbStep(o, std::move(r));
     if (exit == 77) {
-      o.status = TaskStatus::Skip;
-      o.failReason = skipReason(o.stderrCapture, "polyrt: no compatible target (exit 77)");
+      const auto verdict = skipVerdict(task, cfg, o.stderrCapture);
+      o.status = verdict.justified ? TaskStatus::Skip : TaskStatus::Fail;
+      o.failReason = verdict.justified ? verdict.reason : "unjustified skip (exit 77): " + verdict.reason;
       break;
     }
     if (exit != 0) {
