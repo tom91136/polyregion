@@ -64,6 +64,7 @@ extern "C" bool SPIRVTranslate(Module *M, std::string &SpirvObj, std::string &Er
 #include "llvm/Transforms/Scalar/EarlyCSE.h"
 #include "llvm/Transforms/Scalar/InferAddressSpaces.h"
 #include "llvm/Transforms/Scalar/SROA.h"
+#include "llvm/Transforms/Utils/BypassSlowDivision.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Vectorize/LoopVectorize.h"
@@ -1083,6 +1084,23 @@ static void foldNonNullPointerChecks(llvm::Function &F) {
   }
 }
 
+static void bypassWideDivision(llvm::Function &F) {
+  llvm::SmallVector<llvm::BinaryOperator *> signedRemainders;
+  for (llvm::Instruction &I : llvm::instructions(F))
+    if (auto *op = llvm::dyn_cast<llvm::BinaryOperator>(&I);
+        op && op->getOpcode() == llvm::Instruction::SRem && op->getType()->isIntegerTy(64))
+      signedRemainders.push_back(op);
+  for (llvm::BinaryOperator *op : signedRemainders) {
+    llvm::IRBuilder<> B(op);
+    auto *quotient = B.CreateSDiv(op->getOperand(0), op->getOperand(1));
+    op->replaceAllUsesWith(B.CreateSub(op->getOperand(0), B.CreateMul(quotient, op->getOperand(1))));
+    op->eraseFromParent();
+  }
+  const llvm::DenseMap<unsigned, unsigned> widths{{64, 32}};
+  for (llvm::BasicBlock &BB : llvm::make_early_inc_range(F))
+    llvm::bypassSlowDivision(&BB, widths);
+}
+
 static void scalariseForSpirv(llvm::TargetMachine &TM, llvm::Module &M, const bool logical) {
   llvm::PassBuilder PB(&TM);
   llvm::LoopAnalysisManager LAM;
@@ -1150,6 +1168,7 @@ static void scalariseForSpirv(llvm::TargetMachine &TM, llvm::Module &M, const bo
         restoreSubobjectGeps(F);
       }
       llvmc::restoreLeafGeps(F);
+      if (logical) bypassWideDivision(F);
     }
 }
 

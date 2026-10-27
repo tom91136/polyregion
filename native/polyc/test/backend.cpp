@@ -641,6 +641,53 @@ TEST_CASE("SPIR-V reads glcompute scalar arguments through the uniform block", "
     CHECK(storageClassOf(tpe) == spv::StorageClassUniform);
 }
 
+TEST_CASE("Vulkan guards every 64-bit division behind a 32-bit fast path", "[backend][spirv][vulkan]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  for (const auto &[tpe, wide] : std::vector<std::pair<Type::Any, std::vector<unsigned>>>{
+           {Type::IntU64().widen(), {llvm::Instruction::UDiv, llvm::Instruction::URem}},
+           {Type::IntS64().widen(), {llvm::Instruction::SDiv, llvm::Instruction::SRem}},
+       }) {
+    const Named out("out", Type::Ptr(tpe, TypeSpace::Global())), a("a", tpe), b("b", tpe), q("q", tpe), r("r", tpe);
+    const Function entry = mkFn("divide", {Arg(out, {}), Arg(a, {}), Arg(b, {})}, Type::Unit0(),
+                                {Var(q, IntrOp(Div(selectNamed(a), selectNamed(b), tpe)).widen(), false).widen(),
+                                 Var(r, IntrOp(Rem(selectNamed(a), selectNamed(b), tpe)).widen(), false).widen(),
+                                 Update(selectNamed(out), Term::IntS32Const(0).widen(), selectNamed(q).widen()).widen(),
+                                 Update(selectNamed(out), Term::IntS32Const(1).widen(), selectNamed(r).widen()).widen(), ret()},
+                                FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+    const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+    const auto compiled = polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}),
+                                                        {Target::Object_LLVM_SPIRV_GLCompute, ""}, OptLevel::O0);
+    INFO(repr(compiled));
+    REQUIRE(compiled.binary);
+    llvm::LLVMContext context;
+    llvm::SMDiagnostic diagnostic;
+    const auto module = llvm::parseAssemblyString(eventDataOf(compiled, "llvm_to_spirv_ir"), diagnostic, context);
+    REQUIRE(module);
+    size_t narrow = 0, guarded = 0;
+    for (const auto &F : *module)
+      for (const auto &I : llvm::instructions(F)) {
+        const auto *op = llvm::dyn_cast<llvm::BinaryOperator>(&I);
+        if (!op) continue;
+        const bool division = op->getOpcode() == llvm::Instruction::UDiv || op->getOpcode() == llvm::Instruction::URem;
+        if (op->getType()->isIntegerTy(32) && division) ++narrow;
+        if (!op->getType()->isIntegerTy(64) || !(wide ^ contains(static_cast<unsigned>(op->getOpcode())))) continue;
+        const auto *predecessor = op->getParent()->getSinglePredecessor();
+        const auto *branch = predecessor ? llvm::dyn_cast<llvm::BranchInst>(predecessor->getTerminator()) : nullptr;
+        REQUIRE(branch);
+        REQUIRE(branch->isConditional());
+        const auto *cmp = llvm::dyn_cast<llvm::ICmpInst>(branch->getCondition());
+        REQUIRE(cmp);
+        CHECK(cmp->getPredicate() == llvm::CmpInst::ICMP_EQ);
+        CHECK(cmp->getOperand(0)->getType()->isIntegerTy(64));
+        ++guarded;
+      }
+    CHECK(narrow >= 1);
+    CHECK(guarded >= 1);
+  }
+}
+
 TEST_CASE("CPU remote-operation ABI follows the target pointer width", "[backend]") {
   polyregion::compiler::initialise();
   using namespace polyregion::polyast::dsl;
