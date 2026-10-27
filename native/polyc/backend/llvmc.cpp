@@ -355,6 +355,43 @@ std::string llvmc::normaliseSpirvNarrowIntegerOperands(std::string spv) {
   return {reinterpret_cast<const char *>(out.data()), out.size() * sizeof(uint32_t)};
 }
 
+static std::string lowerSpirvControlBarrierCalls(std::string spv) {
+  constexpr std::string_view stubName = "_Z22__spirv_ControlBarrierjjj";
+  if (spv.size() < 5 * sizeof(uint32_t)) return spv;
+  auto *src = reinterpret_cast<const uint32_t *>(spv.data());
+  const size_t nWords = spv.size() / sizeof(uint32_t);
+  auto opcode = [](uint32_t inst) { return static_cast<uint16_t>(inst & 0xFFFF); };
+  auto wcount = [](uint32_t inst) { return static_cast<uint16_t>(inst >> 16); };
+  uint32_t stub = 0;
+  size_t linkages = 0;
+  for (size_t i = 5; i < nWords;) {
+    const uint16_t wc = wcount(src[i]);
+    if (wc == 0 || i + wc > nWords) return spv;
+    if (opcode(src[i]) == spv::OpName && wc >= 3 && std::string_view(reinterpret_cast<const char *>(&src[i + 2])) == stubName)
+      stub = src[i + 1];
+    if (opcode(src[i]) == spv::OpDecorate && wc >= 3 && src[i + 2] == spv::DecorationLinkageAttributes) ++linkages;
+    i += wc;
+  }
+  if (stub == 0) return spv;
+
+  std::vector<uint32_t> out(src, src + 5);
+  out.reserve(nWords);
+  bool inStub = false;
+  for (size_t i = 5; i < nWords;) {
+    const uint16_t wc = wcount(src[i]), op = opcode(src[i]);
+    if (op == spv::OpFunction && src[i + 2] == stub) inStub = true;
+    const bool drop = inStub || (op == spv::OpName && src[i + 1] == stub) || (op == spv::OpDecorate && src[i + 1] == stub)
+                      || (linkages == 1 && op == spv::OpCapability && src[i + 1] == spv::CapabilityLinkage);
+    if (op == spv::OpFunctionCall && wc == 7 && src[i + 3] == stub) {
+      out.push_back((4u << 16) | spv::OpControlBarrier);
+      out.insert(out.end(), src + i + 4, src + i + 7);
+    } else if (!drop) out.insert(out.end(), src + i, src + i + wc);
+    if (op == spv::OpFunctionEnd) inStub = false;
+    i += wc;
+  }
+  return {reinterpret_cast<const char *>(out.data()), out.size() * sizeof(uint32_t)};
+}
+
 // the Vulkan/GLSL memory model assumes distinct OpVariables don't alias unless decorated Aliased. the arena
 // binds ONE VkBuffer to all typed views, so they genuinely alias - without the decoration an optimiser may
 // reorder a store past a load at the same byte (type-punning: std::list node membuf, widened tails).
@@ -1340,6 +1377,7 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
         spvBlob = normaliseSpirvNarrowIntegerOperands(std::move(spvBlob));
         // only Vulkan's logical memory model assumes no-alias by default; OpenCL is C-like (may-alias), already sound
         if (TM.getTargetTriple().getOS() == llvm::Triple::Vulkan) {
+          spvBlob = lowerSpirvControlBarrierCalls(std::move(spvBlob));
           spvBlob = patchSpirvAliased(std::move(spvBlob));
           spvBlob = llvmc::patchSpirvWorkgroupSpecConstant(std::move(spvBlob));
         }

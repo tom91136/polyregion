@@ -688,6 +688,44 @@ TEST_CASE("Vulkan guards every 64-bit division behind a 32-bit fast path", "[bac
   }
 }
 
+TEST_CASE("Vulkan work-group barriers use acquire-release semantics on the matching storage", "[backend][spirv][vulkan]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  constexpr uint32_t acquireRelease = spv::MemorySemanticsAcquireReleaseMask;
+  for (const auto &[barrier, storage] : std::vector<std::pair<Expr::Any, uint32_t>>{
+           {Expr::SpecOp(Spec::GpuBarrierLocal()).widen(), spv::MemorySemanticsWorkgroupMemoryMask},
+           {Expr::SpecOp(Spec::GpuBarrierGlobal()).widen(), spv::MemorySemanticsUniformMemoryMask},
+           {Expr::SpecOp(Spec::GpuBarrierAll()).widen(), spv::MemorySemanticsWorkgroupMemoryMask | spv::MemorySemanticsUniformMemoryMask},
+       }) {
+    INFO(storage);
+    const Function entry =
+        mkFn("sync", {}, Type::Unit0(), {let("sync") = barrier, ret()}, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+    const auto compiled = polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}),
+                                                        {Target::Object_LLVM_SPIRV_GLCompute, ""}, OptLevel::O0);
+    INFO(repr(compiled));
+    REQUIRE(compiled.binary);
+    const auto instructions = spirvInstructions(spirvWords(std::string(compiled.binary->begin(), compiled.binary->end())));
+    const auto constantOf = [&](const uint32_t id) {
+      for (const auto &x : instructions)
+        if ((x[0] & 0xFFFFu) == spv::OpConstant && x[2] == id) return x[3];
+      FAIL("semantics operand is not an OpConstant");
+      return 0u;
+    };
+    size_t barriers = 0;
+    for (const auto &x : instructions)
+      if ((x[0] & 0xFFFFu) == spv::OpControlBarrier) {
+        ++barriers;
+        const auto semantics = constantOf(x[3]);
+        CHECK((semantics & spv::MemorySemanticsSequentiallyConsistentMask) == 0);
+        CHECK((semantics & acquireRelease) == acquireRelease);
+        CHECK((semantics & storage) == storage);
+        CHECK((semantics & ~(acquireRelease | storage)) == 0);
+      }
+    CHECK(barriers == 1);
+  }
+}
+
 TEST_CASE("CPU remote-operation ABI follows the target pointer width", "[backend]") {
   polyregion::compiler::initialise();
   using namespace polyregion::polyast::dsl;
@@ -2531,7 +2569,7 @@ TEST_CASE("Vulkan lowers subgroup barriers to workgroup barriers", "[backend][su
                                                       {Target::Object_LLVM_SPIRV_GLCompute, ""}, OptLevel::O0);
   INFO(repr(compiled));
   REQUIRE(compiled.binary);
-  CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring("@llvm.spv.group.memory.barrier.with.group.sync"));
+  CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring("@_Z22__spirv_ControlBarrierjjj(i32 2, i32 2, i32 264)"));
 }
 
 TEST_CASE("Vulkan uses byte-backed workgroup booleans", "[backend][subgroup][vulkan]") {

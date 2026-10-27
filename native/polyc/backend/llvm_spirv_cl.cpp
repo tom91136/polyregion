@@ -122,6 +122,7 @@ const OclBuiltin MEMORY_BARRIER{"_Z21__spirv_MemoryBarrierjj", vd, {i32, i32}};
 // but the constants are part of the SPIR-V ABI.
 namespace SpvMemSem {
 constexpr uint32_t AcquireRelease = 0x008;
+constexpr uint32_t UniformMemory = 0x040;
 constexpr uint32_t WorkgroupMemory = 0x100;
 constexpr uint32_t CrossWorkgroupMemory = 0x200;
 } // namespace SpvMemSem
@@ -508,10 +509,13 @@ ValPtr SPIRVVulkanTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
   auto localSize = [&](const AnyTerm &dim) -> llvm::Value * {
     return B.CreateIntrinsic(i32t, llvm::Intrinsic::spv_workgroup_size, {dimI32(dim)});
   };
-  auto groupBarrier = [&]() -> ValPtr {
-    B.CreateIntrinsic(llvm::Type::getVoidTy(ctx), llvm::Intrinsic::spv_group_memory_barrier_with_group_sync, {});
+  auto groupBarrier = [&](uint32_t storage) -> ValPtr {
+    auto *scope = llvm::ConstantInt::get(i32t, SpvScope::Workgroup);
+    callOcl(cg, CONTROL_BARRIER, Type::Unit0(), {scope, scope, llvm::ConstantInt::get(i32t, storage | SpvMemSem::AcquireRelease)});
     return cg.mkTermVal(Term::Unit0Const());
   };
+  constexpr uint32_t localStorage = SpvMemSem::WorkgroupMemory;
+  constexpr uint32_t globalStorage = SpvMemSem::UniformMemory;
   auto laneIdx = [&]() -> ValPtr { return B.CreateIntrinsic(i32t, llvm::Intrinsic::spv_subgroup_local_invocation_id, {}); };
   auto subgroupSize = [&]() -> ValPtr { return B.CreateIntrinsic(i32t, llvm::Intrinsic::spv_subgroup_size, {}); };
   auto maskMember = [&](const AnyTerm &mask, ValPtr lane) -> ValPtr {
@@ -598,19 +602,19 @@ ValPtr SPIRVVulkanTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
       [&](const Spec::GpuGroupSize &v) -> ValPtr { return builtin(llvm::Intrinsic::spv_num_workgroups, v.dim, v.tpe); },
       [&](const Spec::GpuLocalIdx &v) -> ValPtr { return builtin(llvm::Intrinsic::spv_thread_id_in_group, v.dim, v.tpe); },
       [&](const Spec::GpuLocalSize &v) -> ValPtr { return coerce(localSize(v.dim), v.tpe); },
-      [&](const Spec::GpuBarrierGlobal &) -> ValPtr { return groupBarrier(); },
-      [&](const Spec::GpuBarrierLocal &) -> ValPtr { return groupBarrier(); },
-      [&](const Spec::GpuBarrierAll &) -> ValPtr { return groupBarrier(); },
-      [&](const Spec::GpuFenceGlobal &) -> ValPtr { return groupBarrier(); },
-      [&](const Spec::GpuFenceLocal &) -> ValPtr { return groupBarrier(); },
-      [&](const Spec::GpuFenceAll &) -> ValPtr { return groupBarrier(); }, //
+      [&](const Spec::GpuBarrierGlobal &) -> ValPtr { return groupBarrier(globalStorage); },
+      [&](const Spec::GpuBarrierLocal &) -> ValPtr { return groupBarrier(localStorage); },
+      [&](const Spec::GpuBarrierAll &) -> ValPtr { return groupBarrier(localStorage | globalStorage); },
+      [&](const Spec::GpuFenceGlobal &) -> ValPtr { return groupBarrier(globalStorage); },
+      [&](const Spec::GpuFenceLocal &) -> ValPtr { return groupBarrier(localStorage); },
+      [&](const Spec::GpuFenceAll &) -> ValPtr { return groupBarrier(localStorage | globalStorage); }, //
       [&](const Spec::GpuLaneIdx &) -> ValPtr { return laneIdx(); },
       [&](const Spec::GpuSubgroupSize &) -> ValPtr { return subgroupSize(); },
       [&](const Spec::GpuShuffleDown &v) -> ValPtr { return shuffle('d', v.value, v.delta, v.width, v.mask, v.rtn); },
       [&](const Spec::GpuShuffleUp &v) -> ValPtr { return shuffle('u', v.value, v.delta, v.width, v.mask, v.rtn); },
       [&](const Spec::GpuShuffleIdx &v) -> ValPtr { return shuffle('i', v.value, v.srcLane, v.width, v.mask, v.rtn); },
       [&](const Spec::GpuShuffleXor &v) -> ValPtr { return shuffle('x', v.value, v.laneMask, v.width, v.mask, v.rtn); },
-      [&](const Spec::GpuSubgroupBarrier &) -> ValPtr { return groupBarrier(); },
+      [&](const Spec::GpuSubgroupBarrier &) -> ValPtr { return groupBarrier(localStorage); },
       [&](const Spec::GpuBallot &v) -> ValPtr {
         return B.CreateAnd(ballotWord(cg.mkTermVal(v.pred)), B.CreateIntCast(cg.mkTermVal(v.mask), i32t, false));
       },
