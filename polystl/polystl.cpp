@@ -106,6 +106,9 @@ POLYREGION_EXPORT void polystl::details::dispatchManaged(const size_t global, co
 
   g_assert.reset();
   uintptr_t errDev = asserts ? polyrt::allocAssertBuffer() : 0;
+  const auto newBuffer = [] {
+    return polyrt::currentPlatform->kind() == PlatformKind::HostThreaded ? ArgBuffer{{Type::IntS64, nullptr}} : ArgBuffer{};
+  };
   const auto bindError = [&](ArgBuffer &buffer) { polyrt::bindAssertError(buffer, asserts, errDev); };
   const auto launch = [&](ArgBuffer &buffer) {
     polyrt::appendArgTerminator(buffer);
@@ -119,7 +122,7 @@ POLYREGION_EXPORT void polystl::details::dispatchManaged(const size_t global, co
 
   const auto mode = polyrt::sma::mirrorModeFor(polyrt::currentDevice->moduleFormat());
   if (mode == polyrt::sma::MirrorMode::Off) {
-    ArgBuffer buffer;
+    auto buffer = newBuffer();
     bindError(buffer);
     if (localMemBytes > 0) buffer.append(Type::Scratch, nullptr);
     buffer.append(Type::Ptr, &functorData);
@@ -135,7 +138,7 @@ POLYREGION_EXPORT void polystl::details::dispatchManaged(const size_t global, co
     // logical SPIR-V reads the arena through a fixed roster of typed views, so a module that declares them binds the one
     // buffer to every view slot; flat backends, and kernels that never read their capture, take it once
     const int arenaViews = polyrt::currentDevice->arenaViewStart(moduleId) ? polyrt::sma::arenaViewCount : 1;
-    ArgBuffer buffer;
+    auto buffer = newBuffer();
     bindError(buffer);
     if (localMemBytes > 0) buffer.append(Type::Scratch, nullptr);
     for (int i = 0; i < arenaViews; ++i)
@@ -152,7 +155,7 @@ POLYREGION_EXPORT void polystl::details::dispatchManaged(const size_t global, co
 
   auto functorDevicePtr = useGenerated ? reinterpret_cast<void *>(preludeResult)
                                        : reinterpret_cast<void *>(allocations.syncLocalToRemote(functorData, *layout));
-  ArgBuffer buffer;
+  auto buffer = newBuffer();
   bindError(buffer);
   if (localMemBytes > 0) buffer.append(Type::Scratch, nullptr);
   buffer.append(Type::Ptr, &functorDevicePtr);

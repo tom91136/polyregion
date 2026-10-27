@@ -122,9 +122,18 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
          moduleId, C.getTypeSize(C.getCanonicalTagType(parent)), repr(program));
   }
 
+  const bool borrowsHost =
+      kind == runtime::PlatformKind::Managed && !(opts.targets ^ exists([](const auto &target, const auto &) {
+                                                    return runtime::targetPlatformKind(target) == runtime::PlatformKind::Managed;
+                                                  }));
+  const auto accepts = [&](const compiletime::Target &target) {
+    const auto targetKind = runtime::targetPlatformKind(target);
+    return kind == targetKind || (borrowsHost && targetKind == runtime::PlatformKind::HostThreaded);
+  };
+
   if (opts.jit) {
-    auto jitObjects = opts.targets                                                                                            //
-                      | filter([&](const auto &target, const auto &) { return kind == runtime::targetPlatformKind(target); }) //
+    auto jitObjects = opts.targets                                                                //
+                      | filter([&](const auto &target, const auto &) { return accepts(target); }) //
                       | collect([&](const auto &target, const auto &arch) -> std::optional<polyfront::KernelObject> {
                           auto format = runtime::moduleFormatOf(target);
                           if (!format) return std::nullopt;
@@ -158,13 +167,13 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
   }
 
   const auto compiled =
-      opts.targets                                                                                            //
-      | filter([&](const auto &target, const auto &) { return kind == runtime::targetPlatformKind(target); }) //
+      opts.targets                                                                //
+      | filter([&](const auto &target, const auto &) { return accepts(target); }) //
       | collect([&](const auto &target, const auto &features) {
           return compileProgram(opts, program, target, features, polyfront::passes::arenaPassesFor(target, features, opts.stackDepth)) //
                  ^ fold_total([&](const CompileResult &r) -> std::optional<CompileResult> { return r; },
                               [&](const std::string &err) -> std::optional<CompileResult> {
-                                emit(diag, clang::DiagnosticsEngine::Level::Warning,
+                                emit(diag, borrowsHost ? clang::DiagnosticsEngine::Level::Remark : clang::DiagnosticsEngine::Level::Warning,
                                      POLYREGION_DIAG_POLYSTL "Frontend failed to compile program [%0, target=%1, features=%2]\n%3",
                                      moduleId, std::string(magic_enum::enum_name(target)), features, err);
                                 return std::nullopt;
@@ -183,7 +192,7 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
                           std::string(magic_enum::enum_name(target)), features, repr(result));
 
                      if (auto bin = result.binary; !bin) {
-                       emit(diag, loc, clang::DiagnosticsEngine::Level::Warning,
+                       emit(diag, loc, borrowsHost ? clang::DiagnosticsEngine::Level::Remark : clang::DiagnosticsEngine::Level::Warning,
                             POLYREGION_DIAG_POLYSTL "Backend failed to compile program [%0, target=%1, features=%2]\nReason: %3", moduleId,
                             std::string(magic_enum::enum_name(target)), features, result.messages);
                        return std::nullopt;

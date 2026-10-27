@@ -400,12 +400,15 @@ RelocatableDeviceQueue::RelocatableDeviceQueue(const std::chrono::duration<int64
   POLYINVOKE_TRACE();
 }
 
+static size_t policyTasks(const Policy &policy) { return policy.global.x * (policy.local ? policy.local->first.x : 1); }
+
 void validatePolicyAndArgs(const char *prefix, std::vector<Type> types, const Policy &policy) {
   if (auto scratchCount = types ^ count([](Type t) { return t == Type::Scratch; }); scratchCount != 0)
     POLYINVOKE_FATAL(prefix, "Scratch types are not supported on the CPU, found %td arg(s)", scratchCount);
   if (policy.global.y != 1) POLYINVOKE_FATAL(prefix, "Policy dimension Y > 1 is not supported: %zu", policy.global.y);
   if (policy.global.z != 1) POLYINVOKE_FATAL(prefix, "Policy dimension Z > 1 is not supported: %zu", policy.global.z);
-  if (policy.local) POLYINVOKE_FATAL(prefix, "Policy local dimension is not supported: size=%zu", policy.local->second);
+  if (policy.local && (policy.local->first.y != 1 || policy.local->first.z != 1))
+    POLYINVOKE_FATAL(prefix, "Policy local dimension Y or Z > 1 is not supported: %zu, %zu", policy.local->first.y, policy.local->first.z);
   if (types[0] != Type::IntS64)
     POLYINVOKE_FATAL(prefix, "Expecting first argument as index (%s), but was %s", magic_enum::enum_name(Type::IntS64).data(),
                      magic_enum::enum_name(types[0]).data());
@@ -442,11 +445,11 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
     }
   }
   this->threadedLaunch(
-      policy.global.x,
+      policyTasks(policy),
       [cb, token = latch.acquire()]() {
         if (cb) (*cb)();
       },
-      [symAddr, types, argData, global = policy.global.x](size_t tid) {
+      [symAddr, types, argData, global = policyTasks(policy)](size_t tid) {
         hostThreadGlobalIdx = tid;
         hostThreadGlobalSize = global;
         auto argData_ = argData;
@@ -579,11 +582,11 @@ void SharedDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
   }
 
   this->threadedLaunch(
-      policy.global.x,
+      policyTasks(policy),
       [cb, token = latch.acquire()]() {
         if (cb) (*cb)();
       },
-      [address, types, argData, global = policy.global.x](size_t tid) {
+      [address, types, argData, global = policyTasks(policy)](size_t tid) {
         hostThreadGlobalIdx = tid;
         hostThreadGlobalSize = global;
         auto argData_ = argData;
