@@ -2,6 +2,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -29,6 +30,7 @@
 #include "polyregion/show.hpp"
 #include "polyrt/mem.hpp"
 #include "polyrt/rt.h"
+#include "polyrt/sma_runtime.hpp"
 
 #include "jit_policy.hpp"
 #include "reflect-rt/rt_reflect.hpp"
@@ -54,7 +56,18 @@ struct StubDevice final : object::ObjectDevice {
   bool failRemoteMalloc = false;
   bool reuseRemoteAddress = false;
   uintptr_t reusableRemoteAddress = 0x1000;
+  bool packAllocations = false;
+  std::vector<std::max_align_t> pool = std::vector<std::max_align_t>(256);
+  size_t poolUsed = 0;
   size_t sharedAllocs = 0, sharedFrees = 0, remoteAllocs = 0, remoteFrees = 0;
+
+  void *carve(const size_t size) {
+    constexpr size_t quantum = 16;
+    poolUsed = (poolUsed + quantum - 1) / quantum * quantum;
+    void *block = reinterpret_cast<char *>(pool.data()) + poolUsed;
+    poolUsed += size;
+    return block;
+  }
 
   explicit StubDevice(const bool shared, const bool cpu = true, const size_t threads = 1024, const size_t subgroup = 1,
                       const ModuleFormat format = ModuleFormat::Object)
@@ -76,22 +89,24 @@ struct StubDevice final : object::ObjectDevice {
   std::optional<void *> mallocShared(size_t size, Access access) override {
     if (!shared) return {};
     sharedAllocs++;
+    if (packAllocations) return carve(size);
     return ObjectDevice::mallocShared(size, access);
   }
   void freeShared(void *ptr) override {
     sharedFrees++;
-    ObjectDevice::freeShared(ptr);
+    if (!packAllocations) ObjectDevice::freeShared(ptr);
   }
   uintptr_t mallocDevice(size_t size, Access access) override {
     remoteAllocs++;
     if (failRemoteMalloc) throw std::runtime_error("injected allocation failure");
     if (reuseRemoteAddress) return reusableRemoteAddress;
+    if (packAllocations) return reinterpret_cast<uintptr_t>(carve(size));
     return ObjectDevice::mallocDevice(size, access);
   }
   void freeDevice(uintptr_t ptr) override {
     remoteFrees++;
     if (failRemoteFree) throw std::runtime_error("injected free failure");
-    if (reuseRemoteAddress) return;
+    if (reuseRemoteAddress || packAllocations) return;
     ObjectDevice::freeDevice(ptr);
   }
   std::unique_ptr<DeviceQueue> createQueue(const std::chrono::duration<int64_t> &) override { return {}; }
@@ -104,11 +119,16 @@ struct StubQueue final : object::ObjectDeviceQueue {
   bool mutateFirstPointer = false;
   bool raiseAssert = false;
   std::vector<Type> invokedTypes;
+  uintptr_t firstPointer = 0;
 
   void enqueueInvokeAsync(const std::string &, const std::string &, const std::vector<Type> &types, std::vector<std::byte> data,
                           const Policy &, const MaybeCallback &) override {
     if (failInvoke) throw std::runtime_error("injected launch failure");
     invokedTypes = types;
+    if (!types.empty() && types.front() == Type::Ptr) {
+      const auto arguments = detail::argDataAsPointers(types, data);
+      std::memcpy(&firstPointer, arguments.front(), sizeof(firstPointer));
+    }
     if (raiseAssert) {
       const auto arguments = detail::argDataAsPointers(types, data);
       uintptr_t error = 0;
@@ -535,6 +555,22 @@ TEST_CASE("usm free leaves a foreign pointer alone") {
   polyrt_usm_free(p);
   CHECK(device.stub->sharedFrees == 0);
   std::free(p);
+}
+
+TEST_CASE("usm one-past-end pointer resolves to the block that ends there") {
+  WithStubDevice device(true);
+  device.stub->packAllocations = true;
+  auto *b = static_cast<int32_t *>(polyrt_usm_malloc(100 * sizeof(int32_t)));
+  auto *ids = static_cast<int32_t *>(polyrt_usm_malloc(100 * sizeof(int32_t)));
+  REQUIRE(b);
+  REQUIRE(ids);
+  const auto end = polyregion::rt_reflect::_rt_reflect_v(reinterpret_cast<uintptr_t>(b + 100));
+  CHECK(end.size == 100 * sizeof(int32_t));
+  CHECK(end.offset == 100 * sizeof(int32_t));
+  CHECK(reinterpret_cast<uintptr_t>(b + 100) - end.offset == reinterpret_cast<uintptr_t>(b));
+  CHECK(polyregion::rt_reflect::_rt_reflect_v(reinterpret_cast<uintptr_t>(ids)).offset == 0);
+  polyrt_usm_free(ids);
+  polyrt_usm_free(b);
 }
 
 TEST_CASE("adaptive JIT specialises hot values after loading generic code") {
@@ -1619,6 +1655,41 @@ TEST_CASE("gen-arena-mirror") {
   rec->p = nullptr;
   f.allocation.genArenaMirror(reinterpret_cast<const char *>(rec), 1, 1, *recLayout, sizeof(Rec));
   CHECK(*reinterpret_cast<const uint64_t *>(f.allocation.genArenaStaging.data() + offsetof(Rec, p)) == 0);
+}
+
+TEST_CASE("arena binds a one-past-end remote pointer to the allocation that ends there") {
+  struct Grid {
+    int32_t *begin;
+    int32_t *end;
+  };
+  auto gridLayout = Struct_(Grid, StructMember_(Grid, begin, &int32Type), StructMember_(Grid, end, &int32Type));
+  WithStubDevice device(false, false, 1024, 1, ModuleFormat::SPIRV_GLCompute);
+  WithStubManagedPlatform platform;
+  device.stub->packAllocations = true;
+  device.stub->advertised = std::vector<std::string>{"overread_pad:4096"};
+  StubQueue queue(std::chrono::seconds(1));
+  polyregion::polyrt::ExecutionContext context{polyregion::polyrt::currentPlatform.get(), device.stub, &queue};
+  Fixture fixture;
+  polyregion::polyrt::sma::CaptureMarshalOf<decltype(fixture.allocation)> marshal{fixture.allocation};
+  polyregion::polyrt::sma::registerCaptureMarshal(&marshal);
+  struct Unregister {
+    ~Unregister() { polyregion::polyrt::sma::registerCaptureMarshal(nullptr); }
+  } unregister;
+
+  const auto begin = remoteAlloc(&context, 100 * sizeof(int32_t));
+  remoteAlloc(&context, 100 * sizeof(int32_t));
+  Grid grid{reinterpret_cast<int32_t *>(begin), reinterpret_cast<int32_t *>(begin + 100 * sizeof(int32_t))};
+
+  const std::array<uint8_t, 1> types{static_cast<uint8_t>(Type::Ptr)};
+  const std::array<void *, 1> arguments{&grid};
+  const std::array<size_t, 1> mirrorSizes{sizeof(Grid)};
+  const std::array<uint8_t, 1> mirrorKinds{1};
+  const std::array<const TypeLayout *, 1> layouts{&*gridLayout};
+  REQUIRE(polyrt_remote_launch_marshalled(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
+                                          arguments.data(), mirrorSizes.data(), mirrorKinds.data(), layouts.data()));
+  REQUIRE(queue.firstPointer != 0);
+  const auto *arenaRoot = reinterpret_cast<const uint64_t *>(queue.firstPointer);
+  CHECK(arenaRoot[1] - arenaRoot[0] == 100 * sizeof(int32_t));
 }
 
 #ifdef POLYRT_TESTS_POLYDCO

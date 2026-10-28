@@ -469,11 +469,13 @@ POLYREGION_EXPORT extern "C" void *polyrt_host_new(const uint64_t bytes) {
 }
 POLYREGION_EXPORT extern "C" void polyrt_host_free(void *pointer) { std::free(pointer); }
 
+static size_t tailPadded(const size_t bytes) { return bytes < std::numeric_limits<size_t>::max() ? bytes + 1 : bytes; }
+
 static uintptr_t remoteMalloc(void *context, const size_t bytes) {
   if (bytes == 0) return 0;
   auto &execution = requireContext(context, __func__);
   const std::lock_guard lock(execution.transaction);
-  const auto pointer = execution.device->mallocDevice(bytes, Access::RW);
+  const auto pointer = execution.device->mallocDevice(tailPadded(bytes), Access::RW);
   try {
     execution.remoteAllocations.insert_or_assign(pointer, polyregion::polyrt::ExecutionContext::RemoteAllocation{bytes});
   } catch (...) {
@@ -1174,12 +1176,12 @@ static void *sharedAllocTracked(const size_t size, const polyregion::rt_reflect:
   void *p = nullptr;
   auto owner = UsmOwner::Host;
   if (polyregion::polyrt::currentDevice) {
-    if (const auto shared = polyregion::polyrt::currentDevice->mallocShared(size, Access::RW)) {
+    if (const auto shared = polyregion::polyrt::currentDevice->mallocShared(tailPadded(size), Access::RW)) {
       p = *shared;
       owner = UsmOwner::Shared;
     }
   }
-  if (!p) p = std::malloc(size);
+  if (!p) p = std::malloc(tailPadded(size));
   if (p) {
     std::lock_guard<std::mutex> g(usmAllocMutex());
     usmAllocOwners().insert_or_assign(p, owner);
@@ -1251,7 +1253,7 @@ POLYREGION_EXPORT extern "C" void polyrt_usm_operator_delete_sized(void *ptr, si
 }
 
 POLYREGION_EXPORT extern "C" void *polyrt_record_malloc(const size_t size) {
-  void *p = __RT_ALTERNATIVE(malloc)(size);
+  void *p = __RT_ALTERNATIVE(malloc)(tailPadded(size));
   if (p) polyregion::rt_reflect::_rt_record(p, size, polyregion::rt_reflect::Type::HeapMalloc);
   return p;
 }
@@ -1267,7 +1269,7 @@ POLYREGION_EXPORT extern "C" void *polyrt_record_realloc(void *ptr, const size_t
     polyregion::rt_reflect::_rt_reclaim(ptr, 1, /*forWrite*/ true);
     polyregion::rt_reflect::_rt_release(ptr, polyregion::rt_reflect::Type::HeapFree);
   }
-  void *p = __RT_ALTERNATIVE(realloc)(ptr, size);
+  void *p = __RT_ALTERNATIVE(realloc)(ptr, size ? tailPadded(size) : 0);
   if (p) polyregion::rt_reflect::_rt_record(p, size, polyregion::rt_reflect::Type::HeapRealloc);
   return p;
 }
@@ -1334,13 +1336,13 @@ POLYREGION_EXPORT extern "C" ssize_t polyrt_record_pwrite(const int fd, const vo
 #endif
 
 POLYREGION_EXPORT extern "C" void *polyrt_record_aligned_alloc(const size_t alignment, const size_t size) {
-  void *p = __RT_ALTERNATIVE(memalign)(alignment, size);
+  void *p = __RT_ALTERNATIVE(memalign)(alignment, tailPadded(size));
   if (p) polyregion::rt_reflect::_rt_record(p, size, polyregion::rt_reflect::Type::HeapAlignedAlloc);
   return p;
 }
 
 POLYREGION_EXPORT void *polyrt_record_operator_new(const size_t size) {
-  void *p = __RT_ALTERNATIVE(malloc)(size);
+  void *p = __RT_ALTERNATIVE(malloc)(tailPadded(size));
   if (!p) {
 #if __cpp_exceptions == 199711
     throw std::bad_alloc{};
