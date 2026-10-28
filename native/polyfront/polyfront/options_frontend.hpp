@@ -11,6 +11,8 @@
 
 #include "aspartame/all.hpp"
 
+#include "polyregion/polyc_jit_symbols.h"
+
 #include "options.hpp"
 
 namespace polyregion::polyfront {
@@ -383,14 +385,15 @@ inline std::vector<std::string> staticRuntimeLinkFlags(const std::string &llvmLi
 // Retain the JIT ABI and expose static symbols to runtime lookup.
 inline std::vector<std::string> jitCompilerLinkFlags(StdParOptions::LinkKind jit, const std::string &libsPath,
                                                      const std::string &llvmLibPath, bool needsCxxRuntime) {
+  namespace abi = polyregion::polyc_jit::abi;
   std::vector<std::string> out;
   const auto anchor = [] {
 #if defined(_WIN32)
-    return std::vector<std::string>{"-Xlinker", "/INCLUDE:polyc_jit_compile"};
+    return std::vector<std::string>{"-Xlinker", fmt::format("/INCLUDE:{}", abi::Compile)};
 #elif defined(__APPLE__)
-    return std::vector<std::string>{"-Wl,-u,_polyc_jit_compile"};
+    return std::vector<std::string>{fmt::format("-Wl,-u,_{}", abi::Compile)};
 #else
-    return std::vector<std::string>{"-Wl,-u,polyc_jit_compile"};
+    return std::vector<std::string>{fmt::format("-Wl,-u,{}", abi::Compile)};
 #endif
   };
   switch (jit) {
@@ -405,15 +408,13 @@ inline std::vector<std::string> jitCompilerLinkFlags(StdParOptions::LinkKind jit
     }
     case StdParOptions::LinkKind::Static: {
       out ^= concat(anchor());
+      const std::vector<std::string> exports{abi::AbiVersion, abi::Compile, abi::LastError, abi::Free};
 #if defined(_WIN32)
-      out ^= concat(std::vector{"polyc_jit_compile", "polyc_jit_last_error", "polyc_jit_free"} //
-                    ^ flat_map([](const auto &s) { return std::vector<std::string>{"-Xlinker", fmt::format("/EXPORT:{}", s)}; }));
+      out ^= concat(exports ^ flat_map([](const auto &s) { return std::vector<std::string>{"-Xlinker", fmt::format("/EXPORT:{}", s)}; }));
 #elif defined(__APPLE__)
-      out ^= concat(std::vector{"_polyc_jit_compile", "_polyc_jit_last_error", "_polyc_jit_free"} //
-                    ^ map([](const auto &s) { return fmt::format("-Wl,-exported_symbol,{}", s); }));
+      out ^= concat(exports ^ map([](const auto &s) { return fmt::format("-Wl,-exported_symbol,_{}", s); }));
 #else
-      out ^= concat(std::vector{"polyc_jit_compile", "polyc_jit_last_error", "polyc_jit_free"} //
-                    ^ map([](const auto &s) { return fmt::format("-Wl,--export-dynamic-symbol={}", s); }));
+      out ^= concat(exports ^ map([](const auto &s) { return fmt::format("-Wl,--export-dynamic-symbol={}", s); }));
 #endif
       out ^= append(joinPath(libsPath, staticLibraryName("polyc-jit-static")));
       out ^= concat(staticArchiveLinkFlags(llvmLibPath, needsCxxRuntime));
