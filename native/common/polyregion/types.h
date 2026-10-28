@@ -181,8 +181,10 @@ POLYREGION_RT_PROTECT inline bool logicalAddressing(const Target target) { retur
 
 namespace polyregion::runtime {
 
-inline constexpr std::array<std::string_view, 7> DeviceGatedFeatures{"fp64",      "fp16",     "int64",    "storage8",
-                                                                     "storage16", "uniform8", "uniform16"};
+inline constexpr std::string_view SystemPagingFeature = "paging:system";
+
+inline constexpr std::array<std::string_view, 8> DeviceGatedFeatures{"fp64",      "fp16",     "int64",     "storage8",
+                                                                     "storage16", "uniform8", "uniform16", SystemPagingFeature};
 
 POLYREGION_RT_PROTECT inline bool deviceGatedFeature(const std::string_view feature) {
   for (const auto gated : DeviceGatedFeatures)

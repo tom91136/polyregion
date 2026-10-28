@@ -145,7 +145,7 @@ inline std::optional<Record> parseRecord(const std::string &stderrText) {
 inline Verdict reject(std::string reason) { return {false, std::move(reason)}; }
 
 inline Verdict judge(const std::string &selector, const std::optional<Inventory> &inventory, const Manifest &manifest,
-                     const std::string &stderrText) {
+                     const std::string &stderrText, const std::vector<std::string> &runFeatures) {
   const auto parsed = compiletime::TargetSpec::parse(selector);
   if (!parsed) return reject(fmt::format("selector '{}' names no backend", selector));
   if (!inventory) return reject("polyinfo reported nothing for the selected backend");
@@ -203,12 +203,13 @@ inline Verdict judge(const std::string &selector, const std::optional<Inventory>
       std::vector<std::string> missing;
       for (const auto gated : runtime::DeviceGatedFeatures) {
         const std::string name(gated);
-        if ((image.features ^ exists([&](const auto &f) { return detail::sameFeature(f, name); })) && !detail::hasFeature(device, name))
+        const auto requested = [&](const auto &f) { return detail::sameFeature(f, name); };
+        if (((image.features ^ exists(requested)) || (runFeatures ^ exists(requested))) && !detail::hasFeature(device, name))
           missing.push_back(name);
       }
       if (missing.empty())
         return reject(
-            fmt::format("module '{}': device '{}' has every feature image {} requires", module, device.name, detail::show(image)));
+            fmt::format("module '{}': device '{}' has every feature required for image {}", module, device.name, detail::show(image)));
       const auto rejected = attempts ^ exists([&](const auto &a) {
                               return a.image == image && a.outcome == "lacks" && a.detail.size() == missing.size()
                                      && (a.detail ^ forall([&](const auto &d) { return missing ^ contains(d); }));
@@ -220,7 +221,7 @@ inline Verdict judge(const std::string &selector, const std::optional<Inventory>
     }
   }
   if (notes.empty()) return reject(unreachable);
-  return {true, fmt::format("polyrt: no compatible target: {} lacks a feature its image requires ({})", device.name,
+  return {true, fmt::format("polyrt: no compatible target: {} lacks a feature its image or run requires ({})", device.name,
                             notes ^ distinct() ^ mk_string("; "))};
 }
 

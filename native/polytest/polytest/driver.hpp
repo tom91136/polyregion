@@ -380,7 +380,11 @@ inline skip::Verdict skipVerdict(const Task &task, const DriverConfig &cfg, cons
     if (llvm::sys::ExecuteAndWait(args[0], argRefs, envRefs, {std::nullopt, outPath, llvm::StringRef()}, 120, 0, &execErr) == 0)
       inventory = skip::parseInventory(polyregion::read_string(outPath));
   }
-  return skip::judge(selector, inventory, skip::parseManifest(polyregion::read_string(task.output + ".images")), stderrText);
+  std::vector<std::string> runFeatures;
+  if (const auto mirror = std::getenv(polyregion::env::PolyrtMirror); mirror && std::string_view(mirror) == "off")
+    runFeatures.emplace_back(runtime::SystemPagingFeature);
+  const auto manifest = skip::parseManifest(polyregion::read_string(task.output + ".images"));
+  return skip::judge(selector, inventory, manifest, stderrText, runFeatures);
 }
 
 inline void absorbStep(TaskOutcome &o, StepResult &&r) {

@@ -119,8 +119,6 @@ POLYREGION_EXPORT void polystl::details::dispatchManaged(const size_t global, co
 
   const auto mode = polyrt::sma::mirrorModeFor(polyrt::currentDevice->moduleFormat());
   if (mode == polyrt::sma::MirrorMode::Off) {
-    if (polyrt::currentDevice->pagingMode() != PagingMode::System)
-      polyrt::skipExit("POLYRT_MIRROR=off needs system paging (HMM / XNACK+ / system-USM)");
     ArgBuffer buffer;
     bindError(buffer);
     if (localMemBytes > 0) buffer.append(Type::Scratch, nullptr);

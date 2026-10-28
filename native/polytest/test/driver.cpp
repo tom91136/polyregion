@@ -134,9 +134,9 @@ void script(const TempDir &dir, const std::string &name, const std::string &body
 }
 
 polyregion::polytest::Task skippingTask(const TempDir &dir, const std::string &record, const std::string &manifest,
-                                        const std::string &selector = Selector) {
+                                        const std::string &selector = Selector, const std::string &inventory = SwiftShaderInventory) {
   using namespace polyregion::polytest;
-  script(dir, "polyinfo", std::string("cat <<'EOF'\n") + SwiftShaderInventory + "\nEOF");
+  script(dir, "polyinfo", std::string("cat <<'EOF'\n") + inventory + "\nEOF");
   script(dir, "skip.sh", "cat <<'EOF' >&2\n" + record + "\nEOF\nexit 77");
   std::ofstream(dir.file("out.images")) << manifest;
   return {Mode::Offload,
@@ -159,6 +159,18 @@ std::string record(const std::string &device, const std::string &kind, const std
          + outcome + R"(","detail":[)" + detail + R"(]}]})";
 }
 
+constexpr const char *CudaSelector = "cuda@sm_35!cuda@*";
+constexpr const char *PtxManifest = R"({"module":"m","images":[{"kind":"Managed","format":"PTX","features":[]}]})";
+constexpr const char *PagingRecord =
+    R"(polyrt-skip: {"device":{"platform":"CUDA","name":"Ocelot PTX Emulator","kind":"Managed","format":"PTX"},"attempts":[)"
+    R"({"module":"m","kind":"Managed","format":"PTX","features":[],"outcome":"lacks","detail":["paging:system"]}]})";
+
+std::string cudaInventory(const std::string &paging) {
+  return R"({"backend":"CUDA","platform":"CUDA","kind":"Managed","devices":[{"name":"Ocelot PTX Emulator","format":"PTX",)"
+         R"("features":["cuda","nvidia","sm_35","fp64","int64",")"
+         + paging + R"("]}]})";
+}
+
 } // namespace
 
 TEST_CASE("A skip whose device lacks the feature its image requires stays a skip") {
@@ -169,7 +181,38 @@ TEST_CASE("A skip whose device lacks the feature its image requires stays a skip
   const auto outcome = detail::runTask(task, testConfig(dir.path));
   INFO(outcome.failReason);
   CHECK(outcome.status == TaskStatus::Skip);
-  CHECK(outcome.failReason.find("SwiftShader Device lacks a feature its image requires") != std::string::npos);
+  CHECK(outcome.failReason.find("SwiftShader Device lacks a feature its image or run requires") != std::string::npos);
+}
+
+TEST_CASE("A usm skip on a device without system paging stays a skip") {
+  using namespace polyregion::polytest;
+  TempDir dir;
+  polyregion::env::ScopedEnv mirror(polyregion::env::PolyrtMirror, "off");
+  const auto task = skippingTask(dir, PagingRecord, PtxManifest, CudaSelector, cudaInventory("paging:None"));
+  const auto outcome = detail::runTask(task, testConfig(dir.path));
+  INFO(outcome.failReason);
+  CHECK(outcome.status == TaskStatus::Skip);
+  CHECK(outcome.failReason.find("Ocelot PTX Emulator lacks a feature its image or run requires") != std::string::npos);
+}
+
+TEST_CASE("A usm skip on a device with system paging fails") {
+  using namespace polyregion::polytest;
+  TempDir dir;
+  polyregion::env::ScopedEnv mirror(polyregion::env::PolyrtMirror, "off");
+  const auto task = skippingTask(dir, PagingRecord, PtxManifest, CudaSelector, cudaInventory("paging:System"));
+  const auto outcome = detail::runTask(task, testConfig(dir.path));
+  CHECK(outcome.status == TaskStatus::Fail);
+  CHECK(outcome.failReason.find("has every feature required for image") != std::string::npos);
+}
+
+TEST_CASE("A paging skip outside a usm run fails") {
+  using namespace polyregion::polytest;
+  TempDir dir;
+  polyregion::env::ScopedEnv mirror(polyregion::env::PolyrtMirror, "runtime");
+  const auto task = skippingTask(dir, PagingRecord, PtxManifest, CudaSelector, cudaInventory("paging:None"));
+  const auto outcome = detail::runTask(task, testConfig(dir.path));
+  CHECK(outcome.status == TaskStatus::Fail);
+  CHECK(outcome.failReason.find("has every feature required for image") != std::string::npos);
 }
 
 TEST_CASE("A skip on a device that has every required feature fails") {
@@ -231,12 +274,12 @@ TEST_CASE("A module with no image for the device does not mask a justified modul
       R"({"module":"a","kind":"Managed","format":"SPIRV_GLCompute","features":["int64"],"outcome":"lacks","detail":["int64"]},)"
       R"({"module":"b","kind":"HostThreaded","format":"Source","features":[],"outcome":"format","detail":["Source"]}]})";
   const auto inventory = skip::parseInventory(SwiftShaderInventory);
-  CHECK(skip::judge(Selector, inventory, manifest, attempts).justified);
+  CHECK(skip::judge(Selector, inventory, manifest, attempts, {}).justified);
   const auto onlyB = skip::parseManifest(R"({"module":"b","images":[{"kind":"HostThreaded","format":"Source","features":[]}]})");
   const auto bAttempt =
       R"(polyrt-skip: {"device":{"platform":"Vulkan","name":"SwiftShader Device","kind":"Managed","format":"SPIRV_GLCompute"},"attempts":[)"
       R"({"module":"b","kind":"HostThreaded","format":"Source","features":[],"outcome":"format","detail":["Source"]}]})";
-  CHECK_FALSE(skip::judge(Selector, inventory, onlyB, bAttempt).justified);
+  CHECK_FALSE(skip::judge(Selector, inventory, onlyB, bAttempt, {}).justified);
 }
 
 TEST_CASE("A compile step exiting 77 fails") {

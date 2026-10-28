@@ -175,6 +175,11 @@ bool hasFeature(Device &d, const std::string_view token) {
   return d.features() ^ exists([&](const auto &f) { return (f ^ to_lower()) == needle; });
 }
 
+bool lacksRequiredPaging(Device &d) {
+  return polyregion::polyrt::sma::mirrorModeFor(d.moduleFormat()) == polyregion::polyrt::sma::MirrorMode::Off
+         && !hasFeature(d, polyregion::runtime::SystemPagingFeature);
+}
+
 } // namespace
 
 static void selectDevice(Platform &p, const std::vector<std::string_view> &requiredFeatures, const std::string &glob, bool strict) {
@@ -859,6 +864,7 @@ void polyregion::polyrt::skipExit(const char *reason) {
 }
 
 bool polyregion::polyrt::hostFallback() {
+  if (currentDevice && lacksRequiredPaging(*currentDevice)) return false;
   static bool fallback = []() {
     if (const auto env = std::getenv(polyregion::env::PolyrtHostFallback); env) {
       if (const auto v = parseIntNoExcept(env); v && *v == 0) {
@@ -1097,6 +1103,7 @@ bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelOb
       missing.emplace_back(req);
     }
   }
+  if (lacksRequiredPaging(*currentDevice)) missing.emplace_back(polyregion::runtime::SystemPagingFeature);
   if (!missing.empty()) {
     note("lacks", std::move(missing));
     return false;

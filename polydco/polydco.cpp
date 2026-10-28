@@ -287,8 +287,6 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
 
   const auto mode = polyrt::sma::mirrorModeFor(polyrt::currentDevice->moduleFormat());
   if (mode == polyrt::sma::MirrorMode::Off) {
-    if (polyrt::currentDevice->pagingMode() != PagingMode::System)
-      polyrt::skipExit("POLYRT_MIRROR=off needs system paging (HMM / XNACK+ / system-USM)");
     ArgBuffer buffer;
     polyrt::bindAssertError(buffer, asserts, errDev);
     buffer.append(Type::Ptr, &captures);
