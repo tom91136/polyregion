@@ -1,3 +1,4 @@
+#include <array>
 #include <atomic>
 #include <functional>
 #include <vector>
@@ -215,6 +216,36 @@ void runMetalPipelineLimit(Context &ctx, Backend backend, Platform &, Device &de
   device.freeDevice(out_d);
 }
 
+void runScalarRoundTrip(Context &ctx, Backend, Platform &platform, Device &device, const ImageGroup &imageGroup) {
+  POLYTEST_REQUIRE_S(ctx, imageGroup.size() == 1, "expected one image group, got {}", imageGroup.size());
+  device.loadModule("module", imageGroup[0].second);
+  auto q = device.createQueue(std::chrono::seconds(10));
+  auto out_d = device.template mallocDeviceTyped<uint64_t>(1, Access::RW);
+  struct Case {
+    const char *kernel;
+    Type tpe;
+    uint64_t bits;
+  };
+  for (const auto &[kernel, tpe, bits] : std::array{
+           Case{"_u8_roundtrip", Type::IntU8, 0xA5},
+           Case{"_u32_roundtrip", Type::IntU32, 0xDEADBEEF},
+           Case{"_u64_roundtrip", Type::IntU64, 0xFEDCBA9876543210},
+           Case{"_f16_roundtrip", Type::Float16, 0xBEEF},
+       }) {
+    uint64_t zero = 0, out = 0, in = bits;
+    waitAll([&](auto &h) { q->enqueueHostToDeviceAsyncTyped(&zero, out_d, 1, h); });
+    ArgBuffer buffer;
+    prependTidArg(platform, buffer);
+    buffer.append(tpe, &in);
+    buffer.append(Type::Ptr, &out_d);
+    buffer.append(tpe, nullptr);
+    waitAll([&](auto &h) { q->enqueueInvokeAsync("module", kernel, buffer, {}, h); });
+    waitAll([&](auto &h) { q->enqueueDeviceToHostAsyncTyped(out_d, &out, 1, h); });
+    POLYTEST_CHECK_S(ctx, out == bits, "{} stored {:#x}, expected {:#x}", kernel, out, bits);
+  }
+  device.freeDevice(out_d);
+}
+
 std::vector<Task> discoverAll() {
   return discoverMatrix({
 #ifndef __APPLE__
@@ -239,6 +270,8 @@ std::vector<Task> discoverAll() {
 #endif
       {"args-cpu-reloc", generated::cpu_reloc::args, {Backend::RelocatableObject}, &runArgs},
       {"args-cpu-shared", generated::cpu_shared::args, {Backend::SharedObject}, &runArgs},
+      {"args-cpu-reloc-scalars", generated::cpu_reloc::args, {Backend::RelocatableObject}, &runScalarRoundTrip},
+      {"args-cpu-shared-scalars", generated::cpu_shared::args, {Backend::SharedObject}, &runScalarRoundTrip},
   });
 }
 

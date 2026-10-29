@@ -120,3 +120,11 @@ void _arg27(int64_t id, float a, float b, float c, float d, float e, float f, fl
             float w, float x, float y, float z, float *out) {
   out[0] = a + b + c + d + e + f + g + h + i + j + k + l + m + n + o + p + q + r + s + t + u + v + w + x + y + z;
 }
+
+uint8_t _u8_roundtrip(int64_t id, uint8_t a, uint8_t *out) { out[0] = a; return a; }
+
+uint32_t _u32_roundtrip(int64_t id, uint32_t a, uint32_t *out) { out[0] = a; return a; }
+
+uint64_t _u64_roundtrip(int64_t id, uint64_t a, uint64_t *out) { out[0] = a; return a; }
+
+float _f16_roundtrip(int64_t id, float a, float *out) { out[0] = a; return a; }

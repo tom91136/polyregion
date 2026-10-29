@@ -148,34 +148,45 @@ static void ffiInvoke(const char *prefix, uint64_t symbolAddress, const std::vec
     switch (tpe) {
       case Type::Bool1:
       case Type::IntS8: return &ffi_type_sint8;
+      case Type::IntU8: return &ffi_type_uint8;
       case Type::IntU16: return &ffi_type_uint16;
       case Type::IntS16: return &ffi_type_sint16;
+      case Type::IntU32: return &ffi_type_uint32;
       case Type::IntS32: return &ffi_type_sint32;
+      case Type::IntU64: return &ffi_type_uint64;
       case Type::IntS64: return &ffi_type_sint64;
+      case Type::Float16:
       case Type::Float32: return &ffi_type_float;
       case Type::Float64: return &ffi_type_double;
       case Type::Ptr: return &ffi_type_pointer;
       case Type::Void: return &ffi_type_void;
-      default: POLYINVOKE_FATAL(prefix, "Illegal ffi type: %s", magic_enum::enum_name(tpe).data());
+      case Type::Scratch: break;
     }
+    POLYINVOKE_FATAL(prefix, "Illegal ffi type: %s", magic_enum::enum_name(tpe).data());
   };
   if (types.size() != args.size()) POLYINVOKE_FATAL(prefix, "types size (%zu) != args size (%zu)", types.size(), args.size());
 
   // skip stripped Unit0/Nothing params; ffi_type_void as a param misaligns Win x64
   std::vector<ffi_type *> ffiParamTypes;
   std::vector<void *> ffiParamArgs;
+  std::vector<uint64_t> argSlots(args.size());
   ffiParamTypes.reserve(args.size());
   ffiParamArgs.reserve(args.size());
   for (size_t i = 0; i + 1 < types.size(); ++i) {
     if (types[i] == Type::Void) continue;
     ffiParamTypes.push_back(toFFITpe(types[i]));
-    ffiParamArgs.push_back(args[i]);
+    std::memcpy(&argSlots[i], args[i], byteOfType(types[i]));
+    ffiParamArgs.push_back(&argSlots[i]);
   }
   ffi_type *returnFfiTpe = toFFITpe(types.back());
+  uint64_t retSlot{};
   ffi_cif cif{};
   ffi_status status = ffi_prep_cif(&cif, FFI_DEFAULT_ABI, static_cast<unsigned>(ffiParamTypes.size()), returnFfiTpe, ffiParamTypes.data());
   switch (status) {
-    case FFI_OK: ffi_call(&cif, FFI_FN(symbolAddress), args.back(), ffiParamArgs.data()); break;
+    case FFI_OK:
+      ffi_call(&cif, FFI_FN(symbolAddress), &retSlot, ffiParamArgs.data());
+      if (types.back() != Type::Void) std::memcpy(args.back(), &retSlot, byteOfType(types.back()));
+      break;
     case FFI_BAD_TYPEDEF: POLYINVOKE_FATAL(prefix, "ffi_prep_cif: FFI_BAD_TYPEDEF (%d)", status);
     case FFI_BAD_ABI: POLYINVOKE_FATAL(prefix, "ffi_prep_cif: FFI_BAD_ABI (%d)", status);
     default: POLYINVOKE_FATAL(prefix, "ffi_prep_cif: unknown error (%d)", status);
