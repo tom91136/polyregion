@@ -37,6 +37,10 @@ if [ "${OS:-}" = "Windows_NT" ] && [ -z "${VSCMD_VER:-}" ] && [ -z "${POLYREGION
 fi
 '''
 
+core_guard := '''
+case "$(cat /proc/sys/kernel/core_pattern 2>/dev/null)" in /*|\|*) ;; *) ulimit -c 0 ;; esac
+'''
+
 # Shared vcpkg install root so `just build-vcpkg-deps` and `just configure` agree on a location.
 export VCPKG_INSTALLED_DIR := env_var_or_default('VCPKG_INSTALLED_DIR', justfile_directory() / "native" / ".vcpkg" / "vcpkg_installed")
 
@@ -273,7 +277,7 @@ test-native *args='': build-pass-native
     #!/usr/bin/env bash
     set -euo pipefail
     {{ msvc_reenter }}
-    ulimit -c 0
+    {{ core_guard }}
     BUILD=$(just _native-build)
     for package_service in "$PWD/native/polyc/libpolypass.so" "$PWD/native/polyc/libpolypass.dylib" "$PWD/native/polyc/libpolypass.dll"; do
         if [ -s "$package_service" ]; then export POLYPASS_PLUGINS="$package_service"; break; fi
@@ -329,7 +333,7 @@ test-native-with-emulators *args='': _pass-bundle
     [ -f emulators/out/env.sh ] || { echo "no emulators/out -- run 'just build-emulators' first"; exit 1; }
     bash emulators/check_inputs.sh emulators/out
     source emulators/out/env.sh
-    ulimit -c 0
+    {{ core_guard }}
     BUILD=$(just _native-build)
     export POLYREGION_TEST_PROFILE=emulators
     export POLYINVOKE_TEST_LOCK="${POLYINVOKE_TEST_LOCK:-0}"
@@ -398,7 +402,7 @@ test-native-dist profile='' junit='native-test-results' *args='':
     fi
     j=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")
     to=600; if [ "{{ profile }}" = emulators ]; then to=1500; fi
-    ulimit -c 0
+    {{ core_guard }}
     junit="$TESTS/{{ junit }}.xml"; rm -f "$junit"
     rc=0; CLICOLOR_FORCE=$([ -t 1 ] && echo 1 || echo 0) ctest --test-dir "$TESTS" -j "$j" --timeout "$to" --output-on-failure --output-junit "$junit" {{ args }} || rc=$?
     skips=$(grep -m1 -o 'skipped="[0-9]*"' "$junit" 2>/dev/null | tr -dc 0-9 || true)
@@ -677,7 +681,7 @@ test-native-san *args='':
     #!/usr/bin/env bash
     set -euo pipefail
     export POLYREGION_ASAN=ON
-    ulimit -c 0
+    {{ core_guard }}
     BUILD=$(just _native-build)
     CLICOLOR_FORCE=$([ -t 1 ] && echo 1 || echo 0) ctest --test-dir "$BUILD" {{ args }}
 
