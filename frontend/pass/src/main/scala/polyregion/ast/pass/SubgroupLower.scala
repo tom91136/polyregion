@@ -620,19 +620,24 @@ private final class Lowering(
     )
   }
 
-  private def zero(tpe: p.Type): p.Term = tpe match {
-    case p.Type.IntS8   => p.Term.IntS8Const(0)
-    case p.Type.IntU8   => p.Term.IntU8Const(0)
-    case p.Type.IntS16  => p.Term.IntS16Const(0)
-    case p.Type.IntU16  => p.Term.IntU16Const(0)
-    case p.Type.IntS32  => p.Term.IntS32Const(0)
-    case p.Type.IntU32  => p.Term.IntU32Const(0)
-    case p.Type.IntS64  => p.Term.IntS64Const(0)
-    case p.Type.IntU64  => p.Term.IntU64Const(0)
-    case p.Type.Float32 => p.Term.Float32Const(0f)
-    case p.Type.Float64 => p.Term.Float64Const(0d)
-    case other =>
-      throw IllegalArgumentException(s"work-group exclusive scan has no additive identity for ${other.repr}")
+  private def identity(op: p.AtomicOp, tpe: p.Type): p.Term = {
+    val bits   = scalarBytes(tpe).getOrElse(0L) * 8
+    val signed = tpe.isSigned
+    val (integral, fractional) = op match {
+      case p.AtomicOp.Add | p.AtomicOp.Or | p.AtomicOp.Xor => (0L, 0d)
+      case p.AtomicOp.And                                  => (-1L, 0d)
+      case p.AtomicOp.Min if signed                        => ((1L << (bits - 1)) - 1, Double.PositiveInfinity)
+      case p.AtomicOp.Min                                  => (-1L, Double.PositiveInfinity)
+      case p.AtomicOp.Max if signed                        => (-(1L << (bits - 1)), Double.NegativeInfinity)
+      case p.AtomicOp.Max                                  => (0L, Double.NegativeInfinity)
+      case p.AtomicOp.Xchg | p.AtomicOp.Sub =>
+        throw IllegalArgumentException(s"work-group lowering requires an associative operation; got ${op.repr}")
+    }
+    val constant =
+      if (tpe == p.Type.Bool1) Some(p.Term.Bool1Const(integral != 0))
+      else if (tpe.isFractional) Fold.floatTerm(tpe, fractional)
+      else Fold.intTerm(tpe, integral)
+    constant.getOrElse(throw IllegalArgumentException(s"work-group scan has no ${op.repr} identity for ${tpe.repr}"))
   }
 
   private def groupScan(
@@ -642,8 +647,6 @@ private final class Lowering(
       pool: ScratchPool,
       inclusive: Boolean
   ): (p.Expr, List[p.Stmt]) = {
-    if (!inclusive && op != p.AtomicOp.Add)
-      throw IllegalArgumentException(s"work-group exclusive scan lowering supports only add; got ${op.repr}")
     val buffers   = pool.allocFor(List.fill(2)(p.Type.Arr(rtn, maxGroupSize, p.Type.Space.Local)))
     val localId   = fresh("group_local_id", p.Type.IntU32)
     val localSize = fresh("group_local_size", p.Type.IntU32)
@@ -700,7 +703,7 @@ private final class Lowering(
         List(
           p.Stmt.Var(first, Some(p.Expr.IntrOp(p.Intr.LogicEq(sel(localId), u32(0)))), isMutable = false),
           p.Stmt.Var(previous, Some(p.Expr.IntrOp(p.Intr.Sub(sel(localId), u32(1), p.Type.IntU32))), isMutable = false),
-          p.Stmt.Var(result, Some(p.Expr.Alias(zero(rtn))), isMutable = true),
+          p.Stmt.Var(result, Some(p.Expr.Alias(identity(op, rtn))), isMutable = true),
           p.Stmt.Cond(
             sel(first),
             Nil,
