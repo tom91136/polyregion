@@ -25,6 +25,8 @@ inline void prependTidArg(invoke::Platform &platform, invoke::ArgBuffer &buffer)
   if (platform.kind() == invoke::PlatformKind::HostThreaded) buffer.append(invoke::Type::IntS64, nullptr);
 }
 
+void checkHostCapabilities(polytest::cases::Context &ctx, invoke::Platform &platform, invoke::Device &device);
+
 using DeviceRunner =
     std::function<void(polytest::cases::Context &, invoke::Backend, invoke::Platform &, invoke::Device &, const ImageGroup &)>;
 

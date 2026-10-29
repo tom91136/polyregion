@@ -23,6 +23,8 @@ namespace polyregion::invoke::object {
 using WriteLock = std::unique_lock<std::shared_mutex>;
 using ReadLock = std::shared_lock<std::shared_mutex>;
 
+inline size_t hostConcurrency() { return std::max<size_t>(1, std::thread::hardware_concurrency()); }
+
 class POLYREGION_EXPORT ObjectDevice : public Device {
 public:
   POLYREGION_EXPORT int64_t id() override;
@@ -37,6 +39,10 @@ public:
   POLYREGION_EXPORT void freeDevice(uintptr_t ptr) override;
   POLYREGION_EXPORT std::optional<void *> mallocShared(size_t size, Access access) override;
   POLYREGION_EXPORT void freeShared(void *ptr) override;
+  POLYREGION_EXPORT size_t maxThreadsPerBlock() override;
+  POLYREGION_EXPORT size_t localMemoryBytes() override;
+  POLYREGION_EXPORT size_t globalMemoryBytes() override;
+  POLYREGION_EXPORT size_t computeUnits() override;
 };
 
 class POLYREGION_EXPORT ObjectDeviceQueue : public DeviceQueue {
@@ -48,7 +54,7 @@ protected:
       if (cb) (*cb)();
       return;
     }
-    const size_t hw = std::max<size_t>(1, std::thread::hardware_concurrency());
+    const size_t hw = hostConcurrency();
     const size_t workers = std::min(N, hw);
     const size_t chunk = (N + workers - 1) / workers;
     auto pending = std::make_shared<std::atomic_size_t>(workers);

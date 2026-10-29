@@ -21,8 +21,10 @@
 #include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
+#include "polyinvoke/object_platform.h"
 #include "polyregion/env_keys.h"
 #include "polyregion/llvm_utils.hpp"
+#include "polyregion/types.h"
 
 #include "polytest/profile.hpp"
 
@@ -199,6 +201,20 @@ int runOnTarget(invoke::Backend backend, std::string_view arch, const std::vecto
     return 1;
   }
   return ctx.failed ? 1 : 0;
+}
+
+void checkHostCapabilities(Context &ctx, invoke::Platform &platform, invoke::Device &device) {
+  if (platform.kind() != invoke::PlatformKind::HostThreaded) return;
+  const auto threads = device.maxThreadsPerBlock();
+  POLYTEST_CHECK_S(ctx, threads == program_meta::HostWorkgroupMaxLanes, "max threads per block: got {}, expected {}", threads,
+                   program_meta::HostWorkgroupMaxLanes);
+  const auto local = device.localMemoryBytes();
+  POLYTEST_CHECK_S(ctx, local == program_meta::HostWorkgroupMemoryBytes, "local memory bytes: got {}, expected {}", local,
+                   program_meta::HostWorkgroupMemoryBytes);
+  const auto units = device.computeUnits();
+  POLYTEST_CHECK_S(ctx, units == invoke::object::hostConcurrency(), "compute units: got {}, expected {}", units,
+                   invoke::object::hostConcurrency());
+  POLYTEST_CHECK_S(ctx, device.globalMemoryBytes() > 0, "global memory bytes: got 0");
 }
 
 std::vector<Task> discoverMatrix(const std::vector<Suite> &suites) {

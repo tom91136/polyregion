@@ -36,6 +36,7 @@ const std::vector<float> xs{0.f,
                             std::numeric_limits<float>::min()};
 
 void runFma(Context &ctx, Backend backend, Platform &platform, Device &device, const ImageGroup &imageGroup) {
+  checkHostCapabilities(ctx, platform, device);
   if (imageGroup.size() != 1) {
     POLYTEST_FAIL(ctx, "expected exactly 1 image group, got {} for device `{}` (backend={})", //
                   imageGroup.size(), device.name(), magic_enum::enum_name(backend));

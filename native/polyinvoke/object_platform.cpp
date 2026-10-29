@@ -13,6 +13,10 @@
 
 #if defined(__linux__) || defined(__APPLE__)
   #include <dlfcn.h>
+  #include <unistd.h>
+#endif
+#ifdef __APPLE__
+  #include <sys/sysctl.h>
 #endif
 
 #include "llvm/ADT/SmallString.h"
@@ -42,6 +46,11 @@
 #include "polyregion/env_keys.h"
 #include "polyregion/llvm_utils.hpp"
 #include "polyregion/types.h"
+
+#ifdef _WIN32
+  #define WIN32_LEAN_AND_MEAN
+  #include <windows.h>
+#endif
 
 // keep last: libffi pollutes the global namespace with macros
 #include "ffi_wrapped.h"
@@ -116,7 +125,7 @@ static void groupedLaunch(const size_t groups, const size_t lanes, const MaybeCa
     if (cb) (*cb)();
     return;
   }
-  const size_t slots = std::clamp<size_t>(std::max<size_t>(1, std::thread::hardware_concurrency()) / lanes, 1, groups);
+  const size_t slots = std::clamp<size_t>(hostConcurrency() / lanes, 1, groups);
   auto pending = std::make_shared<std::atomic_size_t>(slots);
   auto run = std::make_shared<std::function<void(size_t)>>(std::move(task));
   for (size_t slot = 0; slot < slots; ++slot) {
@@ -256,6 +265,34 @@ std::optional<void *> ObjectDevice::mallocShared(size_t size, Access access) {
 void ObjectDevice::freeShared(void *ptr) {
   POLYINVOKE_TRACE();
   std::free(ptr);
+}
+size_t ObjectDevice::maxThreadsPerBlock() {
+  POLYINVOKE_TRACE();
+  return polyregion::program_meta::HostWorkgroupMaxLanes;
+}
+size_t ObjectDevice::localMemoryBytes() {
+  POLYINVOKE_TRACE();
+  return HostGroupLocalBytes;
+}
+size_t ObjectDevice::globalMemoryBytes() {
+  POLYINVOKE_TRACE();
+#ifdef _WIN32
+  MEMORYSTATUSEX status{};
+  status.dwLength = sizeof(status);
+  return GlobalMemoryStatusEx(&status) ? static_cast<size_t>(status.ullTotalPhys) : 0;
+#elif defined(__APPLE__)
+  uint64_t bytes = 0;
+  size_t size = sizeof(bytes);
+  return sysctlbyname("hw.memsize", &bytes, &size, nullptr, 0) == 0 ? static_cast<size_t>(bytes) : 0;
+#else
+  const auto pages = sysconf(_SC_PHYS_PAGES);
+  const auto pageSize = sysconf(_SC_PAGESIZE);
+  return pages > 0 && pageSize > 0 ? static_cast<size_t>(pages) * static_cast<size_t>(pageSize) : 0;
+#endif
+}
+size_t ObjectDevice::computeUnits() {
+  POLYINVOKE_TRACE();
+  return hostConcurrency();
 }
 
 // ---
