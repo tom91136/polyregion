@@ -43,6 +43,7 @@ ProbeResult probe(const std::string &testName, const std::vector<std::pair<std::
   std::string errors = executionError;
   if (const auto buffer = llvm::MemoryBuffer::getFile(errorPath)) errors += (*buffer)->getBuffer().str();
   llvm::sys::fs::remove(errorPath);
+  std::erase(errors, '\r');
   return {code, std::move(errors)};
 }
 
