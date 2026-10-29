@@ -290,7 +290,10 @@ std::string packageEntryPipeline(const compiletime::Target target, const std::st
     case compiletime::Target::Object_LLVM_NVPTX64:
       return opt + ";SubgroupLower(lowerSubgroups=false,lowerGroups=true);StructuredExit;RegionRespace";
     case compiletime::Target::Object_LLVM_AMDGCN: return opt + ";SubgroupLower(lowerSubgroups=false,lowerGroups=true);StructuredExit";
-    default: return opt + ";StructuredExit";
+    default:
+      return opt
+             + fmt::format(";SubgroupLower(lowerSubgroups=false,lowerGroups=true,maxGroupSize={});StructuredExit",
+                           polyregion::program_meta::HostWorkgroupMaxLanes);
   }
 }
 

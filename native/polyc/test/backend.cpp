@@ -2176,6 +2176,7 @@ TEST_CASE("package entry pipelines lower workgroup collectives on non-native rou
        "SubgroupLower(lowerSubgroups=false,lowerGroups=true);StructuredExit;RegionRespace;ArenaLower"},
       {Target::Object_LLVM_NVPTX64, "sm_70", "SubgroupLower(lowerSubgroups=false,lowerGroups=true);StructuredExit"},
       {Target::Object_LLVM_AMDGCN, "gfx906", "SubgroupLower(lowerSubgroups=false,lowerGroups=true);StructuredExit"},
+      {Target::Object_LLVM_HOST, "native", "SubgroupLower(lowerSubgroups=false,lowerGroups=true);StructuredExit"},
   };
   for (const auto &[target, arch, pipeline] : routes) {
     INFO(arch);

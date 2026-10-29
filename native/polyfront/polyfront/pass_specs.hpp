@@ -36,8 +36,9 @@ inline std::string deviceArenaLogical(std::optional<int> stackDepth = {}, bool l
          + ";StructuredExit;PartialEval(canonicaliseAddresses=true);ArenaView;RegionRespace;VerifyAnchors(strict=true)";
 }
 
-inline std::string groupLowered(std::optional<int> stackDepth) {
-  return fullOpt(stackDepth) + ";SubgroupLower(lowerSubgroups=false,lowerGroups=true);StructuredExit;RegionRespace";
+inline std::string groupLowered(std::optional<int> stackDepth, std::optional<uint64_t> maxGroupSize = {}) {
+  const auto ceiling = maxGroupSize ? fmt::format(",maxGroupSize={}", *maxGroupSize) : std::string();
+  return fullOpt(stackDepth) + fmt::format(";SubgroupLower(lowerSubgroups=false,lowerGroups=true{});StructuredExit;RegionRespace", ceiling);
 }
 
 inline std::string hostMirror(const std::string &mirrorId) { return fmt::format("Mirror(id={})", mirrorId); }
@@ -56,7 +57,7 @@ inline std::vector<std::string> arenaPassesFor(const compiletime::Target &target
     case compiletime::Target::Source_C_OpenCL2_0: return {"--passes", deviceArena(stackDepth)};
     case compiletime::Target::Object_LLVM_NVPTX64:
     case compiletime::Target::Object_LLVM_AMDGCN: return {"--passes", groupLowered(stackDepth)};
-    default: return {"--passes", fullOpt(stackDepth) + ";StructuredExit;RegionRespace"};
+    default: return {"--passes", groupLowered(stackDepth, program_meta::HostWorkgroupMaxLanes)};
   }
 }
 
