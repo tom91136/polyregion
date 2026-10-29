@@ -104,9 +104,14 @@ extern "C" POLYREGION_EXPORT void *__polyregion_host_group_local(const uint64_t 
   return hostTaskLocal.get() + offset;
 }
 
+static constexpr const char *RELOBJ_PREFIX = "RelocatableObject";
+
 static bool groupedPolicy(const Policy &policy) { return policy.local && policy.local->first.x > 1; }
 
 static void groupedLaunch(const size_t groups, const size_t lanes, const MaybeCallback &cb, std::function<void(size_t)> task) {
+  if (lanes > polyregion::program_meta::HostWorkgroupMaxLanes)
+    POLYINVOKE_FATAL(RELOBJ_PREFIX, "work-group size %zu exceeds host capacity of %zu lanes", lanes,
+                     static_cast<size_t>(polyregion::program_meta::HostWorkgroupMaxLanes));
   if (groups == 0) {
     if (cb) (*cb)();
     return;
@@ -300,8 +305,6 @@ std::vector<std::unique_ptr<Device>> RelocatablePlatform::enumerate() {
   xs[0] = std::make_unique<RelocatableDevice>();
   return xs;
 }
-
-static constexpr const char *RELOBJ_PREFIX = "RelocatableObject";
 
 static std::string withGlobalPrefix(char prefix, std::string_view name) {
   return prefix ? std::string(1, prefix) + std::string(name) : std::string(name);

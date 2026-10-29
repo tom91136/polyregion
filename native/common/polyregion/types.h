@@ -28,6 +28,7 @@
 namespace polyregion::program_meta {
 inline constexpr int64_t VkWorkgroupSizeXValue = 256;
 inline constexpr uint64_t HostWorkgroupMemoryBytes = 64 * 1024;
+inline constexpr uint64_t HostWorkgroupMaxLanes = 1024;
 } // namespace polyregion::program_meta
 
 namespace polyregion::invoke {
