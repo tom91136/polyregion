@@ -2152,11 +2152,13 @@ TEST_CASE("package entry pipelines lower workgroup collectives on non-native rou
   using namespace polyregion::polyast::dsl;
 
   const auto tpe = Type::IntS32().widen();
-  const Named value("value", tpe), result("result", tpe);
-  const Function entry =
-      mkFn("kernel", {Arg(value, {})}, Type::Unit0(),
-           {Var(result, Expr::SpecOp(Spec::GpuGroupReduce(AtomicOp::Add(), selectNamed(value), tpe)).widen(), false).widen(), ret()},
-           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const Named value("value", tpe), result("result", tpe), inclusive("inclusive", tpe), exclusive("exclusive", tpe);
+  const Function entry = mkFn(
+      "kernel", {Arg(value, {})}, Type::Unit0(),
+      {Var(result, Expr::SpecOp(Spec::GpuGroupReduce(AtomicOp::Add(), selectNamed(value), tpe)).widen(), false).widen(),
+       Var(inclusive, Expr::SpecOp(Spec::GpuGroupInclusiveScan(AtomicOp::Add(), selectNamed(value), tpe)).widen(), false).widen(),
+       Var(exclusive, Expr::SpecOp(Spec::GpuGroupExclusiveScan(AtomicOp::Add(), selectNamed(value), tpe)).widen(), false).widen(), ret()},
+      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
   const Program program(entry, {}, {}, PassPhase::Initial(), {});
 
   struct Route {

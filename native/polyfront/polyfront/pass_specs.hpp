@@ -22,8 +22,9 @@ inline std::string deviceOpt(std::optional<int> stackDepth) { return "DeadFuncti
 // addressing `(T*)&arena[off]`; SPIR-V cannot cast int<->ptr, so it reads through typed scalar views.
 // StructuredExit runs before ArenaLower so a runtime assert message's copy loop (an opaque-pointer deref) is
 // arena-lowered too; it stays after FullOpt so the optimiser cannot DCE its error-buffer writes
-inline std::string deviceArena(std::optional<int> stackDepth = {}) {
-  return fullOpt(stackDepth) + ";SubgroupLower;StructuredExit;ArenaLower;VerifyAnchors(strict=true)";
+inline std::string subgroupLower(bool lowerGroups) { return lowerGroups ? ";SubgroupLower(lowerGroups=true)" : ";SubgroupLower"; }
+inline std::string deviceArena(std::optional<int> stackDepth = {}, bool lowerGroups = false) {
+  return fullOpt(stackDepth) + subgroupLower(lowerGroups) + ";StructuredExit;ArenaLower;VerifyAnchors(strict=true)";
 }
 // VerifyAnchors(strict) after ArenaView asserts every pointer representation was solved into an arena view
 // (logical SPIR-V cannot deref a raw pointer) - a missed deref becomes a compile error, not a device fault.
@@ -31,8 +32,12 @@ inline std::string deviceArena(std::optional<int> stackDepth = {}) {
 // root-anchors derived-pointer temps; it runs after StructuredExit so the temps that lowering injects are
 // canonicalised too, without disturbing the assert/#error side-channel writes
 inline std::string deviceArenaLogical(std::optional<int> stackDepth = {}, bool lowerGroups = false) {
-  return fullOpt(stackDepth) + (lowerGroups ? ";SubgroupLower(lowerGroups=true)" : ";SubgroupLower")
+  return fullOpt(stackDepth) + subgroupLower(lowerGroups)
          + ";StructuredExit;PartialEval(canonicaliseAddresses=true);ArenaView;RegionRespace;VerifyAnchors(strict=true)";
+}
+
+inline std::string groupLowered(std::optional<int> stackDepth) {
+  return fullOpt(stackDepth) + ";SubgroupLower(lowerSubgroups=false,lowerGroups=true);StructuredExit;RegionRespace";
 }
 
 inline std::string hostMirror(const std::string &mirrorId) { return fmt::format("Mirror(id={})", mirrorId); }
@@ -42,13 +47,15 @@ inline std::string hostMirror(const std::string &mirrorId) { return fmt::format(
 inline std::vector<std::string> arenaPassesFor(const compiletime::Target &target, const std::string &arch,
                                                std::optional<int> stackDepth = {}) {
   switch (target) {
-    case compiletime::Target::Object_LLVM_SPIRV_GLCompute: return {"--passes", deviceArenaLogical(stackDepth)};
+    case compiletime::Target::Object_LLVM_SPIRV_GLCompute: return {"--passes", deviceArenaLogical(stackDepth, true)};
     case compiletime::Target::Object_LLVM_SPIRV32_Kernel:
     case compiletime::Target::Object_LLVM_SPIRV64_Kernel:
       return {"--passes", deviceArenaLogical(stackDepth, !compiletime::spirvKernelGeneric(arch))};
     case compiletime::Target::Source_C_OpenCL1_1:
-    case compiletime::Target::Source_C_OpenCL2_0:
-    case compiletime::Target::Source_C_Metal1_0: return {"--passes", deviceArena(stackDepth)};
+    case compiletime::Target::Source_C_Metal1_0: return {"--passes", deviceArena(stackDepth, true)};
+    case compiletime::Target::Source_C_OpenCL2_0: return {"--passes", deviceArena(stackDepth)};
+    case compiletime::Target::Object_LLVM_NVPTX64:
+    case compiletime::Target::Object_LLVM_AMDGCN: return {"--passes", groupLowered(stackDepth)};
     default: return {"--passes", fullOpt(stackDepth) + ";StructuredExit;RegionRespace"};
   }
 }
