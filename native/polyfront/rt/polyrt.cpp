@@ -440,7 +440,7 @@ POLYREGION_EXPORT extern "C" uint64_t polyrt_device_subgroup_size(void *context)
 }
 template <typename F> uint64_t requireDeviceCapability(void *context, const char *name, F query) {
   const auto value = query(*requireContext(context, name).device);
-  if (value == 0) throw std::runtime_error(fmt::format("{} is unavailable for the active device", name));
+  if (value == 0) POLYREGION_FATAL("PolyRT", "%s is unavailable for the active device", name);
   return value;
 }
 POLYREGION_EXPORT extern "C" uint64_t polyrt_device_local_memory_bytes(void *context) {
