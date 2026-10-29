@@ -398,10 +398,7 @@ Value polyregion::polyfc::interface_resolution::emitPackageCall(OpBuilder &build
     }
     const auto allLoaded = [&](OpBuilder &at, const size_t group) -> Value {
       return groupLoaded[group] | fold_left(polyfc::boolConst(at, true), [&](const Value acc, const auto &loaded) -> Value {
-               const auto remoteLoaded = declare("polyrt_remote_loaded", {pointerType, at.getI1Type()}, {at.getI1Type()});
-               const auto name = polyfc::strConst(at, module, loaded.first, true);
-               const auto checked = func::CallOp::create(at, loc, remoteLoaded, ValueRange{name, loaded.second}).getResult(0);
-               return arith::AndIOp::create(at, loc, acc, checked).getResult();
+               return arith::AndIOp::create(at, loc, acc, loaded.second).getResult();
              });
     };
     const auto requireAllLoaded = [&](OpBuilder &at, const size_t group) {
@@ -424,17 +421,19 @@ Value polyregion::polyfc::interface_resolution::emitPackageCall(OpBuilder &build
       const std::function<void(OpBuilder &, size_t)> dispatch = [&](OpBuilder &at, const size_t position) {
         if (position == order.size()) {
           if (!bound) requireAllLoaded(at, order.back());
+          else {
+            const auto remoteFallback = declare("polyrt_remote_fallback", {pointerType}, {});
+            func::CallOp::create(at, loc, remoteFallback, ValueRange{polyfc::strConst(at, module, entries.front().entryName, true)});
+          }
           return;
         }
         const auto group = order[position];
-        auto branch = fir::IfOp::create(at, loc, allLoaded(at, group), position + 1 < order.size() || !bound);
+        auto branch = fir::IfOp::create(at, loc, allLoaded(at, group), true);
         auto run = branch.getThenBodyBuilder();
         callEntry(run, group);
         if (bound) LLVM::StoreOp::create(run, loc, polyfc::boolConst(run, true), bound);
-        if (position + 1 < order.size() || !bound) {
-          auto rest = branch.getElseBodyBuilder();
-          dispatch(rest, position + 1);
-        }
+        auto rest = branch.getElseBodyBuilder();
+        dispatch(rest, position + 1);
       };
       dispatch(b, 0);
     }

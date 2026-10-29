@@ -89,7 +89,7 @@ Runtime platform selectors (`POLYRT_PLATFORM`):
 | env var | values | effect |
 |---|---|---|
 | `POLYRT_PLATFORM` | see above | select GPU/CPU backend |
-| `POLYRT_HOST_FALLBACK` | `0`/`1` | when `1`, fall back to host CPU if GPU init fails (default `1`) |
+| `POLYRT_HOST_FALLBACK` | `0`/`1` | when `1`, fall back to host CPU if no device or kernel object matches (default `1`) |
 | `POLYRT_DEBUG` | `0`-`3` | runtime log level; `2` (Debug) prints SMA mirror/sync trace |
 | `POLYSTL_NO_OFFLOAD` | any non-empty | skip GPU/host dispatch entirely; run the lambda inline on the calling thread |
 | `POLYFRONT_VERBOSE` | `0`/`1` | when `1`, dump polyAST IR before invoking polyc |

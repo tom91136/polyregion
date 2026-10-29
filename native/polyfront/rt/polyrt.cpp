@@ -616,9 +616,9 @@ POLYREGION_EXPORT extern "C" void polyrt_remote_require_loaded(void *context, co
   if (!loaded) polyregion::polyrt::noCompatibleKernelExit(moduleName);
 }
 
-POLYREGION_EXPORT extern "C" bool polyrt_remote_loaded(const char *moduleName, const bool loaded) noexcept {
-  if (!loaded) log(DebugLevel::Debug, "<%s> No kernel object matched the device, running the interface fallback", moduleName);
-  return loaded;
+POLYREGION_EXPORT extern "C" void polyrt_remote_fallback(const char *site) noexcept {
+  if (!polyregion::polyrt::hostFallback()) polyregion::polyrt::noCompatibleKernelExit(site);
+  log(DebugLevel::Debug, "<%s> No kernel object matched the device, running the interface fallback", site);
 }
 
 static void remoteLaunch(void *context, const char *moduleName, const char *kernelName, const size_t gridX, const size_t gridY,

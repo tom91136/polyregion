@@ -506,12 +506,10 @@ static void materializeInterfaceCall(clang::CompilerInstance &CI, clang::ASTCont
       statements.emplace_back(S.CreateBuiltinBinOp({}, clang::BO_Assign, mkDeclRef(C, loaded), anyLoaded).get());
     }
   }
-  auto *remoteLoaded = mkExternCFn(C, "polyrt_remote_loaded", C.BoolTy, {constCharStarTy(C), C.BoolTy});
   auto *requireLoaded = mkExternCFn(C, "polyrt_remote_require_loaded", C.VoidTy, {C.VoidPtrTy, constCharStarTy(C), C.BoolTy});
   const auto allLoaded = [&](const size_t group) -> clang::Expr * {
     return groupLoaded[group] | fold_left(static_cast<clang::Expr *>(boolLit(true)), [&](clang::Expr *acc, const auto &module) {
-             return joinAnd(acc, mkCall(C, remoteLoaded,
-                                        {mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, module.first)), mkLoad(C, module.second)}));
+             return joinAnd(acc, mkLoad(C, module.second));
            });
   };
   const auto requireAllLoaded = [&](const size_t group) {
@@ -534,6 +532,11 @@ static void materializeInterfaceCall(clang::CompilerInstance &CI, clang::ASTCont
     std::stable_partition(order.begin(), order.end(), [&](const size_t group) { return !groupLoaded[group].empty(); });
     clang::Stmt *chain = nullptr;
     if (!fallback) chain = clang::CompoundStmt::Create(C, requireAllLoaded(order.back()), {}, {}, {});
+    else {
+      auto *remoteFallback = mkExternCFn(C, "polyrt_remote_fallback", C.VoidTy, {constCharStarTy(C)});
+      std::vector<clang::Stmt *> miss{mkCall(C, remoteFallback, {mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, site.declaration))})};
+      chain = clang::CompoundStmt::Create(C, miss, {}, {}, {});
+    }
     for (auto group = order.rbegin(); group != order.rend(); ++group) {
       std::vector<clang::Stmt *> run{entryCall(*group)};
       if (fallback) run.emplace_back(S.CreateBuiltinBinOp({}, clang::BO_Assign, mkDeclRef(C, boundDecl), boolLit(true)).get());
