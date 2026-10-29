@@ -139,15 +139,7 @@ test-package filter='' extra='' ctest='':
     set -euo pipefail
     dist="$(just dist)"
     if [ -n "${EMULATORS:-}" ]; then
-      if [ -f "$EMULATORS/env.sh" ]; then
-        source "$EMULATORS/env.sh"
-      else
-        export PATH="$(cygpath -u "$EMULATORS" 2>/dev/null || echo "$EMULATORS")/bin:$PATH"
-        vk="$EMULATORS/share/vulkan/icd.d"; icd=$(echo "$vk"/lvp_icd.*.json)
-        [ -f "$vk/vk_swiftshader_icd.json" ] && icd="$icd;$vk/vk_swiftshader_icd.json" || true
-        export VK_DRIVER_FILES="$icd" VK_ICD_FILENAMES="$icd" POLYINVOKE_OPENCL_CPU=1
-        export POLYINVOKE_OPENCL_LIB="$(cygpath -w "$EMULATORS/bin/OpenCL.dll" 2>/dev/null || echo "$EMULATORS/bin/OpenCL.dll")"
-      fi
+      source "{{ root }}/../emulators/bundle-env.sh" "$EMULATORS"
       export POLYREGION_TEST_PROFILE=emulators POLYINVOKE_TEST_LOCK="${POLYINVOKE_TEST_LOCK:-0}"
     fi
     case "{{ extra }}" in
