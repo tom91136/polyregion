@@ -132,18 +132,19 @@ TEST_CASE("interval index agrees with a linear scan over overlapping intervals")
   IntervalIndex<Entry> index;
   std::map<uintptr_t, Entry> reference;
   std::mt19937_64 rng(42);
+  const auto below = [&rng](size_t bound) { return static_cast<size_t>(rng() % bound); };
   for (int step = 0; step < 20000; ++step) {
-    const uintptr_t base = 0x1000 + (rng() % 2048) * 16;
+    const uintptr_t base = 0x1000 + below(2048) * 16;
     if (const auto it = reference.find(base); it != reference.end()) {
       REQUIRE(index.erase(base));
       reference.erase(it);
     } else {
-      const auto &entry = reference.emplace(base, Entry{base, (rng() % 64) * 16}).first->second;
+      const auto &entry = reference.emplace(base, Entry{base, below(64) * 16}).first->second;
       index.insert(base, entry.size, &entry);
     }
     REQUIRE(index.size() == reference.size());
 
-    const uintptr_t point = 0x1000 + rng() % (2048 * 16 + 64 * 16);
+    const uintptr_t point = 0x1000 + below(2048 * 16 + 64 * 16);
     const Entry *expectedContaining = nullptr, *expectedEnding = nullptr;
     for (const auto &[b, entry] : reference) {
       if (b > point) break;
