@@ -555,6 +555,13 @@ void validatePolicyAndArgs(const char *prefix, std::vector<Type> types, const Po
     POLYINVOKE_FATAL(prefix, "Expecting first argument as index (%s), but was %s", magic_enum::enum_name(Type::IntS64).data(),
                      magic_enum::enum_name(types[0]).data());
 }
+static void validateLocalStorage(const char *prefix, const Policy &policy, const uint64_t staticBytesAddr) {
+  const size_t staticBytes = staticBytesAddr ? *reinterpret_cast<const uint64_t *>(staticBytesAddr) : 0;
+  const size_t dynamicBytes = policy.local ? policy.local->second : 0;
+  if (staticBytes + dynamicBytes > HostGroupLocalBytes)
+    POLYINVOKE_FATAL(prefix, "work-group storage of %zu static and %zu dynamic bytes exceeds the host capacity of %zu bytes", staticBytes,
+                     dynamicBytes, HostGroupLocalBytes);
+}
 void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
                                                 std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
@@ -567,25 +574,25 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
     if (moduleIt == objects.end()) POLYINVOKE_FATAL(RELOBJ_PREFIX, "No module named %s was loaded", moduleName.c_str());
     obj = moduleIt->second.get();
   }
-  uint64_t symAddr;
-  {
+  const auto resolve = [&](const std::string &name, const bool required) -> uint64_t {
     ReadLock r(obj->symbolCacheMutex);
-    if (const auto it = obj->symbolCache.find(symbol); it != obj->symbolCache.end()) symAddr = it->second;
-    else {
-      r.unlock();
-      WriteLock w(obj->symbolCacheMutex);
-      if (const auto it = obj->symbolCache.find(symbol); it != obj->symbolCache.end()) symAddr = it->second;
-      else {
-        const auto fnName = withGlobalPrefix(globalPrefix, symbol);
-        auto symOrErr = es.lookup({obj->jd}, fnName);
-        if (!symOrErr)
-          POLYINVOKE_FATAL(RELOBJ_PREFIX, "Symbol `%s` not found in the given object: %s", fnName.c_str(),
-                           toString(symOrErr.takeError()).c_str());
-        symAddr = symOrErr->getAddress().getValue();
-        obj->symbolCache.emplace(symbol, symAddr);
-      }
-    }
-  }
+    if (const auto it = obj->symbolCache.find(name); it != obj->symbolCache.end()) return it->second;
+    r.unlock();
+    WriteLock w(obj->symbolCacheMutex);
+    if (const auto it = obj->symbolCache.find(name); it != obj->symbolCache.end()) return it->second;
+    const auto fnName = withGlobalPrefix(globalPrefix, name);
+    auto symOrErr = es.lookup({obj->jd}, fnName);
+    uint64_t address = 0;
+    if (symOrErr) address = symOrErr->getAddress().getValue();
+    else if (required)
+      POLYINVOKE_FATAL(RELOBJ_PREFIX, "Symbol `%s` not found in the given object: %s", fnName.c_str(),
+                       toString(symOrErr.takeError()).c_str());
+    else llvm::consumeError(symOrErr.takeError());
+    obj->symbolCache.emplace(name, address);
+    return address;
+  };
+  const auto symAddr = resolve(symbol, true);
+  validateLocalStorage(RELOBJ_PREFIX, policy, resolve(symbol + polyregion::program_meta::HostStaticLocalBytesSuffix, false));
   const auto done = [cb, token = latch.acquire()]() {
     if (cb) (*cb)();
   };
@@ -701,6 +708,19 @@ SharedDeviceQueue::SharedDeviceQueue(const std::chrono::duration<int64_t> &timeo
     : ObjectDeviceQueue(timeout), modules(modules), mutex(mutex) {
   POLYINVOKE_TRACE();
 }
+static uint64_t sharedSymbolAddress(const std::string &moduleName, polyregion::invoke::object::details::LoadedModule &loaded,
+                                    const std::string &symbol, const bool required) {
+  auto &[image, handle, symbolTable] = loaded;
+  if (const auto it = symbolTable.find(symbol); it != symbolTable.end()) return it->second;
+  const auto address = reinterpret_cast<uintptr_t>(polyregion_dl_find(handle, symbol.c_str()));
+  if (!address && required) {
+    POLYINVOKE_FATAL(SHOBJ_PREFIX, "Cannot load symbol %s from module %s (%zu bytes): %s", symbol.c_str(), moduleName.c_str(), image.size(),
+                     polyregion_dl_error());
+  }
+  symbolTable.emplace(symbol, address);
+  return address;
+}
+
 void SharedDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
                                            std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
@@ -710,18 +730,10 @@ void SharedDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
   auto moduleIt = modules.find(moduleName);
   if (moduleIt == modules.end()) POLYINVOKE_FATAL(SHOBJ_PREFIX, "No module named %s was loaded", moduleName.c_str());
 
-  auto &[image, handle, symbolTable] = moduleIt->second;
-
-  uint64_t address = 0;
-  if (const auto it = symbolTable.find(symbol); it != symbolTable.end()) address = it->second;
-  else {
-    address = reinterpret_cast<uintptr_t>(polyregion_dl_find(handle, symbol.c_str()));
-    if (!address) {
-      POLYINVOKE_FATAL(SHOBJ_PREFIX, "Cannot load symbol %s from module %s (%zu bytes): %s", symbol.c_str(), moduleName.c_str(),
-                       image.size(), polyregion_dl_error());
-    }
-    symbolTable.emplace_hint(it, symbol, address);
-  }
+  const auto staticBytesAddr =
+      sharedSymbolAddress(moduleName, moduleIt->second, symbol + polyregion::program_meta::HostStaticLocalBytesSuffix, false);
+  validateLocalStorage(SHOBJ_PREFIX, policy, staticBytesAddr);
+  const auto address = sharedSymbolAddress(moduleName, moduleIt->second, symbol, true);
 
   const auto done = [cb, token = latch.acquire()]() {
     if (cb) (*cb)();
