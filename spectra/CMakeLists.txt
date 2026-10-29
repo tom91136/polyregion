@@ -600,7 +600,8 @@ if(NOT SPECTRA_VENDOR_ONLY AND SPECTRA_ENABLE_PACKAGE_TESTS)
   endif()
   if(_spectra_ONEDPL OR SPECTRA_PREBUILT_PACKAGE)
     list(APPEND _spectra_capabilities
-         opencl1_1=spectra.dpl opencl2_0=spectra.dpl spirv64_kernel=spectra.dpl spirv_glcompute=spectra.dpl metal1_0=spectra.dpl)
+         opencl1_1=spectra.dpl opencl2_0=spectra.dpl spirv64_kernel=spectra.dpl spirv_glcompute=spectra.dpl metal1_0=spectra.dpl
+         host=spectra.dpl)
   endif()
 
   # Captured pointers are mirrored only when allocations are tracked, so the closure suite needs reflect.

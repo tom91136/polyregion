@@ -9,8 +9,7 @@ defaults:
     working-directory: spectra
 
 jobs:
-  # No emulator bundle exists for these architectures, so cases compile under QEMU against the cross dist and skip at
-  # dispatch (no OpenCL platform); this proves package import on every host Polyregion ships for.
+  # Proves the package imports and its cases run on the host under QEMU for every architecture Polyregion ships.
   test-cross:
     strategy:
       fail-fast: false
@@ -23,7 +22,7 @@ jobs:
     env:
       POLYREGION_ARCH: ${{ matrix.arch }}
       POLYREGION_DIST: ${{ github.workspace }}/dist
-      POLYREGION_TEST_TARGETS: opencl1_1@!opencl1_1@*Portable*source*
+      POLYREGION_TEST_TARGETS: host@native!host@*
     steps:
       - uses: actions/checkout@v6
 
