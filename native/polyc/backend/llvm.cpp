@@ -1238,13 +1238,12 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
               g->setAlignment(llvm::Align(16));
               stackPtr = g;
             }
-          } else if (localArr && !dynShared && LLVMBackend::isCpuTarget(C.options.target)) {
-            const auto bytes = M.getDataLayout().getTypeAllocSize(allocTy).getFixedValue();
-            const auto offset = (hostLocalCursor + 15) & ~uint64_t(15);
-            if (offset + bytes > program_meta::HostWorkgroupMemoryBytes)
-              throw BackendException(
-                  fmt::format("workgroup storage exceeds host capacity of {} bytes", program_meta::HostWorkgroupMemoryBytes));
-            hostLocalCursor = offset + bytes;
+          } else if (localArr && LLVMBackend::isCpuTarget(C.options.target)) {
+            uint64_t offset = sharedStaticLocalBytes;
+            if (!dynShared) {
+              offset = hostLocalCursor;
+              hostLocalCursor += llvm::alignTo(M.getDataLayout().getTypeAllocSize(allocTy).getFixedValue(), llvm::Align(16));
+            }
             stackPtr = B.CreateCall(M.getOrInsertFunction("__polyregion_host_group_local", B.getPtrTy(0), B.getInt64Ty()),
                                     {B.getInt64(offset)}, x.name.symbol + "_wg");
           } else if (localArr && (!C.isSpirv() || C.isSpirvKernel())) {
@@ -1722,76 +1721,94 @@ Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program, c
   if (program.entry) allFns ^= prepend(*program.entry);
 
   sharedDynamicLocalBytes = 0;
+  sharedStaticLocalBytes = 0;
   sharedDynamicLocalTypes.clear();
   hostLocalCursor = 0;
-  if (!LLVMBackend::isCpuTarget(C.options.target)) {
-    std::vector<uint64_t> ownStaticBytes(allFns.size(), 0);
-    Map<Signature, size_t> functionBySignature;
-    bool hasAnyDynamicLocal = false;
-    for (size_t i = 0; i < allFns.size(); ++i) {
-      auto allArgs = allFns[i].decl.moduleCaptures | concat(allFns[i].decl.termCaptures) | concat(allFns[i].decl.args) | to_vector();
-      if (allFns[i].decl.receiver) allArgs ^= prepend(*allFns[i].decl.receiver);
-      const auto argsNoUnit = allArgs ^ filter([](const auto &arg) {
-                                return !arg.named.tpe.template is<Type::Unit0>() && !arg.named.tpe.template is<Type::Nothing>();
-                              });
-      functionBySignature.emplace(Signature(allFns[i].decl.name, /*tpeVars*/ {}, /*receiver*/ {},
-                                            argsNoUnit ^ map([](const auto &arg) { return arg.named.tpe; }), /*moduleCaptures*/ {},
-                                            /*termCaptures*/ {}, allFns[i].decl.rtn),
-                                  i);
-      for (const auto &local : allFns[i].template collect_all<Stmt::Var>()) {
-        const auto arr = local.name.tpe.template get<Type::Arr>();
-        if (!arr || !arr->space.template is<TypeSpace::Local>()) continue;
-        if (arr->length == 0) {
-          hasAnyDynamicLocal = true;
-          sharedDynamicLocalTypes.emplace(arr->comp);
-          continue;
-        }
-        const auto bytes = M.getDataLayout().getTypeAllocSize(resolveType(local.name.tpe)).getFixedValue();
-        if (bytes > C.options.workgroupMemoryBytes || ownStaticBytes[i] > C.options.workgroupMemoryBytes - bytes)
-          throw BackendException(fmt::format("workgroup storage exceeds configured capacity of {} bytes", C.options.workgroupMemoryBytes));
-        ownStaticBytes[i] += bytes;
+  const auto cpuTarget = LLVMBackend::isCpuTarget(C.options.target);
+  const auto workgroupCapacity = cpuTarget ? program_meta::HostWorkgroupMemoryBytes : C.options.workgroupMemoryBytes;
+  std::vector<uint64_t> ownStaticBytes(allFns.size(), 0);
+  uint64_t moduleStaticBytes = 0;
+  Map<Signature, size_t> functionBySignature;
+  bool hasAnyDynamicLocal = false;
+  for (size_t i = 0; i < allFns.size(); ++i) {
+    auto allArgs = allFns[i].decl.moduleCaptures | concat(allFns[i].decl.termCaptures) | concat(allFns[i].decl.args) | to_vector();
+    if (allFns[i].decl.receiver) allArgs ^= prepend(*allFns[i].decl.receiver);
+    const auto argsNoUnit = allArgs ^ filter([](const auto &arg) {
+                              return !arg.named.tpe.template is<Type::Unit0>() && !arg.named.tpe.template is<Type::Nothing>();
+                            });
+    functionBySignature.emplace(Signature(allFns[i].decl.name, /*tpeVars*/ {}, /*receiver*/ {},
+                                          argsNoUnit ^ map([](const auto &arg) { return arg.named.tpe; }), /*moduleCaptures*/ {},
+                                          /*termCaptures*/ {}, allFns[i].decl.rtn),
+                                i);
+    for (const auto &local : allFns[i].template collect_all<Stmt::Var>()) {
+      const auto arr = local.name.tpe.template get<Type::Arr>();
+      if (!arr || !arr->space.template is<TypeSpace::Local>()) continue;
+      if (arr->length == 0) {
+        hasAnyDynamicLocal = true;
+        sharedDynamicLocalTypes.emplace(arr->comp);
+        continue;
       }
+      const auto declared = M.getDataLayout().getTypeAllocSize(resolveType(local.name.tpe)).getFixedValue();
+      const auto bytes = cpuTarget ? llvm::alignTo(declared, llvm::Align(16)) : declared;
+      if (bytes > workgroupCapacity || ownStaticBytes[i] > workgroupCapacity - bytes)
+        throw BackendException(fmt::format("workgroup storage exceeds configured capacity of {} bytes", workgroupCapacity));
+      ownStaticBytes[i] += bytes;
+      moduleStaticBytes += bytes;
     }
+  }
 
-    uint64_t maxReachableStaticBytes = 0;
-    for (size_t root = 0; root < allFns.size(); ++root) {
-      if (!allFns[root].convention.is<CallConvention::OffloadEntry>()) continue;
-      std::vector<bool> reachable(allFns.size(), false);
-      std::vector<size_t> pending{root};
-      uint64_t total = 0;
-      while (!pending.empty()) {
-        const auto i = pending.back();
-        pending.pop_back();
-        if (reachable[i]) continue;
-        reachable[i] = true;
-        if (ownStaticBytes[i] > C.options.workgroupMemoryBytes - total)
-          throw BackendException(fmt::format("workgroup storage exceeds configured capacity of {} bytes", C.options.workgroupMemoryBytes));
-        total += ownStaticBytes[i];
-        for (const auto &invoke : allFns[i].template collect_all<Expr::Invoke>()) {
-          auto args = invoke.args;
-          if (invoke.receiver) args ^= prepend(*invoke.receiver);
-          const auto argsNoUnit = args ^ filter([](const auto &arg) {
-                                    return !arg.tpe().template is<Type::Unit0>() && !arg.tpe().template is<Type::Nothing>();
-                                  });
-          const auto sig = Signature(calleeName(invoke), /*tpeVars*/ {}, /*receiver*/ {},
-                                     argsNoUnit ^ map([](const auto &arg) { return arg.tpe(); }), /*moduleCaptures*/ {},
-                                     /*termCaptures*/ {}, invoke.rtn);
-          const auto sigPtr = Signature(calleeName(invoke), /*tpeVars*/ {}, /*receiver*/ {},
-                                        argsNoUnit ^ map([](const auto &arg) -> Type::Any {
-                                          return arg.tpe().template is<Type::FnRef>()
-                                                     ? Type::Any(Type::Ptr(Type::Nothing(), TypeSpace::Global()))
-                                                     : arg.tpe();
-                                        }),
-                                        /*moduleCaptures*/ {}, /*termCaptures*/ {}, invoke.rtn);
-          const auto callee = functionBySignature ^ get_maybe(sig) | or_else([&] { return functionBySignature ^ get_maybe(sigPtr); });
-          if (callee && !reachable[*callee]) pending.push_back(*callee);
-        }
+  uint64_t maxReachableStaticBytes = 0;
+  for (size_t root = 0; root < allFns.size(); ++root) {
+    if (!allFns[root].convention.is<CallConvention::OffloadEntry>()) continue;
+    std::vector<bool> reachable(allFns.size(), false);
+    std::vector<size_t> pending{root};
+    uint64_t total = 0;
+    while (!pending.empty()) {
+      const auto i = pending.back();
+      pending.pop_back();
+      if (reachable[i]) continue;
+      reachable[i] = true;
+      if (ownStaticBytes[i] > workgroupCapacity - total)
+        throw BackendException(fmt::format("workgroup storage exceeds configured capacity of {} bytes", workgroupCapacity));
+      total += ownStaticBytes[i];
+      for (const auto &invoke : allFns[i].template collect_all<Expr::Invoke>()) {
+        auto args = invoke.args;
+        if (invoke.receiver) args ^= prepend(*invoke.receiver);
+        const auto argsNoUnit =
+            args ^ filter([](const auto &arg) { return !arg.tpe().template is<Type::Unit0>() && !arg.tpe().template is<Type::Nothing>(); });
+        const auto sig = Signature(calleeName(invoke), /*tpeVars*/ {}, /*receiver*/ {},
+                                   argsNoUnit ^ map([](const auto &arg) { return arg.tpe(); }), /*moduleCaptures*/ {},
+                                   /*termCaptures*/ {}, invoke.rtn);
+        const auto sigPtr = Signature(calleeName(invoke), /*tpeVars*/ {}, /*receiver*/ {},
+                                      argsNoUnit ^ map([](const auto &arg) -> Type::Any {
+                                        return arg.tpe().template is<Type::FnRef>()
+                                                   ? Type::Any(Type::Ptr(Type::Nothing(), TypeSpace::Global()))
+                                                   : arg.tpe();
+                                      }),
+                                      /*moduleCaptures*/ {}, /*termCaptures*/ {}, invoke.rtn);
+        const auto callee = functionBySignature ^ get_maybe(sig) | or_else([&] { return functionBySignature ^ get_maybe(sigPtr); });
+        if (callee && !reachable[*callee]) pending.push_back(*callee);
       }
-      maxReachableStaticBytes = std::max(maxReachableStaticBytes, total);
     }
-    if (hasAnyDynamicLocal) sharedDynamicLocalBytes = C.options.workgroupMemoryBytes - maxReachableStaticBytes;
+    maxReachableStaticBytes = std::max(maxReachableStaticBytes, total);
+  }
+  if (cpuTarget) {
+    if (moduleStaticBytes > workgroupCapacity)
+      throw BackendException(fmt::format("workgroup storage exceeds configured capacity of {} bytes", workgroupCapacity));
+    sharedStaticLocalBytes = moduleStaticBytes;
+  } else {
+    sharedStaticLocalBytes = maxReachableStaticBytes;
+    if (hasAnyDynamicLocal) sharedDynamicLocalBytes = workgroupCapacity - maxReachableStaticBytes;
   }
   const auto prototypes = allFns ^ map([&](const auto &fn) { return createPrototype(*this, M, fn); });
+  if (cpuTarget) {
+    for (const auto &[llvmFn, fn, argsNoUnit] : prototypes) {
+      if (!fn.convention.is<CallConvention::OffloadEntry>()) continue;
+      const auto _ =
+          new llvm::GlobalVariable(M, B.getInt64Ty(), /*isConstant*/ true, llvm::GlobalValue::ExternalLinkage,
+                                   B.getInt64(moduleStaticBytes), llvmFn->getName().str() + program_meta::HostStaticLocalBytesSuffix);
+    }
+  }
 
   for (const auto &[llvmFn, fn, argsNoUnit] : prototypes) {
     B.SetInsertPoint(llvm::BasicBlock::Create(C.actual, "entry", llvmFn));
