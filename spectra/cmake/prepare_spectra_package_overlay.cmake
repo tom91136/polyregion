@@ -749,6 +749,18 @@ __parallel_stable_sort]=]
     const std::size_t __max_hw_wg_size = __is_cpu ? __max_sg_size : __max_wg_size;]=]
     [=[    const std::size_t __max_hw_wg_size = __max_wg_size;]=]
     1)
+  copy_and_replace_literal(
+    "oneapi/dpl/pstl/hetero/dpcpp/unseq_backend_sycl.h"
+    [=[            if (__adjusted_global_id == __n - 1)
+                __wg_assigner(__wg_sums_ptr, __group_id, __local_acc, __local_id);
+        }
+]=]
+    [=[            if (__adjusted_global_id == __n - 1)
+                __wg_assigner(__wg_sums_ptr, __group_id, __local_acc, __local_id);
+            __dpl_sycl::__group_barrier(__item);
+        }
+]=]
+    2)
   # Express the one-dimensional work-group extent through SYCL's scalar
   # accessor. It is identical to range::size() here and maps directly to the
   # portable block-size intrinsic without materialising an opaque range.
