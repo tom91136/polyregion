@@ -2077,11 +2077,18 @@ TEST_CASE("LLVM GPU workgroup collectives report target-specific support", "[bac
     return Program(entry, {}, {}, PassPhase::Initial(), {});
   };
 
-  for (const auto &op : {Spec::Any(Spec::GpuGroupReduce(AtomicOp::Add(), selectNamed(value), tpe)),
-                         Spec::Any(Spec::GpuGroupInclusiveScan(AtomicOp::Add(), selectNamed(value), tpe)),
+  const auto nvptxReduce = polyregion::compiler::compile(program(Spec::GpuGroupReduce(AtomicOp::Add(), selectNamed(value), tpe)),
+                                                         {Target::Object_LLVM_NVPTX64, "sm_70"}, OptLevel::O0);
+  INFO(repr(nvptxReduce));
+  REQUIRE(nvptxReduce.binary);
+  for (const auto &op : {AtomicOp::Any(AtomicOp::Sub()), AtomicOp::Any(AtomicOp::Xchg())})
+    CHECK_THROWS_WITH(polyregion::compiler::compile(program(Spec::GpuGroupReduce(op, selectNamed(value), tpe)),
+                                                    {Target::Object_LLVM_NVPTX64, "sm_70"}, OptLevel::O0),
+                      Catch::Matchers::ContainsSubstring("associative operation"));
+  for (const auto &op : {Spec::Any(Spec::GpuGroupInclusiveScan(AtomicOp::Add(), selectNamed(value), tpe)),
                          Spec::Any(Spec::GpuGroupExclusiveScan(AtomicOp::Add(), selectNamed(value), tpe))})
     CHECK_THROWS_WITH(polyregion::compiler::compile(program(op), {Target::Object_LLVM_NVPTX64, "sm_70"}, OptLevel::O0),
-                      Catch::Matchers::ContainsSubstring("requires SubgroupLower for NVPTX"));
+                      Catch::Matchers::ContainsSubstring("lowering not yet implemented"));
 
   for (const auto &op : {Spec::Any(Spec::GpuGroupReduce(AtomicOp::Add(), selectNamed(value), tpe)),
                          Spec::Any(Spec::GpuGroupInclusiveScan(AtomicOp::Add(), selectNamed(value), tpe)),
