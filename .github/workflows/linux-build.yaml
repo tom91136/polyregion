@@ -117,22 +117,9 @@ jobs:
           archive: &llvm-archive native/out/llvm-${{ matrix.arch }}-dist.tar.zst
           key: &llvm-key llvm-${{ env.SYSROOT_VARIANT }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/build.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './sysroot/Dockerfile', './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
 
-      - name: Enable zram
+      - name: Enable swap
         if: ${{ !env.ACT && steps.restore-llvm.outputs.cache-hit != 'true' }}
-        run: |
-          sudo swapoff -a
-          sudo rm -f /mnt/swapfile
-          sudo apt-get install -y util-linux zram-config "linux-modules-extra-$(uname -r)"
-
-          sudo modprobe zram
-
-          totalmem=$(LC_ALL=C free | grep -e "^Mem:" | sed -e 's/^Mem: *//' -e 's/  *.*//')
-          mem=$((totalmem * 4 * 1024))
-
-          sudo sh -c "echo $mem > /sys/block/zram0/disksize"
-          sudo mkswap /dev/zram0
-          sudo swapon -p 5 /dev/zram0
-          sudo zramctl
+        run: sudo bash ci/enable_swap.sh
 
       - name: Build LLVM
         id: build-llvm
