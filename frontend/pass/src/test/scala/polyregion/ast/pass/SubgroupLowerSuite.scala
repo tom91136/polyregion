@@ -89,6 +89,43 @@ class SubgroupLowerSuite extends munit.FunSuite {
     assertEquals(localArrays(out).size, 1)
   }
 
+  test("leaves natively handled work-group collectives and lowers the rest") {
+    def collective(name: String, spec: p.Spec, tpe: p.Type) = p.Stmt.Var(named(name, tpe), Some(p.Expr.SpecOp(spec)))
+    val value                                               = named("value", p.Type.IntS32)
+    val body = List(
+      collective("sum", p.Spec.GpuGroupReduce(p.AtomicOp.Add, selectT(value), p.Type.IntS32), p.Type.IntS32),
+      collective("mask", p.Spec.GpuGroupReduce(p.AtomicOp.Xor, selectT(value), p.Type.IntS32), p.Type.IntS32),
+      collective("scan", p.Spec.GpuGroupInclusiveScan(p.AtomicOp.Add, selectT(value), p.Type.IntS32), p.Type.IntS32),
+      collective("wide", p.Spec.GpuGroupReduce(p.AtomicOp.Add, p.Term.IntS64Const(1), p.Type.IntS64), p.Type.IntS64)
+    )
+    val out = SubgroupLower(
+      width = 8,
+      maxGroupSize = 256,
+      lowerSubgroups = false,
+      lowerGroups = true,
+      nativeGroups = "reduce.Add.I32|inclusive.Add.I32"
+    )(program(entry(body = body)), NoopLog)
+
+    val remaining = specs(out).collect {
+      case p.Spec.GpuGroupReduce(op, v, _)        => ("reduce", op, v.tpe)
+      case p.Spec.GpuGroupInclusiveScan(op, v, _) => ("inclusive", op, v.tpe)
+    }
+    assertEquals(
+      remaining.toSet,
+      Set[(String, p.AtomicOp, p.Type)](
+        ("reduce", p.AtomicOp.Add, p.Type.IntS32),
+        ("inclusive", p.AtomicOp.Add, p.Type.IntS32)
+      )
+    )
+  }
+
+  test("nativeGroups is a configured pipeline argument") {
+    val built = PassPipelineParser
+      .parseStep("SubgroupLower(lowerSubgroups=false,lowerGroups=true,nativeGroups=reduce.Add.I32|reduce.Or.Bool1)")
+      .flatMap(PassRegistry.build)
+    assert(built.isRight, built.toString)
+  }
+
   test("optionally lowers multidimensional work-group collectives through local scratch") {
     val value = named("value", p.Type.IntS64)
     val body = List(

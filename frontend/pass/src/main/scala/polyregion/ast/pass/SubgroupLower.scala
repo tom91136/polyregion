@@ -22,11 +22,14 @@ import polyregion.ast.Traversal.*
 //   width / maxGroupSize               ->  require a power-of-two width <= 32 and a divisible ceiling <= 1024;
 //                                         width 1 is a barrier-free scalar subgroup, valid under divergent control flow
 //   group lowering disabled            ->  leave GpuGroup* operations for a native backend
+//   nativeGroups                       ->  `kind.op.type` entries (kind: reduce|inclusive|exclusive, e.g. reduce.Add.I32)
+//                                         joined by `|` that stay for the backend even when lowerGroups is set
 case class SubgroupLower(
     width: Int = 32,
     maxGroupSize: Int = 1024,
     lowerSubgroups: Boolean = true,
-    lowerGroups: Boolean = false
+    lowerGroups: Boolean = false,
+    nativeGroups: String = ""
 ) extends ProgramPass
     derives PassArgCodec {
   override def phase: p.Pass.Phase = p.Pass.Phase.PostMono
@@ -40,7 +43,7 @@ case class SubgroupLower(
       maxGroupSize >= width && maxGroupSize <= 1024 && maxGroupSize % width == 0,
       s"maxGroupSize must be a multiple of width in [$width, 1024]: $maxGroupSize"
     )
-    Lowering(program, width, maxGroupSize, lowerSubgroups, lowerGroups).run()
+    Lowering(program, width, maxGroupSize, lowerSubgroups, lowerGroups, nativeGroups).run()
   }
 }
 
@@ -49,9 +52,31 @@ private final class Lowering(
     width: Int,
     maxGroupSize: Int,
     lowerSubgroups: Boolean,
-    lowerGroups: Boolean
+    lowerGroups: Boolean,
+    nativeGroups: String
 ) {
   private type Leaves = p.Type => List[(List[p.PathStep], p.Type)]
+
+  private val native = nativeGroups.split('|').filter(_.nonEmpty).toSet
+
+  private def scalarName(tpe: p.Type): String = tpe match {
+    case p.Type.Bool1   => "Bool1"
+    case p.Type.IntS8   => "I8"
+    case p.Type.IntS16  => "I16"
+    case p.Type.IntS32  => "I32"
+    case p.Type.IntS64  => "I64"
+    case p.Type.IntU8   => "U8"
+    case p.Type.IntU16  => "U16"
+    case p.Type.IntU32  => "U32"
+    case p.Type.IntU64  => "U64"
+    case p.Type.Float16 => "F16"
+    case p.Type.Float32 => "F32"
+    case p.Type.Float64 => "F64"
+    case other          => other.toString
+  }
+
+  private def lowersGroup(kind: String, op: p.AtomicOp, value: p.Term): Boolean =
+    lowerGroups && !native.contains(s"$kind.$op.${scalarName(value.tpe)}")
 
   private var counter = 0
 
@@ -324,10 +349,11 @@ private final class Lowering(
     case p.Spec.GpuVoteAny(mask, predicate) if lowerSubgroups => Some(vote(mask, predicate, pool, all = false))
     case p.Spec.GpuVoteAll(mask, predicate) if lowerSubgroups => Some(vote(mask, predicate, pool, all = true))
     case p.Spec.GpuBallot(mask, predicate) if lowerSubgroups  => Some(ballot(mask, predicate, pool))
-    case p.Spec.GpuGroupReduce(op, value, rtn) if lowerGroups => Some(groupReduce(op, value, rtn, pool))
-    case p.Spec.GpuGroupInclusiveScan(op, value, rtn) if lowerGroups =>
+    case p.Spec.GpuGroupReduce(op, value, rtn) if lowersGroup("reduce", op, value) =>
+      Some(groupReduce(op, value, rtn, pool))
+    case p.Spec.GpuGroupInclusiveScan(op, value, rtn) if lowersGroup("inclusive", op, value) =>
       Some(groupScan(op, value, rtn, pool, inclusive = true))
-    case p.Spec.GpuGroupExclusiveScan(op, value, rtn) if lowerGroups =>
+    case p.Spec.GpuGroupExclusiveScan(op, value, rtn) if lowersGroup("exclusive", op, value) =>
       Some(groupScan(op, value, rtn, pool, inclusive = false))
     case p.Spec.GpuSubgroupBarrier(_) if lowerSubgroups && width == 1 =>
       Some((p.Expr.Alias(p.Term.Unit0Const), Nil))
