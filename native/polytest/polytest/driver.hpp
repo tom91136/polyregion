@@ -651,7 +651,7 @@ inline const char *statusTag(TaskStatus s) {
 
 inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
   // XXX ROCr writes a ~150 MB gpucore.<pid> per GPU VM fault (honours RLIMIT_CORE)
-  disableCoreDumps();
+  disableUncollectedCoreDumps();
   if (opts.listTargets) {
     loadTestTargets(cfg.profileDir) | for_each([](const auto &t) { std::fprintf(stdout, "%s\n", t.c_str()); });
     return 0;

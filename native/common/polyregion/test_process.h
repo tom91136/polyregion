@@ -1,5 +1,8 @@
 #pragma once
 
+#include <fstream>
+#include <string>
+
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
@@ -13,8 +16,13 @@
 
 namespace polyregion {
 
-inline void disableCoreDumps() {
+inline bool corePatternCollects(const std::string &pattern) { return !pattern.empty() && (pattern[0] == '/' || pattern[0] == '|'); }
+
+inline void disableUncollectedCoreDumps() {
 #ifndef _WIN32
+  std::ifstream in("/proc/sys/kernel/core_pattern");
+  std::string pattern;
+  if (std::getline(in, pattern) && corePatternCollects(pattern)) return;
   const rlimit noCore{0, 0};
   setrlimit(RLIMIT_CORE, &noCore);
 #endif
