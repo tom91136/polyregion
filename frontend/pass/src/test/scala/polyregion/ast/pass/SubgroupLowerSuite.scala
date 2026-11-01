@@ -13,7 +13,7 @@ class SubgroupLowerSuite extends munit.FunSuite {
     SubgroupLower(width, maxGroupSize)(program, NoopLog)
 
   private def specs(program: p.Program): List[p.Spec] =
-    program.entry.collectAll[p.Expr].collect { case p.Expr.SpecOp(op) => op }
+    (program.entry.toList ::: program.functions).flatMap(_.collectAll[p.Expr]).collect { case p.Expr.SpecOp(op) => op }
 
   private def localArrays(program: p.Program): List[p.Named] =
     program.entry.collectAll[p.Stmt].collect {
@@ -399,23 +399,36 @@ class SubgroupLowerSuite extends munit.FunSuite {
     assert(error.getMessage.contains("conditional control flow"), error.getMessage)
   }
 
-  test("rejects conditional work-group collectives in group-only mode") {
+  test("accepts work-group collectives under loop control flow") {
+    val reduce = p.Stmt.Var(
+      named("result", p.Type.IntS32),
+      Some(p.Expr.SpecOp(p.Spec.GpuGroupReduce(p.AtomicOp.Add, p.Term.IntS32Const(1), p.Type.IntS32)))
+    )
+    val loop = p.Stmt.While(p.Term.Bool1Const(true), List(reduce))
+    List(true, false).foreach { lowerSubgroups =>
+      val out = SubgroupLower(width = 8, maxGroupSize = 256, lowerSubgroups = lowerSubgroups, lowerGroups = true)(
+        program(entry(body = List(loop))),
+        NoopLog
+      )
+      assert(!specs(out).exists(_.isInstanceOf[p.Spec.GpuGroupReduce]), s"lowerSubgroups=$lowerSubgroups")
+    }
+  }
+
+  test("accepts conditional work-group collectives in group-only mode") {
     val reduce = p.Expr.SpecOp(p.Spec.GpuGroupReduce(p.AtomicOp.Add, p.Term.IntS32Const(1), p.Type.IntS32))
     val conditional = p.Stmt.Cond(
       p.Term.Bool1Const(true),
       List(p.Stmt.Var(named("result", p.Type.IntS32), Some(reduce))),
       Nil
     )
-    val error = intercept[IllegalArgumentException] {
-      SubgroupLower(width = 8, maxGroupSize = 256, lowerSubgroups = false, lowerGroups = true)(
-        program(entry(body = List(conditional))),
-        NoopLog
-      )
-    }
-    assert(error.getMessage.contains("conditional control flow"), error.getMessage)
+    val out = SubgroupLower(width = 8, maxGroupSize = 256, lowerSubgroups = false, lowerGroups = true)(
+      program(entry(body = List(conditional))),
+      NoopLog
+    )
+    assert(!specs(out).exists(_.isInstanceOf[p.Spec.GpuGroupReduce]))
   }
 
-  test("rejects conditional calls whose closure synchronises a work-group in group-only mode") {
+  test("accepts conditional calls whose closure runs a work-group collective in group-only mode") {
     val helper = fn(
       "groupHelper",
       rtn = p.Type.IntS32,
@@ -431,16 +444,14 @@ class SubgroupLowerSuite extends munit.FunSuite {
       List(p.Stmt.Var(named("result", p.Type.IntS32), Some(call))),
       Nil
     )
-    val error = intercept[IllegalArgumentException] {
-      SubgroupLower(width = 8, maxGroupSize = 256, lowerSubgroups = false, lowerGroups = true)(
-        program(entry(body = List(conditional)), List(helper)),
-        NoopLog
-      )
-    }
-    assert(error.getMessage.contains("conditional control flow"), error.getMessage)
+    val out = SubgroupLower(width = 8, maxGroupSize = 256, lowerSubgroups = false, lowerGroups = true)(
+      program(entry(body = List(conditional)), List(helper)),
+      NoopLog
+    )
+    assert(!specs(out).exists(_.isInstanceOf[p.Spec.GpuGroupReduce]))
   }
 
-  test("rejects conditional exits before a work-group collective in group-only mode") {
+  test("accepts conditional exits before a work-group collective in group-only mode") {
     val body = List(
       p.Stmt.Cond(p.Term.Bool1Const(true), List(p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))), Nil),
       p.Stmt.Var(
@@ -448,13 +459,11 @@ class SubgroupLowerSuite extends munit.FunSuite {
         Some(p.Expr.SpecOp(p.Spec.GpuGroupReduce(p.AtomicOp.Add, p.Term.IntS32Const(1), p.Type.IntS32)))
       )
     )
-    val error = intercept[IllegalArgumentException] {
-      SubgroupLower(width = 8, maxGroupSize = 256, lowerSubgroups = false, lowerGroups = true)(
-        program(entry(body = body)),
-        NoopLog
-      )
-    }
-    assert(error.getMessage.contains("early exit"), error.getMessage)
+    val out = SubgroupLower(width = 8, maxGroupSize = 256, lowerSubgroups = false, lowerGroups = true)(
+      program(entry(body = body)),
+      NoopLog
+    )
+    assert(!specs(out).exists(_.isInstanceOf[p.Spec.GpuGroupReduce]))
   }
 
   test("allows a barrier-free loop break before a later work-group collective") {

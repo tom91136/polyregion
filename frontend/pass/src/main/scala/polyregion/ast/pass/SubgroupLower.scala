@@ -112,16 +112,12 @@ private final class Lowering(
   }
 
   private def validateUniformSubgroupParticipation(): Unit = {
-    if (!lowerSubgroups && !lowerGroups) return
+    if (!lowerSubgroups) return
 
     def requiresBarrier(op: p.Spec): Boolean = op match {
       case _: p.Spec.GpuShuffleDown | _: p.Spec.GpuShuffleUp | _: p.Spec.GpuShuffleIdx | _: p.Spec.GpuShuffleXor |
-          _: p.Spec.GpuVoteAny | _: p.Spec.GpuVoteAll | _: p.Spec.GpuBallot | _: p.Spec.GpuSubgroupBarrier
-          if lowerSubgroups && width > 1 =>
-        true
-      case _: p.Spec.GpuGroupReduce | _: p.Spec.GpuGroupInclusiveScan | _: p.Spec.GpuGroupExclusiveScan
-          if lowerGroups =>
-        true
+          _: p.Spec.GpuVoteAny | _: p.Spec.GpuVoteAll | _: p.Spec.GpuBallot | _: p.Spec.GpuSubgroupBarrier =>
+        width > 1
       case _ => false
     }
     def direct(function: p.Function): Boolean = function.collectAll[p.Expr].exists {
