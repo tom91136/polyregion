@@ -49,8 +49,8 @@ private:
   std::optional<std::string> mkArrayAliasDecl(const Type::Any &tpe, const Term::Any &source, const std::string &name);
   std::string reinterpretScalar(const std::string &value, const Type::Any &from, const Type::Any &to);
   std::string mkTerm(const Term::Any &term);
-  std::string workGroupCollective(const std::string &spec, const std::string &kind, const AtomicOp::Any &op, const Term::Any &value,
-                                  const Type::Any &rtn);
+  std::string workGroupCollective(const std::string &spec, const compiletime::GroupKind kind, const AtomicOp::Any &op,
+                                  const Term::Any &value, const Type::Any &rtn);
   std::string mkExpr(const Expr::Any &expr);
   std::string mkStmt(const Stmt::Any &stmt);
   std::string mkFnProto(const Function &);

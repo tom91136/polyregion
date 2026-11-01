@@ -279,8 +279,8 @@ ValPtr NVPTXTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &ex
       [&](const Spec::GpuAtomicRMW &v) -> ValPtr { return cg.mkAtomicRMW(v, nvptxScope(v.scope)); },
       [&](const Spec::GpuAtomicCAS &v) -> ValPtr { return cg.mkAtomicCAS(v, nvptxScope(v.scope)); },
       [&](const Spec::GpuGroupReduce &v) -> ValPtr {
-        if (v.op.is<AtomicOp::Xchg>() || v.op.is<AtomicOp::Sub>())
-          throw BackendException("work-group reduction requires an associative operation");
+        requireGroupNative(compiletime::Target::Object_LLVM_NVPTX64, cg.C.options.arch, compiletime::GroupKind::Reduce, v.op,
+                           v.value.tpe());
         // Reduce each physical warp, publish one value per warp, then let thread zero fold those partials.
         // CUDA's linear thread ordering is x-major, matching lane/warp numbering even for 2-D/3-D blocks.
         auto &B = cg.B;
@@ -308,7 +308,6 @@ ValPtr NVPTXTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &ex
               });
         };
         const auto words = nvptxShuffleWords(cg, valTy);
-        if (words > 2) throw BackendException("NVPTX work-group reduction supports values up to 8 bytes");
         const auto shfl = [&](llvm::Intrinsic::ID syncId, llvm::Intrinsic::ID legacyId, llvm::Value *value, llvm::Value *index,
                               uint32_t clamp) -> llvm::Value * {
           auto *callee = llvm::Intrinsic::getOrInsertDeclaration(&cg.M, legacySubgroup ? legacyId : syncId, {});

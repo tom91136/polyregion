@@ -431,20 +431,18 @@ std::string backend::CSource::mkTerm(const Term::Any &term) {
                           });
 }
 
-std::string backend::CSource::workGroupCollective(const std::string &spec, const std::string &kind, const AtomicOp::Any &op,
+std::string backend::CSource::workGroupCollective(const std::string &spec, const compiletime::GroupKind kind, const AtomicOp::Any &op,
                                                   const Term::Any &value, const Type::Any &rtn) {
   if (dialect != Dialect::OpenCL2_0)
     throw BackendException(fmt::format("Spec::{} lowering is not available for this C source dialect", spec));
-  if (kind == "reduce" && rtn.template is<Type::Bool1>()) {
-    if (op.template is<AtomicOp::Or>()) return fmt::format("work_group_any({})", mkTerm(value));
-    if (op.template is<AtomicOp::And>()) return fmt::format("work_group_all({})", mkTerm(value));
-  }
-  const auto operation = op.template is<AtomicOp::Add>()   ? "add"
-                         : op.template is<AtomicOp::Min>() ? "min"
-                         : op.template is<AtomicOp::Max>() ? "max"
-                                                           : nullptr;
-  if (!operation) throw BackendException(fmt::format("Spec::{} supports only add, min, and max in OpenCL C 2.0", spec));
-  return fmt::format("work_group_{}_{}({})", kind, operation, mkTerm(value));
+  requireGroupNative(compiletime::Target::Source_C_OpenCL2_0, "", kind, op, value.tpe());
+  if (kind == compiletime::GroupKind::Reduce && rtn.template is<Type::Bool1>())
+    return fmt::format("work_group_{}({})", op.template is<AtomicOp::Or>() ? "any" : "all", mkTerm(value));
+  const auto operation = op.template is<AtomicOp::Add>() ? "add" : op.template is<AtomicOp::Min>() ? "min" : "max";
+  const auto name = kind == compiletime::GroupKind::Reduce      ? "reduce"
+                    : kind == compiletime::GroupKind::Inclusive ? "scan_inclusive"
+                                                                : "scan_exclusive";
+  return fmt::format("work_group_{}_{}({})", name, operation, mkTerm(value));
 }
 
 std::string backend::CSource::mkExpr(const Expr::Any &expr) {
@@ -659,13 +657,13 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
                                  value, desired);
             },
             [&](const Spec::GpuGroupReduce &v) -> std::string {
-              return workGroupCollective("GpuGroupReduce", "reduce", v.op, v.value, v.rtn);
+              return workGroupCollective("GpuGroupReduce", compiletime::GroupKind::Reduce, v.op, v.value, v.rtn);
             },
             [&](const Spec::GpuGroupInclusiveScan &v) -> std::string {
-              return workGroupCollective("GpuGroupInclusiveScan", "scan_inclusive", v.op, v.value, v.rtn);
+              return workGroupCollective("GpuGroupInclusiveScan", compiletime::GroupKind::Inclusive, v.op, v.value, v.rtn);
             },
             [&](const Spec::GpuGroupExclusiveScan &v) -> std::string {
-              return workGroupCollective("GpuGroupExclusiveScan", "scan_exclusive", v.op, v.value, v.rtn);
+              return workGroupCollective("GpuGroupExclusiveScan", compiletime::GroupKind::Exclusive, v.op, v.value, v.rtn);
             },
             [&](const Spec::RemoteLaunch &) -> std::string { throw BackendException("Spec::RemoteLaunch is a host-only operation"); },
             [&](const Spec::RemoteAlloc &) -> std::string { throw BackendException("Spec::RemoteAlloc is a host-only operation"); },

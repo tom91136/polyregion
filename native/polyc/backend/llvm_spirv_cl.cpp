@@ -202,19 +202,23 @@ static std::string mangleOcl(const std::string &name, const std::string &suffix)
   return "_Z" + std::to_string(name.size()) + name + suffix;
 }
 
-static ValPtr emitGroupCollective(CodeGen &cg, const std::string &base, const AtomicOp::Any &op, const Term::Any &value) {
-  const std::string suffix = op.is<AtomicOp::Add>()   ? "add"
-                             : op.is<AtomicOp::Min>() ? "min"
-                             : op.is<AtomicOp::Max>() ? "max"
-                                                      : throw BackendException("SPIR-V group reduce/scan supports only add/min/max");
+static ValPtr emitGroupPredicate(CodeGen &cg, const std::string &name, const Term::Any &value);
+
+static ValPtr emitGroupCollective(CodeGen &cg, const compiletime::GroupKind kind, const AtomicOp::Any &op, const Term::Any &value) {
+  requireGroupNative(compiletime::Target::Object_LLVM_SPIRV64_Kernel, cg.C.options.arch, kind, op, value.tpe());
+  const bool predicate = value.tpe().is<Type::Bool1>();
+  const std::string base = kind == compiletime::GroupKind::Reduce      ? "work_group_reduce"
+                           : kind == compiletime::GroupKind::Inclusive ? "work_group_scan_inclusive"
+                                                                       : "work_group_scan_exclusive";
+  if (predicate) return emitGroupPredicate(cg, op.is<AtomicOp::Or>() ? "work_group_any" : "work_group_all", value);
+  const std::string suffix = op.is<AtomicOp::Add>() ? "add" : op.is<AtomicOp::Min>() ? "min" : "max";
   const auto valueType = value.tpe();
   const std::string mangle = valueType.is<Type::Float32>()   ? "f"
                              : valueType.is<Type::Float64>() ? "d"
                              : valueType.is<Type::IntS32>()  ? "i"
                              : valueType.is<Type::IntU32>()  ? "j"
                              : valueType.is<Type::IntS64>()  ? "l"
-                             : valueType.is<Type::IntU64>()  ? "m"
-                                                             : throw BackendException("unsupported SPIR-V group collective element type");
+                                                             : "m";
   auto *valueV = cg.mkTermVal(value);
   return callSpirFunc(cg, mangleOcl(base + "_" + suffix, mangle), valueV->getType(), {valueV});
 }
@@ -455,13 +459,13 @@ ValPtr SPIRVOpenCLTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
       [&](const Spec::GpuVoteAll &v) -> ValPtr { return emitSubgroupPredicate(cg, "sub_group_all", v.mask, v.pred); },
       [&](const Spec::GpuAtomicRMW &v) -> ValPtr { return cg.mkAtomicRMW(v, ""); },
       [&](const Spec::GpuAtomicCAS &v) -> ValPtr { return cg.mkAtomicCAS(v, ""); },
-      [&](const Spec::GpuGroupReduce &v) -> ValPtr {
-        if (v.value.tpe().is<Type::Bool1>() && v.op.is<AtomicOp::Or>()) return emitGroupPredicate(cg, "work_group_any", v.value);
-        if (v.value.tpe().is<Type::Bool1>() && v.op.is<AtomicOp::And>()) return emitGroupPredicate(cg, "work_group_all", v.value);
-        return emitGroupCollective(cg, "work_group_reduce", v.op, v.value);
+      [&](const Spec::GpuGroupReduce &v) -> ValPtr { return emitGroupCollective(cg, compiletime::GroupKind::Reduce, v.op, v.value); },
+      [&](const Spec::GpuGroupInclusiveScan &v) -> ValPtr {
+        return emitGroupCollective(cg, compiletime::GroupKind::Inclusive, v.op, v.value);
       },
-      [&](const Spec::GpuGroupInclusiveScan &v) -> ValPtr { return emitGroupCollective(cg, "work_group_scan_inclusive", v.op, v.value); },
-      [&](const Spec::GpuGroupExclusiveScan &v) -> ValPtr { return emitGroupCollective(cg, "work_group_scan_exclusive", v.op, v.value); },
+      [&](const Spec::GpuGroupExclusiveScan &v) -> ValPtr {
+        return emitGroupCollective(cg, compiletime::GroupKind::Exclusive, v.op, v.value);
+      },
       [&](const Spec::RemoteLaunch &) -> ValPtr { throw BackendException("Spec::RemoteLaunch is a host-only operation"); },
       [&](const Spec::RemoteAlloc &) -> ValPtr { throw BackendException("Spec::RemoteAlloc is a host-only operation"); },
       [&](const Spec::RemoteTempAlloc &) -> ValPtr { throw BackendException("Spec::RemoteTempAlloc is a host-only operation"); },

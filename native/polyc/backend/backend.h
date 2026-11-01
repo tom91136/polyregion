@@ -2,6 +2,8 @@
 
 #include <stdexcept>
 
+#include "polyregion/group_native.h"
+
 #include "compiler.h"
 
 namespace polyregion::backend {
@@ -25,6 +27,9 @@ struct BackendException final : std::logic_error {
 };
 
 using namespace polyregion;
+
+void requireGroupNative(compiletime::Target target, const std::string &arch, compiletime::GroupKind kind, const polyast::AtomicOp::Any &op,
+                        const polyast::Type::Any &type);
 
 class Backend {
 public:

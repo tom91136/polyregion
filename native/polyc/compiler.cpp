@@ -20,6 +20,7 @@
 
 #include "polyregion/compat.h"
 #include "polyregion/conventions.h"
+#include "polyregion/group_native.h"
 #include "polyregion/io.hpp"
 #include "polyregion/llvm_utils.hpp"
 #include "polyregion/polypackage.h"
@@ -273,26 +274,27 @@ std::string packageEntryPipeline(const compiletime::Target target, const std::st
                                             "FullOpt(level=1)",
                                             *stackDepth)
                               : std::string("DeadFunctionElimination;Intrinsify;RecursionLower;FnInline;Intrinsify;FullOpt(level=1)");
+  const auto groups = compiletime::groupLowerArgs(target, arch);
   switch (target) {
     case compiletime::Target::Object_LLVM_SPIRV_GLCompute:
       return opt
-             + ";SubgroupLower(lowerSubgroups=false,lowerGroups=true);StructuredExit;PartialEval(canonicaliseAddresses=true);ArenaView;"
-               "RegionRespace;"
-               "VerifyAnchors(strict=true)";
+             + fmt::format(";SubgroupLower(lowerSubgroups=false,{});StructuredExit;PartialEval(canonicaliseAddresses=true);ArenaView;"
+                           "RegionRespace;VerifyAnchors(strict=true)",
+                           groups);
     case compiletime::Target::Object_LLVM_SPIRV32_Kernel:
     case compiletime::Target::Object_LLVM_SPIRV64_Kernel:
-      return opt + (compiletime::spirvKernelGeneric(arch) ? "" : ";SubgroupLower(lowerSubgroups=false,lowerGroups=true)")
-             + ";StructuredExit;RegionRespace;ArenaLower";
+      return opt + fmt::format(";SubgroupLower(lowerSubgroups=false,{});StructuredExit;RegionRespace;ArenaLower", groups);
     case compiletime::Target::Source_C_Metal1_0:
     case compiletime::Target::Source_C_OpenCL1_1:
-      return opt + ";SubgroupLower(width=1,lowerGroups=true);StructuredExit;RegionRespace;ArenaLower";
-    case compiletime::Target::Source_C_OpenCL2_0: return opt + ";SubgroupLower(width=1);StructuredExit;RegionRespace;ArenaLower";
+    case compiletime::Target::Source_C_OpenCL2_0:
+      return opt + fmt::format(";SubgroupLower(width=1,{});StructuredExit;RegionRespace;ArenaLower", groups);
     case compiletime::Target::Object_LLVM_NVPTX64:
-      return opt + ";SubgroupLower(lowerSubgroups=false,lowerGroups=true);StructuredExit;RegionRespace";
-    case compiletime::Target::Object_LLVM_AMDGCN: return opt + ";SubgroupLower(lowerSubgroups=false,lowerGroups=true);StructuredExit";
+      return opt + fmt::format(";SubgroupLower(lowerSubgroups=false,{});StructuredExit;RegionRespace", groups);
+    case compiletime::Target::Object_LLVM_AMDGCN:
+      return opt + fmt::format(";SubgroupLower(lowerSubgroups=false,{});StructuredExit", groups);
     default:
       return opt
-             + fmt::format(";SubgroupLower(lowerSubgroups=false,lowerGroups=true,maxGroupSize={});StructuredExit",
+             + fmt::format(";SubgroupLower(lowerSubgroups=false,{},maxGroupSize={});StructuredExit", groups,
                            polyregion::program_meta::HostWorkgroupMaxLanes);
   }
 }

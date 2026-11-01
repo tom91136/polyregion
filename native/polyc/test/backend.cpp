@@ -24,6 +24,7 @@
 #include "spirv/unified1/spirv.hpp"
 
 #include "polyregion/env_keys.h"
+#include "polyregion/group_native.h"
 
 #include "ast.h"
 #include "backend/llvm.h"
@@ -2084,7 +2085,7 @@ TEST_CASE("LLVM GPU workgroup collectives report target-specific support", "[bac
   for (const auto &op : {AtomicOp::Any(AtomicOp::Sub()), AtomicOp::Any(AtomicOp::Xchg())})
     CHECK_THROWS_WITH(polyregion::compiler::compile(program(Spec::GpuGroupReduce(op, selectNamed(value), tpe)),
                                                     {Target::Object_LLVM_NVPTX64, "sm_70"}, OptLevel::O0),
-                      Catch::Matchers::ContainsSubstring("associative operation"));
+                      Catch::Matchers::ContainsSubstring("SubgroupLower must lower it"));
   for (const auto &op : {Spec::Any(Spec::GpuGroupInclusiveScan(AtomicOp::Add(), selectNamed(value), tpe)),
                          Spec::Any(Spec::GpuGroupExclusiveScan(AtomicOp::Add(), selectNamed(value), tpe))})
     CHECK_THROWS_WITH(polyregion::compiler::compile(program(op), {Target::Object_LLVM_NVPTX64, "sm_70"}, OptLevel::O0),
@@ -2095,6 +2096,26 @@ TEST_CASE("LLVM GPU workgroup collectives report target-specific support", "[bac
                          Spec::Any(Spec::GpuGroupExclusiveScan(AtomicOp::Add(), selectNamed(value), tpe))})
     CHECK_THROWS_WITH(polyregion::compiler::compile(program(op), {Target::Object_LLVM_AMDGCN, "gfx906"}, OptLevel::O0),
                       Catch::Matchers::ContainsSubstring("lowering not yet implemented"));
+}
+
+TEST_CASE("native group collective predicate drives the lowering arguments", "[backend][group]") {
+  using namespace polyregion::compiletime;
+  CHECK(groupNative(Target::Object_LLVM_NVPTX64, "sm_70", GroupKind::Reduce, "Add", "F32"));
+  CHECK(groupNative(Target::Object_LLVM_NVPTX64, "sm_70", GroupKind::Reduce, "Xor", "U64"));
+  CHECK_FALSE(groupNative(Target::Object_LLVM_NVPTX64, "sm_70", GroupKind::Reduce, "Xor", "F32"));
+  CHECK_FALSE(groupNative(Target::Object_LLVM_NVPTX64, "sm_70", GroupKind::Inclusive, "Add", "I32"));
+  CHECK_FALSE(groupNative(Target::Object_LLVM_AMDGCN, "gfx906", GroupKind::Reduce, "Add", "I32"));
+  CHECK(groupNative(Target::Source_C_OpenCL2_0, "", GroupKind::Exclusive, "Max", "I64"));
+  CHECK(groupNative(Target::Source_C_OpenCL2_0, "", GroupKind::Reduce, "Or", "Bool1"));
+  CHECK_FALSE(groupNative(Target::Source_C_OpenCL2_0, "", GroupKind::Reduce, "Or", "I32"));
+  CHECK_FALSE(groupNative(Target::Source_C_OpenCL2_0, "", GroupKind::Inclusive, "And", "I32"));
+  CHECK(groupNative(Target::Object_LLVM_SPIRV64_Kernel, "2_0", GroupKind::Reduce, "Min", "F64"));
+  CHECK_FALSE(groupNative(Target::Object_LLVM_SPIRV64_Kernel, "1_1", GroupKind::Reduce, "Min", "F64"));
+  for (const auto target : {Target::Source_C_OpenCL1_1, Target::Source_C_Metal1_0, Target::Object_LLVM_SPIRV_GLCompute,
+                            Target::Object_LLVM_HOST, Target::Object_LLVM_AMDGCN})
+    CHECK(groupLowerArgs(target, "") == "lowerGroups=true");
+  CHECK(groupLowerArgs(Target::Object_LLVM_SPIRV64_Kernel, "1_1") == "lowerGroups=true");
+  CHECK(groupLowerArgs(Target::Object_LLVM_NVPTX64, "sm_70").find("nativeGroups=reduce.Add.I32") != std::string::npos);
 }
 
 TEST_CASE("OpenCL C 2.0 names address spaces only at the kernel boundary", "[backend]") {
