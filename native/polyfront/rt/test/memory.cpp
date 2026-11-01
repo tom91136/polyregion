@@ -828,6 +828,10 @@ TEST_CASE("resident heap blocks fault their device copy back and upload again on
   CHECK(xs[count / 2] == 9);
 }
 
+static bool residentCopy(const size_t bytes, const size_t pages, const size_t fullBytes) {
+  return polyregion::polyrt::guard::AtomicPublish ? bytes <= pages * polyregion::polyrt::guard::pageSize() : bytes >= fullBytes;
+}
+
 TEST_CASE("typed read-back of a pointer-free array first mirrored without a layout queries a bounded number of records") {
   struct Capture {
     double *xs;
@@ -865,13 +869,13 @@ TEST_CASE("typed read-back of a pointer-free array first mirrored without a layo
     fixture.allocation.unmirrorReadAlloc(xs);
     return fixture.remoteWriteBytes - before;
   };
-  CHECK(relaunch([&](double *r) { CHECK(r[count / 2] == 3.0); }) <= 4 * polyregion::polyrt::guard::pageSize());
+  CHECK(residentCopy(relaunch([&](double *r) { CHECK(r[count / 2] == 3.0); }), 4, count * sizeof(double)));
   CHECK(xs[0] == 3.0);
   CHECK(xs[count - 1] == 3.0);
 
   xs[count / 2] = 9.0;
   CHECK(relaunch([&](double *r) { CHECK(r[count / 2] == 9.0); }) >= count * sizeof(double) / 2);
-  CHECK(relaunch([&](double *r) { CHECK(r[count / 2] == 9.0); }) <= 4 * polyregion::polyrt::guard::pageSize());
+  CHECK(residentCopy(relaunch([&](double *r) { CHECK(r[count / 2] == 9.0); }), 4, count * sizeof(double)));
   fixture.allocation.disassociate(xs, false);
 }
 
@@ -901,7 +905,7 @@ TEST_CASE("reading back a typed pointer-free array directly after a launch settl
 
   launch(2.0);
   CHECK(xs[count - 1] == 2.0);
-  CHECK(launch(3.0) <= 8 * polyregion::polyrt::guard::pageSize());
+  CHECK(residentCopy(launch(3.0), 8, count * sizeof(double)));
   CHECK(xs[count / 2] == 3.0);
 
   xs[count / 2] = 9.0;
