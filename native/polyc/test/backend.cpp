@@ -2011,7 +2011,9 @@ TEST_CASE("SPIR-V targets lower workgroup collectives", "[backend][group][spirv]
   const Program program(entry, {}, {}, PassPhase::Initial(), {});
   const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
 
-  const auto compiled = polyregion::compiler::compile(program, {Target::Object_LLVM_SPIRV64_Kernel, ""}, OptLevel::O0);
+  CHECK_THROWS_WITH(polyregion::compiler::compile(program, {Target::Object_LLVM_SPIRV64_Kernel, "1_1"}, OptLevel::O0),
+                    Catch::Matchers::ContainsSubstring("SubgroupLower must lower it"));
+  const auto compiled = polyregion::compiler::compile(program, {Target::Object_LLVM_SPIRV64_Kernel, "2_0"}, OptLevel::O0);
   INFO(repr(compiled));
   REQUIRE(compiled.binary);
   CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring("work_group_reduce_add"));
