@@ -622,7 +622,8 @@ static void compileInterfaceCalls(const polyfront::Options &opts, clang::Compile
   };
 
   std::vector<GroupResults> results(prepared.size());
-  std::vector<std::optional<polyast::Package>> selections(prepared.size());
+  polyfront::package::SelectionCache selectionCache;
+  std::vector<std::shared_ptr<const polyast::Package>> selections(prepared.size());
   std::vector<std::vector<size_t>> pending(groups.size());
   for (size_t index = 0; index < prepared.size(); ++index) {
     const auto &item = prepared[index];
@@ -631,12 +632,12 @@ static void compileInterfaceCalls(const polyfront::Options &opts, clang::Compile
       results[index] = GroupResults(groups.size(), unfit(polyfront::package::undeclaredReason(*item.archive, item.site.declaration)));
       continue;
     }
-    auto selected = polyfront::package::loadPackageSelection(*item.archive, item.site.declaration);
+    auto selected = selectionCache.load(*item.archive, item.site.declaration);
     if (!selected) {
       results[index] = {CompileResult{{}, std::move(selected.errors)}};
       continue;
     }
-    selections[index] = std::move(*selected.value);
+    selections[index] = *selected.value;
     results[index].resize(groups.size());
     for (size_t group = 0; group < groups.size(); ++group) {
       const auto &capabilities = groups[group].capabilities;
@@ -655,7 +656,7 @@ static void compileInterfaceCalls(const polyfront::Options &opts, clang::Compile
     std::unordered_set<Sym> seenDefinitions;
     for (const auto index : members) {
       const auto &item = prepared[index];
-      packages.emplace_back(&*selections[index]);
+      packages.emplace_back(selections[index].get());
       for (auto &function : consumerFunctionsFor(item, group))
         if (seenFunctions.emplace(function.decl.name).second) functions.emplace_back(std::move(function));
       for (const auto &definition : item.consumerDefinitions)

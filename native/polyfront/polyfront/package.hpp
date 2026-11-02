@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -336,6 +337,27 @@ inline Checked<Archive> loadPackage(const std::string &packageName, const std::v
   return archive;
 }
 
+template <typename T, typename Key> std::vector<T> distinctByKey(std::vector<T> items, Key key) {
+  std::unordered_map<polyast::Sym, std::vector<size_t>> buckets;
+  std::vector<T> out;
+  out.reserve(items.size());
+  for (auto &item : items) {
+    auto &bucket = buckets[key(item)];
+    if (std::any_of(bucket.begin(), bucket.end(), [&](const size_t at) { return out[at] == item; })) continue;
+    bucket.emplace_back(out.size());
+    out.emplace_back(std::move(item));
+  }
+  return out;
+}
+
+inline std::vector<polyast::Function> distinctFunctions(std::vector<polyast::Function> functions) {
+  return distinctByKey(std::move(functions), [](const polyast::Function &function) { return function.decl.name; });
+}
+
+inline std::vector<polyast::StructDef> distinctDefinitions(std::vector<polyast::StructDef> definitions) {
+  return distinctByKey(std::move(definitions), [](const polyast::StructDef &definition) { return definition.name; });
+}
+
 inline Checked<polyast::Package> loadPackageSelection(const Archive &archive, const std::string &declaration) {
   if (!archive.storage) return {{}, {"package `" + archive.path + "` has no backing storage"}};
   const auto entries = archive.entriesByDeclaration.find(declaration);
@@ -352,11 +374,25 @@ inline Checked<polyast::Package> loadPackageSelection(const Archive &archive, co
     functions.insert(functions.end(), std::make_move_iterator(program.functions.begin()), std::make_move_iterator(program.functions.end()));
     definitions.insert(definitions.end(), std::make_move_iterator(program.defs.begin()), std::make_move_iterator(program.defs.end()));
   }
-  return {
-      {polyast::Package(archive.interface, polyast::Program({}, functions | distinct() | to_vector(),
-                                                            definitions | distinct() | to_vector(), polyast::PassPhase::Initial(), {}))},
-      {}};
+  return {{polyast::Package(archive.interface,
+                            polyast::Program({}, distinctFunctions(std::move(functions)), distinctDefinitions(std::move(definitions)),
+                                             polyast::PassPhase::Initial(), {}))},
+          {}};
 }
+
+class SelectionCache {
+  std::map<std::pair<std::string, std::string>, std::shared_ptr<const polyast::Package>> loaded;
+
+public:
+  Checked<std::shared_ptr<const polyast::Package>> load(const Archive &archive, const std::string &declaration) {
+    auto &slot = loaded[{archive.path, declaration}];
+    if (slot) return {{slot}, {}};
+    auto selected = loadPackageSelection(archive, declaration);
+    if (!selected) return {{}, std::move(selected.errors)};
+    slot = std::make_shared<const polyast::Package>(std::move(*selected.value));
+    return {{slot}, {}};
+  }
+};
 
 inline std::string undeclaredReason(const Archive &archive, const std::string &declaration) {
   return "package `" + polyast::fqcn(archive.interface.name) + "` has no implementation of `" + declaration + "`";
@@ -413,18 +449,20 @@ inline bool satisfiable(const polyast::Package &package, const std::string &decl
 
 inline std::vector<polyast::Package> mergeSelections(const std::vector<const polyast::Package *> &selections) {
   std::vector<polyast::Package> merged;
+  std::unordered_set<const polyast::Package *> seen;
   for (const auto *selection : selections) {
+    if (!seen.emplace(selection).second) continue;
     const auto found =
         std::find_if(merged.begin(), merged.end(), [&](const auto &package) { return package.interface == selection->interface; });
     if (found == merged.end()) {
       merged.emplace_back(*selection);
       continue;
     }
-    auto functions = found->program.functions;
+    auto functions = std::move(found->program.functions);
     functions.insert(functions.end(), selection->program.functions.begin(), selection->program.functions.end());
-    auto defs = found->program.defs;
+    auto defs = std::move(found->program.defs);
     defs.insert(defs.end(), selection->program.defs.begin(), selection->program.defs.end());
-    found->program = found->program.withFunctions(functions ^ distinct() ^ to_vector()).withDefs(defs ^ distinct() ^ to_vector());
+    found->program = found->program.withFunctions(distinctFunctions(std::move(functions))).withDefs(distinctDefinitions(std::move(defs)));
   }
   return merged;
 }

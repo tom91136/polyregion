@@ -258,21 +258,22 @@ void polyregion::polyfc::interface_resolution::resolveInterfaces(clang::Diagnost
   }
 
   if (prepared.empty()) return;
-  std::vector<Package> selections;
+  SelectionCache selectionCache;
+  std::vector<std::shared_ptr<const Package>> selections;
   std::vector<Function> roots;
   std::vector<ProgramTypeSize> typeSizes;
   for (auto &item : prepared) {
-    const auto selected = loadPackageSelection(item.archive, item.root.implements ? polyast::fqcn(*item.root.implements) : std::string{});
+    const auto selected = selectionCache.load(item.archive, item.root.implements ? polyast::fqcn(*item.root.implements) : std::string{});
     if (!selected) {
       emitErrors(diag, item.function.getLoc(), selected.errors);
       return;
     }
-    selections.emplace_back(std::move(*selected.value));
+    selections.emplace_back(*selected.value);
     roots.emplace_back(item.root);
     for (const auto &size : item.typeSizes)
       if (std::find(typeSizes.begin(), typeSizes.end(), size) == typeSizes.end()) typeSizes.emplace_back(size);
   }
-  const auto packages = mergeSelections(selections ^ map([](const auto &selection) { return &selection; }));
+  const auto packages = mergeSelections(selections ^ map([](const auto &selection) { return selection.get(); }));
   const auto entryNames = prepared ^ map([](const auto &item) { return item.entryName; });
   const auto linked = linkGroups(opts, packages, roots, entryNames, {}, typeSizes, bitcodeFiles, {});
   if (!linked || !linked.value->unfit.empty()) {
