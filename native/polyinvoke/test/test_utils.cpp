@@ -206,8 +206,10 @@ int runOnTarget(invoke::Backend backend, std::string_view arch, const std::vecto
 void checkHostCapabilities(Context &ctx, invoke::Platform &platform, invoke::Device &device) {
   if (platform.kind() != invoke::PlatformKind::HostThreaded) return;
   const auto threads = device.maxThreadsPerBlock();
-  POLYTEST_CHECK_S(ctx, threads == program_meta::HostWorkgroupMaxLanes, "max threads per block: got {}, expected {}", threads,
-                   program_meta::HostWorkgroupMaxLanes);
+  POLYTEST_CHECK_S(ctx, threads == invoke::object::hostMaxLanes(), "max threads per block: got {}, expected {}", threads,
+                   invoke::object::hostMaxLanes());
+  POLYTEST_CHECK_S(ctx, threads >= 1 && threads <= program_meta::HostWorkgroupMaxLanes,
+                   "max threads per block: got {}, expected within [1, {}]", threads, program_meta::HostWorkgroupMaxLanes);
   const auto local = device.localMemoryBytes();
   POLYTEST_CHECK_S(ctx, local == program_meta::HostWorkgroupMemoryBytes, "local memory bytes: got {}, expected {}", local,
                    program_meta::HostWorkgroupMemoryBytes);

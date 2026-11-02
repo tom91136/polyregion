@@ -2,6 +2,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdio>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <system_error>
@@ -13,7 +14,10 @@
 
 #if defined(__linux__) || defined(__APPLE__)
   #include <dlfcn.h>
+  #include <pthread.h>
   #include <unistd.h>
+
+  #include <sys/resource.h>
 #endif
 #ifdef __APPLE__
   #include <sys/sysctl.h>
@@ -96,7 +100,42 @@ struct HostGroup {
 
 thread_local HostGroup *hostGroup = nullptr;
 thread_local std::unique_ptr<std::byte[]> hostTaskLocal;
+
+constexpr double HostLaneStackAddressShare = 0.5;
+
+uint64_t hostStackReserveBytes() {
+#ifdef _WIN32
+  const auto *dos = reinterpret_cast<const IMAGE_DOS_HEADER *>(GetModuleHandleW(nullptr));
+  const auto *nt = reinterpret_cast<const IMAGE_NT_HEADERS *>(reinterpret_cast<const char *>(dos) + dos->e_lfanew);
+  return nt->OptionalHeader.SizeOfStackReserve;
+#else
+  pthread_attr_t attr;
+  pthread_attr_init(&attr);
+  size_t size = 0;
+  pthread_attr_getstacksize(&attr, &size);
+  pthread_attr_destroy(&attr);
+  return size;
+#endif
+}
+
+uint64_t hostAddressSpaceBytes() {
+  uint64_t bytes = sizeof(void *) < sizeof(uint64_t) ? uint64_t(1) << (8 * sizeof(void *)) : std::numeric_limits<uint64_t>::max();
+#ifndef _WIN32
+  rlimit as{};
+  if (getrlimit(RLIMIT_AS, &as) == 0 && as.rlim_cur != RLIM_INFINITY) bytes = std::min<uint64_t>(bytes, as.rlim_cur);
+#endif
+  return bytes;
+}
 } // namespace
+
+size_t polyregion::invoke::object::hostMaxLanes() {
+  static const size_t lanes = [] {
+    const auto fit =
+        static_cast<double>(hostAddressSpaceBytes()) * HostLaneStackAddressShare / static_cast<double>(hostStackReserveBytes());
+    return std::clamp<size_t>(static_cast<size_t>(fit), 1, polyregion::program_meta::HostWorkgroupMaxLanes);
+  }();
+  return lanes;
+}
 
 extern "C" POLYREGION_EXPORT uint64_t __polyregion_host_thread_global_idx() { return hostThreadGlobalIdx; }
 extern "C" POLYREGION_EXPORT uint64_t __polyregion_host_thread_global_size() { return hostThreadGlobalSize; }
@@ -118,9 +157,8 @@ static constexpr const char *RELOBJ_PREFIX = "RelocatableObject";
 static bool groupedPolicy(const Policy &policy) { return policy.local && policy.local->first.x > 1; }
 
 static void groupedLaunch(const size_t groups, const size_t lanes, const MaybeCallback &cb, std::function<void(size_t)> task) {
-  if (lanes > polyregion::program_meta::HostWorkgroupMaxLanes)
-    POLYINVOKE_FATAL(RELOBJ_PREFIX, "work-group size %zu exceeds host capacity of %zu lanes", lanes,
-                     static_cast<size_t>(polyregion::program_meta::HostWorkgroupMaxLanes));
+  if (lanes > hostMaxLanes())
+    POLYINVOKE_FATAL(RELOBJ_PREFIX, "work-group size %zu exceeds host capacity of %zu lanes", lanes, hostMaxLanes());
   if (groups == 0) {
     if (cb) (*cb)();
     return;
@@ -268,7 +306,7 @@ void ObjectDevice::freeShared(void *ptr) {
 }
 size_t ObjectDevice::maxThreadsPerBlock() {
   POLYINVOKE_TRACE();
-  return polyregion::program_meta::HostWorkgroupMaxLanes;
+  return hostMaxLanes();
 }
 size_t ObjectDevice::localMemoryBytes() {
   POLYINVOKE_TRACE();

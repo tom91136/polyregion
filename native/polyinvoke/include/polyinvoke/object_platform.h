@@ -24,6 +24,7 @@ using WriteLock = std::unique_lock<std::shared_mutex>;
 using ReadLock = std::shared_lock<std::shared_mutex>;
 
 inline size_t hostConcurrency() { return std::max<size_t>(1, std::thread::hardware_concurrency()); }
+POLYREGION_EXPORT size_t hostMaxLanes();
 
 class POLYREGION_EXPORT ObjectDevice : public Device {
 public:
