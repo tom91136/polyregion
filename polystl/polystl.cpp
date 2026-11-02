@@ -8,6 +8,7 @@
 #include "polyrt/rt.h"
 #include "polyrt/sma_runtime.hpp"
 
+#include "reflect-rt/rt.hpp"
 #include "reflect-rt/rt_reflect.hpp"
 
 // XXX polystl-static bundles polyinvoke + LLVM Support; consumers link via polycpp at runtime
