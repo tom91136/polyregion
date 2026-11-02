@@ -50,11 +50,6 @@ jobs:
           }
           echo "C:\Program Files\LLVM\bin" >> $env:GITHUB_PATH
 
-      - name: Setup Ninja
-        uses: taiki-e/install-action@v2
-        with:
-          tool: ninja
-
       - name: Dotenv
         id: dotenv
         uses: falti/dotenv-action@v1.2
@@ -154,11 +149,6 @@ jobs:
 
       - name: Setup sbt
         uses: sbt/setup-sbt@v1
-
-      - name: Setup Ninja
-        uses: taiki-e/install-action@v2
-        with:
-          tool: ninja
 
       - name: Dotenv
         id: dotenv
