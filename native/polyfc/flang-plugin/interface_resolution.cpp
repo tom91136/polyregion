@@ -258,7 +258,7 @@ void polyregion::polyfc::interface_resolution::resolveInterfaces(clang::Diagnost
   }
 
   if (prepared.empty()) return;
-  std::vector<Package> packages;
+  std::vector<Package> selections;
   std::vector<Function> roots;
   std::vector<ProgramTypeSize> typeSizes;
   for (auto &item : prepared) {
@@ -267,11 +267,12 @@ void polyregion::polyfc::interface_resolution::resolveInterfaces(clang::Diagnost
       emitErrors(diag, item.function.getLoc(), selected.errors);
       return;
     }
-    if (std::find(packages.begin(), packages.end(), *selected.value) == packages.end()) packages.emplace_back(std::move(*selected.value));
+    selections.emplace_back(std::move(*selected.value));
     roots.emplace_back(item.root);
     for (const auto &size : item.typeSizes)
       if (std::find(typeSizes.begin(), typeSizes.end(), size) == typeSizes.end()) typeSizes.emplace_back(size);
   }
+  const auto packages = mergeSelections(selections ^ map([](const auto &selection) { return &selection; }));
   const auto entryNames = prepared ^ map([](const auto &item) { return item.entryName; });
   const auto linked = linkGroups(opts, packages, roots, entryNames, {}, typeSizes, bitcodeFiles, {});
   if (!linked || !linked.value->unfit.empty()) {
