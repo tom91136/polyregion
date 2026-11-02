@@ -41,10 +41,21 @@ struct POLYREGION_EXPORT Options {
   POLYREGION_EXPORT uint32_t workgroupMemoryBytes = defaultWorkgroupMemoryBytes(target);
 };
 
+struct POLYREGION_EXPORT Staged {
+  POLYREGION_EXPORT std::optional<polyast::Program> program;
+  POLYREGION_EXPORT Options options;
+  POLYREGION_EXPORT bool hadEntry = false;
+  POLYREGION_EXPORT std::vector<polyast::CompileEvent> events;
+  POLYREGION_EXPORT std::string error;
+};
+
 POLYREGION_EXPORT std::vector<polyast::StructLayout> layoutOf(const std::vector<polyast::StructDef> &sdefs, const Options &options);
 POLYREGION_EXPORT std::vector<polyast::StructLayout> layoutOf(const polyast::Bytes &bytes, const Options &options);
 
 POLYREGION_EXPORT polyast::Program runPipeline(const polyast::Program &program, const std::string &spec = {});
+// stage runs the PolyPass pipeline and must stay on one thread; emit is the code generator and may run concurrently
+POLYREGION_EXPORT Staged stage(const polyast::Program &program, const Options &options);
+POLYREGION_EXPORT polyast::CompileResult emit(Staged staged, const compiletime::OptLevel &opt);
 POLYREGION_EXPORT polyast::CompileResult compile(const polyast::Program &program, const Options &options, const compiletime::OptLevel &opt);
 POLYREGION_EXPORT polyast::CompileResult compile(const polyast::Bytes &astBytes, const Options &options, const compiletime::OptLevel &opt);
 

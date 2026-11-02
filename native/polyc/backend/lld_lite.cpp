@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <deque>
 #include <fstream>
+#include <mutex>
 
 #include "lld/Common/CommonLinkerContext.h"
 #include "lld/Common/Driver.h"
@@ -23,6 +24,8 @@ bool link(ArrayRef<const char *> args, llvm::raw_ostream &stdoutOS, llvm::raw_os
 
 std::pair<std::optional<std::string>, std::optional<std::string>>
 polyregion::backend::lld_lite::linkElf(const std::vector<std::string> &args, const std::vector<llvm::MemoryBufferRef> &files) {
+  static std::mutex linkMutex;
+  const std::lock_guard lock(linkMutex);
 
   // XXX deque for stable c_str() across push_back; LLD holds the pointers below.
   std::deque<std::string> inMemoryFiles;

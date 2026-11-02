@@ -1,6 +1,7 @@
 #include "llvmc.h"
 
 #include <array>
+#include <mutex>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -89,7 +90,8 @@ llvm::Triple llvmc::defaultHostTriple() { return llvm::Triple(llvm::sys::getProc
 const llvmc::CpuInfo &llvmc::hostCpuInfo() {
   // XXX This is cached because host CPU can never change (hopefully!) at runtime.
   static std::optional<llvmc::CpuInfo> hostCpuInfo = {};
-  if (!hostCpuInfo) {
+  static std::once_flag once;
+  std::call_once(once, [] {
     auto hostFeatures = llvm::sys::getHostCPUFeatures();
 #if defined(__riscv)
     // QEMU's riscv_hwprobe emulation can omit floating-point extensions even
@@ -111,7 +113,7 @@ const llvmc::CpuInfo &llvmc::hostCpuInfo() {
       Features.AddFeature(F.first(), F.second);
     }
     hostCpuInfo = {.uArch = llvm::sys::getHostCPUName().str(), .features = Features.getString()};
-  }
+  });
   assert(hostCpuInfo && "Host CPU info not valid");
   return *hostCpuInfo;
 }

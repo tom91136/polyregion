@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <future>
+#include <memory>
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
@@ -12,6 +14,7 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/SHA256.h"
+#include "llvm/Support/ThreadPool.h"
 
 #include "aspartame/all.hpp"
 #include "fmt/format.h"
@@ -20,6 +23,7 @@
 
 #include "polyregion/compat.h"
 #include "polyregion/conventions.h"
+#include "polyregion/env_keys.h"
 #include "polyregion/group_native.h"
 #include "polyregion/io.hpp"
 #include "polyregion/llvm_utils.hpp"
@@ -330,6 +334,15 @@ std::string packageEntryPipeline(const compiletime::Target target, const std::st
   }
 }
 
+unsigned compileJobs() {
+  if (const char *value = std::getenv(polyregion::env::PolycJobs); value && *value) {
+    char *end = nullptr;
+    const auto parsed = std::strtoul(value, &end, 10);
+    if (end != value && *end == '\0') return static_cast<unsigned>(parsed);
+  }
+  return 0;
+}
+
 std::vector<polyast::Sym> consumerRoots(const polyast::ProgramLinkRequest &request) {
   std::vector<polyast::Sym> roots;
   const auto add = [&](const polyast::Function &function) {
@@ -516,10 +529,21 @@ compiler::package::compile(const polyast::ProgramLinkRequest &request, const com
     std::erase_if(program.functions, [&](const auto &function) { return !live.contains(function.decl.name); });
   }
 
-  const auto host = compile(program, Options{hostTarget, hostArch, "StructuredExit", true}, compiletime::OptLevel::O3);
-  if (!host.binary) return {{}, {"linked consumer program compilation failed: " + host.messages}};
+  llvm::StdThreadPool pool(llvm::hardware_concurrency(compileJobs()));
+  const auto submit = [&](compiler::Staged staged, const compiletime::OptLevel opt) {
+    return pool.async([staged = std::make_shared<compiler::Staged>(std::move(staged)), opt] {
+      return std::make_shared<polyast::CompileResult>(compiler::emit(std::move(*staged), opt));
+    });
+  };
 
-  std::vector<polyast::CompileModule> remoteModules;
+  auto hostCompile = submit(compiler::stage(program, Options{hostTarget, hostArch, "StructuredExit", true}), compiletime::OptLevel::O3);
+
+  struct DeviceCompile {
+    std::string moduleName;
+    compiletime::Target target;
+    std::shared_future<std::shared_ptr<polyast::CompileResult>> result;
+  };
+  std::vector<DeviceCompile> deviceCompiles;
   for (const auto &entry : program.functions) {
     if (!entry.convention.is<polyast::CallConvention::OffloadEntry>()) continue;
     const auto moduleName = backend::normaliseSymbol(entry.decl.name);
@@ -536,18 +560,26 @@ compiler::package::compile(const polyast::ProgramLinkRequest &request, const com
     entryProgram.functions = std::move(functions);
     for (const auto &[target, arch] : deviceTargets) {
       const auto pipeline = packageEntryPipeline(target, arch, stackDepth);
-      const auto device = compile(entryProgram, Options{target, arch, pipeline}, compiletime::OptLevel::O3);
-      if (!device.binary) return {{}, {"linked consumer entry compilation failed for " + moduleName + ": " + device.messages}};
-      const auto format = runtime::moduleFormatOf(target);
-      if (!format) continue;
-      auto features = device.features;
-      if (device.entryArgs ^ exists([](const auto &arg) { return arg.symbol == conventions::ErrorArg; }))
-        features.emplace_back(conventions::ErrorArg);
-      remoteModules.emplace_back(moduleName, static_cast<int32_t>(*format), static_cast<int32_t>(runtime::targetPlatformKind(target)),
-                                 std::move(features), *device.binary);
+      deviceCompiles.push_back(
+          {moduleName, target, submit(compiler::stage(entryProgram, Options{target, arch, pipeline}), compiletime::OptLevel::O3)});
     }
   }
-  return {{polyast::CompileBundle(std::move(*host.binary), std::move(remoteModules), std::move(implementations), std::move(unfit),
+
+  const auto host = hostCompile.get();
+  if (!host->binary) return {{}, {"linked consumer program compilation failed: " + host->messages}};
+  std::vector<polyast::CompileModule> remoteModules;
+  for (const auto &[moduleName, target, result] : deviceCompiles) {
+    const auto device = result.get();
+    if (!device->binary) return {{}, {"linked consumer entry compilation failed for " + moduleName + ": " + device->messages}};
+    const auto format = runtime::moduleFormatOf(target);
+    if (!format) continue;
+    auto features = device->features;
+    if (device->entryArgs ^ exists([](const auto &arg) { return arg.symbol == conventions::ErrorArg; }))
+      features.emplace_back(conventions::ErrorArg);
+    remoteModules.emplace_back(moduleName, static_cast<int32_t>(*format), static_cast<int32_t>(runtime::targetPlatformKind(target)),
+                               std::move(features), std::move(*device->binary));
+  }
+  return {{polyast::CompileBundle(std::move(*host->binary), std::move(remoteModules), std::move(implementations), std::move(unfit),
                                   std::move(compileRootInfo))},
           {}};
 }
@@ -620,32 +652,9 @@ polyast::Program compiler::runPipeline(const polyast::Program &program, const st
   return runPipelineChain(program, spec).program;
 }
 
-polyast::CompileResult compiler::compile(const polyast::Program &program, const Options &options, const compiletime::OptLevel &opt) {
+compiler::Staged compiler::stage(const polyast::Program &program, const Options &options) {
   initialise();
   const bool hadEntry = program.entry.has_value();
-  auto mkBackend = [&]() -> std::unique_ptr<backend::Backend> {
-    switch (options.target) {
-      case compiletime::Target::Object_LLVM_HOST:
-      case compiletime::Target::Object_LLVM_x86_64:
-      case compiletime::Target::Object_LLVM_AArch64:
-      case compiletime::Target::Object_LLVM_ARM:
-      case compiletime::Target::Object_LLVM_NVPTX64:
-      case compiletime::Target::Object_LLVM_AMDGCN:
-      case compiletime::Target::Object_LLVM_SPIRV32_Kernel:
-      case compiletime::Target::Object_LLVM_SPIRV64_Kernel:
-      case compiletime::Target::Object_LLVM_SPIRV_GLCompute:                                                           //
-        return std::make_unique<backend::LLVMBackend>(toLLVMBackendOptions(options));                                  //
-      case compiletime::Target::Source_C_OpenCL1_1:                                                                    //
-        return std::make_unique<backend::CSource>(backend::CSource::Dialect::OpenCL1_1, options.workgroupMemoryBytes); //
-      case compiletime::Target::Source_C_OpenCL2_0:
-        return std::make_unique<backend::CSource>(backend::CSource::Dialect::OpenCL2_0, options.workgroupMemoryBytes);
-      case compiletime::Target::Source_C_Metal1_0:                                                                  //
-        return std::make_unique<backend::CSource>(backend::CSource::Dialect::MSL1_0, options.workgroupMemoryBytes); //
-      case compiletime::Target::Source_C_C11:                                                                       //
-        return std::make_unique<backend::CSource>(backend::CSource::Dialect::C11, options.workgroupMemoryBytes);    //
-      default: throw std::logic_error(fmt::format("Unknown target: {}", magic_enum::enum_name(options.target)));
-    }
-  };
 
   const bool isGpuTarget = runtime::targetPlatformKind(options.target) == runtime::PlatformKind::Managed;
   if (isGpuTarget && program.entry && !program.entry->decl.affinity.is<polyast::FunctionAffinity::Offload>())
@@ -689,22 +698,59 @@ polyast::CompileResult compiler::compile(const polyast::Program &program, const 
   }
 
   if (options.hostMirroring) {
-    if (!effective.entry) return {{}, {}, preEvents, {}, "hostMirroring: pipeline removed the Program entry", {}};
+    if (!effective.entry)
+      return {std::nullopt, options, hadEntry, std::move(preEvents), "hostMirroring: pipeline removed the Program entry"};
     auto hostFns = std::vector<polyast::Function>{*effective.entry}                                                       //
                    | concat(effective.functions)                                                                          //
                    | filter([](const auto &f) { return f.decl.affinity.template is<polyast::FunctionAffinity::Host>(); }) //
                    | to_vector();
-    if (hostFns.empty()) return {{}, {}, preEvents, {}, "hostMirroring: pipeline produced no Host-affinity functions", {}};
+    if (hostFns.empty())
+      return {std::nullopt, options, hadEntry, std::move(preEvents), "hostMirroring: pipeline produced no Host-affinity functions"};
     effective = polyast::Program(hostFns.front(), std::vector<polyast::Function>(std::next(hostFns.begin()), hostFns.end()), effective.defs,
                                  effective.phase, effective.metadata);
   }
 
+  return {std::move(effective), options, hadEntry, std::move(preEvents), {}};
+}
+
+polyast::CompileResult compiler::emit(Staged staged, const compiletime::OptLevel &opt) {
+  if (!staged.error.empty()) return {{}, {}, std::move(staged.events), {}, std::move(staged.error), {}};
+  const auto &options = staged.options;
+  auto mkBackend = [&]() -> std::unique_ptr<backend::Backend> {
+    switch (options.target) {
+      case compiletime::Target::Object_LLVM_HOST:
+      case compiletime::Target::Object_LLVM_x86_64:
+      case compiletime::Target::Object_LLVM_AArch64:
+      case compiletime::Target::Object_LLVM_ARM:
+      case compiletime::Target::Object_LLVM_NVPTX64:
+      case compiletime::Target::Object_LLVM_AMDGCN:
+      case compiletime::Target::Object_LLVM_SPIRV32_Kernel:
+      case compiletime::Target::Object_LLVM_SPIRV64_Kernel:
+      case compiletime::Target::Object_LLVM_SPIRV_GLCompute:                                                           //
+        return std::make_unique<backend::LLVMBackend>(toLLVMBackendOptions(options));                                  //
+      case compiletime::Target::Source_C_OpenCL1_1:                                                                    //
+        return std::make_unique<backend::CSource>(backend::CSource::Dialect::OpenCL1_1, options.workgroupMemoryBytes); //
+      case compiletime::Target::Source_C_OpenCL2_0:
+        return std::make_unique<backend::CSource>(backend::CSource::Dialect::OpenCL2_0, options.workgroupMemoryBytes);
+      case compiletime::Target::Source_C_Metal1_0:                                                                  //
+        return std::make_unique<backend::CSource>(backend::CSource::Dialect::MSL1_0, options.workgroupMemoryBytes); //
+      case compiletime::Target::Source_C_C11:                                                                       //
+        return std::make_unique<backend::CSource>(backend::CSource::Dialect::C11, options.workgroupMemoryBytes);    //
+      default: throw std::logic_error(fmt::format("Unknown target: {}", magic_enum::enum_name(options.target)));
+    }
+  };
+
+  auto &effective = *staged.program;
   polyast::CompileResult c = mkBackend()->compileProgram(effective, opt);
-  if (hadEntry && !effective.entry) throw std::logic_error("pipeline removed the Program entry");
+  if (staged.hadEntry && !effective.entry) throw std::logic_error("pipeline removed the Program entry");
   if (effective.entry) c.entryArgs = effective.entry->decl.args ^ map([](const auto &a) { return a.named; });
-  c.events ^= concat(preEvents);
+  c.events ^= concat(staged.events);
   std::stable_sort(c.events.begin(), c.events.end(), [](const auto &l, const auto &r) { return l.epochMillis < r.epochMillis; });
   return c;
+}
+
+polyast::CompileResult compiler::compile(const polyast::Program &program, const Options &options, const compiletime::OptLevel &opt) {
+  return emit(stage(program, options), opt);
 }
 
 polyast::CompileResult compiler::compile(const polyast::Bytes &astBytes, const Options &options, const compiletime::OptLevel &opt) {
