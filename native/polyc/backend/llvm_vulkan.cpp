@@ -78,7 +78,7 @@ llvm::Value *VulkanLowering::localElementPtr(const Term::Select &select, llvm::V
   const auto base = localBases ^ get_maybe(select.root.symbol);
   if (!base) return nullptr;
   const auto &[elemTpe, arrTy, gv] = *base;
-  return cg.B.CreateInBoundsGEP(arrTy, gv, {llvm::ConstantInt::get(cg.C.i32Ty(), 0), cg.i64SExt(index)}, qualified(select) + "_wg_ptr");
+  return cg.B.CreateInBoundsGEP(arrTy, gv, {llvm::ConstantInt::get(cg.C.i32Ty(), 0), index}, qualified(select) + "_wg_ptr");
 }
 
 std::optional<std::tuple<llvm::Value *, llvm::Type *, std::vector<llvm::Value *>>> VulkanLowering::localOrigin(const Term::Select &select) {
@@ -94,8 +94,7 @@ std::optional<std::tuple<llvm::Value *, llvm::Type *, std::vector<llvm::Value *>
     arrTy = cg.resolveType(select.root.tpe);
   } else return std::nullopt;
   if (!(select.steps ^ forall([](const auto &step) { return step.template is<PathStep::IndexDyn>(); }))) return std::nullopt;
-  const auto indices =
-      select.steps ^ map([&](const auto &step) { return cg.i64SExt(cg.mkTermVal(step.template get<PathStep::IndexDyn>()->idx)); });
+  const auto indices = select.steps ^ map([&](const auto &step) { return cg.i64Index(step.template get<PathStep::IndexDyn>()->idx); });
   return std::tuple{base, arrTy, indices};
 }
 
@@ -126,8 +125,8 @@ std::vector<llvm::Value *> VulkanLowering::extendIndices(const std::vector<llvm:
   const bool descend = lhsTpe.template is<Type::Arr>()
                        || (lhsTpe.template get<Type::Ptr>() ^ exists([](const auto &p) { return p.comp.template is<Type::Arr>(); }));
   std::vector<llvm::Value *> out = base;
-  if (descend || out.empty()) out.push_back(cg.i64SExt(idx));
-  else out.back() = cg.B.CreateAdd(out.back(), cg.i64SExt(idx));
+  if (descend || out.empty()) out.push_back(idx);
+  else out.back() = cg.B.CreateAdd(out.back(), idx);
   return out;
 }
 
@@ -225,7 +224,7 @@ std::optional<ValPtr> VulkanLowering::termSelectVal(CodeGen &, const Term::Selec
 
 std::optional<ValPtr> VulkanLowering::mkIndex(const Term::Select &lhs, const Term::Any &idx) {
   auto &B = cg.B;
-  auto *ptr = elementPtr(lhs, cg.i64SExt(cg.mkTermVal(idx)));
+  auto *ptr = elementPtr(lhs, cg.i64Index(idx));
   if (!ptr) return std::nullopt;
   Opt<AnyType> compTpe;
   if (auto p = lhs.tpe.template get<Type::Ptr>()) compTpe = p->comp;
@@ -241,13 +240,13 @@ std::optional<ValPtr> VulkanLowering::mkIndex(const Term::Select &lhs, const Ter
 }
 
 std::optional<ValPtr> VulkanLowering::mkRefTo(const Term::Select &lhs, const Opt<Term::Any> &idx) {
-  auto *ptr = elementPtr(lhs, idx ? cg.i64SExt(cg.mkTermVal(*idx)) : i64Zero());
+  auto *ptr = elementPtr(lhs, idx ? cg.i64Index(*idx) : i64Zero());
   return ptr ? std::optional{ValPtr{ptr}} : std::nullopt;
 }
 
 bool VulkanLowering::mkUpdate(const Term::Select &lhs, const Term::Any &idx, const Term::Any &value) {
   auto &B = cg.B;
-  auto *ptr = elementPtr(lhs, cg.i64SExt(cg.mkTermVal(idx)));
+  auto *ptr = elementPtr(lhs, cg.i64Index(idx));
   if (!ptr) return false;
   if (value.tpe().template is<Type::Struct>()) {
     cg.copyStruct(ptr, cg.mkTermVal(value), value.tpe());

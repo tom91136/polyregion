@@ -1990,6 +1990,66 @@ TEST_CASE("LLVM GPU targets lower volatile access", "[backend][volatile]") {
   }
 }
 
+static Program indexStoreProgram(const Type::Any &indexTpe) {
+  using namespace polyregion::polyast::dsl;
+  const auto ptrTpe = Type::Ptr(Type::IntS32(), TypeSpace::Global()).widen();
+  const Named ptr("ptr", ptrTpe), idx("idx", indexTpe);
+  return Program(
+      mkFn("store", {Arg(ptr, {}), Arg(idx, {})}, Type::Unit0(),
+           {Update(Term::Select(ptr, {}, ptrTpe), Term::Select(idx, {}, indexTpe), Term::IntS32Const(42).widen()).widen(), ret()},
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true),
+      {}, {}, PassPhase::Initial(), {});
+}
+
+static std::set<llvm::Instruction::CastOps> gepIndexCasts(const std::string &ir) {
+  llvm::LLVMContext context;
+  llvm::SMDiagnostic diagnostic;
+  const auto module = llvm::parseAssemblyString(ir, diagnostic, context);
+  REQUIRE(module);
+  std::set<llvm::Instruction::CastOps> casts;
+  for (const auto &F : *module)
+    for (const auto &I : llvm::instructions(F))
+      if (const auto *gep = llvm::dyn_cast<llvm::GetElementPtrInst>(&I))
+        for (const auto &index : gep->indices())
+          if (const auto *cast = llvm::dyn_cast<llvm::CastInst>(index.get());
+              cast && cast->getSrcTy()->isIntegerTy(32) && cast->getDestTy()->isIntegerTy(64))
+            casts.insert(cast->getOpcode());
+  return casts;
+}
+
+TEST_CASE("indices widen by their signedness on LLVM targets", "[backend][index]") {
+  polyregion::compiler::initialise();
+  const auto unsignedProgram = indexStoreProgram(Type::IntU32().widen());
+  const auto signedProgram = indexStoreProgram(Type::IntS32().widen());
+
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  const auto castsOf = [&](const Program &program, const Target target, const std::string &arch) {
+    const auto compiled = polyregion::compiler::compile(program, {target, arch}, OptLevel::O0);
+    REQUIRE(compiled.binary);
+    return gepIndexCasts(llvmIrOf(compiled));
+  };
+  for (const auto &[target, arch] : std::vector<std::pair<Target, std::string>>{
+           {Target::Object_LLVM_HOST, "native"},
+           {Target::Object_LLVM_NVPTX64, "sm_35"},
+           {Target::Object_LLVM_AMDGCN, "gfx906"},
+       }) {
+    INFO(arch);
+    CHECK(castsOf(unsignedProgram, target, arch) == std::set{llvm::Instruction::ZExt});
+    CHECK(castsOf(signedProgram, target, arch) == std::set{llvm::Instruction::SExt});
+  }
+}
+
+TEST_CASE("glcompute keeps indices out of 64-bit GEPs", "[backend][index][spirv][vulkan]") {
+  polyregion::compiler::initialise();
+
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  for (const auto &program : {indexStoreProgram(Type::IntU32().widen()), indexStoreProgram(Type::IntS32().widen())}) {
+    const auto compiled = polyregion::compiler::compile(program, {Target::Object_LLVM_SPIRV_GLCompute, ""}, OptLevel::O0);
+    REQUIRE(compiled.binary);
+    CHECK(gepIndexCasts(eventDataOf(compiled, "llvm_to_spirv_ir")).empty());
+  }
+}
+
 TEST_CASE("SPIR-V targets lower workgroup collectives", "[backend][group][spirv]") {
   polyregion::compiler::initialise();
   using namespace polyregion::polyast::dsl;

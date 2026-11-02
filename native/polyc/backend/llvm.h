@@ -191,7 +191,7 @@ struct CodeGen {
   [[nodiscard]] llvm::Function *resolveExtFn(const AnyType &rtn, const std::string &name, const std::vector<AnyType> &args);
 
   [[nodiscard]] llvm::Value *byteOffsetPtr(llvm::Value *base, llvm::Value *byteOff, const std::string &name);
-  [[nodiscard]] llvm::Value *i64SExt(llvm::Value *v);
+  [[nodiscard]] llvm::Value *i64Index(const Term::Any &idx);
   // signed/unsigned int mismatch shares one LLVM integer slot, so the store/compare is bit-identical
   [[nodiscard]] bool sameIntSlot(const AnyType &a, const AnyType &b);
   // lower a term to an i1 predicate (already-i1 passes through, otherwise `!= 0`)

@@ -84,7 +84,7 @@ ValPtr arrElemPtr(CodeGen &gen, llvm::Type *arrTy, llvm::Value *base, llvm::Valu
 }
 
 ValPtr arrElemPtr(CodeGen &gen, llvm::Type *arrTy, const Type::Any &comp, llvm::Value *base, llvm::Value *offset, const std::string &key) {
-  return arrElemPtr(gen, arrTy, base, gen.i64SExt(offset), key, [&] { return elemStepPtr(gen, comp, base, gen.i64SExt(offset), key); });
+  return arrElemPtr(gen, arrTy, base, offset, key, [&] { return elemStepPtr(gen, comp, base, offset, key); });
 }
 
 ValPtr loadBool(CodeGen &gen, llvm::Value *ptr, llvm::Type *ty) {
@@ -103,14 +103,13 @@ ValPtr physicalIndexVal(CodeGen &gen, const Expr::Index &x, const std::string &k
       if (arrTpe->comp.is<Type::Unit0>()) {
         const auto val = gen.mkTermVal(Term::Unit0Const());
         auto *basePtr = gen.mkTermVal(*lhs);
-        B.CreateInBoundsGEP(val->getType(), basePtr, gen.i64SExt(gen.mkTermVal(x.idx)), key + "_ptr");
+        B.CreateInBoundsGEP(val->getType(), basePtr, gen.i64Index(x.idx), key + "_ptr");
         return val;
       } else if (auto innerArr = arrTpe->comp.get<Type::Arr>()) {
         const auto arrLlvmTy = gen.resolveType(*innerArr);
         const auto compLlvmTy = gen.resolveType(innerArr->comp);
         const auto basePtr = gen.mkTermVal(*lhs);
-        const auto ptr =
-            B.CreateInBoundsGEP(arrLlvmTy, basePtr, {ConstantInt::get(C.i32Ty(), 0), gen.i64SExt(gen.mkTermVal(x.idx))}, key + "_idx_ptr");
+        const auto ptr = B.CreateInBoundsGEP(arrLlvmTy, basePtr, {ConstantInt::get(C.i32Ty(), 0), gen.i64Index(x.idx)}, key + "_idx_ptr");
         if (innerArr->comp.is<Type::Bool1>()) return loadBool(gen, ptr, compLlvmTy);
         return C.load(B, ptr, compLlvmTy);
       } else {
@@ -119,10 +118,10 @@ ValPtr physicalIndexVal(CodeGen &gen, const Expr::Index &x, const std::string &k
         llvm::Value *ptr;
         if (gen.spirvStructByMemcpy()) {
           auto *elemSize = llvm::ConstantInt::get(C.i64Ty(), M.getDataLayout().getTypeAllocSize(ty));
-          auto *byteOff = B.CreateMul(gen.i64SExt(gen.mkTermVal(x.idx)), elemSize);
+          auto *byteOff = B.CreateMul(gen.i64Index(x.idx), elemSize);
           ptr = gen.byteOffsetPtr(basePtr, byteOff, key + "_idx_ptr");
         } else {
-          ptr = B.CreateInBoundsGEP(ty, basePtr, gen.i64SExt(gen.mkTermVal(x.idx)), key + "_idx_ptr");
+          ptr = B.CreateInBoundsGEP(ty, basePtr, gen.i64Index(x.idx), key + "_idx_ptr");
         }
         if (arrTpe->comp.is<Type::Bool1>()) return loadBool(gen, ptr, ty);
         if (gen.structByPtr() && arrTpe->comp.template is<Type::Struct>()) return ptr;
@@ -130,7 +129,7 @@ ValPtr physicalIndexVal(CodeGen &gen, const Expr::Index &x, const std::string &k
       }
     } else if (const auto arrTpe = lhs->tpe.template get<Type::Arr>()) {
       auto *basePtr = gen.mkTermVal(*lhs);
-      const auto ptr = arrElemPtr(gen, gen.resolveType(*arrTpe), arrTpe->comp, basePtr, gen.mkTermVal(x.idx), key + "_idx_ptr");
+      const auto ptr = arrElemPtr(gen, gen.resolveType(*arrTpe), arrTpe->comp, basePtr, gen.i64Index(x.idx), key + "_idx_ptr");
       if (gen.structByPtr() && arrTpe->comp.template is<Type::Struct>()) return ptr;
       return C.load(B, ptr, gen.resolveType(arrTpe->comp));
     } else {
@@ -169,15 +168,14 @@ static ValPtr physicalRefToPtr(CodeGen &gen, const Expr::RefTo &x, const std::st
       }
       return gen.mkTermVal(baseTerm);
     }();
-    auto *rawOffset = x.idx ? gen.mkTermVal(*x.idx) : llvm::ConstantInt::get(C.i32Ty(), 0, true);
-    auto *offset = gen.i64SExt(rawOffset);
+    auto *offset = x.idx ? gen.i64Index(*x.idx) : llvm::ConstantInt::get(C.i64Ty(), 0, true);
     if (auto innerArr = ptrTpe.comp.template get<Type::Arr>())
       return B.CreateGEP(gen.resolveType(*innerArr), base, {llvm::ConstantInt::get(C.i32Ty(), 0), offset}, key + "_ref_to_ptr_arr");
     auto ty = ptrTpe.comp.template is<Type::Unit0>() ? llvm::Type::getInt8Ty(C.actual) : gen.resolveType(ptrTpe.comp);
     // kernel SPIR-V: ptrtoint round-trip works around Arc OpenCL mis-handling negative OpPtrAccessChain elements
     if (C.isSpirvKernel()) {
       auto elemSize = llvm::ConstantInt::get(C.i64Ty(), M.getDataLayout().getTypeAllocSize(ty));
-      auto *byteOffset = B.CreateMul(gen.i64SExt(rawOffset), elemSize);
+      auto *byteOffset = B.CreateMul(offset, elemSize);
       return gen.byteOffsetPtr(base, byteOffset, key + "_ref_to_ptr");
     }
     return B.CreateInBoundsGEP(ty, base, offset, key + "_ref_to_ptr");
@@ -196,8 +194,7 @@ static ValPtr physicalRefToPtr(CodeGen &gen, const Expr::RefTo &x, const std::st
       // stored value has proven shared/local provenance. Walk that path in the RefTo's address space before
       // applying the runtime index; otherwise the final addrspacecast converts an already-shared offset twice.
       auto *base = lhs->steps.empty() ? gen.mkTermVal(*lhs) : selectPtrImpl(gen, *lhs, /*oneGep*/ false, x.space);
-      auto *rawOffset = x.idx ? gen.mkTermVal(*x.idx) : llvm::ConstantInt::get(C.i32Ty(), 0, true);
-      auto *offset = gen.i64SExt(rawOffset);
+      auto *offset = x.idx ? gen.i64Index(*x.idx) : llvm::ConstantInt::get(C.i64Ty(), 0, true);
       return arrElemPtr(gen, arrLlvmTy, base, offset, key + "_ref_to_" + llvm_tostring(arrLlvmTy),
                         [&] { return elemStepPtr(gen, arrTpe->comp, base, offset, key + "_ref_to_ptr"); });
     } else {
@@ -247,13 +244,13 @@ void physicalStoreUpdate(CodeGen &gen, const Term::Select &lhs, const Term::Any 
   const auto gepTy = componentIsSizedArray ? gen.resolveType(lhs.tpe) : valTy;
   const auto getPtr = [&]() -> llvm::Value * {
     if (componentIsSizedArray)
-      return arrElemPtr(gen, gepTy, lhs.tpe.template get<Type::Arr>()->comp, dest, gen.mkTermVal(idx), qualified(lhs) + "_update_ptr");
+      return arrElemPtr(gen, gepTy, lhs.tpe.template get<Type::Arr>()->comp, dest, gen.i64Index(idx), qualified(lhs) + "_update_ptr");
     if (gen.spirvStructByMemcpy()) {
       auto *elemSize = llvm::ConstantInt::get(C.i64Ty(), M.getDataLayout().getTypeAllocSize(valTy));
-      auto *byteOff = B.CreateMul(gen.i64SExt(gen.mkTermVal(idx)), elemSize);
+      auto *byteOff = B.CreateMul(gen.i64Index(idx), elemSize);
       return gen.byteOffsetPtr(dest, byteOff, qualified(lhs) + "_update_ptr");
     }
-    return B.CreateInBoundsGEP(gepTy, dest, {gen.mkTermVal(idx)}, qualified(lhs) + "_update_ptr");
+    return B.CreateInBoundsGEP(gepTy, dest, {gen.i64Index(idx)}, qualified(lhs) + "_update_ptr");
   };
   const auto ptr = getPtr();
   if (gen.structByPtr() && value.tpe().template is<Type::Struct>()) {
@@ -443,7 +440,7 @@ ValPtr selectPtrImpl(CodeGen &gen, const Term::Select &select, const bool oneGep
     if (auto dyn = step.template get<PathStep::IndexDyn>()) {
       auto arr = tpe.template get<Type::Arr>();
       if (!arr) throw BackendException("IndexDyn step on non-array type " + to_string(tpe) + fail());
-      auto *idxV = gen.i64SExt(gen.mkTermVal(dyn->idx));
+      auto *idxV = gen.i64Index(dyn->idx);
       // typed access chain even on SPIR-V kernel: a byte-offset inttoptr loses the per-lane provenance IGC needs
       if (oneGep) {
         if (idxs.empty()) {
@@ -470,7 +467,7 @@ ValPtr selectPtrImpl(CodeGen &gen, const Term::Select &select, const bool oneGep
     // (annotateLocalSpace), and by-ref decay reads &ts[0] - a direct member access reaches element 0 the same way
     if (auto a = tpe.template get<Type::Arr>()) {
       flush();
-      root = arrElemPtr(gen, gen.resolveType(tpe), a->comp, root, llvm::ConstantInt::get(C.i32Ty(), 0), qualified(select) + "_select_arr0");
+      root = arrElemPtr(gen, gen.resolveType(tpe), a->comp, root, llvm::ConstantInt::get(C.i64Ty(), 0), qualified(select) + "_select_arr0");
       tpe = a->comp;
     }
     const auto info = structTypeOf(tpe);
@@ -589,7 +586,10 @@ llvm::Value *CodeGen::byteOffsetPtr(llvm::Value *base, llvm::Value *byteOff, con
   return B.CreateInBoundsGEP(B.getInt8Ty(), base, byteOff, name);
 }
 
-llvm::Value *CodeGen::i64SExt(llvm::Value *v) { return B.CreateSExtOrTrunc(v, C.i64Ty()); }
+llvm::Value *CodeGen::i64Index(const Term::Any &idx) {
+  auto *v = mkTermVal(idx);
+  return isUnsigned(idx.tpe()) ? B.CreateZExtOrTrunc(v, C.i64Ty()) : B.CreateSExtOrTrunc(v, C.i64Ty());
+}
 
 bool CodeGen::sameIntSlot(const AnyType &a, const AnyType &b) {
   return a.kind().is<TypeKind::Integral>() && b.kind().is<TypeKind::Integral>() && resolveType(a) == resolveType(b);
