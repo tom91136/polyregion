@@ -2,8 +2,11 @@
 
 #include <unordered_set>
 
+#include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/InstIterator.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Passes/PassBuilder.h"
 
@@ -82,6 +85,17 @@ static bool runSplice(llvm::Module &M, const bool verbose) {
     if (const auto SP = F.getSubprogram()) zeroDebugLoc = llvm::DILocation::get(C, 0, 0, SP);
 
     if (verbose) llvm::errs() << "[ReflectStackPass] In " << F.getName() << " (" << Allocas.size() << " allocas)\n";
+
+    const std::unordered_set<const llvm::Value *> Tracked(Allocas.begin(), Allocas.end());
+    const auto Markers = llvm::instructions(F) | collect([&](auto &I) -> std::optional<llvm::IntrinsicInst *> {
+                           auto *II = llvm::dyn_cast<llvm::IntrinsicInst>(&I);
+                           if (II && II->isLifetimeStartOrEnd() && Tracked.count(llvm::getUnderlyingObject(II->getArgOperand(0))))
+                             return II;
+                           return {};
+                         }) //
+                         | to_vector();
+    for (auto *II : Markers)
+      II->eraseFromParent();
 
     // XXX Anchor record/release on the alloca and on each return, not on llvm.lifetime_*. clang
     // only emits lifetime intrinsics at -O1+, and an alloca-scoped record is correct (just less

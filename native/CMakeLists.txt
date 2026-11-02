@@ -640,6 +640,9 @@ set(POLYREGION_TEST_BINARIES
 if (POLYREGION_HAS_FLANG)
     list(APPEND POLYREGION_TEST_BINARIES polyfc-tests)
 endif ()
+if (TARGET polyreflect-stack-tests)
+    list(APPEND POLYREGION_TEST_BINARIES polyreflect-stack-tests)
+endif ()
 
 
 add_custom_target(test_all
