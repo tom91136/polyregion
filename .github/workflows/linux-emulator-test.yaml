@@ -101,17 +101,7 @@ jobs:
       # always() not failure(): --repeat until-pass recovers transient crashes, but the core is still on disk
       - name: Collect crash backtraces
         if: always()
-        run: |
-          mkdir -p crash-reports
-          shopt -s nullglob
-          cores=(/var/lib/polyregion-cores/core.*)
-          if [ ${#cores[@]} -gt 0 ]; then
-            sudo apt-get update -qq && sudo apt-get install -y -qq gdb || true
-            for c in "${cores[@]:0:20}"; do
-              gdb -batch -ex 'thread apply all bt' -c "$c" > "crash-reports/$(basename "$c").txt" 2>&1 || true
-            done
-          fi
-          ls -la crash-reports || true
+        run: bash ci/collect_cores.sh
       - name: Upload crash reports
         continue-on-error: true
         if: ${{ always() && !env.ACT }}
@@ -191,17 +181,7 @@ jobs:
 
       - name: Collect crash backtraces
         if: failure()
-        run: |
-          mkdir -p crash-reports
-          shopt -s nullglob
-          cores=(/var/lib/polyregion-cores/core.*)
-          if [ ${#cores[@]} -gt 0 ]; then
-            sudo apt-get update -qq && sudo apt-get install -y -qq gdb || true
-            for c in "${cores[@]:0:20}"; do
-              gdb -batch -ex 'thread apply all bt' -c "$c" > "crash-reports/$(basename "$c").txt" 2>&1 || true
-            done
-          fi
-          ls -la crash-reports || true
+        run: bash ci/collect_cores.sh
 
       - name: Upload crash reports
         continue-on-error: true
