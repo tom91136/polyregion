@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <vector>
 
 #include "fmt/format.h"
@@ -40,7 +41,9 @@ void runGroups(Context &ctx, Backend, Platform &platform, Device &device, const 
   POLYTEST_REQUIRE_S(ctx, imageGroup.size() == 1, "expected 1 image group, got {}", imageGroup.size());
   device.loadModule("module", imageGroup[0].second);
 
-  for (const auto shape : {Shape{1, 64}, Shape{3, 64}, Shape{4, 256}, Shape{2, 1024}}) {
+  const size_t maxLanes = device.maxThreadsPerBlock();
+  for (auto shape : {Shape{1, 64}, Shape{3, 64}, Shape{4, 256}, Shape{2, 1024}}) {
+    shape.lanes = std::min(shape.lanes, maxLanes);
     const auto reversed = launch(platform, device, "groups_reverse", shape, 1);
     for (size_t g = 0; g < shape.groups; ++g)
       for (size_t l = 0; l < shape.lanes; ++l) {
