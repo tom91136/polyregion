@@ -1259,14 +1259,15 @@ private[polyregion] object ProgramLinker {
         case value @ p.Type.Struct(name, args) => definitionNames.get(name).fold(value)(p.Type.Struct(_, args))
         case value                             => value
       }
+      val renames = functionNames.nonEmpty || definitionNames.nonEmpty
       val functions = allFunctions.map { function =>
-        val rewritten = function.modifyAll[p.Type](rewriteType)
+        val rewritten = if (renames) function.modifyAll[p.Type](rewriteType) else function
         functionNames
           .get(rewritten.name)
           .fold(rewritten)(name => rewritten.copy(decl = rewritten.decl.copy(name = name)))
       }
       val definitions = program.defs.map { definition =>
-        val rewritten = definition.modifyAll[p.Type](rewriteType)
+        val rewritten = if (renames) definition.modifyAll[p.Type](rewriteType) else definition
         definitionNames.get(rewritten.name).fold(rewritten)(name => rewritten.copy(name = name))
       }
       val callableKeys = functionNames.map { (from, to) =>
