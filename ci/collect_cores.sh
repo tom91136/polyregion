@@ -7,7 +7,7 @@ per_exe="${CORES_PER_EXE:-3}"
 
 mkdir -p "$out_dir"
 
-# core_pattern is core.%e.%p: rank each core newest-first within its executable, then
+# core_pattern is core.%E.%p (executable path with / as !): rank each core newest-first within its executable, then
 # order by rank so the newest core of every executable comes before any second core
 mapfile -t cores < <(
   find "$cores_dir" -maxdepth 1 -type f -name 'core.*' -printf '%T@\t%f\n' \
@@ -25,7 +25,11 @@ if [ ${#cores[@]} -eq 0 ]; then
 else
   command -v gdb >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq gdb || true; }
   for c in "${cores[@]}"; do
-    gdb -batch -ex 'thread apply all bt' -c "$cores_dir/$c" > "$out_dir/$c.txt" 2>&1 || true
+    exe=${c#core.}
+    exe=${exe%.*}
+    exe=${exe//!//}
+    [ -f "$exe" ] || exe=
+    gdb -batch -ex 'thread apply all bt' ${exe:+"$exe"} -c "$cores_dir/$c" > "$out_dir/${c##*!}.txt" 2>&1 || true
   done
 fi
 ls -la "$out_dir" || true

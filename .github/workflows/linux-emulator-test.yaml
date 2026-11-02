@@ -74,7 +74,7 @@ jobs:
       - name: Enable core dumps
         run: |
           sudo mkdir -p /var/lib/polyregion-cores && sudo chmod 1777 /var/lib/polyregion-cores || true
-          echo '/var/lib/polyregion-cores/core.%e.%p' | sudo tee /proc/sys/kernel/core_pattern || true
+          echo '/var/lib/polyregion-cores/core.%E.%p' | sudo tee /proc/sys/kernel/core_pattern || true
 
       - name: Run misc tests (non-codegen)
         run: |
@@ -156,7 +156,7 @@ jobs:
       - name: Enable core dumps
         run: |
           sudo mkdir -p /var/lib/polyregion-cores && sudo chmod 1777 /var/lib/polyregion-cores || true
-          echo '/var/lib/polyregion-cores/core.%e.%p' | sudo tee /proc/sys/kernel/core_pattern || true
+          echo '/var/lib/polyregion-cores/core.%E.%p' | sudo tee /proc/sys/kernel/core_pattern || true
 
       - name: Run emulator tests (${{ matrix.shard }})
         run: |
