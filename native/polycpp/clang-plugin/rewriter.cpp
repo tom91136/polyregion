@@ -600,49 +600,128 @@ static void compileInterfaceCalls(const polyfront::Options &opts, clang::Compile
   const auto groups = polyfront::package::capabilityGroups(declaredCapabilities, opts.targets);
   const auto &targetCPU = CI.getTarget().getTargetOpts().CPU;
   auto *translationUnit = C.getTranslationUnitDecl();
-  // Each interface call is an independent package root.  Keep it isolated through package linking and backend
-  // compilation: merging expanded roots first multiplies the AST retained and serialised for every device entry.
-  // Default to one child because a canonical vendor root can consume several GiB.  Callers that coordinate their
-  // outer compile fan-out may opt into a small bounded window; results are still consumed in source order.
   size_t jobs = 1;
   if (const char *value = std::getenv(env::PolycppPackageJobs); value && *value) {
     char *end = nullptr;
     const auto parsed = std::strtoul(value, &end, 10);
-    if (end != value && *end == '\0' && parsed > 0) jobs = std::min<size_t>(parsed, prepared.size());
+    if (end != value && *end == '\0' && parsed > 0) jobs = std::min<size_t>(parsed, groups.size());
   }
   // a bundle with unfit reasons keeps the call, so the interface's inline fallback body runs
   using CompileResult = polyfront::package::Checked<CompileBundle>;
   using GroupResults = std::vector<CompileResult>;
-  const auto unfit = [](std::string reason) -> CompileResult { return {CompileBundle({}, {}, {}, {std::move(reason)}), {}}; };
+  const auto unfit = [](std::string reason) -> CompileResult { return {CompileBundle({}, {}, {}, {std::move(reason)}, {}), {}}; };
   const auto entryNameFor = [&](const PreparedInterfaceCall &item, const size_t group) {
     return item.entryName + polyfront::package::groupEntrySuffix(groups.size(), group);
   };
-  const auto compile = [&](const PreparedInterfaceCall &item) -> GroupResults {
+  const auto consumerFunctionsFor = [&](const PreparedInterfaceCall &item, const size_t group) {
+    const auto entryName = entryNameFor(item, group);
+    auto consumerFunctions = item.consumerFunctions;
+    for (auto &function : consumerFunctions)
+      if (function.decl.name == Sym({item.entryName})) function.decl.name = Sym({entryName});
+    return consumerFunctions;
+  };
+
+  std::vector<GroupResults> results(prepared.size());
+  std::vector<std::optional<polyast::Package>> selections(prepared.size());
+  std::vector<std::vector<size_t>> pending(groups.size());
+  for (size_t index = 0; index < prepared.size(); ++index) {
+    const auto &item = prepared[index];
     const bool fallback = hasInterfaceFallback(item.site.callee);
-    if (fallback && !item.archive->entriesByDeclaration.contains(item.site.declaration))
-      return GroupResults(groups.size(), unfit(polyfront::package::undeclaredReason(*item.archive, item.site.declaration)));
+    if (fallback && !item.archive->entriesByDeclaration.contains(item.site.declaration)) {
+      results[index] = GroupResults(groups.size(), unfit(polyfront::package::undeclaredReason(*item.archive, item.site.declaration)));
+      continue;
+    }
     auto selected = polyfront::package::loadPackageSelection(*item.archive, item.site.declaration);
-    if (!selected) return {CompileResult{{}, std::move(selected.errors)}};
-    GroupResults results;
+    if (!selected) {
+      results[index] = {CompileResult{{}, std::move(selected.errors)}};
+      continue;
+    }
+    selections[index] = std::move(*selected.value);
+    results[index].resize(groups.size());
     for (size_t group = 0; group < groups.size(); ++group) {
       const auto &capabilities = groups[group].capabilities;
-      if (fallback && !polyfront::package::satisfiable(*selected.value, item.site.declaration, capabilities)) {
-        results.emplace_back(unfit(polyfront::package::unsatisfiedReason(capabilities)));
-        continue;
-      }
-      const auto entryName = entryNameFor(item, group);
-      auto consumerFunctions = item.consumerFunctions;
-      for (auto &function : consumerFunctions)
-        if (function.decl.name == Sym({item.entryName})) function.decl.name = Sym({entryName});
-      const auto request = ProgramLinkRequest({*selected.value}, polyfront::packageProgram(consumerFunctions, item.consumerDefinitions),
-                                              capabilities, item.typeSizes, std::nullopt, groups[group].logicalAddressing);
-      auto compiled = polyfront::package::compileProgram(request, opts.executable, *entryTarget,
-                                                         polyfront::objectCPUFor(CI.getTarget().getTriple(), targetCPU),
-                                                         groups[group].targets, opts.stackDepth);
-      results.emplace_back(std::move(compiled));
+      if (fallback && !polyfront::package::satisfiable(*selections[index], item.site.declaration, capabilities))
+        results[index][group] = unfit(polyfront::package::unsatisfiedReason(capabilities));
+      else pending[group].emplace_back(index);
     }
-    return results;
+  }
+
+  const auto compileBatch = [&](const size_t group, const std::vector<size_t> &members) -> std::vector<CompileResult> {
+    std::vector<const polyast::Package *> packages;
+    std::vector<Function> functions;
+    std::vector<StructDef> definitions;
+    std::vector<ProgramTypeSize> typeSizes;
+    std::unordered_set<Sym> seenFunctions;
+    std::unordered_set<Sym> seenDefinitions;
+    for (const auto index : members) {
+      const auto &item = prepared[index];
+      packages.emplace_back(&*selections[index]);
+      for (auto &function : consumerFunctionsFor(item, group))
+        if (seenFunctions.emplace(function.decl.name).second) functions.emplace_back(std::move(function));
+      for (const auto &definition : item.consumerDefinitions)
+        if (seenDefinitions.emplace(definition.name).second) definitions.emplace_back(definition);
+      for (const auto &size : item.typeSizes)
+        if (std::find(typeSizes.begin(), typeSizes.end(), size) == typeSizes.end()) typeSizes.emplace_back(size);
+    }
+    const auto request = ProgramLinkRequest(polyfront::package::mergeSelections(packages),
+                                            polyfront::packageProgram(std::move(functions), std::move(definitions)),
+                                            groups[group].capabilities, typeSizes, std::nullopt, groups[group].logicalAddressing);
+    auto compiled = polyfront::package::compileProgram(request, opts.executable, *entryTarget,
+                                                       polyfront::objectCPUFor(CI.getTarget().getTriple(), targetCPU),
+                                                       groups[group].targets, opts.stackDepth);
+    if (!compiled) return std::vector<CompileResult>(members.size(), CompileResult{{}, compiled.errors});
+    std::vector<CompileResult> sliced;
+    bool hostAssigned = false;
+    for (const auto index : members) {
+      auto slice = polyfront::package::sliceBundle(*compiled.value, entryNameFor(prepared[index], group), {});
+      if (slice && slice.value->unfit.empty() && !hostAssigned) {
+        slice.value->hostObject = std::move(compiled.value->hostObject);
+        hostAssigned = true;
+      }
+      sliced.emplace_back(std::move(slice));
+    }
+    return sliced;
   };
+  const auto compileMembers = [&](const size_t group, const std::vector<size_t> &members) {
+    auto batch = compileBatch(group, members);
+    if (members.size() > 1 && std::any_of(batch.begin(), batch.end(), [](const auto &result) { return !result; }))
+      for (size_t at = 0; at < members.size(); ++at)
+        batch[at] = std::move(compileBatch(group, {members[at]}).front());
+    return batch;
+  };
+
+  struct Task {
+    size_t group;
+    std::vector<size_t> members;
+  };
+  std::vector<Task> tasks;
+  for (size_t group = 0; group < groups.size(); ++group) {
+    std::vector<std::vector<Function>> functionsOf;
+    functionsOf.reserve(pending[group].size());
+    for (const auto index : pending[group])
+      functionsOf.emplace_back(consumerFunctionsFor(prepared[index], group));
+    std::vector<polyfront::package::ConsumerUnit> units;
+    for (size_t at = 0; at < pending[group].size(); ++at)
+      units.push_back({&functionsOf[at], &prepared[pending[group][at]].consumerDefinitions, &prepared[pending[group][at]].typeSizes});
+    for (const auto &batch : polyfront::package::compatibleBatches(units))
+      tasks.push_back({group, batch | map([&](const auto at) { return pending[group][at]; }) | to_vector()});
+  }
+  const auto assign = [&](const Task &task, std::vector<CompileResult> batch) {
+    for (size_t at = 0; at < task.members.size(); ++at)
+      results[task.members[at]][task.group] = std::move(batch[at]);
+  };
+  if (jobs == 1) {
+    for (const auto &task : tasks)
+      assign(task, compileMembers(task.group, task.members));
+  } else {
+    llvm::StdThreadPool pool(llvm::hardware_concurrency(jobs));
+    std::vector<std::shared_future<std::unique_ptr<std::vector<CompileResult>>>> futures;
+    for (const auto &task : tasks)
+      futures.emplace_back(pool.async(
+          [&compileMembers, &task] { return std::make_unique<std::vector<CompileResult>>(compileMembers(task.group, task.members)); }));
+    for (size_t at = 0; at < tasks.size(); ++at)
+      assign(tasks[at], std::move(*futures[at].get()));
+  }
   const auto consume = [&](const PreparedInterfaceCall &item, GroupResults results) {
     const auto location = item.site.call->getExprLoc();
     if (const auto failed = std::find_if(results.begin(), results.end(), [](const auto &result) { return !result; });
@@ -674,7 +753,7 @@ static void compileInterfaceCalls(const polyfront::Options &opts, clang::Compile
     for (const auto group : bound) {
       auto &compiled = results[group].value;
       const auto suffix = item.suffix + polyfront::package::groupEntrySuffix(groups.size(), group);
-      packageProgramBitcodes.emplace_back(std::move(compiled->hostObject));
+      if (!compiled->hostObject.empty()) packageProgramBitcodes.emplace_back(std::move(compiled->hostObject));
       std::vector<InterfaceModuleResource> resources;
       resources.reserve(compiled->remoteModules.size());
       for (size_t index = 0; index < compiled->remoteModules.size(); ++index) {
@@ -699,26 +778,8 @@ static void compileInterfaceCalls(const polyfront::Options &opts, clang::Compile
     }
     materializeInterfaceCall(CI, C, item, boundGroups);
   };
-  if (jobs == 1) {
-    for (const auto &item : prepared)
-      consume(item, compile(item));
-    return;
-  }
-  llvm::StdThreadPool pool(llvm::hardware_concurrency(jobs));
-  using Pending = std::pair<const PreparedInterfaceCall *, std::shared_future<std::unique_ptr<GroupResults>>>;
-  std::deque<Pending> pending;
-  const auto consumeOldest = [&] {
-    auto [item, result] = std::move(pending.front());
-    pending.pop_front();
-    consume(*item, std::move(*result.get()));
-  };
-  for (const auto &item : prepared) {
-    const auto *itemPtr = &item;
-    pending.emplace_back(itemPtr, pool.async([&compile, itemPtr] { return std::make_unique<GroupResults>(compile(*itemPtr)); }));
-    if (pending.size() >= jobs) consumeOldest();
-  }
-  while (!pending.empty())
-    consumeOldest();
+  for (size_t index = 0; index < prepared.size(); ++index)
+    consume(prepared[index], std::move(results[index]));
 }
 
 static Vector<std::variant<Failure, Callsite>> outlinePolyregionOffload(clang::ASTContext &context) {

@@ -220,6 +220,7 @@ private[polyregion] object CodeGen {
 
   private def compileWireStructs: List[StructNode] =
     deriveStruct[Compile.Module]()
+      :: deriveStruct[Compile.Root]()
       :: deriveStruct[Compile.Bundle]()
       :: Nil
 

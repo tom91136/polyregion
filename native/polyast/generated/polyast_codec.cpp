@@ -8,11 +8,11 @@ template <class... Ts> struct overloaded : Ts... {
 template <class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 
 namespace polyregion::polyast {
-constexpr auto AdtHash = "c8117feea959cfe89ee40068e93ce3fa";
+constexpr auto AdtHash = "32ac18ad861f5f2faa3c9c983062be14";
 constexpr auto ProgramHash = "de2de5f725108f6b01538c5ef974ec9a";
 constexpr auto PackageHash = "944c2b087ebac646c9d8a15c5fb76323";
 constexpr auto PackageWireHash = "956e868514bb0e0e4190efc14c8bfe8d";
-constexpr auto CompileWireHash = "6a5c5e89c9331829463c57f0815d95fe";
+constexpr auto CompileWireHash = "761bad2d8b6004abf355f5063d0116a9";
 using msgpack::decodeMaybeInterned;
 using msgpack::encodeInterned;
 using msgpack::MsgpackReader;
@@ -3421,6 +3421,22 @@ json compilemodule_to_json(const CompileModule &x_) {
   return json::array({moduleName, format, kind, features, image});
 }
 
+CompileRoot compileroot_from_json(const json &j_) {
+  auto name = j_.at(0).get<std::string>();
+  auto modules = j_.at(1).get<std::vector<std::string>>();
+  auto implementations = j_.at(2).get<std::vector<std::string>>();
+  auto unfit = j_.at(3).get<std::vector<std::string>>();
+  return {name, modules, implementations, unfit};
+}
+
+json compileroot_to_json(const CompileRoot &x_) {
+  auto name = x_.name;
+  auto modules = x_.modules;
+  auto implementations = x_.implementations;
+  auto unfit = x_.unfit;
+  return json::array({name, modules, implementations, unfit});
+}
+
 CompileBundle compilebundle_from_json(const json &j_) {
   auto hostObject = j_.at(0).get<std::vector<int8_t>>();
   std::vector<CompileModule> remoteModules;
@@ -3429,7 +3445,11 @@ CompileBundle compilebundle_from_json(const json &j_) {
   }
   auto implementations = j_.at(2).get<std::vector<std::string>>();
   auto unfit = j_.at(3).get<std::vector<std::string>>();
-  return {hostObject, remoteModules, implementations, unfit};
+  std::vector<CompileRoot> roots;
+  for (const auto &v_ : j_.at(4)) {
+    roots.emplace_back(compileroot_from_json(v_));
+  }
+  return {hostObject, remoteModules, implementations, unfit, roots};
 }
 
 json compilebundle_to_json(const CompileBundle &x_) {
@@ -3440,7 +3460,11 @@ json compilebundle_to_json(const CompileBundle &x_) {
   }
   auto implementations = x_.implementations;
   auto unfit = x_.unfit;
-  return json::array({hostObject, remoteModules, implementations, unfit});
+  std::vector<json> roots;
+  for (const auto &v_ : x_.roots) {
+    roots.emplace_back(compileroot_to_json(v_));
+  }
+  return json::array({hostObject, remoteModules, implementations, unfit, roots});
 }
 json hashed_from_json(const json &j_) {
   auto hash_ = j_.at(0).get<std::string>();
@@ -4121,6 +4145,10 @@ CompileModule compilemodule_fields_from_msgpack(MsgpackReader &, size_t);
 void compilemodule_fields_to_msgpack(MsgpackWriter &, const CompileModule &);
 CompileModule compilemodule_from_msgpack(MsgpackReader &);
 void compilemodule_to_msgpack(MsgpackWriter &, const CompileModule &);
+CompileRoot compileroot_fields_from_msgpack(MsgpackReader &, size_t);
+void compileroot_fields_to_msgpack(MsgpackWriter &, const CompileRoot &);
+CompileRoot compileroot_from_msgpack(MsgpackReader &);
+void compileroot_to_msgpack(MsgpackWriter &, const CompileRoot &);
 CompileBundle compilebundle_fields_from_msgpack(MsgpackReader &, size_t);
 void compilebundle_fields_to_msgpack(MsgpackWriter &, const CompileBundle &);
 CompileBundle compilebundle_from_msgpack(MsgpackReader &);
@@ -11807,8 +11835,67 @@ void compilemodule_to_msgpack(MsgpackWriter &w_, const CompileModule &x_) {
   compilemodule_fields_to_msgpack(w_, x_);
 }
 
+CompileRoot compileroot_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 4) throw std::runtime_error("Expected CompileRoot with 4 field(s)");
+  auto name = r_.readString();
+  std::vector<std::string> modules;
+  {
+    auto modules_size = r_.readArrayHeader();
+    modules.reserve(modules_size);
+    for (size_t modules_idx = 0; modules_idx < modules_size; ++modules_idx) {
+      auto modules_elem = r_.readString();
+      modules.emplace_back(std::move(modules_elem));
+    }
+  }
+  std::vector<std::string> implementations;
+  {
+    auto implementations_size = r_.readArrayHeader();
+    implementations.reserve(implementations_size);
+    for (size_t implementations_idx = 0; implementations_idx < implementations_size; ++implementations_idx) {
+      auto implementations_elem = r_.readString();
+      implementations.emplace_back(std::move(implementations_elem));
+    }
+  }
+  std::vector<std::string> unfit;
+  {
+    auto unfit_size = r_.readArrayHeader();
+    unfit.reserve(unfit_size);
+    for (size_t unfit_idx = 0; unfit_idx < unfit_size; ++unfit_idx) {
+      auto unfit_elem = r_.readString();
+      unfit.emplace_back(std::move(unfit_elem));
+    }
+  }
+  return {name, modules, implementations, unfit};
+}
+
+void compileroot_fields_to_msgpack(MsgpackWriter &w_, const CompileRoot &x_) {
+  w_.writeString(x_.name);
+  w_.writeArrayHeader(x_.modules.size());
+  for (const auto &v0_ : x_.modules) {
+    w_.writeString(v0_);
+  }
+  w_.writeArrayHeader(x_.implementations.size());
+  for (const auto &v0_ : x_.implementations) {
+    w_.writeString(v0_);
+  }
+  w_.writeArrayHeader(x_.unfit.size());
+  for (const auto &v0_ : x_.unfit) {
+    w_.writeString(v0_);
+  }
+}
+
+CompileRoot compileroot_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return compileroot_fields_from_msgpack(r_, n_);
+}
+
+void compileroot_to_msgpack(MsgpackWriter &w_, const CompileRoot &x_) {
+  w_.writeArrayHeader(4);
+  compileroot_fields_to_msgpack(w_, x_);
+}
+
 CompileBundle compilebundle_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 4) throw std::runtime_error("Expected CompileBundle with 4 field(s)");
+  if (n_ != 5) throw std::runtime_error("Expected CompileBundle with 5 field(s)");
   std::vector<int8_t> hostObject;
   {
     auto hostObject_size = r_.readArrayHeader();
@@ -11845,7 +11932,16 @@ CompileBundle compilebundle_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
       unfit.emplace_back(std::move(unfit_elem));
     }
   }
-  return {hostObject, remoteModules, implementations, unfit};
+  std::vector<CompileRoot> roots;
+  {
+    auto roots_size = r_.readArrayHeader();
+    roots.reserve(roots_size);
+    for (size_t roots_idx = 0; roots_idx < roots_size; ++roots_idx) {
+      auto roots_elem = compileroot_from_msgpack(r_);
+      roots.emplace_back(std::move(roots_elem));
+    }
+  }
+  return {hostObject, remoteModules, implementations, unfit, roots};
 }
 
 void compilebundle_fields_to_msgpack(MsgpackWriter &w_, const CompileBundle &x_) {
@@ -11865,6 +11961,10 @@ void compilebundle_fields_to_msgpack(MsgpackWriter &w_, const CompileBundle &x_)
   for (const auto &v0_ : x_.unfit) {
     w_.writeString(v0_);
   }
+  w_.writeArrayHeader(x_.roots.size());
+  for (const auto &v0_ : x_.roots) {
+    compileroot_to_msgpack(w_, v0_);
+  }
 }
 
 CompileBundle compilebundle_from_msgpack(MsgpackReader &r_) {
@@ -11873,7 +11973,7 @@ CompileBundle compilebundle_from_msgpack(MsgpackReader &r_) {
 }
 
 void compilebundle_to_msgpack(MsgpackWriter &w_, const CompileBundle &x_) {
-  w_.writeArrayHeader(4);
+  w_.writeArrayHeader(5);
   compilebundle_fields_to_msgpack(w_, x_);
 }
 

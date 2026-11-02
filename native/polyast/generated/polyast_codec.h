@@ -370,6 +370,8 @@ namespace Term {
 [[nodiscard]] POLYREGION_EXPORT json packagelinkrequest_to_json(const PackageLinkRequest &);
 [[nodiscard]] POLYREGION_EXPORT CompileModule compilemodule_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json compilemodule_to_json(const CompileModule &);
+[[nodiscard]] POLYREGION_EXPORT CompileRoot compileroot_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json compileroot_to_json(const CompileRoot &);
 [[nodiscard]] POLYREGION_EXPORT CompileBundle compilebundle_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json compilebundle_to_json(const CompileBundle &);
 namespace Intr {

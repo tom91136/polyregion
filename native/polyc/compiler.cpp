@@ -170,6 +170,37 @@ FunctionIndex indexFunctions(const polyast::Program &program) {
   return index;
 }
 
+using ReferenceGraph = std::unordered_map<polyast::Sym, std::vector<polyast::Sym>>;
+
+ReferenceGraph referenceGraph(const polyast::Program &program) {
+  ReferenceGraph graph;
+  const auto add = [&](const polyast::Function &function) {
+    auto &references = graph[function.decl.name];
+    for (const auto &reference : function.collect_all<polyast::Type::FnRef>())
+      references.emplace_back(reference.name);
+  };
+  if (program.entry) add(*program.entry);
+  for (const auto &function : program.functions)
+    add(function);
+  return graph;
+}
+
+std::vector<polyast::Sym> referencesOf(const polyast::Function &function) {
+  return function.collect_all<polyast::Type::FnRef>() | map([](const auto &reference) { return reference.name; }) | to_vector();
+}
+
+std::unordered_set<polyast::Sym> reachableFrom(const ReferenceGraph &graph, std::vector<polyast::Sym> frontier) {
+  std::unordered_set<polyast::Sym> live;
+  while (!frontier.empty()) {
+    auto name = std::move(frontier.back());
+    frontier.pop_back();
+    if (!live.emplace(name).second) continue;
+    if (const auto found = graph.find(name); found != graph.end())
+      frontier.insert(frontier.end(), found->second.begin(), found->second.end());
+  }
+  return live;
+}
+
 struct PluginRegistry {
   std::vector<std::unique_ptr<polypass::PassRunner>> plugins;
   std::unordered_map<std::string, size_t> ownerByPass;
@@ -319,6 +350,24 @@ std::vector<std::string> linkMetadata(const polyast::Program &program, const std
          });
 }
 
+std::vector<polyast::CompileRoot> compileRoots(const polyast::Program &program, const std::vector<polyast::Sym> &roots,
+                                               const ReferenceGraph &graph) {
+  std::unordered_map<polyast::Sym, std::string> moduleNames;
+  for (const auto &function : program.functions)
+    if (function.convention.is<polyast::CallConvention::OffloadEntry>())
+      moduleNames.emplace(function.decl.name, backend::normaliseSymbol(function.decl.name));
+  return roots | map([&](const auto &root) {
+           std::vector<std::string> modules;
+           for (const auto &name : reachableFrom(graph, {root}))
+             if (const auto found = moduleNames.find(name); found != moduleNames.end()) modules.emplace_back(found->second);
+           std::ranges::sort(modules);
+           return polyast::CompileRoot(polyast::fqcn(root), std::move(modules),
+                                       linkMetadata(program, {root}, conventions::LinkImplementationMeta),
+                                       linkMetadata(program, {root}, conventions::LinkUnfitMeta));
+         })
+         | to_vector();
+}
+
 std::vector<std::string> validateImportedEntries(const polyast::ProgramLinkRequest &request, const polyast::Program &program) {
   std::vector<std::string> errors;
   const auto linked = indexFunctions(program);
@@ -437,7 +486,8 @@ compiler::package::compile(const polyast::ProgramLinkRequest &request, const com
   const auto roots = consumerRoots(request);
   auto implementations = linkMetadata(*linked.value, roots, conventions::LinkImplementationMeta);
   auto unfit = linkMetadata(*linked.value, roots, conventions::LinkUnfitMeta);
-  if (implementations.empty() && !unfit.empty()) return {{polyast::CompileBundle({}, {}, {}, std::move(unfit))}, {}};
+  if (implementations.empty() && !unfit.empty())
+    return {{polyast::CompileBundle({}, {}, {}, std::move(unfit), compileRoots(*linked.value, roots, {}))}, {}};
   if (auto errors = validateRemoteEntries(*linked.value); !errors.empty()) return {{}, std::move(errors)};
   initialise();
   std::unordered_set<polyast::Sym> consumerEntries;
@@ -455,6 +505,17 @@ compiler::package::compile(const polyast::ProgramLinkRequest &request, const com
     else function.visibility = polyast::FunctionVisibility::Internal();
   }
 
+  const auto graph = referenceGraph(program);
+  auto compileRootInfo = compileRoots(program, roots, graph);
+  {
+    std::vector<polyast::Sym> seeds;
+    if (program.entry) seeds = referencesOf(*program.entry);
+    for (const auto &function : program.functions)
+      if (function.visibility.template is<polyast::FunctionVisibility::Exported>()) seeds.emplace_back(function.decl.name);
+    const auto live = reachableFrom(graph, std::move(seeds));
+    std::erase_if(program.functions, [&](const auto &function) { return !live.contains(function.decl.name); });
+  }
+
   const auto host = compile(program, Options{hostTarget, hostArch, "StructuredExit", true}, compiletime::OptLevel::O3);
   if (!host.binary) return {{}, {"linked consumer program compilation failed: " + host.messages}};
 
@@ -463,10 +524,10 @@ compiler::package::compile(const polyast::ProgramLinkRequest &request, const com
     if (!entry.convention.is<polyast::CallConvention::OffloadEntry>()) continue;
     const auto moduleName = backend::normaliseSymbol(entry.decl.name);
     auto entryProgram = program.withEntry(entry);
+    const auto live = reachableFrom(graph, referencesOf(entry));
     std::vector<polyast::Function> functions;
-    functions.reserve(program.functions.size() - 1);
     for (const auto &function : program.functions) {
-      if (function.decl.name == entry.decl.name) continue;
+      if (function.decl.name == entry.decl.name || !live.contains(function.decl.name)) continue;
       auto internal = function.withVisibility(polyast::FunctionVisibility::Internal());
       if (internal.convention.is<polyast::CallConvention::OffloadEntry>())
         internal = internal.withConvention(polyast::CallConvention::RegularCall());
@@ -486,7 +547,9 @@ compiler::package::compile(const polyast::ProgramLinkRequest &request, const com
                                  std::move(features), *device.binary);
     }
   }
-  return {{polyast::CompileBundle(std::move(*host.binary), std::move(remoteModules), std::move(implementations), std::move(unfit))}, {}};
+  return {{polyast::CompileBundle(std::move(*host.binary), std::move(remoteModules), std::move(implementations), std::move(unfit),
+                                  std::move(compileRootInfo))},
+          {}};
 }
 
 static polyast::PassRunResult runPipelineChain(const polyast::Program &p, std::string_view rawSpec) {

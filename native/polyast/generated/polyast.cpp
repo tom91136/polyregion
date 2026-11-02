@@ -5063,34 +5063,59 @@ POLYREGION_EXPORT bool CompileModule::operator==(const CompileModule &rhs) const
          && (image == rhs.image);
 }
 
+CompileRoot::CompileRoot(std::string name, std::vector<std::string> modules, std::vector<std::string> implementations,
+                         std::vector<std::string> unfit) noexcept
+    : name(std::move(name)), modules(std::move(modules)), implementations(std::move(implementations)), unfit(std::move(unfit)) {}
+size_t CompileRoot::hash_code() const {
+  size_t seed = 0;
+  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(modules)>()(modules) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(implementations)>()(implementations) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(unfit)>()(unfit) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+CompileRoot CompileRoot::withName(const std::string &v_) const { return CompileRoot(v_, modules, implementations, unfit); }
+CompileRoot CompileRoot::withModules(const std::vector<std::string> &v_) const { return CompileRoot(name, v_, implementations, unfit); }
+CompileRoot CompileRoot::withImplementations(const std::vector<std::string> &v_) const { return CompileRoot(name, modules, v_, unfit); }
+CompileRoot CompileRoot::withUnfit(const std::vector<std::string> &v_) const { return CompileRoot(name, modules, implementations, v_); }
+POLYREGION_EXPORT bool CompileRoot::operator!=(const CompileRoot &rhs) const { return !(*this == rhs); }
+POLYREGION_EXPORT bool CompileRoot::operator==(const CompileRoot &rhs) const {
+  return (name == rhs.name) && (modules == rhs.modules) && (implementations == rhs.implementations) && (unfit == rhs.unfit);
+}
+
 CompileBundle::CompileBundle(std::vector<int8_t> hostObject, std::vector<CompileModule> remoteModules,
-                             std::vector<std::string> implementations, std::vector<std::string> unfit) noexcept
+                             std::vector<std::string> implementations, std::vector<std::string> unfit,
+                             std::vector<CompileRoot> roots) noexcept
     : hostObject(std::move(hostObject)), remoteModules(std::move(remoteModules)), implementations(std::move(implementations)),
-      unfit(std::move(unfit)) {}
+      unfit(std::move(unfit)), roots(std::move(roots)) {}
 size_t CompileBundle::hash_code() const {
   size_t seed = 0;
   seed ^= std::hash<decltype(hostObject)>()(hostObject) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(remoteModules)>()(remoteModules) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(implementations)>()(implementations) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(unfit)>()(unfit) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(roots)>()(roots) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
 CompileBundle CompileBundle::withHostObject(const std::vector<int8_t> &v_) const {
-  return CompileBundle(v_, remoteModules, implementations, unfit);
+  return CompileBundle(v_, remoteModules, implementations, unfit, roots);
 }
 CompileBundle CompileBundle::withRemoteModules(const std::vector<CompileModule> &v_) const {
-  return CompileBundle(hostObject, v_, implementations, unfit);
+  return CompileBundle(hostObject, v_, implementations, unfit, roots);
 }
 CompileBundle CompileBundle::withImplementations(const std::vector<std::string> &v_) const {
-  return CompileBundle(hostObject, remoteModules, v_, unfit);
+  return CompileBundle(hostObject, remoteModules, v_, unfit, roots);
 }
 CompileBundle CompileBundle::withUnfit(const std::vector<std::string> &v_) const {
-  return CompileBundle(hostObject, remoteModules, implementations, v_);
+  return CompileBundle(hostObject, remoteModules, implementations, v_, roots);
+}
+CompileBundle CompileBundle::withRoots(const std::vector<CompileRoot> &v_) const {
+  return CompileBundle(hostObject, remoteModules, implementations, unfit, v_);
 }
 POLYREGION_EXPORT bool CompileBundle::operator!=(const CompileBundle &rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool CompileBundle::operator==(const CompileBundle &rhs) const {
   return (hostObject == rhs.hostObject) && (remoteModules == rhs.remoteModules) && (implementations == rhs.implementations)
-         && (unfit == rhs.unfit);
+         && (unfit == rhs.unfit) && (roots == rhs.roots);
 }
 
 } // namespace polyregion::polyast
@@ -5924,6 +5949,9 @@ std::hash<polyregion::polyast::PackageLinkRequest>::operator()(const polyregion:
   return x.hash_code();
 }
 std::size_t std::hash<polyregion::polyast::CompileModule>::operator()(const polyregion::polyast::CompileModule &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::CompileRoot>::operator()(const polyregion::polyast::CompileRoot &x) const noexcept {
   return x.hash_code();
 }
 std::size_t std::hash<polyregion::polyast::CompileBundle>::operator()(const polyregion::polyast::CompileBundle &x) const noexcept {

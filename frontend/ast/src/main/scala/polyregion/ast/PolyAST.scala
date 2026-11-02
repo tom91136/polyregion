@@ -546,11 +546,19 @@ object PolyAST {
         image: ArraySeq[Byte]
     ) derives MsgPack.Codec
 
+    case class Root(
+        name: String,
+        modules: List[String],
+        implementations: List[String] = Nil,
+        unfit: List[String] = Nil
+    ) derives MsgPack.Codec
+
     case class Bundle(
         hostObject: ArraySeq[Byte],
         remoteModules: List[Module],
         implementations: List[String] = Nil,
-        unfit: List[String] = Nil
+        unfit: List[String] = Nil,
+        roots: List[Root] = Nil
     ) derives MsgPack.Codec
 
     case class Event(
