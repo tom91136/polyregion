@@ -151,7 +151,7 @@ POLYREGION_RT_PROTECT inline ArenaImage arenaMarshal(SMA &sma, const void *captu
   sma.genArenaReset();
   sma.genArenaObjectSlack = invoke::overReadPadBytes(currentDevice->features());
   sma.genArenaRemoteOf = remoteOf;
-  sma.genArenaMirror(static_cast<const char *>(capture), 1, 1, layout, layout.sizeInBytes);
+  sma.genArenaMirror(static_cast<const char *>(capture), 1, 1, layout, sizeof(uintptr_t), layout.sizeInBytes);
   sma.genArenaRemoteOf = {};
   return {sma.genArenaFinish(), sma.genArenaRemotes};
 }

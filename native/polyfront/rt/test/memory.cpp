@@ -1601,7 +1601,7 @@ TEST_CASE("resident arena leaves keep kernel output on the device until the host
 
   const auto launch = [&](const auto &kernel) {
     f.allocation.genArenaReset();
-    f.allocation.genArenaMirror(reinterpret_cast<const char *>(rec), 1, 1, *recLayout, sizeof(Rec));
+    f.allocation.genArenaMirror(reinterpret_cast<const char *>(rec), 1, 1, *recLayout, sizeof(uintptr_t), sizeof(Rec));
     auto *base = reinterpret_cast<char *>(f.allocation.genArenaFinish());
     const uint64_t off = *reinterpret_cast<const uint64_t *>(base + offsetof(Rec, xs));
     kernel(reinterpret_cast<int32_t *>(base + off));
@@ -1645,7 +1645,7 @@ TEST_CASE("gen-arena-mirror") {
 
   // the whole reachable graph laid into one arena: Rec body first, then its char payload appended,
   // the `p` slot rewritten to the chars' arena byte offset
-  const uint64_t off = f.allocation.genArenaMirror(reinterpret_cast<const char *>(rec), 1, 1, *recLayout, sizeof(Rec));
+  const uint64_t off = f.allocation.genArenaMirror(reinterpret_cast<const char *>(rec), 1, 1, *recLayout, sizeof(uintptr_t), sizeof(Rec));
   auto &arena = f.allocation.genArenaStaging;
   CHECK(off == 0);
   CHECK(arena.size() == sizeof(Rec) + 4);
@@ -1657,7 +1657,7 @@ TEST_CASE("gen-arena-mirror") {
   // nothing pointing back at it, so every real pointee offset is > 0 and 0 unambiguously means null
   f.allocation.genArenaReset();
   rec->p = nullptr;
-  f.allocation.genArenaMirror(reinterpret_cast<const char *>(rec), 1, 1, *recLayout, sizeof(Rec));
+  f.allocation.genArenaMirror(reinterpret_cast<const char *>(rec), 1, 1, *recLayout, sizeof(uintptr_t), sizeof(Rec));
   CHECK(*reinterpret_cast<const uint64_t *>(f.allocation.genArenaStaging.data() + offsetof(Rec, p)) == 0);
 }
 
@@ -1692,7 +1692,7 @@ TEST_CASE("arena binds a one-past-end remote pointer to the allocation that ends
   REQUIRE(polyrt_remote_launch_marshalled(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
                                           arguments.data(), mirrorSizes.data(), mirrorKinds.data(), layouts.data()));
   REQUIRE(queue.firstPointer != 0);
-  const auto *arenaRoot = reinterpret_cast<const uint64_t *>(queue.firstPointer);
+  const auto *arenaRoot = reinterpret_cast<const uintptr_t *>(queue.firstPointer);
   CHECK(arenaRoot[1] - arenaRoot[0] == 100 * sizeof(int32_t));
 }
 

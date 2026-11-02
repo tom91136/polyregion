@@ -74,6 +74,19 @@ class SynchronisedMemAllocation {
     return v;
   }
   static char *readPtrValue(const char *base) { return readAt<char *>(base); }
+  static void writeSlot(char *dst, const uint64_t value, const size_t width) { std::memcpy(dst, &value, width); }
+  static uint64_t readSlot(const char *src, const size_t width) {
+    uint64_t v = 0;
+    std::memcpy(&v, src, width);
+    return v;
+  }
+  static void copyInArena(char *dst, const char *hostData, const size_t count, const size_t indirection, const size_t slot,
+                          const size_t bytes) {
+    if (indirection > 1)
+      for (size_t i = 0; i < count; ++i)
+        writeSlot(dst + i * slot, readAt<uintptr_t>(hostData + i * sizeof(uintptr_t)), slot);
+    else std::memcpy(dst, hostData, bytes);
+  }
 
   // XXX `allowPastEnd` matches `localPtr == base + size` (one-past-end). off by default: a forward lookup in
   // `mirrorToRemote` would otherwise attribute an unmapped alloc's base to an adjacent record's past-end
@@ -924,7 +937,7 @@ public:
   struct GenArenaRec {
     const char *host;
     uint64_t off;
-    size_t count, indirection, size;
+    size_t count, indirection, slot, size;
     const runtime::TypeLayout *l;
     bool readOnly;         // a const input the device cannot have written; never copy it back (would corrupt it)
     bool resident = false; // kept at a stable offset across launches, page-guarded; others are re-laid every launch
@@ -967,7 +980,7 @@ public:
     genArenaRecs.clear();
   }
 
-  void genArenaPatch(const char *hostBase, const size_t hostOff, const uint64_t arenaPtrOff, const size_t indirection,
+  void genArenaPatch(const char *hostBase, const size_t hostOff, const uint64_t arenaPtrOff, const size_t slot, const size_t indirection,
                      const size_t componentSize, const size_t pointeeMinBytes, const runtime::TypeLayout &tl,
                      const runtime::AggregateMember::ResolvePtrSize resolve, const bool readOnly) {
     uint64_t childOff = arenaNull;
@@ -975,7 +988,7 @@ public:
       const auto address = reinterpret_cast<uintptr_t>(target);
       if (const auto remote = genArenaRemoteOf ? genArenaRemoteOf(address) : std::nullopt) {
         childOff = genArenaBindRemote(remote->first, remote->second) + (address - remote->first);
-        std::memcpy(genArenaStaging.data() + arenaPtrOff, &childOff, sizeof(uint64_t));
+        writeSlot(genArenaStaging.data() + arenaPtrOff, childOff, slot);
         return;
       }
       // interior pointer into an already-mirrored object (e.g. an SSO string's `_M_p` -> its own
@@ -987,7 +1000,7 @@ public:
           break;
         }
       if (childOff != arenaNull) {
-        std::memcpy(genArenaStaging.data() + arenaPtrOff, &childOff, sizeof(uint64_t));
+        writeSlot(genArenaStaging.data() + arenaPtrOff, childOff, slot);
         return;
       }
       const char *base = target;
@@ -1011,11 +1024,11 @@ public:
       }
       if (sized) {
         const size_t cnt = componentSize ? sz / componentSize : 1;
-        childOff = genArenaMirror(base, cnt ? cnt : 1, indirection, tl, sz, ro);
+        childOff = genArenaMirror(base, cnt ? cnt : 1, indirection, tl, slot, sz, ro);
         if (childOff != arenaNull) childOff += pastEndAdd;
       } else return; // XXX foreign / unsized: preserve copied bytes
     }
-    std::memcpy(genArenaStaging.data() + arenaPtrOff, &childOff, sizeof(uint64_t));
+    writeSlot(genArenaStaging.data() + arenaPtrOff, childOff, slot);
   }
 
   // recurse the typed prefix copied at arena `arenaOff` (mirror of host `hostBase+hostOff`); a const link
@@ -1032,7 +1045,8 @@ public:
         if (member.ptrIndirection > 0) {
           const size_t comp = member.ptrIndirection == 1 ? member.componentSize : sizeof(uintptr_t);
           const size_t minB = member.ptrIndirection == 1 ? member.componentSize : 0;
-          genArenaPatch(hostBase, hOff, aOff, member.ptrIndirection, comp, minB, *member.type, member.resolvePtrSizeInBytes, memberRO);
+          genArenaPatch(hostBase, hOff, aOff, member.sizeInBytes, member.ptrIndirection, comp, minB, *member.type,
+                        member.resolvePtrSizeInBytes, memberRO);
         } else if (member.type && member.type->memberCount > 0) genArenaWalk(hostBase, aOff, hOff, 1, *member.type, memberRO);
       }
   }
@@ -1040,9 +1054,9 @@ public:
   // append `count` elements of `hostData` to the arena and patch their pointers; dedup by host ptr.
   // indirection>1: the elements are themselves pointers (an array of pointers)
   uint64_t genArenaMirror(const char *hostData, const size_t count, const size_t indirection, const runtime::TypeLayout &l,
-                          const size_t hostAllocSizeInBytes = 0, const bool readOnly = false) {
+                          const size_t slot, const size_t hostAllocSizeInBytes = 0, const bool readOnly = false) {
     if (!hostData) return arenaNull;
-    const size_t unit = indirection > 1 ? sizeof(uintptr_t) : l.sizeInBytes;
+    const size_t unit = indirection > 1 ? slot : l.sizeInBytes;
     const size_t allocSize = std::max(unit * count, hostAllocSizeInBytes);
 
     if (genArenaPersist) {
@@ -1057,13 +1071,13 @@ public:
           genArenaResidentEnd = 0;
           genArenaDevValid = 0; // layout changed: the resident device image is stale, force a full re-upload
         } else if (genArenaStaging.size() < genArenaCaptureCap) genArenaStaging.assign(genArenaCaptureCap, 0);
-        std::memcpy(genArenaStaging.data(), hostData, allocSize);
+        copyInArena(genArenaStaging.data(), hostData, count, indirection, slot, allocSize);
         std::memset(genArenaStaging.data() + allocSize, 0, genArenaCaptureCap - allocSize); // zero slack for over-reads
-        genArenaRecs.push_back({hostData, 0, count, indirection, allocSize, &l, readOnly});
+        genArenaRecs.push_back({hostData, 0, count, indirection, slot, allocSize, &l, readOnly});
         genArenaUploads.emplace_back(0, genArenaCaptureCap);
         if (indirection > 1)
           for (size_t i = 0; i < count; ++i)
-            genArenaPatch(hostData, i * sizeof(uintptr_t), i * sizeof(uintptr_t), indirection - 1,
+            genArenaPatch(hostData, i * sizeof(uintptr_t), i * slot, slot, indirection - 1,
                           indirection - 1 == 1 ? l.sizeInBytes : sizeof(uintptr_t), 0, l, nullptr, readOnly);
         else genArenaWalk(hostData, 0, 0, count, l, readOnly);
         return 0;
@@ -1080,13 +1094,15 @@ public:
 
     // pad to the object's alignment: the device reads each pointer/scalar field via a typed access-chain
     // off the arena base, so an under-aligned offset faults (CUDA misaligned-address / SPIR-V UB)
-    const size_t align = indirection > 1 ? sizeof(uintptr_t) : std::max<size_t>(1, l.alignmentInBytes);
+    const size_t align = indirection > 1 ? slot : std::max<size_t>(1, l.alignmentInBytes);
     if (const size_t pad = (align - genArenaStaging.size() % align) % align; pad) genArenaStaging.resize(genArenaStaging.size() + pad);
     const uint64_t off = genArenaStaging.size();
     mutateTables([&] { genArenaOffsetOf[reinterpret_cast<uintptr_t>(hostData)] = off; });
     const bool resident = genArenaPersist && indirection == 1 && pointerFree(&l) && arenaGuardable(hostData, allocSize);
-    genArenaRecs.push_back({hostData, off, count, indirection, allocSize, &l, readOnly, resident});
-    genArenaStaging.insert(genArenaStaging.end(), hostData, hostData + allocSize);
+    genArenaRecs.push_back({hostData, off, count, indirection, slot, allocSize, &l, readOnly, resident});
+    const size_t at = genArenaStaging.size();
+    genArenaStaging.resize(at + allocSize);
+    copyInArena(genArenaStaging.data() + at, hostData, count, indirection, slot, allocSize);
     // pad before any child object is appended, so this object's over-read lands in its own zeroed slack
     if (genArenaObjectSlack) genArenaStaging.resize(genArenaStaging.size() + genArenaObjectSlack);
     if (resident) genArenaResidentEnd = genArenaStaging.size();
@@ -1096,7 +1112,7 @@ public:
     }
     if (indirection > 1)
       for (size_t i = 0; i < count; ++i)
-        genArenaPatch(hostData, i * sizeof(uintptr_t), off + i * sizeof(uintptr_t), indirection - 1,
+        genArenaPatch(hostData, i * sizeof(uintptr_t), off + i * slot, slot, indirection - 1,
                       indirection - 1 == 1 ? l.sizeInBytes : sizeof(uintptr_t), 0, l, nullptr, readOnly);
     else genArenaWalk(hostData, off, 0, count, l, readOnly);
     return off;
@@ -1233,8 +1249,8 @@ public:
     const char *at(const uint64_t off) const { return data + (off - base); }
   };
 
-  void genArenaReadbackPtr(const ArenaView &buf, char *hostSlot, const uint64_t aOff) {
-    const uint64_t devOff = readAt<uint64_t>(buf.at(aOff)), origOff = readAt<uint64_t>(genArenaStaging.data() + aOff);
+  void genArenaReadbackPtr(const ArenaView &buf, char *hostSlot, const uint64_t aOff, const size_t slot) {
+    const uint64_t devOff = readSlot(buf.at(aOff), slot), origOff = readSlot(genArenaStaging.data() + aOff, slot);
     if (devOff != origOff)
       if (const auto host = genArenaHostOf(devOff)) std::memcpy(hostSlot, &*host, sizeof(const char *));
   }
@@ -1249,7 +1265,7 @@ public:
         if (member.sizeInBytes == 0 || member.readOnly) continue;
         const size_t hOff = hostOff + idx * l.sizeInBytes + member.offsetInBytes;
         const uint64_t aOff = arenaOff + idx * l.sizeInBytes + member.offsetInBytes;
-        if (member.ptrIndirection > 0) genArenaReadbackPtr(buf, hostBase + hOff, aOff);
+        if (member.ptrIndirection > 0) genArenaReadbackPtr(buf, hostBase + hOff, aOff, member.sizeInBytes);
         else if (member.type && member.type->memberCount > 0) genArenaReadbackWalk(buf, hostBase, aOff, hOff, 1, *member.type);
         else std::memcpy(hostBase + hOff, buf.at(aOff), member.sizeInBytes);
       }
@@ -1262,7 +1278,7 @@ public:
     if (r.indirection > 1) {
       // an array of `count` pointers (each an arena offset); translate the ones the kernel changed
       for (size_t i = 0; i < r.count; ++i)
-        genArenaReadbackPtr(buf, host + i * sizeof(uintptr_t), r.off + i * sizeof(uintptr_t));
+        genArenaReadbackPtr(buf, host + i * sizeof(uintptr_t), r.off + i * r.slot, r.slot);
       return;
     }
     if (r.l->memberCount == 0) std::memcpy(host, buf.at(r.off), r.count * r.l->sizeInBytes);
