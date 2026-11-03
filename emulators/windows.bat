@@ -110,6 +110,8 @@ rem Mesa lavapipe (static LLVM + CRT). drm.h assumes non-Linux==BSD and pulls sy
 rem cpp_rtti matches LLVM RTTI=OFF; expat off (POSIX xmlconfig); /wd* demote Mesa's warning-as-error;
 rem platforms=windows declares vk_icdEnumerateAdapterPhysicalDevices
 if not exist "%WORK%\mesa\.git" git clone -b %MESA_REF% --depth 1 https://gitlab.freedesktop.org/mesa/mesa "%WORK%\mesa" || exit /b 1
+git -C "%WORK%\mesa" checkout -q -- . || (echo MESA-RESET-FAIL & exit /b 1)
+git -C "%WORK%\mesa" apply "%DIR%mesa.patch" || (echo MESA-PATCH-FAIL & exit /b 1)
 findstr /c:"!defined(_WIN32)" "%WORK%\mesa\include\drm-uapi\drm.h" >nul || "%SED%" -i "s|#include <sys/ioccom.h>|#if !defined(_WIN32)\n#include <sys/ioccom.h>\n#endif|" "%WORK%\mesa\include\drm-uapi\drm.h"
 rmdir /s /q "%WORK%\build-mesa" 2>nul
 rmdir /s /q "%WORK%\mesa-prefix" 2>nul

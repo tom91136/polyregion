@@ -72,6 +72,8 @@ pocl() {
 
 mesa() {
   clone_pinned "$WORK/mesa" "$MESA_REF" https://gitlab.freedesktop.org/mesa/mesa
+  git -C "$WORK/mesa" checkout -q -- .
+  git -C "$WORK/mesa" apply "$DIR/mesa.patch"
   export LIBRARY_PATH="$PREFIX/lib"
   export PKG_CONFIG_PATH="$PREFIX/opt/expat/lib/pkgconfig:$PREFIX/opt/zlib/lib/pkgconfig"
   rm -rf "$WORK/build-mesa" "$WORK/mesa-prefix"

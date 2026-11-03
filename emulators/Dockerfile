@@ -97,11 +97,13 @@ RUN git clone -b ${GLSLANG_REF} --depth 1 https://github.com/KhronosGroup/glslan
  && ninja -C /src/glslang/build install \
  && rm -rf /src/glslang
 ARG MESA_REF
+COPY mesa.patch /src/mesa.patch
 # EL8 ninja 1.8.2 is too old for Mesa's multiple-output depslog; # XXX bindgen's clang needs gcc-toolset-13's libstdc++ headers
 RUN TRIPLE=$(gcc -dumpmachine) \
  && export BINDGEN_EXTRA_CLANG_ARGS="-isystem /opt/rh/gcc-toolset-13/root/usr/include/c++/13 -isystem /opt/rh/gcc-toolset-13/root/usr/include/c++/13/$TRIPLE --gcc-install-dir=/opt/rh/gcc-toolset-13/root/usr/lib/gcc/$TRIPLE/13" \
  && pip3.11 install --no-cache-dir 'ninja>=1.11' \
  && git clone -b ${MESA_REF} --depth 1 https://gitlab.freedesktop.org/mesa/mesa /src/mesa \
+ && git -C /src/mesa apply /src/mesa.patch \
  && meson setup /src/mesa /src/mesa/build \
       -Dbuildtype=release \
       -Dvulkan-drivers=swrast -Dgallium-drivers=llvmpipe \

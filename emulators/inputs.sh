@@ -2,9 +2,9 @@
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 case "${1:-$(uname -s)}" in
-  linux|Linux)               files=(Dockerfile collect.sh gpuocelot.patch) ;;
-  macos|Darwin)              files=(macos.sh) ;;
-  windows|MINGW*|MSYS*|CYGWIN*) files=(windows.bat gpuocelot.patch gpuocelot.windows.patch) ;;
+  linux|Linux)               files=(Dockerfile collect.sh gpuocelot.patch mesa.patch) ;;
+  macos|Darwin)              files=(macos.sh mesa.patch) ;;
+  windows|MINGW*|MSYS*|CYGWIN*) files=(windows.bat gpuocelot.patch gpuocelot.windows.patch mesa.patch) ;;
   *) echo "inputs.sh: unsupported OS $1" >&2; exit 1 ;;
 esac
 sum() { sha256sum 2>/dev/null || shasum -a 256; }

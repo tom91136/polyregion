@@ -17,3 +17,5 @@ source emulators/out/env.sh      # use the bundle directly (LD_LIBRARY_PATH + VK
 
 `gpuocelot.patch` is the polyregion fork's diff vs upstream `b16039dc`. `gpuocelot.windows.patch`
 layers MSVC/clang-cl support on top (built by `windows.bat`, staged as `nvcuda.dll`).
+
+`mesa.patch` guards llvmpipe's uniform `load_global` against an empty exec mask (applied to the Mesa tree by the Linux `Dockerfile`, `macos.sh` and `windows.bat`).

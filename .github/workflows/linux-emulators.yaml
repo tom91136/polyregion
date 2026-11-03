@@ -42,7 +42,7 @@ jobs:
         with:
           path: &emu-path emulators/out
           archive: &emu-archive emulators/out.tar.zst
-          key: &emu-key emulators-linux-${{ matrix.arch }}-${{ hashFiles('./emulators/inputs.sh', './emulators/Dockerfile', './emulators/collect.sh', './emulators/gpuocelot.patch') }}
+          key: &emu-key emulators-linux-${{ matrix.arch }}-${{ hashFiles('./emulators/inputs.sh', './emulators/Dockerfile', './emulators/collect.sh', './emulators/gpuocelot.patch', './emulators/mesa.patch') }}
 
       - name: Detect existing emulators (act fast-path)
         if: ${{ env.ACT }}

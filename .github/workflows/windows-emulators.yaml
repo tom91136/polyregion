@@ -33,7 +33,7 @@ jobs:
         with:
           path: &emu-path emulators/out
           archive: &emu-archive emulators/out.tar.zst
-          key: &emu-key emulators-windows-${{ matrix.arch }}-${{ hashFiles('./emulators/inputs.sh', './emulators/windows.bat', './emulators/gpuocelot.patch', './emulators/gpuocelot.windows.patch') }}
+          key: &emu-key emulators-windows-${{ matrix.arch }}-${{ hashFiles('./emulators/inputs.sh', './emulators/windows.bat', './emulators/gpuocelot.patch', './emulators/gpuocelot.windows.patch', './emulators/mesa.patch') }}
       - name: Build emulators
         id: build-emulators
         if: steps.restore-emu.outputs.cache-hit != 'true'

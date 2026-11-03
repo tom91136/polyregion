@@ -1,0 +1,34 @@
+diff --git a/src/gallium/auxiliary/gallivm/lp_bld_nir_soa.c b/src/gallium/auxiliary/gallivm/lp_bld_nir_soa.c
+index 9e02a51..5880c93 100644
+--- a/src/gallium/auxiliary/gallivm/lp_bld_nir_soa.c
++++ b/src/gallium/auxiliary/gallivm/lp_bld_nir_soa.c
+@@ -4689,9 +4689,27 @@ visit_load_global(struct lp_build_nir_soa_context *bld,
+    if (!lp_value_is_divergent(addr)) {
+       addr = global_addr_to_ptr(gallivm, addr, instr->def.bit_size);
+ 
++      /* gallivm doesn't jump when exec_mask is 0, so a uniform address that no
++       * active invocation computed (e.g. an array indexed past the end by a
++       * loop whose last invocation has broken out) must not be dereferenced.
++       */
++      LLVMValueRef any_active = NULL;
++      if (!invocation_0_must_be_active(bld)) {
++         LLVMValueRef exec_mask = mask_vec_with_helpers(bld);
++         LLVMValueRef bitvec = LLVMBuildICmp(builder, LLVMIntNE, exec_mask, bld->uint_bld.zero, "exec_bitvec");
++         LLVMTypeRef bitmask_type = LLVMIntTypeInContext(gallivm->context, bld->uint_bld.type.length);
++         bitvec = LLVMBuildBitCast(builder, bitvec, bitmask_type, "exec_bitmask");
++         any_active = LLVMBuildICmp(builder, LLVMIntNE, bitvec, LLVMConstNull(bitmask_type), "any_active");
++      }
++
+       for (unsigned c = 0; c < instr->def.num_components; c++) {
+-         result[c] = lp_build_pointer_get2(builder, res_bld->elem_type,
+-                                           addr, lp_build_const_int32(gallivm, c));
++         LLVMValueRef index = lp_build_const_int32(gallivm, c);
++         LLVMValueRef ptr = LLVMBuildGEP2(builder, res_bld->elem_type, addr, &index, 1, "");
++         if (any_active) {
++            LLVMValueRef null_ptr = LLVMBuildBitCast(builder, bld->null_qword_ptr, LLVMTypeOf(ptr), "");
++            ptr = LLVMBuildSelect(builder, any_active, ptr, null_ptr, "");
++         }
++         result[c] = LLVMBuildLoad2(builder, res_bld->elem_type, ptr, "");
+       }
+       return;
+    }

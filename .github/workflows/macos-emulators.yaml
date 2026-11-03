@@ -29,7 +29,7 @@ jobs:
         with:
           path: &emu-path emulators/out
           archive: &emu-archive emulators/out.tar.zst
-          key: &emu-key emulators-darwin-${{ matrix.arch }}-${{ hashFiles('./emulators/inputs.sh', './emulators/macos.sh') }}
+          key: &emu-key emulators-darwin-${{ matrix.arch }}-${{ hashFiles('./emulators/inputs.sh', './emulators/macos.sh', './emulators/mesa.patch') }}
       - name: Build emulators
         id: build-emulators
         if: steps.restore-emu.outputs.cache-hit != 'true'
