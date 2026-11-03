@@ -296,10 +296,10 @@ compiler::package::Result<polyast::Package> compiler::package::link(const polyas
       [](const uint8_t *begin, const uint8_t *end) { return polyast::package_service_result_from_msgpack(begin, end); });
 }
 
-static compiler::package::Result<polyast::Program> linkProgram(const polyast::ProgramLinkRequest &request) {
-  return invokePackage<polyast::Program>(
-      polyast::programlinkrequest_to_msgpack(request), polypackage::abi::LinkProgram,
-      [](const uint8_t *begin, const uint8_t *end) { return polyast::program_service_result_from_msgpack(begin, end); });
+static compiler::package::Result<polyast::Program> linkProgram(const std::vector<uint8_t> &request) {
+  return invokePackage<polyast::Program>(request, polypackage::abi::LinkProgram, [](const uint8_t *begin, const uint8_t *end) {
+    return polyast::program_service_result_from_msgpack(begin, end);
+  });
 }
 
 namespace {
@@ -471,10 +471,15 @@ polyast::Program namespaceRemoteEntries(polyast::Program program,
     if (!function.convention.is<polyast::CallConvention::OffloadEntry>()) continue;
     names.emplace(function.decl.name, polyast::Sym({polyast::offloadEntrySymbol(function.decl.name), "module", identity}));
   }
-  program = program.modify_all<polyast::Type::FnRef>([&](const auto &reference) {
+  const std::function<polyast::Type::FnRef(const polyast::Type::FnRef &)> rename = [&](const polyast::Type::FnRef &reference) {
     const auto found = names.find(reference.name);
     return found == names.end() ? reference : reference.withName(found->second);
-  });
+  };
+  if (program.entry) program.entry = program.entry->modify_all<polyast::Type::FnRef>(rename);
+  for (auto &function : program.functions)
+    function = function.modify_all<polyast::Type::FnRef>(rename);
+  for (auto &definition : program.defs)
+    definition = definition.modify_all<polyast::Type::FnRef>(rename);
   if (program.entry) {
     if (const auto found = names.find(program.entry->decl.name); found != names.end()) program.entry->decl.name = found->second;
   }
@@ -487,13 +492,16 @@ polyast::Program namespaceRemoteEntries(polyast::Program program,
 } // namespace
 
 compiler::package::Result<polyast::CompileBundle>
-compiler::package::compile(const polyast::ProgramLinkRequest &request, const compiletime::Target hostTarget, const std::string &hostArch,
+compiler::package::compile(polyast::ProgramLinkRequest request, const compiletime::Target hostTarget, const std::string &hostArch,
                            const std::vector<std::pair<compiletime::Target, std::string>> &deviceTargets,
                            const std::optional<int> stackDepth) {
   if (!(deviceTargets
         ^ forall([&](const auto &target) { return compiletime::logicalAddressing(target.first) == request.logicalAddressing; })))
     return {{}, {fmt::format("device targets do not all use {} addressing", request.logicalAddressing ? "logical" : "physical")}};
-  auto linked = linkProgram(request.withStackDepth(stackDepth));
+  request.stackDepth = stackDepth;
+  const auto linkRequest = polyast::programlinkrequest_to_msgpack(request);
+  request.packages = {};
+  auto linked = linkProgram(linkRequest);
   if (!linked) return {{}, std::move(linked.errors)};
   if (auto errors = validateImportedEntries(request, *linked.value); !errors.empty()) return {{}, std::move(errors)};
   const auto roots = consumerRoots(request);
@@ -536,18 +544,14 @@ compiler::package::compile(const polyast::ProgramLinkRequest &request, const com
     });
   };
 
-  auto hostCompile = submit(compiler::stage(program, Options{hostTarget, hostArch, "StructuredExit", true}), compiletime::OptLevel::O3);
-
-  struct DeviceCompile {
+  struct EntryJob {
     std::string moduleName;
-    compiletime::Target target;
-    std::shared_future<std::shared_ptr<polyast::CompileResult>> result;
+    polyast::Function entry;
+    std::vector<polyast::Function> functions;
   };
-  std::vector<DeviceCompile> deviceCompiles;
+  std::vector<EntryJob> entryJobs;
   for (const auto &entry : program.functions) {
     if (!entry.convention.is<polyast::CallConvention::OffloadEntry>()) continue;
-    const auto moduleName = backend::normaliseSymbol(entry.decl.name);
-    auto entryProgram = program.withEntry(entry);
     const auto live = reachableFrom(graph, referencesOf(entry));
     std::vector<polyast::Function> functions;
     for (const auto &function : program.functions) {
@@ -557,11 +561,33 @@ compiler::package::compile(const polyast::ProgramLinkRequest &request, const com
         internal = internal.withConvention(polyast::CallConvention::RegularCall());
       functions.emplace_back(std::move(internal));
     }
-    entryProgram.functions = std::move(functions);
-    for (const auto &[target, arch] : deviceTargets) {
+    entryJobs.push_back({backend::normaliseSymbol(entry.decl.name), entry, std::move(functions)});
+  }
+  std::erase_if(program.functions,
+                [](const auto &function) { return !function.decl.affinity.template is<polyast::FunctionAffinity::Host>(); });
+  const auto sharedDefs = program.defs;
+  const auto sharedPhase = program.phase;
+  const auto sharedMetadata = program.metadata;
+
+  auto hostStaged = compiler::stage(std::move(program), Options{hostTarget, hostArch, "StructuredExit", true});
+  auto hostCompile = submit(std::move(hostStaged), compiletime::OptLevel::O3);
+
+  struct DeviceCompile {
+    std::string moduleName;
+    compiletime::Target target;
+    std::shared_future<std::shared_ptr<polyast::CompileResult>> result;
+  };
+  std::vector<DeviceCompile> deviceCompiles;
+  for (auto &job : entryJobs) {
+    for (size_t index = 0; index < deviceTargets.size(); ++index) {
+      const auto &[target, arch] = deviceTargets[index];
       const auto pipeline = packageEntryPipeline(target, arch, stackDepth);
+      const auto last = index + 1 == deviceTargets.size();
+      auto entryProgram = last ? polyast::Program(std::move(job.entry), std::move(job.functions), sharedDefs, sharedPhase, sharedMetadata)
+                               : polyast::Program(job.entry, job.functions, sharedDefs, sharedPhase, sharedMetadata);
       deviceCompiles.push_back(
-          {moduleName, target, submit(compiler::stage(entryProgram, Options{target, arch, pipeline}), compiletime::OptLevel::O3)});
+          {job.moduleName, target,
+           submit(compiler::stage(std::move(entryProgram), Options{target, arch, pipeline}), compiletime::OptLevel::O3)});
     }
   }
 
@@ -584,7 +610,7 @@ compiler::package::compile(const polyast::ProgramLinkRequest &request, const com
           {}};
 }
 
-static polyast::PassRunResult runPipelineChain(const polyast::Program &p, std::string_view rawSpec) {
+static polyast::PassRunResult runPipelineChain(polyast::Program &&p, std::string_view rawSpec) {
   const std::string_view spec = rawSpec.empty() ? std::string_view{compiler::DefaultPipelineSpec} : rawSpec;
   const auto rootEpoch = compiler::nowMs();
   const auto rootStart = compiler::nowMono();
@@ -597,6 +623,7 @@ static polyast::PassRunResult runPipelineChain(const polyast::Program &p, std::s
 
   auto [bytes, serialiseEvent] = timed("polyast_msgpack_serialise_cpp", "", [&] { return polyast::program_to_msgpack(p); });
   serialiseEvent.data = fmt::format("bytes={}", bytes.size());
+  static_cast<void>(polyast::Program(std::move(p)));
 
   auto &reg = sharedPlugins();
 
@@ -625,7 +652,7 @@ static polyast::PassRunResult runPipelineChain(const polyast::Program &p, std::s
   std::vector<polyast::CompileEvent> items;
   items.push_back(std::move(serialiseEvent));
 
-  polyast::Program currentProgram = p;
+  std::optional<polyast::Program> currentProgram;
   for (auto &[idx, stepStrings] : groups) {
     auto &runner = *reg.plugins[idx];
     std::string err;
@@ -644,15 +671,19 @@ static polyast::PassRunResult runPipelineChain(const polyast::Program &p, std::s
     bytes = std::move(out);
   }
 
-  return polyast::PassRunResult(std::move(currentProgram), polyast::CompileEvent(rootEpoch, compiler::elapsedNs(rootStart), "PolyPass",
-                                                                                 std::string(spec), std::move(items)));
+  return polyast::PassRunResult(std::move(*currentProgram), polyast::CompileEvent(rootEpoch, compiler::elapsedNs(rootStart), "PolyPass",
+                                                                                  std::string(spec), std::move(items)));
 }
 
 polyast::Program compiler::runPipeline(const polyast::Program &program, const std::string &spec) {
-  return runPipelineChain(program, spec).program;
+  return runPipelineChain(polyast::Program(program), spec).program;
 }
 
 compiler::Staged compiler::stage(const polyast::Program &program, const Options &options) {
+  return stage(polyast::Program(program), options);
+}
+
+compiler::Staged compiler::stage(polyast::Program &&program, const Options &options) {
   initialise();
   const bool hadEntry = program.entry.has_value();
 
@@ -662,9 +693,9 @@ compiler::Staged compiler::stage(const polyast::Program &program, const Options 
         fmt::format("GPU target {} requires an Offload-affinity entry function; got Host-affinity", magic_enum::enum_name(options.target)));
 
   std::vector<polyast::CompileEvent> preEvents;
-  auto effective = program;
+  auto effective = std::move(program);
   {
-    auto passRun = runPipelineChain(effective, options.pipelineSpec);
+    auto passRun = runPipelineChain(std::move(effective), options.pipelineSpec);
     effective = std::move(passRun.program);
     preEvents.emplace_back(std::move(passRun.event));
   }
@@ -678,10 +709,10 @@ compiler::Staged compiler::stage(const polyast::Program &program, const Options 
                               ? "false"
                               : "true";
       const auto metal = options.target == compiletime::Target::Source_C_Metal1_0 ? "true" : "false";
-      auto passRun = runPipelineChain(effective, fmt::format("SourceStorageLegalise(elideRecursivelyEmptyAggregates={});"
-                                                             "SourcePointerLegalise(requiresConcreteSpaces={});"
-                                                             "SourceSelectionLegalise;SourceNameNormalise(metalKeywords={})",
-                                                             metal, strict, metal));
+      auto passRun = runPipelineChain(std::move(effective), fmt::format("SourceStorageLegalise(elideRecursivelyEmptyAggregates={});"
+                                                                        "SourcePointerLegalise(requiresConcreteSpaces={});"
+                                                                        "SourceSelectionLegalise;SourceNameNormalise(metalKeywords={})",
+                                                                        metal, strict, metal));
       effective = std::move(passRun.program);
       preEvents.emplace_back(std::move(passRun.event));
       break;
@@ -689,7 +720,7 @@ compiler::Staged compiler::stage(const polyast::Program &program, const Options 
     case compiletime::Target::Object_LLVM_SPIRV32_Kernel:
     case compiletime::Target::Object_LLVM_SPIRV64_Kernel: {
       if (compiletime::spirvKernelGeneric(options.arch)) break;
-      auto passRun = runPipelineChain(effective, "SourcePointerLegalise(requiresConcreteSpaces=true)");
+      auto passRun = runPipelineChain(std::move(effective), "SourcePointerLegalise(requiresConcreteSpaces=true)");
       effective = std::move(passRun.program);
       preEvents.emplace_back(std::move(passRun.event));
       break;

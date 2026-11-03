@@ -18,7 +18,7 @@ template <typename T> struct Result {
 };
 
 [[nodiscard]] Result<polyast::Package> link(const polyast::PackageLinkRequest &request);
-[[nodiscard]] Result<polyast::CompileBundle> compile(const polyast::ProgramLinkRequest &request, compiletime::Target hostTarget,
+[[nodiscard]] Result<polyast::CompileBundle> compile(polyast::ProgramLinkRequest request, compiletime::Target hostTarget,
                                                      const std::string &hostArch,
                                                      const std::vector<std::pair<compiletime::Target, std::string>> &deviceTargets,
                                                      std::optional<int> stackDepth = {});

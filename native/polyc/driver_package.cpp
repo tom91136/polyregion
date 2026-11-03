@@ -231,8 +231,8 @@ int packageCompile(std::string requestPath = fire::arg({0, "<request.msgpack>", 
     if (!hostTarget) throw std::invalid_argument("unknown host target: " + hostTargetName);
     const auto requestBytes = readBytes(requestPath);
     if (!requestBytes) return IoError;
-    const auto request = polyast::programlinkrequest_from_msgpack(*requestBytes);
-    const auto compiled = compiler::package::compile(request, hostTarget->codegen, hostArch, deviceTargets,
+    auto request = polyast::programlinkrequest_from_msgpack(*requestBytes);
+    const auto compiled = compiler::package::compile(std::move(request), hostTarget->codegen, hostArch, deviceTargets,
                                                      stackDepth == 0 ? std::optional<int>{} : std::optional<int>{stackDepth});
     if (!compiled) {
       llvm::errs() << (compiled.errors | mk_string("\n")) << '\n';
