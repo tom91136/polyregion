@@ -9,6 +9,10 @@ import scala.scalanative.unsafe.*
 import scala.scalanative.unsigned.*
 import scala.scalanative.libc.stdlib
 
+@extern private object BoehmGC {
+  def GC_gcollect_and_unmap(): Unit = extern
+}
+
 object NativeBundle {
 
   private val plugin: PluginEntry = DefaultPlugin
@@ -154,6 +158,20 @@ object NativeBundle {
   }
 
   private def packageOperation[A: MsgPack.Codec, B: MsgPack.Codec](
+      label: String,
+      inPtr: Ptr[Byte],
+      inLen: CSize,
+      outPtr: Ptr[Ptr[Byte]],
+      outLen: Ptr[CSize]
+  )(operation: A => Either[List[String], B]): CInt = {
+    val status = runPackageOperation[A, B](label, inPtr, inLen, outPtr, outLen)(operation)
+    releaseHeap()
+    status
+  }
+
+  private def releaseHeap(): Unit = BoehmGC.GC_gcollect_and_unmap()
+
+  private def runPackageOperation[A: MsgPack.Codec, B: MsgPack.Codec](
       label: String,
       inPtr: Ptr[Byte],
       inLen: CSize,
