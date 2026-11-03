@@ -1380,7 +1380,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         const auto loopTest = llvm::BasicBlock::Create(C.actual, "loop_test", &fn);
         const auto loopBody = llvm::BasicBlock::Create(C.actual, "loop_body", &fn);
         const auto loopExit = llvm::BasicBlock::Create(C.actual, "loop_exit", &fn);
-        WhileCtx ctx{.exit = loopExit, .test = loopTest};
+        WhileCtx ctx{.exit = loopExit, .cont = loopTest};
         // lanes that enter a loop together leave it together, as on lockstep and structured-convergence targets;
         // a subgroup collective after a lane-divergent exit otherwise sees only the lanes that left first
         auto *lanes = leavesFunction(x.body) ? nullptr : targetHandler->loopLanes(*this);
@@ -1410,12 +1410,13 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
       [&](const Stmt::ForRange &x) -> BlockKind {
         const auto loopTest = llvm::BasicBlock::Create(C.actual, "loop_test", &fn);
         const auto loopBody = llvm::BasicBlock::Create(C.actual, "loop_body", &fn);
+        const auto loopStep = llvm::BasicBlock::Create(C.actual, "loop_step", &fn);
         const auto loopExit = llvm::BasicBlock::Create(C.actual, "loop_exit", &fn);
         const auto inductionSelect = Term::Select(x.induction, {}, x.induction.tpe);
         const auto inductionTerm = Term::Any(inductionSelect);
         static_cast<void>(mkStmt(Stmt::Var(x.induction, std::optional<Expr::Any>{}, /*isMutable*/ true), fn, whileCtx));
         static_cast<void>(mkStmt(Stmt::Mut(inductionSelect, Expr::Alias(x.lbIncl)), fn, whileCtx));
-        WhileCtx ctx{.exit = loopExit, .test = loopTest};
+        WhileCtx ctx{.exit = loopExit, .cont = loopStep};
         auto *lanes = leavesFunction(x.body) ? nullptr : targetHandler->loopLanes(*this);
         B.CreateBr(loopTest);
         {
@@ -1429,7 +1430,11 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
             kind = mkStmt(body, fn, {ctx});
             if (kind == BlockKind::Terminal) break;
           }
-          if (kind != BlockKind::Terminal) {
+          const auto stepped = !loopStep->use_empty();
+          if (stepped && kind != BlockKind::Terminal) B.CreateBr(loopStep);
+          if (stepped) B.SetInsertPoint(loopStep);
+          else loopStep->eraseFromParent();
+          if (stepped || kind != BlockKind::Terminal) {
             [[maybe_unused]] auto _0 =
                 mkStmt(Stmt::Mut(inductionSelect, Expr::IntrOp(Intr::Add(inductionTerm, x.step, x.induction.tpe))), fn, {ctx});
             B.CreateBr(loopTest);
@@ -1445,7 +1450,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         return BlockKind::Terminal;
       }, //
       [&](const Stmt::Cont &) -> BlockKind {
-        if (whileCtx) B.CreateBr(whileCtx->test);
+        if (whileCtx) B.CreateBr(whileCtx->cont);
         else throw BackendException("orphaned cont!");
         return BlockKind::Terminal;
       }, //

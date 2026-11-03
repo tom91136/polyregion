@@ -150,7 +150,7 @@ struct CodeGen {
   enum class BlockKind : uint8_t { Terminal, Normal };
 
   struct WhileCtx {
-    llvm::BasicBlock *exit, *test;
+    llvm::BasicBlock *exit, *cont;
   };
 
   TargetedContext C;

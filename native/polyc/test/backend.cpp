@@ -2,8 +2,10 @@
 #include <cstring>
 #include <set>
 
+#include "llvm/Analysis/LoopInfo.h"
 #include "llvm/AsmParser/Parser.h"
 #include "llvm/Bitcode/BitcodeReader.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicsSPIRV.h"
@@ -4486,6 +4488,43 @@ TEST_CASE("a constant loop condition lowers to an unconditional branch", "[backe
   REQUIRE(c.binary != std::nullopt);
 
   CHECK_FALSE(llvmIrOf(c) ^ contains_slice("br i1 true"));
+}
+
+TEST_CASE("a range loop continue runs the induction step", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Named i("i", Type::IntS64()), skip("skip", Type::Bool1());
+  const Function entry =
+      mkFn("kernel", {}, Type::Unit0(),
+           {ForRange(i, Term::IntS64Const(0).widen(), Term::IntS64Const(4).widen(), Term::IntS64Const(1).widen(),
+                     {Var(skip, Expr::IntrOp(LogicEq(selectNamed(i), Term::IntS64Const(1).widen())).widen(), false).widen(),
+                      Stmt::Cond(selectNamed(skip).widen(), {Stmt::Cont().widen()}, {}).widen()})
+                .widen(),
+            ret()},
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const ScopedEnv captureIr(polyregion::env::PolyregionDebug, std::string("1"));
+  const auto compiled =
+      polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), {Target::Object_LLVM_HOST, "native"}, OptLevel::O0);
+  INFO(repr(compiled));
+  REQUIRE(compiled.binary);
+
+  llvm::LLVMContext context;
+  llvm::SMDiagnostic diagnostic;
+  const auto module = llvm::parseAssemblyString(llvmIrOf(compiled), diagnostic, context);
+  REQUIRE(module);
+  std::size_t loops = 0;
+  for (auto &F : *module) {
+    if (F.isDeclaration()) continue;
+    llvm::DominatorTree dom(F);
+    llvm::LoopInfo info(dom);
+    for (const auto *loop : info.getLoopsInPreorder()) {
+      ++loops;
+      REQUIRE(loop->getLoopLatch());
+      CHECK(llvm::any_of(*loop->getLoopLatch(), [](const llvm::Instruction &I) { return I.getOpcode() == llvm::Instruction::Add; }));
+    }
+  }
+  CHECK(loops == 1);
 }
 
 TEST_CASE("Vulkan drops dead null edges from private pointer phis", "[backend][spirv][vulkan]") {
