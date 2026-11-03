@@ -18,10 +18,22 @@
   #include "rt_index.hpp"
   #include "rt_protected.hpp"
 
+  #if defined(__has_feature)
+    #if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer) || __has_feature(memory_sanitizer)
+      #define __RT_SANITIZED 1
+    #endif
+  #endif
+  #if (defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__) || defined(__RT_SANITIZED))                                           \
+      && __has_include(<sanitizer/allocator_interface.h>)
+    #include <sanitizer/allocator_interface.h>
+    #define __RT_SANITIZER_HOOKS 1
+  #endif
+
   #ifdef _WIN32
     #include <windows.h>
 using pid_t = DWORD;
   #else
+    #include <pthread.h>
     #include <unistd.h>
 using pid_t = pid_t;
   #endif
@@ -45,6 +57,7 @@ extern "C" enum class Type : uint8_t {
   HeapFree,
   HeapCXXNew,
   HeapCXXDelete,
+  HeapSanitizer,
 
   // XXX RO static segment (PT_LOAD without W/X) registered at polystl init so SMA can resolve captured .rodata pointers.
   StaticRodata,
@@ -59,7 +72,7 @@ extern "C" struct PtrMeta {
 template <typename E> constexpr std::underlying_type_t<E> to_integral(E e) { return static_cast<std::underlying_type_t<E>>(e); }
 
 constexpr bool isHeap(const Type t) {
-  return to_integral(t) >= to_integral(Type::HeapMalloc) && to_integral(t) <= to_integral(Type::HeapCXXDelete);
+  return to_integral(t) >= to_integral(Type::HeapMalloc) && to_integral(t) <= to_integral(Type::HeapSanitizer);
 }
 
 constexpr const char *to_string(const Type t) {
@@ -76,6 +89,7 @@ constexpr const char *to_string(const Type t) {
     case Type::HeapFree: return "HeapFree";
     case Type::HeapCXXNew: return "HeapCXXNew";
     case Type::HeapCXXDelete: return "HeapCXXDelete";
+    case Type::HeapSanitizer: return "HeapSanitizer";
     case Type::StaticRodata: return "StaticRodata";
   }
   return "Undefined";
@@ -216,7 +230,7 @@ public:
     index.insert(info.base, info.size, data.find(info.base));
   }
 
-  __RT_ODR void blockingRelease(const uintptr_t ptr, const Type type, const time_point<steady_clock> now = steady_clock::now()) {
+  __RT_ODR bool blockingRelease(const uintptr_t ptr, const Type type, const time_point<steady_clock> now = steady_clock::now()) {
     std::unique_lock lock(mutex);
     if (const auto *rec = queryUnsafe(ptr, false)) {
       if (trace)
@@ -228,10 +242,11 @@ public:
                      duration_cast<microseconds>(now - rec->point).count());
       index.erase(ptr);
       data.erase(ptr);
-      return;
+      return true;
     }
     if (!isHeap(type))
       safe_fprintf(stderr, "[PtrReflect] failed to release %p (type=%s)\n", reinterpret_cast<void *>(ptr), to_string(type));
+    return false;
   }
 
   __RT_ODR void finishTrace() {
@@ -280,14 +295,31 @@ inline auto _ = [] {
 
 // XXX TLS re-entry flag: a throw inside a service call mallocs an exception, which would
 // re-enter _rt_record on the same mutex; same for internal HashMap rehash/emplace.
-__RT_ODR inline bool &_rt_in_service() {
+  #if defined(__APPLE__) && defined(__RT_SANITIZER_HOOKS)
+__RT_ODR inline pthread_key_t _rt_service_key() {
+  static const pthread_key_t key = [] {
+    pthread_key_t k;
+    pthread_key_create(&k, nullptr);
+    return k;
+  }();
+  return key;
+}
+__RT_ODR inline bool _rt_in_service() { return pthread_getspecific(_rt_service_key()) != nullptr; }
+__RT_ODR inline void _rt_set_in_service(const bool inService) {
+  pthread_setspecific(_rt_service_key(), inService ? &serviceInit : nullptr);
+}
+  #else
+__RT_ODR inline bool &_rt_in_service_flag() {
   thread_local bool inService = false;
   return inService;
 }
+__RT_ODR inline bool _rt_in_service() { return _rt_in_service_flag(); }
+__RT_ODR inline void _rt_set_in_service(const bool inService) { _rt_in_service_flag() = inService; }
+  #endif
 struct _rt_service_guard {
   bool prev;
-  __RT_ODR _rt_service_guard() : prev(_rt_in_service()) { _rt_in_service() = true; }
-  __RT_ODR ~_rt_service_guard() { _rt_in_service() = prev; }
+  __RT_ODR _rt_service_guard() : prev(_rt_in_service()) { _rt_set_in_service(true); }
+  __RT_ODR ~_rt_service_guard() { _rt_set_in_service(prev); }
 };
 
 __RT_ODR inline std::atomic<void (*)(void *)> &_rt_release_cb() {
@@ -323,8 +355,8 @@ extern "C" __RT_ODR __RT_EXPORTED void _rt_release(void *ptr, const Type type) {
   if (!details::serviceInit.load()) return;
   if (details::_rt_in_service()) return;
   details::_rt_service_guard guard;
-  details::_rt_get()->blockingRelease(reinterpret_cast<uintptr_t>(ptr), type);
-  if (type == Type::HeapFree || type == Type::HeapCXXDelete)
+  const bool released = details::_rt_get()->blockingRelease(reinterpret_cast<uintptr_t>(ptr), type);
+  if (type == Type::HeapFree || type == Type::HeapCXXDelete || (type == Type::HeapSanitizer && released))
     if (const auto cb = details::_rt_release_cb().load(std::memory_order_relaxed)) cb(ptr);
 }
 
@@ -338,6 +370,14 @@ extern "C" __RT_ODR __RT_EXPORTED PtrMeta _rt_reflect_v(const uintptr_t ptrValue
   details::_rt_service_guard guard;
   return details::_rt_get()->blockingQuery(ptrValue);
 }
+
+  #ifdef __RT_SANITIZER_HOOKS
+namespace details {
+inline const int sanitizerHooks = __sanitizer_install_malloc_and_free_hooks(
+    [](const volatile void *ptr, const size_t size) { _rt_record(const_cast<const void *>(ptr), size, Type::HeapSanitizer); },
+    [](const volatile void *ptr) { _rt_release(const_cast<void *>(ptr), Type::HeapSanitizer); });
+} // namespace details
+  #endif
 
 #endif
 } // namespace polyregion::rt_reflect
