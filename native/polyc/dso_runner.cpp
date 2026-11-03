@@ -50,7 +50,7 @@ String DsoPassRunner::load() {
   if (impl->loaded) return {};
   // XXX set before dlopen: Boehm's GC_INIT runs from the DSO's .init_array.
   env::put("GC_INITIAL_HEAP_SIZE", "512M", false);
-  env::put("GC_FREE_SPACE_DIVISOR", "1", false);
+  env::put("GC_FREE_SPACE_DIVISOR", "4", false);
   impl->dso = polyregion_dl_open(impl->path.c_str());
   if (!impl->dso) {
     const char *e = polyregion_dl_error();
