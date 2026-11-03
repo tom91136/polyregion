@@ -6,6 +6,7 @@ import polyregion.ast.{PolyAST as p, given}
 import polyregion.ast.pass.*
 
 import scala.collection.mutable
+import scala.util.Try
 
 private[polyregion] object ProgramLinker {
 
@@ -1010,7 +1011,7 @@ private[polyregion] object ProgramLinker {
   }
 
   private enum RootLink {
-    case Bound(root: p.Sym, program: p.Program, implementation: p.Sym)
+    case Bound(root: p.Sym, program: Try[Either[List[String], p.Program]], implementation: p.Sym)
     case Unfit(root: p.Sym, reason: String)
   }
 
@@ -1020,7 +1021,8 @@ private[polyregion] object ProgramLinker {
       callerFns: List[p.Function],
       callerDefs: List[p.StructDef],
       capabilities: Set[String],
-      typeSizes: Map[p.Type, Int]
+      typeSizes: Map[p.Type, Int],
+      prepare: p.Program => Either[List[String], p.Program]
   ): Either[List[String], RootLink] = {
     val target = root.implements.toRight(List(s"consumer root `${root.name.repr}` has no public declaration"))
     target.flatMap { declaration =>
@@ -1048,12 +1050,16 @@ private[polyregion] object ProgramLinker {
             entry       <- materializeEntry(root.name.fqn.mkString("."), resolution, typeSizes)
           } yield RootLink.Bound(
             root.name,
-            p.Program(
-              Some(entry),
-              closure,
-              definitions,
-              metadata = resolution.call.callables.values.toList.distinct.map(callable =>
-                p.MetaEntry(p.Conventions.LinkCallableMeta + callable.fqcn, root.name.fqcn)
+            Try(
+              prepare(
+                p.Program(
+                  Some(entry),
+                  closure,
+                  definitions,
+                  metadata = resolution.call.callables.values.toList.distinct.map(callable =>
+                    p.MetaEntry(p.Conventions.LinkCallableMeta + callable.fqcn, root.name.fqcn)
+                  )
+                )
               )
             ),
             resolution.implementation.name
@@ -1344,25 +1350,29 @@ private[polyregion] object ProgramLinker {
     else Right(linked.flatMap(_.toOption))
   }
 
-  def link(request: p.Program.LinkRequest): Either[List[String], p.Program] =
-    resolveRequest(request, linkRoot).flatMap { roots =>
+  def link(request: p.Program.LinkRequest): Either[List[String], p.Program] = {
+    val prepare: p.Program => Either[List[String], p.Program] =
+      prepareLinkedProgram(_, request.stackDepth, request.logicalAddressing)
+    resolveRequest(
+      request,
+      (pkg, root, callerFns, callerDefs, capabilities, typeSizes) =>
+        linkRoot(pkg, root, callerFns, callerDefs, capabilities, typeSizes, prepare)
+    ).flatMap { roots =>
       val bound = roots.collect { case RootLink.Bound(_, program, _) => program }
       val metadata = roots.map {
         case RootLink.Bound(root, _, implementation) =>
           p.MetaEntry(p.Conventions.LinkImplementationMeta + root.fqcn, implementation.fqcn)
         case RootLink.Unfit(root, reason) => p.MetaEntry(p.Conventions.LinkUnfitMeta + root.fqcn, reason)
       }
-      // Package roots are independent imports. Prepare each selected closure before merging so specialisation and
-      // offload-entry handling never retain unrelated widths in the same expanding AST. This is also the natural
-      // unit for a future bounded-parallel implementation.
+      // Package roots are independent imports. Each selected closure is prepared as soon as it is resolved, so
+      // specialisation and offload-entry handling never retain unrelated widths in the same expanding AST and only
+      // the prepared programs stay live until the merge.
       val linked =
         if (bound.isEmpty && roots.nonEmpty) Right(p.Program(None, Nil, Nil))
-        else
-          bound
-            .traverse(prepareLinkedProgram(_, request.stackDepth, request.logicalAddressing))
-            .flatMap(mergeLinkedPrograms)
+        else bound.traverse(_.get).flatMap(mergeLinkedPrograms)
       linked.map(program => program.copy(metadata = metadata ::: program.metadata))
     }
+  }
 
   def importProgram(
       request: p.Program.LinkRequest,
