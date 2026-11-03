@@ -130,13 +130,25 @@ object Traversal {
         val prod = a.asInstanceOf[Product]
         val arr  = tss
         val n    = arr.length
-        val out  = new Array[Any](n)
+        var out  = null: Array[Any] | Null
         var i    = 0
         while (i < n) {
-          out(i) = arr(i).asInstanceOf[Traversal[Any, B]].modifyAll(prod.productElement(i))(f)
+          val x = prod.productElement(i)
+          val y = arr(i).asInstanceOf[Traversal[Any, B]].modifyAll(x)(f)
+          if (out != null) out(i) = y
+          else if (y.asInstanceOf[AnyRef] ne x.asInstanceOf[AnyRef]) {
+            val copy = new Array[Any](n)
+            var j    = 0
+            while (j < i) {
+              copy(j) = prod.productElement(j)
+              j += 1
+            }
+            copy(i) = y
+            out = copy
+          }
           i += 1
         }
-        m.fromProduct(Tuple.fromArray(out))
+        if (out == null) a else m.fromProduct(Tuple.fromArray(out.nn))
       }
       def modifyCollect[C](f: B => (B, C)): (A, List[C]) = {
         val (a0, cs) = modifyCollectInternal(f)
@@ -213,6 +225,59 @@ object Traversal {
     }
   }
 
+  private def mapShared[A](xs: List[A])(g: A => A): List[A] = {
+    var rest = xs
+    while (rest.nonEmpty) {
+      val x = rest.head
+      val y = g(x)
+      if (y.asInstanceOf[AnyRef] ne x.asInstanceOf[AnyRef]) {
+        val out = scala.collection.mutable.ListBuffer.empty[A]
+        var it  = xs
+        while (it ne rest) {
+          out += it.head
+          it = it.tail
+        }
+        out += y
+        rest = rest.tail
+        while (rest.nonEmpty) {
+          out += g(rest.head)
+          rest = rest.tail
+        }
+        return out.toList
+      }
+      rest = rest.tail
+    }
+    xs
+  }
+
+  private def mapShared[A](xs: Vector[A])(g: A => A): Vector[A] = {
+    var i = 0
+    while (i < xs.length) {
+      val x = xs(i)
+      val y = g(x)
+      if (y.asInstanceOf[AnyRef] ne x.asInstanceOf[AnyRef]) {
+        val out = Vector.newBuilder[A]
+        out ++= xs.take(i)
+        out += y
+        i += 1
+        while (i < xs.length) {
+          out += g(xs(i))
+          i += 1
+        }
+        return out.result()
+      }
+      i += 1
+    }
+    xs
+  }
+
+  private def mapShared[A](o: Option[A])(g: A => A): Option[A] = o match {
+    case Some(x) =>
+      val y = g(x)
+      if (y.asInstanceOf[AnyRef] eq x.asInstanceOf[AnyRef]) o else Some(y)
+    case None => o
+  }
+
   def empty[A, B]: Traversal[A, B] = nullTraversal.asInstanceOf[Traversal[A, B]]
 
   given [A, B](using NotGiven[A <:< Product]): Traversal[A, B] =
@@ -229,8 +294,8 @@ object Traversal {
       }
       def collectFirst_[C](f: PartialFunction[B, C]): Option[C] =
         xs.view.map(t.collectFirst_(_)(f)).collectFirst { case Some(x) => x }
-      def modifyAll(f: B => B): List[A]         = xs.map(t.modifyAll(_)(f))
-      def modifyAllInternal(f: B => B): List[A] = xs.map(t.modifyAll(_)(f))
+      def modifyAll(f: B => B): List[A]         = mapShared(xs)(t.modifyAll(_)(f))
+      def modifyAllInternal(f: B => B): List[A] = mapShared(xs)(t.modifyAll(_)(f))
       def modifyCollect[C](f: B => (B, C)): (List[A], List[C]) = {
         val bsBuf  = scala.collection.mutable.ListBuffer.empty[A]
         val cssBuf = scala.collection.mutable.ListBuffer.empty[C]
@@ -258,8 +323,8 @@ object Traversal {
       }
       def collectFirst_[C](f: PartialFunction[B, C]): Option[C] =
         xs.view.map(t.collectFirst_(_)(f)).collectFirst { case Some(x) => x }
-      def modifyAll(f: B => B): Vector[A]         = xs.map(t.modifyAll(_)(f))
-      def modifyAllInternal(f: B => B): Vector[A] = xs.map(t.modifyAll(_)(f))
+      def modifyAll(f: B => B): Vector[A]         = mapShared(xs)(t.modifyAll(_)(f))
+      def modifyAllInternal(f: B => B): Vector[A] = mapShared(xs)(t.modifyAll(_)(f))
       def modifyCollect[C](f: B => (B, C)): (Vector[A], List[C]) = {
         val bsBuf  = scala.collection.mutable.ArrayBuffer.empty[A]
         val cssBuf = scala.collection.mutable.ListBuffer.empty[C]
@@ -278,8 +343,8 @@ object Traversal {
     extension (o: Option[A]) {
       def visitAll(f: B => Unit): Unit                          = if (o.isDefined) t.visitAll(o.get)(f)
       def collectFirst_[C](f: PartialFunction[B, C]): Option[C] = o.fold(None)(t.collectFirst_(_)(f))
-      def modifyAll(f: B => B): Option[A]                       = o.map(t.modifyAll(_)(f))
-      def modifyAllInternal(f: B => B): Option[A]               = o.map(t.modifyAll(_)(f))
+      def modifyAll(f: B => B): Option[A]                       = mapShared(o)(t.modifyAll(_)(f))
+      def modifyAllInternal(f: B => B): Option[A]               = mapShared(o)(t.modifyAll(_)(f))
       def modifyCollect[C](f: B => (B, C)): (Option[A], List[C]) = o match {
         case None    => (None, Nil)
         case Some(x) => val (b, cs) = t.modifyCollect(x)(f); (Some(b), cs)
