@@ -59,8 +59,7 @@ extern "C" struct PtrMeta {
 template <typename E> constexpr std::underlying_type_t<E> to_integral(E e) { return static_cast<std::underlying_type_t<E>>(e); }
 
 constexpr bool isHeap(const Type t) {
-  return t == Type::HeapMalloc || t == Type::HeapCalloc || t == Type::HeapRealloc || t == Type::HeapMemalign || t == Type::HeapAlignedAlloc
-         || t == Type::HeapCXXNew;
+  return to_integral(t) >= to_integral(Type::HeapMalloc) && to_integral(t) <= to_integral(Type::HeapCXXDelete);
 }
 
 constexpr const char *to_string(const Type t) {
@@ -231,7 +230,8 @@ public:
       data.erase(ptr);
       return;
     }
-    safe_fprintf(stderr, "[PtrReflect] failed to release %p (type=%s)\n", reinterpret_cast<void *>(ptr), to_string(type));
+    if (!isHeap(type))
+      safe_fprintf(stderr, "[PtrReflect] failed to release %p (type=%s)\n", reinterpret_cast<void *>(ptr), to_string(type));
   }
 
   __RT_ODR void finishTrace() {
