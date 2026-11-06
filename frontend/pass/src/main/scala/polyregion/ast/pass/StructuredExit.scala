@@ -860,12 +860,18 @@ object StructuredExit extends ProgramPass {
         stmts: List[p.Stmt],
         canBreak: Boolean = false,
         breakOnRaise: Boolean = false
-    ): List[p.Stmt] = stmts match {
-      case Nil => Nil
-      case s :: rest =>
-        val head = lower(s, canBreak, breakOnRaise)
-        if (flow.escapes(s)) head ::: fence(rest, canBreak, breakOnRaise)
-        else head ::: guard(rest, canBreak, breakOnRaise)
+    ): List[p.Stmt] = {
+      val out = ListBuffer.empty[p.Stmt]
+      @annotation.tailrec
+      def go(rest: List[p.Stmt]): Unit = rest match {
+        case Nil => ()
+        case s :: tail =>
+          out ++= lower(s, canBreak, breakOnRaise)
+          if (flow.escapes(s)) out ++= fence(tail, canBreak, breakOnRaise)
+          else go(tail)
+      }
+      go(stmts)
+      out.toList
     }
 
     private def fence(stmts: List[p.Stmt], canBreak: Boolean, breakOnRaise: Boolean): List[p.Stmt] = {
