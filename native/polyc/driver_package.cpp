@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -91,6 +92,31 @@ polyfront::package::Checked<polyfront::package::ValidatedArchiveFragment> valida
   if (linked.value->interface != fragment.value->archive.interface)
     return {{}, {"package fragment interface advertises declarations without compatible implementations"}};
   return fragment;
+}
+
+polyfront::package::Checked<polyast::ProgramLinkRequest> hydrateRequest(polyast::ProgramLinkRequest request,
+                                                                        const std::vector<std::string> &archivePaths) {
+  std::vector<polyfront::package::Archive> archives;
+  for (const auto &path : archivePaths) {
+    auto loaded = polyfront::package::loadPackageFile(path);
+    if (!loaded) return {{}, std::move(loaded.errors)};
+    archives.emplace_back(std::move(*loaded.value));
+  }
+  const auto selections = compiler::package::select(request);
+  if (!selections) return {{}, std::move(selections.errors)};
+  for (auto &package : request.packages) {
+    const auto archive =
+        std::find_if(archives.begin(), archives.end(), [&](const auto &candidate) { return candidate.interface == package.interface; });
+    if (archive == archives.end()) return {{}, {"no package archive was provided for `" + polyast::fqcn(package.interface.name) + "`"}};
+    const auto implementations = *selections.value | filter([&](const auto &selection) {
+      return package.interface.declarations ^ exists([&](const auto &declaration) { return declaration.name == selection.declaration; });
+    }) | map([](const auto &selection) { return selection.implementation; })
+                                 | to<std::unordered_set>();
+    auto hydrated = polyfront::package::hydratePackage(*archive, package, implementations);
+    if (!hydrated) return {{}, std::move(hydrated.errors)};
+    package = std::move(*hydrated.value);
+  }
+  return {{std::move(request)}, {}};
 }
 
 int packageLink(fire::optional<std::string> capabilities = fire::arg({"--capabilities", "Comma-separated implementation capabilities"}),
@@ -215,7 +241,9 @@ int packageCompile(std::string requestPath = fire::arg({0, "<request.msgpack>", 
                    std::string hostArch = fire::arg({"-a", "--arch", "Host architecture"}, "native"),
                    fire::optional<std::string> devices =
                        fire::arg({"--devices", "Comma-separated <target>@<architecture> device profiles; architecture may be empty"}),
-                   int stackDepth = fire::arg({"--stack-depth", "Positive device stack-depth bound; zero uses the target default"}, 0)) {
+                   int stackDepth = fire::arg({"--stack-depth", "Positive device stack-depth bound; zero uses the target default"}, 0),
+                   fire::optional<std::string> archives =
+                       fire::arg({"--archives", "Package archives holding the implementation bodies of header-only request packages"})) {
   try {
     if (stackDepth < 0) throw std::invalid_argument("--stack-depth must not be negative");
     std::vector<std::pair<compiletime::Target, std::string>> deviceTargets;
@@ -232,6 +260,14 @@ int packageCompile(std::string requestPath = fire::arg({0, "<request.msgpack>", 
     const auto requestBytes = readBytes(requestPath);
     if (!requestBytes) return IoError;
     auto request = polyast::programlinkrequest_from_msgpack(*requestBytes);
+    if (const auto paths = polyfront::package::splitPackageRoots(archives.value_or("")); !paths.empty()) {
+      auto hydrated = hydrateRequest(std::move(request), paths);
+      if (!hydrated) {
+        llvm::errs() << (hydrated.errors | mk_string("\n")) << '\n';
+        return PackageError;
+      }
+      request = std::move(*hydrated.value);
+    }
     const auto compiled = compiler::package::compile(std::move(request), hostTarget->codegen, hostArch, deviceTargets,
                                                      stackDepth == 0 ? std::optional<int>{} : std::optional<int>{stackDepth});
     if (!compiled) {

@@ -15,6 +15,7 @@ namespace polyregion::polyfront::package {
 [[nodiscard]] Checked<polyast::CompileBundle> compileProgram(const polyast::ProgramLinkRequest &request, const std::string &executable,
                                                              compiletime::Target hostTarget, const std::string &hostArch,
                                                              const std::vector<std::pair<compiletime::Target, std::string>> &deviceTargets,
-                                                             std::optional<int> stackDepth = {});
+                                                             std::optional<int> stackDepth = {},
+                                                             const std::vector<std::string> &archives = {});
 
 } // namespace polyregion::polyfront::package

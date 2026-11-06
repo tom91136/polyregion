@@ -33,6 +33,7 @@ struct DsoPassRunner::Impl {
   polypackage::abi::AbiVersionFn packageAbi = nullptr;
   polypackage::abi::LinkPackageFn linkPackage = nullptr;
   polypackage::abi::LinkProgramFn linkProgram = nullptr;
+  polypackage::abi::SelectImplementationsFn selectImplementations = nullptr;
   polypackage::abi::LastErrorFn packageErr = nullptr;
   polypackage::abi::FreeFn packageFree = nullptr;
   Vector<String> names;
@@ -67,14 +68,18 @@ String DsoPassRunner::load() {
   impl->packageAbi = reinterpret_cast<packageAbi::AbiVersionFn>(polyregion_dl_find(impl->dso, packageAbi::AbiVersion));
   impl->linkPackage = reinterpret_cast<packageAbi::LinkPackageFn>(polyregion_dl_find(impl->dso, packageAbi::LinkPackage));
   impl->linkProgram = reinterpret_cast<packageAbi::LinkProgramFn>(polyregion_dl_find(impl->dso, packageAbi::LinkProgram));
+  impl->selectImplementations =
+      reinterpret_cast<packageAbi::SelectImplementationsFn>(polyregion_dl_find(impl->dso, packageAbi::SelectImplementations));
   impl->packageErr = reinterpret_cast<packageAbi::LastErrorFn>(polyregion_dl_find(impl->dso, packageAbi::LastError));
   impl->packageFree = reinterpret_cast<packageAbi::FreeFn>(polyregion_dl_find(impl->dso, packageAbi::Free));
 
   const bool anyPass = impl->abi || impl->count || impl->name || impl->descr || impl->run || impl->err || impl->free;
   const bool completePass = impl->abi && impl->count && impl->name && impl->run && impl->err && impl->free;
   if (anyPass && !completePass) return fmt::format("dlsym polypass_*: incomplete pass capability in {}", impl->path);
-  const bool anyPackage = impl->packageAbi || impl->linkPackage || impl->linkProgram || impl->packageErr || impl->packageFree;
-  const bool completePackage = impl->packageAbi && impl->linkPackage && impl->linkProgram && impl->packageErr && impl->packageFree;
+  const bool anyPackage =
+      impl->packageAbi || impl->linkPackage || impl->linkProgram || impl->selectImplementations || impl->packageErr || impl->packageFree;
+  const bool completePackage =
+      impl->packageAbi && impl->linkPackage && impl->linkProgram && impl->selectImplementations && impl->packageErr && impl->packageFree;
   if (anyPackage && !completePackage) return fmt::format("dlsym polypackage_*: incomplete package capability in {}", impl->path);
   if (!completePass && !completePackage) return fmt::format("{} exposes neither polypass_* nor polypackage_*", impl->path);
 
@@ -135,9 +140,10 @@ Vector<uint8_t> DsoPassRunner::runPackage(const std::string_view operation, cons
     error = "DSO not loaded; call load() first";
     return {};
   }
-  const auto invoke = operation == polypackage::abi::LinkPackage   ? impl->linkPackage
-                      : operation == polypackage::abi::LinkProgram ? impl->linkProgram
-                                                                   : nullptr;
+  const auto invoke = operation == polypackage::abi::LinkPackage             ? impl->linkPackage
+                      : operation == polypackage::abi::LinkProgram           ? impl->linkProgram
+                      : operation == polypackage::abi::SelectImplementations ? impl->selectImplementations
+                                                                             : nullptr;
   if (!invoke) {
     error = fmt::format("unknown or unavailable package operation {}", operation);
     return {};

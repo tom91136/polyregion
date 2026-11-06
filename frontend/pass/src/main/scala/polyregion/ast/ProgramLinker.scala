@@ -1015,17 +1015,14 @@ private[polyregion] object ProgramLinker {
     case Unfit(root: p.Sym, reason: String)
   }
 
-  private def linkRoot(
+  private def resolveRootCall(
       pkg: p.Package,
       root: p.Function,
       callerFns: List[p.Function],
-      callerDefs: List[p.StructDef],
       capabilities: Set[String],
-      typeSizes: Map[p.Type, Int],
-      prepare: p.Program => Either[List[String], p.Program]
-  ): Either[List[String], RootLink] = {
-    val target = root.implements.toRight(List(s"consumer root `${root.name.repr}` has no public declaration"))
-    target.flatMap { declaration =>
+      typeSizes: Map[p.Type, Int]
+  ): Either[List[String], Either[Rejection, ImplementationResolution]] =
+    root.implements.toRight(List(s"consumer root `${root.name.repr}` has no public declaration")).map { declaration =>
       val signature = ProgramLinker.CallSignature(
         declaration,
         root.tpeVars,
@@ -1040,33 +1037,43 @@ private[polyregion] object ProgramLinker {
         capabilities,
         typeSizes,
         matchResult = root.rtn != p.Type.Nothing
-      ) match {
-        case Left(Rejection(_, Some(reason))) => Right(RootLink.Unfit(root.name, reason))
-        case Left(Rejection(errors, None))    => Left(errors)
-        case Right(resolution) =>
-          for {
-            closure     <- implementationClosure(pkg, resolution, callerFns)
-            definitions <- resolvedStructClosure(pkg, closure, callerDefs)
-            entry       <- materializeEntry(root.name.fqn.mkString("."), resolution, typeSizes)
-          } yield RootLink.Bound(
-            root.name,
-            Try(
-              prepare(
-                p.Program(
-                  Some(entry),
-                  closure,
-                  definitions,
-                  metadata = resolution.call.callables.values.toList.distinct.map(callable =>
-                    p.MetaEntry(p.Conventions.LinkCallableMeta + callable.fqcn, root.name.fqcn)
-                  )
+      )
+    }
+
+  private def linkRoot(
+      pkg: p.Package,
+      root: p.Function,
+      callerFns: List[p.Function],
+      callerDefs: List[p.StructDef],
+      capabilities: Set[String],
+      typeSizes: Map[p.Type, Int],
+      prepare: p.Program => Either[List[String], p.Program]
+  ): Either[List[String], RootLink] =
+    resolveRootCall(pkg, root, callerFns, capabilities, typeSizes).flatMap {
+      case Left(Rejection(_, Some(reason))) => Right(RootLink.Unfit(root.name, reason))
+      case Left(Rejection(errors, None))    => Left(errors)
+      case Right(resolution) =>
+        for {
+          closure     <- implementationClosure(pkg, resolution, callerFns)
+          definitions <- resolvedStructClosure(pkg, closure, callerDefs)
+          entry       <- materializeEntry(root.name.fqn.mkString("."), resolution, typeSizes)
+        } yield RootLink.Bound(
+          root.name,
+          Try(
+            prepare(
+              p.Program(
+                Some(entry),
+                closure,
+                definitions,
+                metadata = resolution.call.callables.values.toList.distinct.map(callable =>
+                  p.MetaEntry(p.Conventions.LinkCallableMeta + callable.fqcn, root.name.fqcn)
                 )
               )
-            ),
-            resolution.implementation.name
-          )
-      }
+            )
+          ),
+          resolution.implementation.name
+        )
     }
-  }
 
   private def importRoot(
       pkg: p.Package,
@@ -1307,7 +1314,7 @@ private[polyregion] object ProgramLinker {
     Either.cond(distinct.isEmpty, linked, distinct)
   }
 
-  private def resolveRequest[A](
+  private def resolveRoots[A](
       request: p.Program.LinkRequest,
       resolveRoot: (
           p.Package,
@@ -1317,7 +1324,7 @@ private[polyregion] object ProgramLinker {
           Set[String],
           Map[p.Type, Int]
       ) => Either[List[String], A]
-  ): Either[List[String], List[A]] = {
+  ): (List[String], List[(p.Function, Either[List[String], A])]) = {
     val groupedTypeSizes = request.typeSizes.groupBy(_.tpe)
     val layoutErrors = groupedTypeSizes.toList
       .flatMap { case (tpe, values) =>
@@ -1337,17 +1344,44 @@ private[polyregion] object ProgramLinker {
     val typeSizes = groupedTypeSizes.view.mapValues(_.head.sizeInBytes).toMap
     val linked = roots.map { root =>
       val target = root.implements.get
-      packagesByDeclaration.getOrElse(target, Nil).map(_._2).distinct match {
+      root -> (packagesByDeclaration.getOrElse(target, Nil).map(_._2).distinct match {
         case List(pkg) =>
           resolveRoot(pkg, root, callerFns, request.consumer.defs, request.capabilities.toSet, typeSizes)
         case Nil => Left(List(s"no package declares `${target.repr}` for consumer root `${root.name.repr}`"))
         case matches =>
           Left(List(s"${matches.size} packages declare `${target.repr}` for consumer root `${root.name.repr}`"))
-      }
+      })
     }
-    val errors = layoutErrors ::: linked.flatMap(_.left.toOption.toList.flatten)
+    (layoutErrors, linked)
+  }
+
+  private def resolveRequest[A](
+      request: p.Program.LinkRequest,
+      resolveRoot: (
+          p.Package,
+          p.Function,
+          List[p.Function],
+          List[p.StructDef],
+          Set[String],
+          Map[p.Type, Int]
+      ) => Either[List[String], A]
+  ): Either[List[String], List[A]] = {
+    val (layoutErrors, linked) = resolveRoots(request, resolveRoot)
+    val errors                 = layoutErrors ::: linked.flatMap(_._2.left.toOption.toList.flatten)
     if (errors.nonEmpty) Left(errors.distinct)
-    else Right(linked.flatMap(_.toOption))
+    else Right(linked.flatMap(_._2.toOption))
+  }
+
+  def select(request: p.Program.LinkRequest): Either[List[String], p.Program] = {
+    val (_, roots) = resolveRoots(
+      request,
+      (pkg, root, callerFns, _, capabilities, typeSizes) =>
+        resolveRootCall(pkg, root, callerFns, capabilities, typeSizes).map(_.map(_.implementation.name))
+    )
+    val metadata = roots.collect { case (root, Right(Right(implementation))) =>
+      p.MetaEntry(p.Conventions.LinkImplementationMeta + root.name.fqcn, implementation.fqcn)
+    }
+    Right(p.Program(None, Nil, Nil, metadata = metadata))
   }
 
   def link(request: p.Program.LinkRequest): Either[List[String], p.Program] = {

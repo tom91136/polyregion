@@ -14,6 +14,9 @@ inline constexpr auto LinkPackage = "polypackage_link_package";
 // Link a versioned ProgramLinkRequest into a Program encoded with the package-service wire schema.
 inline constexpr auto LinkProgram = "polypackage_link_program";
 
+// Resolve the implementation each root of a versioned ProgramLinkRequest binds, as link-implementation metadata of an empty Program.
+inline constexpr auto SelectImplementations = "polypackage_select_implementations";
+
 // NUL-terminated diagnostic for the most recent failed package operation; NULL when no error is set.
 inline constexpr auto LastError = "polypackage_last_error";
 
@@ -23,6 +26,7 @@ inline constexpr auto Free = "polypackage_free";
 using AbiVersionFn = polypackage_abi_version_fn;
 using LinkPackageFn = polypackage_link_package_fn;
 using LinkProgramFn = polypackage_link_program_fn;
+using SelectImplementationsFn = polypackage_select_implementations_fn;
 using LastErrorFn = polypackage_last_error_fn;
 using FreeFn = polypackage_free_fn;
 

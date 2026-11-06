@@ -117,7 +117,7 @@ Checked<polyast::CompileBundle> invokeCompiler(const std::vector<uint8_t> &reque
 Checked<polyast::CompileBundle> compileProgram(const polyast::ProgramLinkRequest &request, const std::string &executable,
                                                const compiletime::Target hostTarget, const std::string &hostArch,
                                                const std::vector<std::pair<compiletime::Target, std::string>> &deviceTargets,
-                                               const std::optional<int> stackDepth) {
+                                               const std::optional<int> stackDepth, const std::vector<std::string> &archives) {
   const auto host = compiletime::TargetSpec::findByCodegen(hostTarget);
   if (!host) return {{}, {fmt::format("unknown program host target {}", static_cast<int>(hostTarget))}};
   std::vector<std::string> args{"--target=" + std::string(host->canonical), "--arch=" + hostArch};
@@ -130,6 +130,7 @@ Checked<polyast::CompileBundle> compileProgram(const polyast::ProgramLinkRequest
   }
   if (!devices.empty()) args.emplace_back("--devices=" + devices);
   if (stackDepth) args.emplace_back("--stack-depth=" + std::to_string(*stackDepth));
+  if (!archives.empty()) args.emplace_back("--archives=" + joinPackageRoots(archives));
   return invokeCompiler(polyast::programlinkrequest_to_msgpack(request), executable, args);
 }
 

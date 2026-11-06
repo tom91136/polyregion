@@ -1,5 +1,6 @@
 polypackage_abi_version
 polypackage_link_package
 polypackage_link_program
+polypackage_select_implementations
 polypackage_last_error
 polypackage_free

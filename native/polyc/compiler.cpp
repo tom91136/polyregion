@@ -302,6 +302,24 @@ static compiler::package::Result<polyast::Program> linkProgram(const std::vector
   });
 }
 
+compiler::package::Result<std::vector<compiler::package::Selection>> compiler::package::select(const polyast::ProgramLinkRequest &request) {
+  auto selected = invokePackage<polyast::Program>(
+      polyast::programlinkrequest_to_msgpack(request), polypackage::abi::SelectImplementations,
+      [](const uint8_t *begin, const uint8_t *end) { return polyast::program_service_result_from_msgpack(begin, end); });
+  if (!selected) return {{}, std::move(selected.errors)};
+  std::vector<Selection> selections;
+  const auto add = [&](const polyast::Function &function) {
+    if (!function.visibility.template is<polyast::FunctionVisibility::Exported>() || !function.implements) return;
+    const auto key = conventions::LinkImplementationMeta + polyast::fqcn(function.decl.name);
+    if (const auto found = selected.value->metadata ^ find([&](const auto &entry) { return entry.key == key; }))
+      selections.push_back({*function.implements, found->value});
+  };
+  if (request.consumer.entry) add(*request.consumer.entry);
+  for (const auto &function : request.consumer.functions)
+    add(function);
+  return {{std::move(selections)}, {}};
+}
+
 namespace {
 
 std::string packageEntryPipeline(const compiletime::Target target, const std::string &arch, const std::optional<int> stackDepth) {

@@ -45,6 +45,7 @@ template <typename T> struct Checked {
 struct ArchiveEntry {
   std::string declaration;
   std::string implementation;
+  std::vector<uint8_t> header;
   uint64_t offset;
   uint64_t compressedSize;
   uint64_t uncompressedSize;
@@ -80,8 +81,8 @@ inline constexpr auto PackageName = "lib.polyast";
 
 namespace detail {
 
-inline constexpr char ArchiveMagic[] = {'P', 'O', 'L', 'Y', 'P', 'K', 'G', '3'};
-inline constexpr uint32_t ArchiveVersion = 3;
+inline constexpr char ArchiveMagic[] = {'P', 'O', 'L', 'Y', 'P', 'K', 'G', '4'};
+inline constexpr uint32_t ArchiveVersion = 4;
 inline constexpr uint64_t MaxPayloadBytes = uint64_t{1} << 30;
 
 inline void appendU32(std::vector<uint8_t> &out, uint32_t value) {
@@ -95,6 +96,11 @@ inline void appendU64(std::vector<uint8_t> &out, uint64_t value) {
 }
 
 inline void appendString(std::vector<uint8_t> &out, const std::string &value) {
+  appendU32(out, static_cast<uint32_t>(value.size()));
+  out.insert(out.end(), value.begin(), value.end());
+}
+
+inline void appendBytes(std::vector<uint8_t> &out, const std::vector<uint8_t> &value) {
   appendU32(out, static_cast<uint32_t>(value.size()));
   out.insert(out.end(), value.begin(), value.end());
 }
@@ -141,6 +147,14 @@ public:
     out.assign(reinterpret_cast<const char *>(value.data()), value.size());
     return true;
   }
+
+  bool blob(std::vector<uint8_t> &out) {
+    uint32_t size = 0;
+    llvm::ArrayRef<uint8_t> value;
+    if (!u32(size) || !take(size, value)) return false;
+    out.assign(value.begin(), value.end());
+    return true;
+  }
 };
 
 inline Checked<std::vector<uint8_t>> decompress(llvm::ArrayRef<uint8_t> input, uint64_t rawSize) {
@@ -171,13 +185,13 @@ inline Checked<Archive> decodeArchive(const std::string &path, std::shared_ptr<c
   if (version != ArchiveVersion)
     return {{}, {"package archive version differs: expected " + std::to_string(ArchiveVersion) + ", got " + std::to_string(version)}};
   if (interfaceCompressedSize > std::numeric_limits<size_t>::max()) return {{}, {"package archive interface is too large"}};
-  constexpr size_t minimumEntryBytes = 4 + 4 + 8 + 8 + 8;
+  constexpr size_t minimumEntryBytes = 4 + 4 + 4 + 8 + 8 + 8;
   if (entryCount > reader.remaining() / minimumEntryBytes) return {{}, {"package archive entry count exceeds the available index"}};
   std::vector<ArchiveEntry> entries;
   entries.reserve(entryCount);
   for (uint32_t index = 0; index < entryCount; ++index) {
     ArchiveEntry entry;
-    if (!reader.string(entry.declaration) || !reader.string(entry.implementation) || !reader.u64(entry.offset)
+    if (!reader.string(entry.declaration) || !reader.string(entry.implementation) || !reader.blob(entry.header) || !reader.u64(entry.offset)
         || !reader.u64(entry.compressedSize) || !reader.u64(entry.uncompressedSize))
       return {{}, {"package archive index is truncated"}};
     if (entry.offset > bytes.size() || entry.compressedSize > bytes.size() - static_cast<size_t>(entry.offset))
@@ -226,6 +240,25 @@ inline Checked<Archive> decodeArchive(const std::string &path, std::shared_ptr<c
   return {{Archive{std::move(interface), path, std::move(entries), std::move(storage), std::move(entriesByDeclaration)}}, {}};
 }
 
+inline Checked<polyast::Function> decodeHeader(const ArchiveEntry &entry) {
+  auto decoded = polyast::decodeHashedProgram(entry.header.data(), entry.header.data() + entry.header.size());
+  if (const auto error = std::get_if<std::string>(&decoded))
+    return {{}, {"cannot decode package implementation header `" + entry.implementation + "`: " + *error}};
+  auto program = std::move(std::get<polyast::Program>(decoded));
+  if (program.entry || !program.defs.empty() || !program.metadata.empty() || program.functions.size() != 1)
+    return {{}, {"package implementation header `" + entry.implementation + "` is not a single function"}};
+  auto &function = program.functions.front();
+  if (!function.body.empty()) return {{}, {"package implementation header `" + entry.implementation + "` has a body"}};
+  if (!function.implements || polyast::fqcn(*function.implements) != entry.declaration
+      || polyast::fqcn(function.decl.name) != entry.implementation)
+    return {{}, {"package implementation header `" + entry.implementation + "` differs from its index entry"}};
+  return {{std::move(function)}, {}};
+}
+
+inline std::vector<uint8_t> encodeHeader(const polyast::Function &root) {
+  return polyast::hashed_program_to_msgpack(polyast::Program({}, {root.withBody({})}, {}, polyast::PassPhase::Initial(), {}));
+}
+
 inline Checked<polyast::Program> decodeValidatedImplementation(const ArchiveEntry &entry, llvm::ArrayRef<uint8_t> bytes) {
   if (entry.offset > bytes.size() || entry.compressedSize > bytes.size() - static_cast<size_t>(entry.offset))
     return {{}, {"package archive entry `" + entry.implementation + "` is outside the file"}};
@@ -256,6 +289,7 @@ inline Checked<polyast::Program> decodeValidatedImplementation(const ArchiveEntr
   if (!root) return {{}, {"package implementation `" + entry.implementation + "` does not contain its declared implementation root"}};
   if (root->visibility != polyast::FunctionVisibility::Exported())
     return {{}, {"package implementation `" + entry.implementation + "` has a non-exported implementation root"}};
+  if (entry.header != encodeHeader(*root)) return {{}, {"package implementation `" + entry.implementation + "` differs from its header"}};
   if (exportedRoots != 1)
     return {{}, {"package implementation `" + entry.implementation + "` contains " + std::to_string(exportedRoots) + " exported roots"}};
   return {{std::move(program)}, {}};
@@ -270,6 +304,15 @@ inline std::vector<std::string> splitPackageRoots(const std::string &value) {
   constexpr char separator = ':';
 #endif
   return value ^ split(separator) | filter([](const auto &root) { return !root.empty(); }) | to_vector();
+}
+
+inline std::string joinPackageRoots(const std::vector<std::string> &roots) {
+#ifdef _WIN32
+  constexpr char separator = ';';
+#else
+  constexpr char separator = ':';
+#endif
+  return roots ^ mk_string(std::string(1, separator));
 }
 
 inline std::vector<std::string> packageRoots() {
@@ -358,41 +401,50 @@ inline std::vector<polyast::StructDef> distinctDefinitions(std::vector<polyast::
   return distinctByKey(std::move(definitions), [](const polyast::StructDef &definition) { return definition.name; });
 }
 
-inline Checked<polyast::Package> loadPackageSelection(const Archive &archive, const std::string &declaration) {
-  if (!archive.storage) return {{}, {"package `" + archive.path + "` has no backing storage"}};
+inline Checked<polyast::Package> loadPackageHeaders(const Archive &archive, const std::string &declaration) {
   const auto entries = archive.entriesByDeclaration.find(declaration);
   if (entries == archive.entriesByDeclaration.end()) return {{}, {"package has no implementation payloads for `" + declaration + "`"}};
+  std::vector<polyast::Function> functions;
+  for (const auto index : entries->second) {
+    auto header = detail::decodeHeader(archive.entries[index]);
+    if (!header) return {{}, std::move(header.errors)};
+    functions.emplace_back(std::move(*header.value));
+  }
+  return {{polyast::Package(archive.interface, polyast::Program({}, std::move(functions), {}, polyast::PassPhase::Initial(), {}))}, {}};
+}
+
+inline Checked<polyast::Package> hydratePackage(const Archive &archive, const polyast::Package &headers,
+                                                const std::unordered_set<std::string> &implementations) {
+  if (!archive.storage) return {{}, {"package `" + archive.path + "` has no backing storage"}};
   const auto data = archive.storage->getBuffer();
   const auto bytes = llvm::ArrayRef(reinterpret_cast<const uint8_t *>(data.data()), data.size());
   std::vector<polyast::Function> functions;
   std::vector<polyast::StructDef> definitions;
-  for (const auto index : entries->second) {
-    const auto &entry = archive.entries[index];
-    auto decoded = detail::decodeValidatedImplementation(entry, bytes);
+  std::unordered_set<std::string> hydrated;
+  for (const auto &header : headers.program.functions) {
+    const auto implementation = polyast::fqcn(header.decl.name);
+    if (!header.implements || implementations.count(implementation) == 0) {
+      functions.emplace_back(header);
+      continue;
+    }
+    if (!hydrated.emplace(implementation).second) continue;
+    const auto entries = archive.entriesByDeclaration.find(polyast::fqcn(*header.implements));
+    const ArchiveEntry *entry = nullptr;
+    if (entries != archive.entriesByDeclaration.end())
+      for (const auto index : entries->second)
+        if (archive.entries[index].implementation == implementation) entry = &archive.entries[index];
+    if (!entry) return {{}, {"package has no implementation payload for `" + implementation + "`"}};
+    auto decoded = detail::decodeValidatedImplementation(*entry, bytes);
     if (!decoded) return {{}, std::move(decoded.errors)};
     auto program = std::move(*decoded.value);
     functions.insert(functions.end(), std::make_move_iterator(program.functions.begin()), std::make_move_iterator(program.functions.end()));
     definitions.insert(definitions.end(), std::make_move_iterator(program.defs.begin()), std::make_move_iterator(program.defs.end()));
   }
-  return {{polyast::Package(archive.interface,
+  return {{polyast::Package(headers.interface,
                             polyast::Program({}, distinctFunctions(std::move(functions)), distinctDefinitions(std::move(definitions)),
                                              polyast::PassPhase::Initial(), {}))},
           {}};
 }
-
-class SelectionCache {
-  std::map<std::pair<std::string, std::string>, std::shared_ptr<const polyast::Package>> loaded;
-
-public:
-  Checked<std::shared_ptr<const polyast::Package>> load(const Archive &archive, const std::string &declaration) {
-    auto &slot = loaded[{archive.path, declaration}];
-    if (slot) return {{slot}, {}};
-    auto selected = loadPackageSelection(archive, declaration);
-    if (!selected) return {{}, std::move(selected.errors)};
-    slot = std::make_shared<const polyast::Package>(std::move(*selected.value));
-    return {{slot}, {}};
-  }
-};
 
 inline std::string undeclaredReason(const Archive &archive, const std::string &declaration) {
   return "package `" + polyast::fqcn(archive.interface.name) + "` has no implementation of `" + declaration + "`";

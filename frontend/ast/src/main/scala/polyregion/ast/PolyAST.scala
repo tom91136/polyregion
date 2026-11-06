@@ -648,7 +648,7 @@ object PolyAST {
 
   object PolyPackageAbi {
 
-    inline val Version = 2
+    inline val Version = 3
     inline val Prefix  = "polypackage_"
 
     object Status {
@@ -674,6 +674,13 @@ object PolyAST {
     object LinkProgram {
       def apply(request: Array[Byte]): Array[Byte] = docs(
         "Link a versioned ProgramLinkRequest into a Program encoded with the package-service wire schema."
+      )
+      transparent inline def Name: String = AbiMacros.cName[this.type](Prefix)
+    }
+
+    object SelectImplementations {
+      def apply(request: Array[Byte]): Array[Byte] = docs(
+        "Resolve the implementation each root of a versioned ProgramLinkRequest binds, as link-implementation metadata of an empty Program."
       )
       transparent inline def Name: String = AbiMacros.cName[this.type](Prefix)
     }

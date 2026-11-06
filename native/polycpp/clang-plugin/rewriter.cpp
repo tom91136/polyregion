@@ -622,7 +622,6 @@ static void compileInterfaceCalls(const polyfront::Options &opts, clang::Compile
   };
 
   std::vector<GroupResults> results(prepared.size());
-  polyfront::package::SelectionCache selectionCache;
   std::vector<std::shared_ptr<const polyast::Package>> selections(prepared.size());
   std::vector<std::vector<size_t>> pending(groups.size());
   for (size_t index = 0; index < prepared.size(); ++index) {
@@ -632,12 +631,12 @@ static void compileInterfaceCalls(const polyfront::Options &opts, clang::Compile
       results[index] = GroupResults(groups.size(), unfit(polyfront::package::undeclaredReason(*item.archive, item.site.declaration)));
       continue;
     }
-    auto selected = selectionCache.load(*item.archive, item.site.declaration);
+    auto selected = polyfront::package::loadPackageHeaders(*item.archive, item.site.declaration);
     if (!selected) {
       results[index] = {CompileResult{{}, std::move(selected.errors)}};
       continue;
     }
-    selections[index] = *selected.value;
+    selections[index] = std::make_shared<const polyast::Package>(std::move(*selected.value));
     results[index].resize(groups.size());
     for (size_t group = 0; group < groups.size(); ++group) {
       const auto &capabilities = groups[group].capabilities;
@@ -649,6 +648,7 @@ static void compileInterfaceCalls(const polyfront::Options &opts, clang::Compile
 
   const auto compileBatch = [&](const size_t group, const std::vector<size_t> &members) -> std::vector<CompileResult> {
     std::vector<const polyast::Package *> packages;
+    std::vector<std::string> archives;
     std::vector<Function> functions;
     std::vector<StructDef> definitions;
     std::vector<ProgramTypeSize> typeSizes;
@@ -657,6 +657,7 @@ static void compileInterfaceCalls(const polyfront::Options &opts, clang::Compile
     for (const auto index : members) {
       const auto &item = prepared[index];
       packages.emplace_back(selections[index].get());
+      if (std::find(archives.begin(), archives.end(), item.archive->path) == archives.end()) archives.emplace_back(item.archive->path);
       for (auto &function : consumerFunctionsFor(item, group))
         if (seenFunctions.emplace(function.decl.name).second) functions.emplace_back(std::move(function));
       for (const auto &definition : item.consumerDefinitions)
@@ -669,7 +670,7 @@ static void compileInterfaceCalls(const polyfront::Options &opts, clang::Compile
                                             groups[group].capabilities, typeSizes, std::nullopt, groups[group].logicalAddressing);
     auto compiled = polyfront::package::compileProgram(request, opts.executable, *entryTarget,
                                                        polyfront::objectCPUFor(CI.getTarget().getTriple(), targetCPU),
-                                                       groups[group].targets, opts.stackDepth);
+                                                       groups[group].targets, opts.stackDepth, archives);
     if (!compiled) return std::vector<CompileResult>(members.size(), CompileResult{{}, compiled.errors});
     std::vector<CompileResult> sliced;
     bool hostAssigned = false;

@@ -233,6 +233,17 @@ object NativeBundle {
       ProgramLinker.link
     )
 
+  @exported(PolyPackageAbi.SelectImplementations.Name)
+  def selectImplementations(
+      inPtr: Ptr[Byte],
+      inLen: CSize,
+      outPtr: Ptr[Ptr[Byte]],
+      outLen: Ptr[CSize]
+  ): CInt =
+    packageOperation[p.Program.LinkRequest, p.Program]("select implementations", inPtr, inLen, outPtr, outLen)(
+      ProgramLinker.select
+    )
+
   @exported(PolyPackageAbi.LastError.Name)
   def packageLastErrorPtr(): CString = packageErrorCString
 

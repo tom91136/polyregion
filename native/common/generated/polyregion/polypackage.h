@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-#define POLYPACKAGE_ABI_VERSION 2u
+#define POLYPACKAGE_ABI_VERSION 3u
 
 typedef enum polypackage_status {
   POLYPACKAGE_OK = 0,
@@ -43,6 +43,12 @@ POLYPACKAGE_EXPORT polypackage_status_t polypackage_link_package(const uint8_t *
 POLYPACKAGE_EXPORT polypackage_status_t polypackage_link_program(const uint8_t *request, size_t requestLen, uint8_t **out, size_t *outLen);
 
 /**
+ * Resolve the implementation each root of a versioned ProgramLinkRequest binds, as link-implementation metadata of an empty Program.
+ */
+POLYPACKAGE_EXPORT polypackage_status_t polypackage_select_implementations(const uint8_t *request, size_t requestLen, uint8_t **out,
+                                                                           size_t *outLen);
+
+/**
  * NUL-terminated diagnostic for the most recent failed package operation; NULL when no error is set.
  */
 POLYPACKAGE_EXPORT const char *polypackage_last_error(void);
@@ -55,6 +61,7 @@ POLYPACKAGE_EXPORT void polypackage_free(void *ptr);
 typedef uint32_t (*polypackage_abi_version_fn)(void);
 typedef polypackage_status_t (*polypackage_link_package_fn)(const uint8_t *, size_t, uint8_t **, size_t *);
 typedef polypackage_status_t (*polypackage_link_program_fn)(const uint8_t *, size_t, uint8_t **, size_t *);
+typedef polypackage_status_t (*polypackage_select_implementations_fn)(const uint8_t *, size_t, uint8_t **, size_t *);
 typedef const char *(*polypackage_last_error_fn)(void);
 typedef void (*polypackage_free_fn)(void *);
 

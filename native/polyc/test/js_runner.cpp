@@ -70,6 +70,7 @@ TEST_CASE("load and invoke a package-only plugin") {
       return out;
     };
     exports.polypackage_link_program = function(bytes) { return bytes; };
+    exports.polypackage_select_implementations = function(bytes) { return bytes; };
   )JS")
               .empty());
   CHECK(r.passNames().empty());

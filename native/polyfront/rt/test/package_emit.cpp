@@ -37,6 +37,14 @@ Package fixture(int32_t increment) {
   return {Interface(Sym({"foo"}), {publicDecl}, {MetaEntry("increment", std::to_string(increment))}), packageProgram({implementation}, {})};
 }
 
+Checked<Package> loadPackageSelection(const Archive &archive, const std::string &declaration) {
+  auto headers = loadPackageHeaders(archive, declaration);
+  if (!headers) return headers;
+  const auto implementations =
+      headers.value->program.functions | map([](const auto &function) { return fqcn(function.decl.name); }) | to<std::unordered_set>();
+  return hydratePackage(archive, *headers.value, implementations);
+}
+
 class TemporaryDirectory {
 public:
   TemporaryDirectory() { REQUIRE_FALSE(llvm::sys::fs::createUniqueDirectory("polyregion-package-test", path)); }
@@ -125,7 +133,7 @@ PackResult packFragment(const Interface &interface, const Program &program) {
   const auto compressed = detail::compress(raw);
   REQUIRE(compressed);
   const detail::EncodedImplementation implementation{polyregion::polyast::fqcn(*root.implements), polyregion::polyast::fqcn(root.decl.name),
-                                                     raw.size(), *compressed.value};
+                                                     detail::encodeHeader(root), raw.size(), *compressed.value};
   const auto archive = detail::encodeArchive(interface, {implementation});
   REQUIRE(archive);
   llvm::SmallString<128> interfacePath(inputs.path), fragmentPath(inputs.path), errorPath(inputs.path);
@@ -230,6 +238,41 @@ TEST_CASE("package packing tracks overloaded declarations by signature") {
   CHECK(incomplete.errors == std::vector<std::string>{"public declaration `foo.apply` has no compatible implementation"});
 }
 
+TEST_CASE("package headers hold bodyless roots and hydration loads only chosen implementations") {
+  TemporaryDirectory root;
+  const auto name = Sym({"foo", "apply"});
+  const auto declaration = [&](const Type::Any &type) {
+    return FunctionDecl(name, {}, {}, {Arg(Named("value", type), {})}, {}, {}, type, FunctionAffinity::Host());
+  };
+  const auto implementation = [&](const FunctionDecl &publicDecl, const std::string &suffix) {
+    const auto decl = publicDecl.withName(Sym({"foo", "implementation", suffix}));
+    return Function(decl, {ret(Term::Select(decl.args.front().named, {}, decl.rtn))}, FunctionVisibility::Exported(),
+                    FunctionFpMode::Relaxed(), CallConvention::RegularCall(), name, {"gpu"});
+  };
+  const auto i32 = declaration(Type::IntS32());
+  const auto f32 = declaration(Type::Float32());
+  const auto linked = linkPackage(PackageLinkRequest(Interface(Sym({"foo"}), {i32, f32}, {}),
+                                                     {PackageFragment("i32", packageProgram({implementation(i32, "i32")}, {})),
+                                                      PackageFragment("f32", packageProgram({implementation(f32, "f32")}, {}))},
+                                                     {"gpu"}, false),
+                                  root.path.str().str());
+  REQUIRE(linked);
+  const auto headers = loadPackageHeaders(*linked.value, "foo.apply");
+  REQUIRE(headers);
+  REQUIRE(headers.value->program.functions.size() == 2);
+  for (const auto &function : headers.value->program.functions) {
+    CHECK(function.body.empty());
+    CHECK(function.requiredCapabilities == std::vector<std::string>{"gpu"});
+  }
+  CHECK(satisfiable(*headers.value, "foo.apply", {"gpu"}));
+  CHECK_FALSE(satisfiable(*headers.value, "foo.apply", {}));
+
+  const auto hydrated = hydratePackage(*linked.value, *headers.value, {"foo.implementation.i32"});
+  REQUIRE(hydrated);
+  for (const auto &function : hydrated.value->program.functions)
+    CHECK(function.body.empty() == (fqcn(function.decl.name) == "foo.implementation.f32"));
+}
+
 TEST_CASE("package linking preserves overloads split across fragments") {
   TemporaryDirectory root;
   const auto name = Sym({"foo", "apply"});
@@ -287,7 +330,9 @@ TEST_CASE("package selection and packing reject a malformed implementation paylo
   const std::vector<uint8_t> malformed{0x81, 0xa3, 'b', 'a', 'd'};
   const auto compressed = detail::compress(malformed);
   REQUIRE(compressed);
-  const detail::EncodedImplementation implementation{"foo.bar.apply", "foo.implementation.apply", malformed.size(), *compressed.value};
+  const detail::EncodedImplementation implementation{"foo.bar.apply", "foo.implementation.apply",
+                                                     detail::encodeHeader(value.program.functions.front()), malformed.size(),
+                                                     *compressed.value};
   const auto encoded = detail::encodeArchive(value.interface, {implementation});
   REQUIRE(encoded);
   llvm::SmallString<128> path(root.path);
@@ -311,7 +356,8 @@ TEST_CASE("package archive decoding rejects inconsistent indexes") {
   const auto raw = hashed_program_to_msgpack(value.program);
   const auto compressed = detail::compress(raw);
   REQUIRE(compressed);
-  const detail::EncodedImplementation implementation{"foo.bar.apply", "foo.implementation.apply", raw.size(), *compressed.value};
+  const detail::EncodedImplementation implementation{"foo.bar.apply", "foo.implementation.apply",
+                                                     detail::encodeHeader(value.program.functions.front()), raw.size(), *compressed.value};
   const auto writeArchive = [&](const std::string &name, const std::vector<detail::EncodedImplementation> &implementations) {
     const auto encoded = detail::encodeArchive(value.interface, implementations);
     REQUIRE(encoded);
@@ -349,7 +395,10 @@ TEST_CASE("package selection validates its indexed implementation root") {
   const auto raw = hashed_program_to_msgpack(value.program);
   const auto compressed = detail::compress(raw);
   REQUIRE(compressed);
-  const detail::EncodedImplementation mismatched{"foo.bar.apply", "foo.implementation.other", raw.size(), *compressed.value};
+  const auto otherRoot =
+      value.program.functions.front().withDecl(value.program.functions.front().decl.withName(Sym({"foo", "implementation", "other"})));
+  const detail::EncodedImplementation mismatched{"foo.bar.apply", "foo.implementation.other", detail::encodeHeader(otherRoot), raw.size(),
+                                                 *compressed.value};
   const auto encoded = detail::encodeArchive(value.interface, {mismatched});
   REQUIRE(encoded);
   llvm::SmallString<128> path(root.path);

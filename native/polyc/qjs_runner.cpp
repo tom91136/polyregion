@@ -260,7 +260,8 @@ std::optional<uint32_t> JsPassRunner::packageAbiVersion() const {
 }
 
 Vector<uint8_t> JsPassRunner::runPackage(const std::string_view operation, const Vector<uint8_t> &request, String &error) {
-  if (operation != polypackage::abi::LinkPackage && operation != polypackage::abi::LinkProgram) {
+  if (operation != polypackage::abi::LinkPackage && operation != polypackage::abi::LinkProgram
+      && operation != polypackage::abi::SelectImplementations) {
     error = fmt::format("unknown package operation {}", operation);
     return {};
   }
@@ -316,9 +317,10 @@ String JsPassRunner::Impl::enumeratePasses() {
   const bool completePass = hasFunctionExport(ctx, abi::AbiVersion) && hasFunctionExport(ctx, abi::PassCount)
                             && hasFunctionExport(ctx, abi::PassName) && hasFunctionExport(ctx, abi::RunPasses);
   const bool anyPackage = hasExport(ctx, polypackage::abi::AbiVersion) || hasExport(ctx, polypackage::abi::LinkPackage)
-                          || hasExport(ctx, polypackage::abi::LinkProgram);
+                          || hasExport(ctx, polypackage::abi::LinkProgram) || hasExport(ctx, polypackage::abi::SelectImplementations);
   const bool completePackage = hasFunctionExport(ctx, polypackage::abi::AbiVersion) && hasFunctionExport(ctx, polypackage::abi::LinkPackage)
-                               && hasFunctionExport(ctx, polypackage::abi::LinkProgram);
+                               && hasFunctionExport(ctx, polypackage::abi::LinkProgram)
+                               && hasFunctionExport(ctx, polypackage::abi::SelectImplementations);
   if (anyPass && !completePass) return "PolyPass JS: incomplete pass capability";
   if (anyPackage && !completePackage) return "PolyPass JS: incomplete package capability";
   if (!completePass && !completePackage) return "PolyPass JS: bundle exposes neither pass nor package capability";

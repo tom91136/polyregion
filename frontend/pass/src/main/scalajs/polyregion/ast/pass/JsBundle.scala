@@ -65,6 +65,10 @@ object JsBundle {
   def linkProgram(bytes: Uint8Array): Uint8Array =
     packageOperation[p.Program.LinkRequest, p.Program]("link program", bytes)(ProgramLinker.link)
 
+  @JSExportTopLevel(PolyPackageAbi.SelectImplementations.Name)
+  def selectImplementations(bytes: Uint8Array): Uint8Array =
+    packageOperation[p.Program.LinkRequest, p.Program]("select implementations", bytes)(ProgramLinker.select)
+
   private object JsBytes {
     def toArray(bytes: Uint8Array): Array[Byte] = {
       val out = new Array[Byte](bytes.length)

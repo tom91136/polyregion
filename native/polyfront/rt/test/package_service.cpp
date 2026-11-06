@@ -1,9 +1,14 @@
 #include <algorithm>
 #include <cctype>
 
+#include "llvm/ADT/ScopeExit.h"
+#include "llvm/ADT/SmallString.h"
+#include "llvm/Support/FileSystem.h"
+
 #include <catch2/catch_test_macros.hpp>
 
 #include "polyfront/options_backend.hpp"
+#include "polyfront/package_emit.hpp"
 #include "polyfront/package_program.hpp"
 #include "polyfront/polyc_client.hpp"
 #include "polyfront/program_fragment.hpp"
@@ -287,6 +292,35 @@ TEST_CASE("package service links and compiles a typed consumer program") {
   CHECK(unfit.value->implementations.empty());
   CHECK(unfit.value->hostObject.empty());
   CHECK(unfit.value->remoteModules.empty());
+  llvm::SmallString<128> archiveRoot;
+  REQUIRE_FALSE(llvm::sys::fs::createUniqueDirectory("polyregion-package-archive", archiveRoot));
+  const llvm::scope_exit removeArchive([&] { llvm::sys::fs::remove_directories(archiveRoot); });
+  const auto archive = polyfront::package::publishPackage(pkg, archiveRoot.str().str());
+  REQUIRE(archive);
+  const auto headers = polyfront::package::loadPackageHeaders(*archive.value, polyast::fqcn(publicName));
+  REQUIRE(headers);
+  CHECK(headers.value->program.functions.size() == 1);
+  CHECK(headers.value->program.functions.front().body.empty());
+  const auto compileHeaders = [&](const polyast::Function &consumerRoot, std::vector<ProgramTypeSize> typeSizes) {
+    return polyfront::package::compileProgram(ProgramLinkRequest({*headers.value}, polyfront::packageProgram({consumerRoot}, {}), {"gpu"},
+                                                                 std::move(typeSizes), std::nullopt, false),
+                                              {}, compiletime::Target::Object_LLVM_HOST, "native",
+                                              {{compiletime::Target::Source_C_Metal1_0, "host"}}, 8, {archive.value->path});
+  };
+  const auto hydrated = compileHeaders(root, {ProgramTypeSize(f32, 4)});
+  for (const auto &error : hydrated.errors)
+    UNSCOPED_INFO(error);
+  REQUIRE(hydrated);
+  CHECK(*hydrated.value == *compiled.value);
+  const auto hydratedUnfit = compileHeaders(wideRoot, {ProgramTypeSize(f64, 8)});
+  REQUIRE(hydratedUnfit);
+  CHECK(hydratedUnfit.value->unfit == unfit.value->unfit);
+  const auto missingArchive = polyfront::package::compileProgram(
+      ProgramLinkRequest({*headers.value}, polyfront::packageProgram({root}, {}), {"gpu"}, {ProgramTypeSize(f32, 4)}, std::nullopt, false),
+      {}, compiletime::Target::Object_LLVM_HOST, "native", {{compiletime::Target::Source_C_Metal1_0, "host"}}, 8,
+      {archive.value->path + ".absent"});
+  CHECK_FALSE(missingArchive);
+
   const auto unlaid = compileWide({});
   REQUIRE_FALSE(unlaid);
   CHECK((unlaid.errors ^ aspartame::exists([](const auto &error) { return error.find("has no layout for `F64`") != std::string::npos; })));

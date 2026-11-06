@@ -697,6 +697,70 @@ class PackageServiceSuite extends munit.FunSuite {
     )
   }
 
+  test("implementation selection reads only package headers and agrees with linking") {
+    val publicName    = p.Sym("select.identity")
+    val t: p.Type.Var = p.Type.Var("T")
+    val public = p.FunctionDecl(
+      publicName,
+      List(t),
+      None,
+      List(p.Arg(p.Named("value", t))),
+      Nil,
+      Nil,
+      t,
+      p.Function.Affinity.Host
+    )
+    def implementation(name: String, width: Int) = {
+      val value: p.Type.Var = p.Type.Var("Value", Some(width))
+      val decl = public.copy(
+        name = p.Sym(name),
+        tpeVars = List(value),
+        args = List(p.Arg(p.Named("value", value))),
+        rtn = value
+      )
+      function(
+        decl,
+        List(p.Stmt.Return(p.Expr.Alias(p.Term.Select(decl.args.head.named, Nil, value)))),
+        implements = Some(publicName),
+        visibility = p.Function.Visibility.Exported
+      )
+    }
+    val implementations = List(implementation("implementation.w4", 4), implementation("implementation.w8", 8))
+    val interface       = p.Interface(p.Sym("select"), List(public))
+    val full            = p.Package(interface, p.Program(None, implementations, Nil))
+    val headers         = p.Package(interface, p.Program(None, implementations.map(_.copy(body = Nil)), Nil))
+    def root(name: String, tpe: p.Type) = function(
+      public.copy(name = p.Sym(name), tpeVars = Nil, args = List(p.Arg(p.Named("value", tpe))), rtn = tpe),
+      implements = Some(publicName),
+      visibility = p.Function.Visibility.Exported
+    )
+    val narrow = root("consumer.narrow", p.Type.IntS32)
+    val wide   = root("consumer.wide", p.Type.Float64)
+    val tiny   = root("consumer.tiny", p.Type.IntS16)
+    val sizes = List(
+      p.Program.TypeSize(p.Type.IntS32, 4),
+      p.Program.TypeSize(p.Type.Float64, 8),
+      p.Program.TypeSize(p.Type.IntS16, 2)
+    )
+    def request(pkg: p.Package) =
+      p.Program.LinkRequest(List(pkg), p.Program(None, List(narrow, wide, tiny), Nil), Nil, sizes)
+    val selected = ProgramLinker.select(request(headers))
+    assert(selected.isRight, selected)
+    assertEquals(
+      selected.toOption.get.metadata,
+      List(
+        p.MetaEntry(p.Conventions.LinkImplementationMeta + "consumer.narrow", "implementation.w4"),
+        p.MetaEntry(p.Conventions.LinkImplementationMeta + "consumer.wide", "implementation.w8")
+      )
+    )
+    val linked = ProgramLinker.link(request(full))
+    assert(linked.isRight, linked)
+    assertEquals(
+      linked.toOption.get.metadata.filter(_.key.startsWith(p.Conventions.LinkImplementationMeta)),
+      selected.toOption.get.metadata
+    )
+  }
+
   test("program linking rejects invalid or conflicting type layouts") {
     val name = p.Sym("library.noop")
     val declaration = p.FunctionDecl(

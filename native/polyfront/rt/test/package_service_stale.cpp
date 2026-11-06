@@ -10,6 +10,8 @@ polypackage_status_t polypackage_link_package(const uint8_t *, size_t, uint8_t *
 
 polypackage_status_t polypackage_link_program(const uint8_t *, size_t, uint8_t **, size_t *) { return POLYPACKAGE_ABI_MISMATCH; }
 
+polypackage_status_t polypackage_select_implementations(const uint8_t *, size_t, uint8_t **, size_t *) { return POLYPACKAGE_ABI_MISMATCH; }
+
 const char *polypackage_last_error() { return "stale package service"; }
 
 void polypackage_free(void *ptr) { std::free(ptr); }

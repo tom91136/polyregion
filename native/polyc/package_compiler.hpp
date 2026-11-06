@@ -17,7 +17,13 @@ template <typename T> struct Result {
   explicit operator bool() const { return value.has_value(); }
 };
 
+struct Selection {
+  polyast::Sym declaration;
+  std::string implementation;
+};
+
 [[nodiscard]] Result<polyast::Package> link(const polyast::PackageLinkRequest &request);
+[[nodiscard]] Result<std::vector<Selection>> select(const polyast::ProgramLinkRequest &request);
 [[nodiscard]] Result<polyast::CompileBundle> compile(polyast::ProgramLinkRequest request, compiletime::Target hostTarget,
                                                      const std::string &hostArch,
                                                      const std::vector<std::pair<compiletime::Target, std::string>> &deviceTargets,

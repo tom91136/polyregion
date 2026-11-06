@@ -28,6 +28,7 @@ namespace detail {
 struct EncodedImplementation {
   std::string declaration;
   std::string implementation;
+  std::vector<uint8_t> header;
   uint64_t rawSize;
   std::vector<uint8_t> compressed;
 };
@@ -111,8 +112,8 @@ inline Checked<EncodedImplementation> encodeImplementation(const PackageIndex &i
   const auto raw = polyast::hashed_program_to_msgpack(*closure.value);
   auto compressed = compress(raw);
   if (!compressed) return {{}, std::move(compressed.errors)};
-  return {{EncodedImplementation{polyast::fqcn(*root.implements), polyast::fqcn(root.decl.name), static_cast<uint64_t>(raw.size()),
-                                 std::move(*compressed.value)}},
+  return {{EncodedImplementation{polyast::fqcn(*root.implements), polyast::fqcn(root.decl.name), encodeHeader(root),
+                                 static_cast<uint64_t>(raw.size()), std::move(*compressed.value)}},
           {}};
 }
 
@@ -184,13 +185,13 @@ inline Checked<std::vector<uint8_t>> encodeArchive(const polyast::Interface &int
   if (!interfaceCompressed) return {{}, std::move(interfaceCompressed.errors)};
   size_t indexSize = 0;
   for (const auto &item : encoded)
-    indexSize += 4 + item.declaration.size() + 4 + item.implementation.size() + 8 + 8 + 8;
+    indexSize += 4 + item.declaration.size() + 4 + item.implementation.size() + 4 + item.header.size() + 8 + 8 + 8;
   uint64_t offset = sizeof(ArchiveMagic) + 4 + 8 + 8 + 4 + indexSize + interfaceCompressed.value->size();
 
   std::vector<ArchiveEntry> entries;
   entries.reserve(encoded.size());
   for (const auto &item : encoded) {
-    entries.emplace_back(ArchiveEntry{item.declaration, item.implementation, offset, item.compressed.size(), item.rawSize});
+    entries.emplace_back(ArchiveEntry{item.declaration, item.implementation, item.header, offset, item.compressed.size(), item.rawSize});
     offset += item.compressed.size();
   }
 
@@ -204,6 +205,7 @@ inline Checked<std::vector<uint8_t>> encodeArchive(const polyast::Interface &int
   for (const auto &entry : entries) {
     appendString(out, entry.declaration);
     appendString(out, entry.implementation);
+    appendBytes(out, entry.header);
     appendU64(out, entry.offset);
     appendU64(out, entry.compressedSize);
     appendU64(out, entry.uncompressedSize);
@@ -266,7 +268,7 @@ public:
     additions.reserve(archive.entries.size());
     for (const auto &entry : archive.entries) {
       const auto compressed = bytes.slice(static_cast<size_t>(entry.offset), static_cast<size_t>(entry.compressedSize));
-      additions.emplace_back(detail::EncodedImplementation{entry.declaration, entry.implementation, entry.uncompressedSize,
+      additions.emplace_back(detail::EncodedImplementation{entry.declaration, entry.implementation, entry.header, entry.uncompressedSize,
                                                            std::vector<uint8_t>(compressed.begin(), compressed.end())});
     }
     const auto coveredNames = additions | map([](const auto &addition) { return addition.declaration; }) | to<std::unordered_set>();
@@ -365,7 +367,8 @@ private:
       const auto existing = implementationByName.find(addition.implementation);
       if (existing != implementationByName.end()) {
         const auto &item = implementations[existing->second];
-        if (item.declaration != addition.declaration || item.rawSize != addition.rawSize || item.compressed != addition.compressed)
+        if (item.declaration != addition.declaration || item.header != addition.header || item.rawSize != addition.rawSize
+            || item.compressed != addition.compressed)
           return {{}, {"package contains conflicting implementation `" + addition.implementation + "`"}};
       }
     }

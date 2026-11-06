@@ -130,7 +130,8 @@ std::vector<std::string> declaredCapabilities(const polyfront::Options &opts) {
 Checked<polyregion::polyfc::interface_resolution::LinkedPackage>
 linkGroups(const polyfront::Options &opts, const std::vector<polyast::Package> &packages, const std::vector<polyast::Function> &functions,
            const std::vector<std::string> &entryNames, const std::vector<polyast::StructDef> &definitions,
-           const std::vector<polyast::ProgramTypeSize> &typeSizes, std::vector<std::string> &bitcodeFiles,
+           const std::vector<polyast::ProgramTypeSize> &typeSizes, const std::vector<std::string> &archives,
+           std::vector<std::string> &bitcodeFiles,
            const std::function<std::optional<std::string>(const std::vector<std::string> &)> &unfitReason) {
   using polyregion::polyfc::interface_resolution::LinkedGroup;
   using polyregion::polyfc::interface_resolution::LinkedPackage;
@@ -150,7 +151,7 @@ linkGroups(const polyfront::Options &opts, const std::vector<polyast::Package> &
     const auto request = polyast::ProgramLinkRequest(packages, polyfront::packageProgram(std::move(renamed), definitions),
                                                      group.capabilities, typeSizes, std::nullopt, group.logicalAddressing);
     auto compiled = polyfront::package::compileProgram(request, opts.executable, compiletime::Target::Object_LLVM_HOST, "native",
-                                                       group.targets, opts.stackDepth);
+                                                       group.targets, opts.stackDepth, archives);
     if (!compiled) return {{}, std::move(compiled.errors)};
     if (!compiled.value->unfit.empty()) {
       linked.unfit ^= concat(compiled.value->unfit);
@@ -258,24 +259,25 @@ void polyregion::polyfc::interface_resolution::resolveInterfaces(clang::Diagnost
   }
 
   if (prepared.empty()) return;
-  SelectionCache selectionCache;
-  std::vector<std::shared_ptr<const Package>> selections;
+  std::vector<Package> selections;
+  std::vector<std::string> archives;
   std::vector<Function> roots;
   std::vector<ProgramTypeSize> typeSizes;
   for (auto &item : prepared) {
-    const auto selected = selectionCache.load(item.archive, item.root.implements ? polyast::fqcn(*item.root.implements) : std::string{});
+    auto selected = loadPackageHeaders(item.archive, item.root.implements ? polyast::fqcn(*item.root.implements) : std::string{});
     if (!selected) {
       emitErrors(diag, item.function.getLoc(), selected.errors);
       return;
     }
-    selections.emplace_back(*selected.value);
+    selections.emplace_back(std::move(*selected.value));
+    if (std::find(archives.begin(), archives.end(), item.archive.path) == archives.end()) archives.emplace_back(item.archive.path);
     roots.emplace_back(item.root);
     for (const auto &size : item.typeSizes)
       if (std::find(typeSizes.begin(), typeSizes.end(), size) == typeSizes.end()) typeSizes.emplace_back(size);
   }
-  const auto packages = mergeSelections(selections ^ map([](const auto &selection) { return selection.get(); }));
+  const auto packages = mergeSelections(selections ^ map([](const auto &selection) { return &selection; }));
   const auto entryNames = prepared ^ map([](const auto &item) { return item.entryName; });
-  const auto linked = linkGroups(opts, packages, roots, entryNames, {}, typeSizes, bitcodeFiles, {});
+  const auto linked = linkGroups(opts, packages, roots, entryNames, {}, typeSizes, archives, bitcodeFiles, {});
   if (!linked || !linked.value->unfit.empty()) {
     emitErrors(diag, prepared.front().function.getLoc(), linked ? linked.value->unfit : linked.errors);
     return;
@@ -470,11 +472,11 @@ polyregion::polyfc::interface_resolution::linkPackageProgram(const polyfront::Op
     return {{LinkedPackage{{}, {}, {std::move(reason)}}}, {}};
   };
   if (archive.entriesByDeclaration.count(declaration) == 0) return unfit(polyfront::package::undeclaredReason(archive, declaration));
-  auto selected = polyfront::package::loadPackageSelection(archive, declaration);
+  auto selected = polyfront::package::loadPackageHeaders(archive, declaration);
   if (!selected) return {{}, std::move(selected.errors)};
   consumerFunctions.insert(consumerFunctions.begin(), root);
-  return linkGroups(opts, {*selected.value}, consumerFunctions, {root.decl.name.fqn.front()}, consumerDefs, typeSizes, bitcodeFiles,
-                    [&](const std::vector<std::string> &capabilities) -> std::optional<std::string> {
+  return linkGroups(opts, {*selected.value}, consumerFunctions, {root.decl.name.fqn.front()}, consumerDefs, typeSizes, {archive.path},
+                    bitcodeFiles, [&](const std::vector<std::string> &capabilities) -> std::optional<std::string> {
                       if (polyfront::package::satisfiable(*selected.value, declaration, capabilities)) return {};
                       return polyfront::package::unsatisfiedReason(capabilities);
                     });
@@ -497,7 +499,7 @@ std::optional<polyfront::package::Archive> polyregion::polyfc::interface_resolut
 bool polyregion::polyfc::interface_resolution::implements(const polyfront::package::Archive &archive, const std::string &declaration,
                                                           const polyfront::Options &opts) {
   if (archive.entriesByDeclaration.count(declaration) == 0) return false;
-  const auto selected = polyfront::package::loadPackageSelection(archive, declaration);
+  const auto selected = polyfront::package::loadPackageHeaders(archive, declaration);
   if (!selected) return false;
   return polyfront::package::capabilityGroups(declaredCapabilities(opts), opts.targets)
          ^ exists([&](const auto &group) { return polyfront::package::satisfiable(*selected.value, declaration, group.capabilities); });
