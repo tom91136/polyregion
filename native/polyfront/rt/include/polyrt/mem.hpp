@@ -114,9 +114,9 @@ class SynchronisedMemAllocation {
     return {};
   }
 
-  template <typename V, typename F>
-  static std::optional<std::pair<V *, size_t>> offsetQuery(std::unordered_map<uintptr_t, V> &map, const void *p, F selectSize,
-                                                           const bool allowPastEnd = false) {
+  template <typename M, typename F>
+  static std::optional<std::pair<typename M::mapped_type *, size_t>> offsetQuery(M &map, const void *p, F selectSize,
+                                                                                 const bool allowPastEnd = false) {
     if (const auto query = offsetQueryIt(map, p, selectSize, allowPastEnd)) {
       auto [it, offset] = *query;
       return std::pair{&it->second, offset};
@@ -369,7 +369,7 @@ public:
     std::vector<char> deviceBytes{};
   };
 
-  std::unordered_map<uintptr_t, RemoteAllocation> localToRemoteAlloc{};
+  std::map<uintptr_t, RemoteAllocation> localToRemoteAlloc{};
   std::unordered_map<uintptr_t, RangedAllocation> remoteToLocalPtr{};
 
   // Resident heap blocks keep their device copy across launches. Whole pages of the block are guarded so the first
@@ -777,12 +777,17 @@ public:
     }
   }
 
-  // the host block at `p` is going away: drop whatever mirrors it
-  void forget(const void *p, const bool releaseRemote = true) {
+  // the host block [p, p + sizeInBytes) is going away: drop whatever mirrors it, interior keys included
+  void forget(const void *p, const size_t sizeInBytes, const bool releaseRemote = true) {
     if (tableMutations) return;
-    unguard(reinterpret_cast<uintptr_t>(p));
-    genArenaForget(p);
-    disassociateExact(p, releaseRemote);
+    const auto begin = reinterpret_cast<uintptr_t>(p), end = begin + std::max<size_t>(sizeInBytes, 1);
+    unguard(begin);
+    genArenaForget(begin, end);
+    std::vector<uintptr_t> mirrored;
+    for (auto it = localToRemoteAlloc.lower_bound(begin); it != localToRemoteAlloc.end() && it->first < end; ++it)
+      mirrored.push_back(it->first);
+    for (const auto local : mirrored)
+      disassociateExact(reinterpret_cast<const void *>(local), releaseRemote);
   }
 
   void disassociateExact(const void *p, const bool releaseRemote = true) {
@@ -972,7 +977,7 @@ public:
   // package pointers are heap offsets already
   static constexpr uint64_t arenaNull = 0;
   std::vector<char> genArenaStaging{};
-  std::unordered_map<uintptr_t, uint64_t> genArenaOffsetOf{};
+  std::map<uintptr_t, uint64_t> genArenaOffsetOf{};
   uintptr_t genArenaDevBase = 0;
   uint64_t genArenaWindow = 0;
   ArenaPlacement genArenaPlacement{};
@@ -1307,11 +1312,13 @@ public:
   }
 
   // a resident leaf's host block was freed: forget it so a later block at the same address starts afresh
-  void genArenaForget(const void *p) {
-    const auto host = reinterpret_cast<uintptr_t>(p);
-    if (!genArenaOffsetOf.erase(host)) return;
+  void genArenaForget(const uintptr_t begin, const uintptr_t end) {
+    const auto first = genArenaOffsetOf.lower_bound(begin), last = genArenaOffsetOf.lower_bound(end);
+    if (first == last) return;
+    genArenaOffsetOf.erase(first, last);
+    const auto freed = [&](const uintptr_t host) { return host >= begin && host < end; };
     genArenaRecs.erase(std::remove_if(genArenaRecs.begin(), genArenaRecs.end(),
-                                      [&](const auto &r) { return r.off != 0 && reinterpret_cast<uintptr_t>(r.host) == host; }),
+                                      [&](const auto &r) { return r.off != 0 && freed(reinterpret_cast<uintptr_t>(r.host)); }),
                        genArenaRecs.end());
   }
 

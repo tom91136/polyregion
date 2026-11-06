@@ -1247,7 +1247,7 @@ TEST_CASE("freeing an unguarded block never waits on a device read in flight") {
   bool freedDuringRead = false;
   fixture.duringRemoteRead = [&](void *dst) {
     if (freed.valid() || dst < xs || dst >= xs + count) return;
-    freed = std::async(std::launch::async, [&] { fixture.allocation.forget(unrelated, false); });
+    freed = std::async(std::launch::async, [&] { fixture.allocation.forget(unrelated, count * sizeof(int32_t), false); });
     freedDuringRead = freed.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
   };
   fixture.allocation.mirrorAlloc(&capture, sizeof(capture), false);
@@ -1317,7 +1317,7 @@ TEST_CASE("record wrappers reclaim guarded blocks before libc or the kernel touc
   active = &fixture;
   polyregion::rt_reflect::_rt_set_reclaim_cb(
       +[](const void *p, const size_t n, const bool forWrite) { active->allocation.reclaimRange(p, n, forWrite); });
-  polyregion::rt_reflect::_rt_set_release_cb(+[](void *p) { active->allocation.forget(p, false); });
+  polyregion::rt_reflect::_rt_set_release_cb(+[](void *p, const size_t n) { active->allocation.forget(p, n, false); });
 
   const size_t count = 64 * polyregion::polyrt::guard::pageSize() / sizeof(int32_t), bytes = count * sizeof(int32_t);
   auto xs = fixture.mallocLocalHeap<int32_t>(count);
@@ -1450,6 +1450,41 @@ TEST_CASE("runtime mirror preserves an interior offset when refreshing a reused 
   CHECK(remoteCapture->result == &remotePair->second);
   CHECK(remotePair->first == 3);
   CHECK(remotePair->second == 9);
+}
+
+TEST_CASE("freeing a block drops mirrors keyed at its interior pointers") {
+  struct Capture {
+    int32_t *data;
+  };
+  auto captureMeta = Struct_(Capture, StructMember_(Capture, data, &int32Type));
+
+  Fixture fixture;
+  constexpr size_t overAlign = 32, count = 64, blockBytes = overAlign + count * sizeof(int32_t);
+  auto region = fixture.mallocLocalHeap<char>(blockBytes);
+  const auto regionKey = reinterpret_cast<uintptr_t>(region);
+  auto stale = reinterpret_cast<int32_t *>(region + overAlign);
+  std::fill(stale, stale + count, 1);
+  Capture staleCapture{stale};
+  auto remoteStale = fixture.localToRemote(&staleCapture, *captureMeta)->data;
+  fixture.allocation.disassociate(&staleCapture, false);
+
+  fixture.localAllocations.erase(regionKey);
+  fixture.heapAllocations.erase(regionKey);
+  fixture.allocation.forget(region, blockBytes, false);
+
+  fixture.localAllocations.emplace(regionKey, blockBytes);
+  fixture.heapAllocations.emplace(regionKey);
+  auto reused = reinterpret_cast<int32_t *>(region);
+  std::fill(reused, reused + blockBytes / sizeof(int32_t), 2);
+  Capture reusedCapture{reused};
+  auto remoteReused = fixture.localToRemote(&reusedCapture, *captureMeta)->data;
+  fixture.allocation.disassociate(&reusedCapture, false);
+
+  CHECK(remoteReused != remoteStale);
+  CHECK(fixture.remoteToLocal(stale) == std::optional{reinterpret_cast<uintptr_t>(remoteReused + overAlign / sizeof(int32_t))});
+  remoteReused[overAlign / sizeof(int32_t)] = 3;
+  fixture.allocation.syncRemoteToLocal(stale);
+  CHECK(stale[0] == 3);
 }
 
 TEST_CASE("ptr-indirect-2-star") {
@@ -1882,7 +1917,7 @@ TEST_CASE("resident arena leaves keep kernel output on the device until the host
   xs[count / 2 + 1] = 7;
   launch([&](int32_t *d) { CHECK(d[count / 2 + 1] == 7); });
 
-  f.allocation.forget(xs, false);
+  f.allocation.forget(xs, count * sizeof(int32_t), false);
   xs[count / 2] = 9;
   CHECK(xs[count / 2] == 9);
 }
@@ -2353,7 +2388,7 @@ TEST_CASE("a window that cannot grow in place moves with its resident leaf and g
   CHECK(xs[0] == 7);
   CHECK(xs[count / 2] == 3);
   CHECK(xs[count - 1] == 9);
-  a.fixture.allocation.forget(xs, false);
+  a.fixture.allocation.forget(xs, count * sizeof(int32_t), false);
 }
 
 TEST_CASE("a union of pointers is rebased by the window offset once") {
@@ -2439,7 +2474,7 @@ TEST_CASE("an untouched resident leaf is carried across a window move") {
   CHECK(a.window() != window);
   CHECK(xs[count / 2] == static_cast<int32_t>(10 + count / 2));
   CHECK(xs[1] == 11);
-  a.fixture.allocation.forget(xs, false);
+  a.fixture.allocation.forget(xs, count * sizeof(int32_t), false);
 }
 
 TEST_CASE("a guard fault during a window move waits for the move and reads the moved bytes") {
@@ -2483,7 +2518,7 @@ TEST_CASE("a guard fault during a window move waits for the move and reads the m
   reader.join();
   CHECK(readerWaited);
   CHECK(seen == 5);
-  a.fixture.allocation.forget(xs, false);
+  a.fixture.allocation.forget(xs, count * sizeof(int32_t), false);
 }
 
 TEST_CASE("heap growth from another thread waits for an arena launch in flight") {
@@ -2563,7 +2598,7 @@ TEST_CASE("destroying the context releases guarded arena leaves before the heap 
   a.f.queue.onInvoke = nullptr;
   a.f.retire();
   CHECK(xs[count / 2] == 4);
-  a.fixture.allocation.forget(xs, false);
+  a.fixture.allocation.forget(xs, count * sizeof(int32_t), false);
 }
 
 TEST_CASE("a leaf uploaded into reused heap memory brings its zeroed over-read slack") {
@@ -2616,7 +2651,7 @@ TEST_CASE("heap memcpy moves a multi-megabyte span in both directions and into a
   REQUIRE(a.launch(&rec, *layout));
   REQUIRE(polyrt_remote_memcpy(&a.f.context, reinterpret_cast<uintptr_t>(xs), block, count * sizeof(int32_t), 1));
   CHECK(std::memcmp(xs, pattern.data(), count * sizeof(int32_t)) == 0);
-  a.fixture.allocation.forget(xs, false);
+  a.fixture.allocation.forget(xs, count * sizeof(int32_t), false);
 }
 
 TEST_CASE("a launch cannot move an arena between the device heap and a separate buffer") {

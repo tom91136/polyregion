@@ -12,6 +12,7 @@
   #include <cstdio>
   #include <cstdlib>
   #include <mutex>
+  #include <optional>
   #include <shared_mutex>
 
   #include "rt_hashmap.hpp"
@@ -101,7 +102,7 @@ extern "C" __declspec(dllimport) PtrMeta _rt_reflect_p(const void *ptr);
 extern "C" __declspec(dllimport) PtrMeta _rt_reflect_v(uintptr_t ptrValue);
 extern "C" __declspec(dllimport) void _rt_record(const void *ptr, size_t size, Type type);
 extern "C" __declspec(dllimport) void _rt_release(void *ptr, Type type);
-extern "C" __declspec(dllimport) void _rt_set_release_cb(void (*cb)(void *));
+extern "C" __declspec(dllimport) void _rt_set_release_cb(void (*cb)(void *, size_t));
 extern "C" __declspec(dllimport) void _rt_set_reclaim_cb(void (*cb)(const void *, size_t, bool));
 extern "C" __declspec(dllimport) void _rt_reclaim(const void *ptr, size_t size, bool forWrite);
   #else
@@ -109,7 +110,7 @@ extern "C" PtrMeta _rt_reflect_p(const void *ptr);
 extern "C" PtrMeta _rt_reflect_v(uintptr_t ptrValue);
 extern "C" void _rt_record(const void *ptr, size_t size, Type type);
 extern "C" void _rt_release(void *ptr, Type type);
-extern "C" void _rt_set_release_cb(void (*cb)(void *));
+extern "C" void _rt_set_release_cb(void (*cb)(void *, size_t));
 extern "C" void _rt_set_reclaim_cb(void (*cb)(const void *, size_t, bool));
 extern "C" void _rt_reclaim(const void *ptr, size_t size, bool forWrite);
   #endif
@@ -230,7 +231,8 @@ public:
     index.insert(info.base, info.size, data.find(info.base));
   }
 
-  __RT_ODR bool blockingRelease(const uintptr_t ptr, const Type type, const time_point<steady_clock> now = steady_clock::now()) {
+  __RT_ODR std::optional<PtrInfo> blockingRelease(const uintptr_t ptr, const Type type,
+                                                  const time_point<steady_clock> now = steady_clock::now()) {
     std::unique_lock lock(mutex);
     if (const auto *rec = queryUnsafe(ptr, false)) {
       if (trace)
@@ -240,13 +242,14 @@ public:
                      rec->info.base, rec->info.size, to_string(rec->info.type),
                      duration_cast<microseconds>(rec->point.time_since_epoch()).count(),
                      duration_cast<microseconds>(now - rec->point).count());
+      const PtrInfo info = rec->info;
       index.erase(ptr);
       data.erase(ptr);
-      return true;
+      return info;
     }
     if (!isHeap(type))
       safe_fprintf(stderr, "[PtrReflect] failed to release %p (type=%s)\n", reinterpret_cast<void *>(ptr), to_string(type));
-    return false;
+    return std::nullopt;
   }
 
   __RT_ODR void finishTrace() {
@@ -322,8 +325,8 @@ struct _rt_service_guard {
   __RT_ODR ~_rt_service_guard() { _rt_set_in_service(prev); }
 };
 
-__RT_ODR inline std::atomic<void (*)(void *)> &_rt_release_cb() {
-  static std::atomic<void (*)(void *)> cb{nullptr};
+__RT_ODR inline std::atomic<void (*)(void *, size_t)> &_rt_release_cb() {
+  static std::atomic<void (*)(void *, size_t)> cb{nullptr};
   return cb;
 }
 
@@ -334,7 +337,7 @@ __RT_ODR inline std::atomic<void (*)(const void *, size_t, bool)> &_rt_reclaim_c
 
 } // namespace details
 
-extern "C" __RT_ODR __RT_EXPORTED void _rt_set_release_cb(void (*cb)(void *)) { details::_rt_release_cb().store(cb); }
+extern "C" __RT_ODR __RT_EXPORTED void _rt_set_release_cb(void (*cb)(void *, size_t)) { details::_rt_release_cb().store(cb); }
 
 extern "C" __RT_ODR __RT_EXPORTED void _rt_set_reclaim_cb(void (*cb)(const void *, size_t, bool)) { details::_rt_reclaim_cb().store(cb); }
 
@@ -355,9 +358,9 @@ extern "C" __RT_ODR __RT_EXPORTED void _rt_release(void *ptr, const Type type) {
   if (!details::serviceInit.load()) return;
   if (details::_rt_in_service()) return;
   details::_rt_service_guard guard;
-  const bool released = details::_rt_get()->blockingRelease(reinterpret_cast<uintptr_t>(ptr), type);
+  const auto released = details::_rt_get()->blockingRelease(reinterpret_cast<uintptr_t>(ptr), type);
   if (type == Type::HeapFree || type == Type::HeapCXXDelete || (type == Type::HeapSanitizer && released))
-    if (const auto cb = details::_rt_release_cb().load(std::memory_order_relaxed)) cb(ptr);
+    if (const auto cb = details::_rt_release_cb().load(std::memory_order_relaxed)) cb(ptr, released ? released->size : 0);
 }
 
 extern "C" __RT_ODR __RT_EXPORTED PtrMeta _rt_reflect_p(const void *ptr) {
