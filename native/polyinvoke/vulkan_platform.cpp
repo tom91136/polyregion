@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cinttypes>
 #include <cstring>
+#include <limits>
 #include <utility>
 
 #include "aspartame/all.hpp"
@@ -32,6 +33,10 @@ using namespace polyregion::invoke;
 using namespace polyregion::invoke::vulkan;
 
 static constexpr const char *PREFIX = "Vulkan";
+
+static size_t hostSize(const vk::DeviceSize size) {
+  return static_cast<size_t>(std::min<vk::DeviceSize>(size, std::numeric_limits<size_t>::max()));
+}
 
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
@@ -206,9 +211,9 @@ VulkanDevice::VulkanDevice(vk::raii::Instance &instance,              //
       transferQueueId(transferQueueId), //
       device(std::move(device_)),       //
       ctx(createDevice(device, computeQueueId.first, transferQueueId.first)), allocator(createAllocator(instance, device, ctx)),
-      deviceMaxAllocSize(device.getProperties2<vk::PhysicalDeviceProperties2, vk::PhysicalDeviceMaintenance3Properties>()
-                             .get<vk::PhysicalDeviceMaintenance3Properties>()
-                             .maxMemoryAllocationSize),
+      deviceMaxAllocSize(hostSize(device.getProperties2<vk::PhysicalDeviceProperties2, vk::PhysicalDeviceMaintenance3Properties>()
+                                      .get<vk::PhysicalDeviceMaintenance3Properties>()
+                                      .maxMemoryAllocationSize)),
       deviceMaxWorkGroupInvocations(device.getProperties().limits.maxComputeWorkGroupInvocations),
       lavapipe(std::string(device.getProperties().deviceName.data()).find("llvmpipe") != std::string::npos),
       deviceSubgroupSize(device.getProperties2<vk::PhysicalDeviceProperties2, vk::PhysicalDeviceSubgroupProperties>()
@@ -409,11 +414,12 @@ std::optional<HeapLimits> VulkanDevice::heapLimits() {
   const auto exts = device.enumerateDeviceExtensionProperties();
   if (props.apiVersion >= VK_API_VERSION_1_3
       || exts ^ exists([](const auto &e) { return std::strcmp(e.extensionName, VK_KHR_MAINTENANCE_4_EXTENSION_NAME) == 0; }))
-    maxBytes = std::min<size_t>(maxBytes, device.getProperties2<vk::PhysicalDeviceProperties2, vk::PhysicalDeviceMaintenance4Properties>()
-                                              .get<vk::PhysicalDeviceMaintenance4Properties>()
-                                              .maxBufferSize);
+    maxBytes = std::min(maxBytes, hostSize(device.getProperties2<vk::PhysicalDeviceProperties2, vk::PhysicalDeviceMaintenance4Properties>()
+                                               .get<vk::PhysicalDeviceMaintenance4Properties>()
+                                               .maxBufferSize));
   constexpr size_t widestScalarView = 8, vectorAccess = 16;
-  return HeapLimits{maxBytes, std::max<size_t>({props.limits.minStorageBufferOffsetAlignment, vectorAccess, widestScalarView})};
+  const auto alignment = std::max<vk::DeviceSize>({props.limits.minStorageBufferOffsetAlignment, vectorAccess, widestScalarView});
+  return HeapLimits{maxBytes, static_cast<size_t>(alignment)};
 }
 
 uintptr_t VulkanDevice::reserveDevice(size_t maxBytes, size_t committedBytes) {
