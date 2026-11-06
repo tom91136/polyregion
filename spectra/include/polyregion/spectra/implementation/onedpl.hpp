@@ -4,6 +4,10 @@
   #define POLYREGION_SPECTRA_EXPORT(name)
   #define POLYREGION_SPECTRA_UNDEF_EXPORT
 #endif
+#ifndef POLYREGION_SPECTRA_CORE_EXPORT
+  #define POLYREGION_SPECTRA_CORE_EXPORT(name)
+  #define POLYREGION_SPECTRA_UNDEF_CORE_EXPORT
+#endif
 
 #include <cstdint>
 
@@ -29,6 +33,29 @@ public:
 };
 
 } // namespace detail
+
+template <class F, class... Args> [[clang::annotate("__polyregion_element")]] decltype(auto) element(F &f, Args... args) {
+  return f(args...);
+}
+
+template <class Body> void core_for_each(std::int64_t n, Body body) {
+  if (n <= 0) return;
+  oneapi::dpl::execution::device_policy<>{}
+      .queue()
+      .submit([=](sycl::handler &handler) {
+        handler.parallel_for(sycl::range<1>(static_cast<std::size_t>(n)),
+                             [=](sycl::item<1> item) { element(body, static_cast<std::int64_t>(item.get_linear_id())); });
+      })
+      .wait();
+}
+
+template <class T, class Map, class Combine>     //
+POLYREGION_SPECTRA_CORE_EXPORT(transform_reduce) //
+    T core_transform_reduce(std::int64_t n, T init, Map map, Combine combine) {
+  return oneapi::dpl::transform_reduce(oneapi::dpl::execution::device_policy<>{}, oneapi::dpl::counting_iterator<std::int64_t>(0),
+                                       oneapi::dpl::counting_iterator<std::int64_t>(n), init, combine,
+                                       [=](std::int64_t i) -> T { return element(map, i); });
+}
 
 template <class T, class Op>                   //
 POLYREGION_SPECTRA_EXPORT(adjacent_difference) //
@@ -544,4 +571,8 @@ POLYREGION_SPECTRA_EXPORT(upper_bound) //
 #ifdef POLYREGION_SPECTRA_UNDEF_EXPORT
   #undef POLYREGION_SPECTRA_UNDEF_EXPORT
   #undef POLYREGION_SPECTRA_EXPORT
+#endif
+#ifdef POLYREGION_SPECTRA_UNDEF_CORE_EXPORT
+  #undef POLYREGION_SPECTRA_UNDEF_CORE_EXPORT
+  #undef POLYREGION_SPECTRA_CORE_EXPORT
 #endif

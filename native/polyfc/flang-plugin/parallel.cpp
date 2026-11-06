@@ -40,6 +40,10 @@ template <typename... Vs> Stmts splice(Vs &&...vs) {
   return out;
 }
 
+template <typename P> Stmts elementBody(const P &p) {
+  return {elementBoundary(splice(mappedInductionStmts(p.induction, p.lowerBound, p.step), p.body))};
+}
+
 } // namespace
 
 Stmt::Any parallel_ops::SingleVarReduction::partialVar() const {
@@ -78,8 +82,7 @@ Function parallel_ops::forEach(const std::string &fnName, const Named &capture, 
                Stmts body;
                const auto begin = letBind(body, "begin", Expr::Index(p.begins, "__tid"_(Long), Long));
                const auto end = letBind(body, "end", Expr::Index(p.ends, "__tid"_(Long), Long));
-               body.emplace_back(Stmt::ForRange(Named("#i", Long), begin, end, Term::IntS64Const(1),
-                                                splice(mappedInductionStmts(p.induction, p.lowerBound, p.step), p.body)));
+               body.emplace_back(Stmt::ForRange(Named("#i", Long), begin, end, Term::IntS64Const(1), elementBody(p)));
                body.emplace_back(ret());
                return Function(FunctionDecl(Sym({fnName}), {}, std::optional<Arg>{},
                                             std::vector<Arg>{Arg(capture, {}), Arg(Named("#unused", Ptr(Byte)), {})}, {}, {}, Unit,
@@ -92,8 +95,7 @@ Function parallel_ops::forEach(const std::string &fnName, const Named &capture, 
                const auto gs = letBind(body, "gs", Expr::Cast(gsU, Long));
                const auto gidU = letBind(body, "gidU", call(Spec::GpuGlobalIdx(0_(UInt))));
                const auto gid = letBind(body, "gid", Expr::Cast(gidU, Long));
-               body.emplace_back(Stmt::ForRange(Named("#i", Long), gid, p.tripCount, gs,
-                                                splice(mappedInductionStmts(p.induction, p.lowerBound, p.step), p.body)));
+               body.emplace_back(Stmt::ForRange(Named("#i", Long), gid, p.tripCount, gs, elementBody(p)));
                body.emplace_back(ret());
                return Function(FunctionDecl(Sym({fnName}), {}, std::optional<Arg>{},
                                             std::vector<Arg>{Arg(capture, {}), Arg(Named("#unused", Ptr(Byte)), {})}, {}, {}, Unit,
@@ -112,8 +114,7 @@ Function parallel_ops::reduce(const std::string &fnName, const Named &capture, c
                  body.emplace_back(r.partialVar());
                const auto begin = letBind(body, "begin", Expr::Index(p.begins, "__tid"_(Long), Long));
                const auto end = letBind(body, "end", Expr::Index(p.ends, "__tid"_(Long), Long));
-               body.emplace_back(Stmt::ForRange(Named("#i", Long), begin, end, Term::IntS64Const(1),
-                                                splice(mappedInductionStmts(p.induction, p.lowerBound, p.step), p.body)));
+               body.emplace_back(Stmt::ForRange(Named("#i", Long), begin, end, Term::IntS64Const(1), elementBody(p)));
                for (const auto &r : reductions)
                  body.emplace_back(r.drainPartial("__tid"_(Long)));
                body.emplace_back(ret());
@@ -134,8 +135,7 @@ Function parallel_ops::reduce(const std::string &fnName, const Named &capture, c
                const auto gid = letBind(body, "gid", Expr::Cast(gidU, Long));
                for (const auto &r : reductions)
                  body.emplace_back(r.partialVar());
-               body.emplace_back(Stmt::ForRange(Named("#i", Long), gid, p.tripCount, gs,
-                                                splice(mappedInductionStmts(p.induction, p.lowerBound, p.step), p.body)));
+               body.emplace_back(Stmt::ForRange(Named("#i", Long), gid, p.tripCount, gs, elementBody(p)));
 
                if (reductions.empty()) {
                  // XXX Skip the tree-reduce barrier loop: miscompiles on some SPIR-V targets at small workgroup sizes.

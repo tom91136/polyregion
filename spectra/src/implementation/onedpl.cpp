@@ -21,4 +21,8 @@ template <class R, class... A> struct [[clang::annotate("polyregion_callable_var
 #define SPECTRA_VARIANT "dpl"
 #include <polyregion/spectra/implementation/onedpl.hpp>
 
-#include "export_instantiations.inc"
+#ifdef SPECTRA_CORE
+  #include "core.inc"
+#else
+  #include "export_instantiations.inc"
+#endif

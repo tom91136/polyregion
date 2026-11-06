@@ -10,6 +10,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <new>
 #include <optional>
 #include <queue>
 #include <shared_mutex>
@@ -63,6 +64,14 @@ using MaybeCallback = std::optional<Callback>;
 inline constexpr auto OverReadPadFeature = "overread_pad";
 [[nodiscard]] inline size_t overReadPadBytes(const std::vector<std::string> &features) {
   const std::string prefix = std::string(OverReadPadFeature) + ":";
+  for (const auto &f : features)
+    if (f.rfind(prefix, 0) == 0) return std::stoull(f.substr(prefix.size()));
+  return 0;
+}
+
+inline constexpr auto StorageAlignFeature = "storage_align";
+[[nodiscard]] inline size_t storageAlignBytes(const std::vector<std::string> &features) {
+  const std::string prefix = std::string(StorageAlignFeature) + ":";
   for (const auto &f : features)
     if (f.rfind(prefix, 0) == 0) return std::stoull(f.substr(prefix.size()));
   return 0;
@@ -218,6 +227,11 @@ public:
     std::unique_lock writeLock(mutex);
     return allocations.erase(key) == 1;
   }
+
+  bool empty() {
+    std::shared_lock readLock(mutex);
+    return allocations.empty();
+  }
 };
 
 template <typename T> class MemoryObjects {
@@ -225,6 +239,7 @@ template <typename T> class MemoryObjects {
 
   struct Region {
     size_t size;
+    size_t reserved;
     T value;
   };
 
@@ -245,7 +260,7 @@ template <typename T> class MemoryObjects {
     if (nextRegion != regions.end() && (nextRegion->first == base || nextRegion->first - base < size)) return true;
     if (nextRegion == regions.begin()) return false;
     const auto previous = std::prev(nextRegion);
-    return base - previous->first < previous->second.size;
+    return base - previous->first < previous->second.reserved;
   }
 
 public:
@@ -260,18 +275,41 @@ public:
     return Resolved{resolved.value, resolved.offset + offset, resolved.remaining - offset};
   }
 
-  uintptr_t malloc(size_t size, T value) {
+  uintptr_t malloc(size_t size, T value) { return reserve(size, size, std::move(value)); }
+
+  uintptr_t reserve(size_t reserved, size_t committed, T value) {
+    if (committed > reserved) throw std::invalid_argument("committed size exceeds the reserved size");
     std::unique_lock lock(mutex);
+    const auto span = (reserved + Granularity - 1) / Granularity * Granularity + Granularity;
+    if (reserved > (std::numeric_limits<uintptr_t>::max)() - next - Granularity) throw std::bad_alloc();
     const auto base = next;
-    next += (size + Granularity - 1) / Granularity * Granularity + Granularity;
-    regions.emplace(base, Region{size, std::move(value)});
+    next += span;
+    regions.emplace(base, Region{committed, reserved, std::move(value)});
     return base;
+  }
+
+  void commit(uintptr_t base, size_t committed, T value) {
+    std::unique_lock lock(mutex);
+    const auto it = regions.find(base);
+    if (it == regions.end()) throw std::out_of_range("commit of an unknown allocation");
+    if (committed > it->second.reserved)
+      throw std::length_error("commit of " + std::to_string(committed) + " bytes exceeds the reserved size of "
+                              + std::to_string(it->second.reserved) + " bytes");
+    if (committed < it->second.size) throw std::invalid_argument("commit cannot shrink an allocation");
+    it->second.size = committed;
+    it->second.value = std::move(value);
+  }
+
+  std::optional<size_t> reservedSize(uintptr_t base) const {
+    std::shared_lock lock(mutex);
+    const auto it = regions.find(base);
+    return it == regions.end() ? std::nullopt : std::optional{it->second.reserved};
   }
 
   bool insert(uintptr_t base, size_t size, T value) {
     std::unique_lock lock(mutex);
     if (overlaps(base, size)) return false;
-    regions.emplace(base, Region{size, std::move(value)});
+    regions.emplace(base, Region{size, size, std::move(value)});
     return true;
   }
 
@@ -434,9 +472,20 @@ struct POLYREGION_EXPORT DeviceQueue {
   }
 
   virtual POLYREGION_EXPORT void enqueueWaitBlocking() = 0;
+
+  [[nodiscard]] virtual POLYREGION_EXPORT bool quiescent() { return false; }
+
+  POLYREGION_EXPORT void settle() {
+    if (!quiescent()) enqueueWaitBlocking();
+  }
 };
 
 enum class PagingMode { None, Managed, System };
+
+struct HeapLimits {
+  size_t maxBytes;
+  size_t alignment;
+};
 
 struct POLYREGION_EXPORT Device {
   virtual POLYREGION_EXPORT ~Device() = default;
@@ -456,6 +505,14 @@ struct POLYREGION_EXPORT Device {
 
   [[nodiscard]] virtual POLYREGION_EXPORT uintptr_t mallocDevice(size_t size, Access access) = 0;
   virtual POLYREGION_EXPORT void freeDevice(uintptr_t ptr) = 0;
+
+  [[nodiscard]] virtual POLYREGION_EXPORT std::optional<HeapLimits> heapLimits() { return std::nullopt; }
+  [[nodiscard]] virtual POLYREGION_EXPORT uintptr_t reserveDevice(size_t maxBytes, size_t committedBytes) {
+    throw std::logic_error("device does not support growable allocations");
+  }
+  virtual POLYREGION_EXPORT void growDevice(uintptr_t handle, size_t committedBytes) {
+    throw std::logic_error("device does not support growable allocations");
+  }
 
   [[nodiscard]] virtual POLYREGION_EXPORT std::optional<void *> mallocShared(size_t size, Access access) = 0;
   virtual POLYREGION_EXPORT void freeShared(void *ptr) = 0;

@@ -3,8 +3,10 @@
 #include <condition_variable>
 #include <cstdio>
 #include <limits>
+#include <map>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <system_error>
 #include <thread>
 #include <utility>
@@ -17,6 +19,7 @@
   #include <pthread.h>
   #include <unistd.h>
 
+  #include <sys/mman.h>
   #include <sys/resource.h>
 #endif
 #ifdef __APPLE__
@@ -287,13 +290,68 @@ std::vector<std::string> ObjectDevice::features() {
 
   return features;
 }
+namespace {
+struct Reservation {
+  size_t reserved;
+  size_t committed;
+};
+
+std::mutex reservationsMutex;
+std::map<uintptr_t, Reservation> reservations;
+} // namespace
+
 uintptr_t ObjectDevice::mallocDevice(size_t size, Access) {
   POLYINVOKE_TRACE();
   return reinterpret_cast<uintptr_t>(std::malloc(size));
 }
 void ObjectDevice::freeDevice(uintptr_t ptr) {
   POLYINVOKE_TRACE();
+  {
+    const std::lock_guard lock(reservationsMutex);
+    if (const auto it = reservations.find(ptr); it != reservations.end()) {
+#ifdef _WIN32
+      VirtualFree(reinterpret_cast<void *>(ptr), 0, MEM_RELEASE);
+#else
+      munmap(reinterpret_cast<void *>(ptr), it->second.reserved);
+#endif
+      reservations.erase(it);
+      return;
+    }
+  }
   std::free(reinterpret_cast<void *>(ptr));
+}
+uintptr_t ObjectDevice::reserveDevice(size_t maxBytes, size_t committedBytes) {
+  POLYINVOKE_TRACE();
+  if (committedBytes == 0 || committedBytes > maxBytes)
+    throw std::invalid_argument(fmt::format("committed size {} is outside (0, {}]", committedBytes, maxBytes));
+#ifdef _WIN32
+  void *base = VirtualAlloc(nullptr, maxBytes, MEM_RESERVE, PAGE_READWRITE);
+  if (!base || !VirtualAlloc(base, committedBytes, MEM_COMMIT, PAGE_READWRITE)) {
+    if (base) VirtualFree(base, 0, MEM_RELEASE);
+    throw std::bad_alloc();
+  }
+#else
+  void *base = mmap(nullptr, maxBytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+  if (base == MAP_FAILED) throw std::bad_alloc();
+#endif
+  const auto handle = reinterpret_cast<uintptr_t>(base);
+  const std::lock_guard lock(reservationsMutex);
+  reservations.emplace(handle, Reservation{maxBytes, committedBytes});
+  return handle;
+}
+void ObjectDevice::growDevice(uintptr_t handle, size_t committedBytes) {
+  POLYINVOKE_TRACE();
+  const std::lock_guard lock(reservationsMutex);
+  const auto it = reservations.find(handle);
+  if (it == reservations.end()) throw std::invalid_argument(fmt::format("{} is not a growable allocation", handle));
+  if (committedBytes > it->second.reserved)
+    throw std::length_error(
+        fmt::format("device heap growth to {} bytes exceeds the limit of {} bytes", committedBytes, it->second.reserved));
+  if (committedBytes <= it->second.committed) return;
+#ifdef _WIN32
+  if (!VirtualAlloc(reinterpret_cast<void *>(handle), committedBytes, MEM_COMMIT, PAGE_READWRITE)) throw std::bad_alloc();
+#endif
+  it->second.committed = committedBytes;
 }
 
 std::optional<void *> ObjectDevice::mallocShared(size_t size, Access access) {

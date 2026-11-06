@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <cstring>
@@ -71,19 +72,22 @@ inline void bindAssertError(invoke::ArgBuffer &buffer, const bool asserts, uintp
 
 inline void appendArgTerminator(invoke::ArgBuffer &buffer) { buffer.append(invoke::Type::Void, nullptr); }
 
-inline uintptr_t allocAssertBuffer() {
-  const auto errDev = currentDevice->mallocDevice(assertBufferBytes, Access::RW);
-  const std::vector<uint8_t> zero(assertBufferBytes, 0);
-  currentQueue->enqueueHostToDeviceAsyncTyped(zero.data(), errDev, assertBufferBytes, {});
-  currentQueue->enqueueWaitBlocking();
-  return errDev;
-}
+POLYREGION_RT_PROTECT POLYREGION_EXPORT uintptr_t acquireErrorBlock(ExecutionContext &context);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT void releaseErrorBlock(ExecutionContext &context, uintptr_t block, bool dirty);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT void discardErrorBlock(ExecutionContext &context, uintptr_t block);
 
-inline AssertReason readAssertBuffer(const uintptr_t errDev) {
+inline uintptr_t allocAssertBuffer(ExecutionContext &context) { return acquireErrorBlock(context); }
+
+inline AssertReason readAssertBuffer(ExecutionContext &context, const uintptr_t errDev) {
   std::vector<uint8_t> buf(assertBufferBytes, 0);
-  currentQueue->enqueueDeviceToHostAsyncTyped(errDev, buf.data(), assertBufferBytes, {});
-  currentQueue->enqueueWaitBlocking();
-  currentDevice->freeDevice(errDev);
+  try {
+    context.queue->enqueueDeviceToHostAsyncTyped(errDev, buf.data(), assertBufferBytes, {});
+    context.wait();
+  } catch (...) {
+    discardErrorBlock(context, errDev);
+    throw;
+  }
+  releaseErrorBlock(context, errDev, std::any_of(buf.begin(), buf.end(), [](const uint8_t byte) { return byte != 0; }));
   return decodeAssertBuffer(buf.data());
 }
 

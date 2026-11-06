@@ -38,6 +38,8 @@ public:
   POLYREGION_EXPORT bool singleEntryPerModule() override;
   POLYREGION_EXPORT uintptr_t mallocDevice(size_t size, Access access) override;
   POLYREGION_EXPORT void freeDevice(uintptr_t ptr) override;
+  POLYREGION_EXPORT uintptr_t reserveDevice(size_t maxBytes, size_t committedBytes) override;
+  POLYREGION_EXPORT void growDevice(uintptr_t handle, size_t committedBytes) override;
   POLYREGION_EXPORT std::optional<void *> mallocShared(size_t size, Access access) override;
   POLYREGION_EXPORT void freeShared(void *ptr) override;
   POLYREGION_EXPORT size_t maxThreadsPerBlock() override;

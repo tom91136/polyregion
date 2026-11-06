@@ -60,16 +60,14 @@ POLYREGION_RT_PROTECT inline auto stdRemoteAlloc() {
 POLYREGION_RT_PROTECT inline auto stdRemoteRead() {
   return [](void *dst, const uintptr_t src, const size_t srcOffset, const size_t size) {
     log(DebugLevel::Debug, "Local %p <|[%4zu]- Remote [%p + %4zu]", dst, size, reinterpret_cast<void *>(src), srcOffset);
-    currentQueue->enqueueDeviceToHostAsync(src, srcOffset, dst, size, {});
-    currentQueue->enqueueWaitBlocking();
+    copyToHost(*currentQueue, src, srcOffset, dst, size);
   };
 }
 
 POLYREGION_RT_PROTECT inline auto stdRemoteWrite() {
   return [](const void *src, const uintptr_t dst, const size_t dstOffset, const size_t size) {
     log(DebugLevel::Debug, "Local %p -[%4zu]|> Remote [%p + %4zu]", src, size, reinterpret_cast<void *>(dst), dstOffset);
-    currentQueue->enqueueHostToDeviceAsync(src, dst, dstOffset, size, {});
-    currentQueue->enqueueWaitBlocking();
+    copyToDevice(*currentQueue, src, dst, dstOffset, size);
   };
 }
 
@@ -139,21 +137,49 @@ POLYREGION_RT_PROTECT inline void mapReadwrite(SMA &sma, void *origin, const ptr
   sma.invalidateLocal(origin);
 }
 
-struct ArenaImage {
-  uintptr_t base;
-  std::vector<ArenaRemote> remotes;
+POLYREGION_RT_PROTECT POLYREGION_EXPORT ArenaPlacement arenaPlacementOf(void *context);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT ArenaPlacement currentArenaPlacement();
+
+class ContextTransaction {
+  void *context = polyrt_context_current();
+
+public:
+  ContextTransaction() {
+    if (context) polyrt_context_acquire_or_throw(context);
+  }
+  ~ContextTransaction() {
+    if (context) polyrt_context_release(context);
+  }
+  ContextTransaction(const ContextTransaction &) = delete;
+  ContextTransaction &operator=(const ContextTransaction &) = delete;
 };
 
-// lays the capture graph into the device arena, pointers rewritten to arena offsets, with the capture at offset 0
+struct ArenaImage {
+  uintptr_t base = 0;
+  int64_t root = 0;
+};
+
+// lays the capture graph into the device arena, pointers rewritten to arena offsets, with the capture at the window root
 template <typename SMA>
 POLYREGION_RT_PROTECT inline ArenaImage arenaMarshal(SMA &sma, const void *capture, const runtime::TypeLayout &layout,
-                                                     const RemoteRangeOf &remoteOf) {
+                                                     ArenaPlacement placement) {
+  sma.genArenaAdopt(std::move(placement));
   sma.genArenaReset();
   sma.genArenaObjectSlack = invoke::overReadPadBytes(currentDevice->features());
-  sma.genArenaRemoteOf = remoteOf;
   sma.genArenaMirror(static_cast<const char *>(capture), 1, 1, layout, sizeof(uintptr_t), layout.sizeInBytes);
-  sma.genArenaRemoteOf = {};
-  return {sma.genArenaFinish(), sma.genArenaRemotes};
+  const auto base = sma.genArenaFinish();
+  return {base, static_cast<int64_t>(sma.genArenaWindow)};
+}
+
+// a module that declares the typed views binds the one arena buffer to each, led by the offset of the capture within it
+POLYREGION_RT_PROTECT inline void bindArena(invoke::ArgBuffer &buffer, const uintptr_t base, const int64_t root, const bool views) {
+  auto pointer = base;
+  if (views) {
+    auto offset = root;
+    buffer.append(invoke::Type::IntS64, &offset);
+  }
+  for (int i = 0; i < (views ? arenaViewCount : 1); ++i)
+    buffer.append(invoke::Type::Ptr, &pointer);
 }
 
 // the SMA of the library that hosts this runtime, for launches whose captures the runtime marshals itself
@@ -164,8 +190,9 @@ struct CaptureMarshal {
   virtual void readAlloc(const void *local) = 0;
   virtual uintptr_t mirror(const void *capture, const runtime::TypeLayout &layout) = 0;
   virtual void readMirror(void *capture) = 0;
-  virtual ArenaImage arena(const void *capture, const runtime::TypeLayout &layout, const RemoteRangeOf &remoteOf) = 0;
+  virtual ArenaImage arena(const void *capture, const runtime::TypeLayout &layout, ArenaPlacement placement) = 0;
   virtual void readArena() = 0;
+  virtual void releaseArena() = 0;
 };
 
 template <typename SMA> class CaptureMarshalOf final : public CaptureMarshal {
@@ -181,10 +208,11 @@ public:
     sma.syncRemoteToLocalAfterLaunch(capture);
     sma.disassociate(capture);
   }
-  ArenaImage arena(const void *capture, const runtime::TypeLayout &layout, const RemoteRangeOf &remoteOf) override {
-    return arenaMarshal(sma, capture, layout, remoteOf);
+  ArenaImage arena(const void *capture, const runtime::TypeLayout &layout, ArenaPlacement placement) override {
+    return arenaMarshal(sma, capture, layout, std::move(placement));
   }
   void readArena() override { sma.genArenaReadback(); }
+  void releaseArena() override { sma.releaseArenaGuards(); }
 };
 
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void registerCaptureMarshal(CaptureMarshal *marshal);

@@ -967,4 +967,126 @@ class StructuredExitSuite extends munit.FunSuite {
     )
     intercept[RuntimeException](StructuredExit(program(entry(body = List(loop, ret))), NoopLog))
   }
+
+  private def barrierStmt: p.Stmt =
+    p.Stmt.Var(named("_b", p.Type.Unit0), Some(p.Expr.SpecOp(p.Spec.GpuBarrierLocal)), isMutable = false)
+
+  private def elementLoop(count: Int, element: p.Named => List[p.Stmt]): p.Stmt = {
+    val i = named("i", i32)
+    p.Stmt.ForRange(i, p.Term.IntS32Const(0), p.Term.IntS32Const(count), p.Term.IntS32Const(1), element(i))
+  }
+
+  private def runArray(count: Int, body: List[p.Stmt]): (List[Long], (Int, String)) = {
+    val arr     = named("arr", p.Type.Ptr(i32, g))
+    val lowered = lower(List(p.Arg(arr)), body :+ ret)
+    val vm      = Interpreter.Vm(lowered)
+    val a       = vm.alloc(4L * count)
+    val err     = vm.alloc(4L + limit)
+    val args = lowered.entry.args.map { arg =>
+      arg.named.symbol match {
+        case p.Conventions.ErrorArg => errT               -> V.I(err)
+        case _                      => p.Type.Ptr(i32, g) -> V.I(a)
+      }
+    }
+    vm.call(p.Conventions.EntryName, args)
+    (0 until count).map(k => i32At(vm, a + 4L * k)).toList -> decode(vm, err)
+  }
+
+  test("an assert in an element body ends that element and the loop continues") {
+    val arr = named("arr", p.Type.Ptr(i32, g))
+    val t   = named("t", i32)
+    val c   = named("c", p.Type.Bool1)
+    val loop = elementLoop(
+      4,
+      i =>
+        List(
+          StructuredExit.elementBoundary(
+            List(
+              p.Stmt.Var(t, Some(p.Expr.IntrOp(p.Intr.Add(selectT(i), p.Term.IntS32Const(1), i32)))),
+              p.Stmt.Update(selectT(arr), selectT(i), selectT(t)),
+              p.Stmt.Var(c, Some(p.Expr.IntrOp(p.Intr.LogicEq(selectT(i), p.Term.IntS32Const(1))))),
+              p.Stmt.Cond(selectT(c), List(assertStmt(msg = "element")), Nil),
+              p.Stmt.Update(selectT(arr), selectT(i), p.Term.IntS32Const(100))
+            )
+          )
+        )
+    )
+    val (cells, error) = runArray(4, List(loop))
+    assertEquals(cells, List(100L, 2L, 100L, 100L))
+    assertEquals(error, (p.Enums.AssertCode.Assert.value, "element"))
+  }
+
+  test("code after an element boundary runs on the asserting lane") {
+    val arr = named("arr", p.Type.Ptr(i32, g))
+    val (cells, error) = runArray(
+      2,
+      List(
+        StructuredExit.elementBoundary(List(assertStmt(msg = "first"))),
+        p.Stmt.Update(selectT(arr), p.Term.IntU32Const(0), p.Term.IntS32Const(7))
+      )
+    )
+    assertEquals(cells, List(7L, 0L))
+    assertEquals(error, (p.Enums.AssertCode.Assert.value, "first"))
+  }
+
+  test("an element boundary leaves no structured exit state in an entry that never asserts") {
+    val arr = named("arr", p.Type.Ptr(i32, g))
+    val out = lower(
+      List(p.Arg(arr)),
+      List(
+        elementLoop(
+          2,
+          i =>
+            List(StructuredExit.elementBoundary(List(p.Stmt.Update(selectT(arr), selectT(i), p.Term.IntS32Const(1)))))
+        ),
+        ret
+      )
+    )
+    assertEquals(out.collectWhere[p.Stmt] { case t: p.Stmt.Try => t }, Nil)
+    assertEquals(out.entry.args.map(_.named), List(arr))
+  }
+
+  test("a raise escaping an element is reported, cleaned up, and the loop continues") {
+    val c = named("c", p.Type.Bool1)
+    val body = List(
+      elementLoop(
+        3,
+        i =>
+          List(
+            p.Stmt.Var(c, Some(p.Expr.IntrOp(p.Intr.LogicEq(selectT(i), p.Term.IntS32Const(1))))),
+            StructuredExit.elementBoundary(
+              p.Stmt.Cond(selectT(c), List(raise(selectT(i), "int", append(7, "Cleanup"))), Nil) :: append(2, "Tail")
+            )
+          )
+      )
+    )
+    assertEquals(runOutBody(body), 272L -> (p.Enums.AssertCode.Exception.value, "int"))
+  }
+
+  test("a handled raise inside an element stays handled and reports nothing") {
+    val body = List(
+      StructuredExit.elementBoundary(
+        p.Stmt.Try(
+          List(raise(p.Term.IntS32Const(5), "int")),
+          List(handler(Some(i32), None, append(1, "Handled"), Some("int"))),
+          Nil
+        ) :: append(2, "Tail")
+      )
+    )
+    assertEquals(runOutBody(body), 12L -> (0, ""))
+  }
+
+  test("an element body holding a barrier is not a boundary") {
+    val arr = named("arr", p.Type.Ptr(i32, g))
+    val (cells, _) = runArray(
+      1,
+      List(
+        StructuredExit.elementBoundary(List(assertStmt(), barrierStmt)),
+        p.Stmt.Update(selectT(arr), p.Term.IntU32Const(0), p.Term.IntS32Const(7))
+      )
+    )
+    assertEquals(cells, List(0L))
+    val loop = elementLoop(2, _ => List(StructuredExit.elementBoundary(List(assertStmt(), barrierStmt))))
+    intercept[RuntimeException](StructuredExit(program(entry(body = List(loop, ret))), NoopLog))
+  }
 }

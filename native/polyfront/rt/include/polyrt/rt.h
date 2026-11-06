@@ -1,10 +1,13 @@
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <map>
+#include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <vector>
 
@@ -28,21 +31,62 @@ using invoke::Platform;
 using invoke::ModuleFormat;
 using invoke::PlatformKind;
 
+struct HeapCounters {
+  std::atomic<uint64_t> live{}, committed{}, growths{};
+};
+
+class DeviceHeap;
+
 struct ExecutionContext {
-  ExecutionContext(Platform *platform, Device *device, DeviceQueue *queue) : platform(platform), device(device), queue(queue) {}
+  ExecutionContext(Platform *platform, Device *device, DeviceQueue *queue);
   ~ExecutionContext();
 
   Platform *platform;
   Device *device;
   DeviceQueue *queue;
   std::recursive_mutex transaction;
+  std::shared_ptr<std::shared_mutex> arenaMutex = std::make_shared<std::shared_mutex>();
   struct RemoteAllocation {
     size_t bytes;
     bool cleanupPending = false;
   };
   std::map<uintptr_t, RemoteAllocation> remoteAllocations;
   std::vector<std::vector<uintptr_t>> temporaryAllocationScopes;
+  std::vector<uintptr_t> errorBlocks;
+
+  struct Counters {
+    std::atomic<uint64_t> launches{}, arenaLaunches{}, arenaWindowMoves{}, d2dCopies{}, h2dCopies{}, d2hCopies{}, waits{}, remoteMallocs{};
+  } counters;
+  HeapCounters heapCounters;
+  std::unique_ptr<DeviceHeap> heap;
+  bool heapResolved = false;
+  std::atomic<bool> heapActive{false};
+
+  void wait() {
+    counters.waits.fetch_add(1, std::memory_order_relaxed);
+    queue->enqueueWaitBlocking();
+  }
+  void settle() {
+    if (!queue->quiescent()) wait();
+  }
+  void copyDeviceToDevice(uintptr_t src, size_t srcOffset, uintptr_t dst, size_t dstOffset, size_t bytes) {
+    counters.d2dCopies.fetch_add(1, std::memory_order_relaxed);
+    queue->enqueueDeviceToDeviceAsync(src, srcOffset, dst, dstOffset, bytes, {});
+  }
+  void copyHostToDevice(const void *src, uintptr_t dst, size_t dstOffset, size_t bytes) {
+    counters.h2dCopies.fetch_add(1, std::memory_order_relaxed);
+    queue->enqueueHostToDeviceAsync(src, dst, dstOffset, bytes, {});
+  }
+  void copyDeviceToHost(uintptr_t src, size_t srcOffset, void *dst, size_t bytes) {
+    counters.d2hCopies.fetch_add(1, std::memory_order_relaxed);
+    queue->enqueueDeviceToHostAsync(src, srcOffset, dst, bytes, {});
+  }
 };
+
+POLYREGION_RT_PROTECT POLYREGION_EXPORT void settleQueue(DeviceQueue &queue);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT void copyToDevice(DeviceQueue &queue, const void *src, uintptr_t dst, size_t dstOffset,
+                                                          size_t bytes);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT void copyToHost(DeviceQueue &queue, uintptr_t src, size_t srcOffset, void *dst, size_t bytes);
 
 POLYREGION_RT_PROTECT POLYREGION_EXPORT extern std::unique_ptr<Platform> currentPlatform;
 POLYREGION_RT_PROTECT POLYREGION_EXPORT extern std::unique_ptr<Device> currentDevice;
@@ -81,7 +125,13 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_context_release_or_throw(voi
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_record_operator_new(size_t size);
 
 extern "C" {
+struct PolyrtStats {
+  uint64_t launches, arenaLaunches, arenaWindowMoves, d2dCopies, h2dCopies, d2hCopies, waits, remoteMallocs;
+  uint64_t heapBytesLive, heapBytesCommitted, heapGrowths;
+};
+
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_context_current();
+POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_stats(void *context, PolyrtStats *stats) noexcept;
 POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_context_available(void *context, const char *site) noexcept;
 // True means success. A failed status call leaves a thread-local diagnostic until the next status call on that thread.
 POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_context_acquire(void *context) noexcept;

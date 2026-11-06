@@ -342,6 +342,7 @@ std::vector<std::string> VulkanDevice::features() {
   if (f8.storageBuffer8BitAccess) out.emplace_back("storage8");
   if (f8.uniformAndStorageBuffer8BitAccess) out.emplace_back("uniform8");
   out.emplace_back(fmt::format("paging:{}", magic_enum::enum_name(pagingMode())));
+  out.emplace_back(fmt::format("{}:{}", StorageAlignFeature, heapLimits()->alignment));
   // XXX lavapipe's unpredicated SIMD-remainder lanes over-read past buffer/arena ends; pad like the OpenCL path (cl_platform.cpp
   // resolveQuirks)
   if (lavapipe) out.emplace_back(fmt::format("{}:{}", OverReadPadFeature, 4096));
@@ -375,8 +376,9 @@ static polyregion::invoke::vulkan::details::MemObject allocate(VmaAllocator &all
   VmaAllocation allocation{};
   VmaAllocationInfo allocInfo;
   if (const VkResult r = vmaCreateBuffer(allocator, &bufferInfo, &allocCreateInfo, &buffer, &allocation, &allocInfo); r != VK_SUCCESS)
-    POLYINVOKE_FATAL(PREFIX, "vmaCreateBuffer failed for %zu bytes (VkResult %d); likely exceeds the device maxMemoryAllocationSize", size,
-                     static_cast<int>(r));
+    throw std::runtime_error(fmt::format("{}: vmaCreateBuffer failed for {} bytes (VkResult {}); likely exceeds the device memory or its "
+                                         "maxMemoryAllocationSize",
+                                         PREFIX, size, static_cast<int>(r)));
   return {vk::Buffer(buffer), allocation, allocInfo.pMappedData, size};
 }
 
@@ -398,6 +400,56 @@ void VulkanDevice::freeDevice(uintptr_t ptr) {
     vmaDestroyBuffer(allocator, VkBuffer(obj->value->buffer), obj->value->allocation);
     memoryObjects.erase(ptr);
   } else POLYINVOKE_FATAL(PREFIX, "Illegal memory object: %" PRIuPTR, ptr);
+}
+
+std::optional<HeapLimits> VulkanDevice::heapLimits() {
+  POLYINVOKE_TRACE();
+  const auto props = device.getProperties();
+  size_t maxBytes = deviceMaxAllocSize;
+  const auto exts = device.enumerateDeviceExtensionProperties();
+  if (props.apiVersion >= VK_API_VERSION_1_3
+      || exts ^ exists([](const auto &e) { return std::strcmp(e.extensionName, VK_KHR_MAINTENANCE_4_EXTENSION_NAME) == 0; }))
+    maxBytes = std::min<size_t>(maxBytes, device.getProperties2<vk::PhysicalDeviceProperties2, vk::PhysicalDeviceMaintenance4Properties>()
+                                              .get<vk::PhysicalDeviceMaintenance4Properties>()
+                                              .maxBufferSize);
+  constexpr size_t widestScalarView = 8, vectorAccess = 16;
+  return HeapLimits{maxBytes, std::max<size_t>({props.limits.minStorageBufferOffsetAlignment, vectorAccess, widestScalarView})};
+}
+
+uintptr_t VulkanDevice::reserveDevice(size_t maxBytes, size_t committedBytes) {
+  POLYINVOKE_TRACE();
+  if (const auto limit = heapLimits()->maxBytes; maxBytes > limit)
+    throw std::length_error(
+        fmt::format("{}: device heap of {} bytes exceeds the device limit of {} bytes (maxMemoryAllocationSize)", PREFIX, maxBytes, limit));
+  if (committedBytes == 0 || committedBytes > maxBytes)
+    throw std::invalid_argument(fmt::format("{}: committed size {} is outside (0, {}]", PREFIX, committedBytes, maxBytes));
+  return memoryObjects.reserve(
+      maxBytes, committedBytes,
+      std::make_shared<polyregion::invoke::vulkan::details::MemObject>(allocate(allocator, committedBytes, false)));
+}
+
+void VulkanDevice::growDevice(uintptr_t handle, size_t committedBytes) {
+  POLYINVOKE_TRACE();
+  const std::lock_guard lock(growMutex);
+  const auto current = memoryObjects.query(handle);
+  const auto reserved = memoryObjects.reservedSize(handle);
+  if (!current || !reserved || current->offset != 0)
+    throw std::invalid_argument(fmt::format("{}: {} is not a growable allocation", PREFIX, handle));
+  if (committedBytes > *reserved)
+    throw std::length_error(fmt::format("{}: device heap growth to {} bytes exceeds the limit of {} bytes (maxMemoryAllocationSize)",
+                                        PREFIX, committedBytes, *reserved));
+  const auto committed = current->remaining;
+  if (committedBytes <= committed) return;
+  auto grown = std::make_shared<polyregion::invoke::vulkan::details::MemObject>(allocate(allocator, committedBytes, false));
+  try {
+    std::memcpy(grown->mappedData, current->value->mappedData, committed);
+    vmaFlushAllocation(allocator, grown->allocation, 0, committed);
+    memoryObjects.commit(handle, committedBytes, grown);
+  } catch (...) {
+    vmaDestroyBuffer(allocator, VkBuffer(grown->buffer), grown->allocation);
+    throw;
+  }
+  vmaDestroyBuffer(allocator, VkBuffer(current->value->buffer), current->value->allocation);
 }
 
 std::optional<void *> VulkanDevice::mallocShared(size_t size, Access access) {
@@ -550,14 +602,19 @@ void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
   vk::SpecializationInfo specInfo(specEntries.size(), specEntries.data(), //
                                   specValues.size() * sizeof(uint32_t), specValues.data());
 
-  auto pipe = ctx.createComputePipeline( //
-      fn.pipeCache,                      //
-      vk::ComputePipelineCreateInfo(     //
-          {},                            //
-          {{}, vk::ShaderStageFlagBits::eCompute, **fn.shaderModule, symbol.c_str(), &specInfo},
-          *fn.pipeLayout //
-          )              //
-  );
+  auto &cached = fn.pipelines[specValues];
+  if (!cached) {
+    cached = std::make_shared<vk::raii::Pipeline>(ctx.createComputePipeline( //
+        fn.pipeCache,                                                        //
+        vk::ComputePipelineCreateInfo(                                       //
+            {},                                                              //
+            {{}, vk::ShaderStageFlagBits::eCompute, **fn.shaderModule, symbol.c_str(), &specInfo},
+            *fn.pipeLayout //
+            )              //
+        ));
+    pipelineCount++;
+  }
+  const auto pipe = cached;
 
   const auto writeDsSets = infos                        //
                            | zip_with_index<uint32_t>() //
@@ -570,7 +627,7 @@ void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
 
   auto beginInfo = vk::CommandBufferBeginInfo();
   fn.cmdBuffer.begin(beginInfo);
-  fn.cmdBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, *pipe);
+  fn.cmdBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, **pipe);
   fn.cmdBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, *fn.pipeLayout, 0, *fn.dscSet, {});
 
   fn.cmdBuffer.dispatch(global.x, global.y, global.z);
@@ -578,7 +635,7 @@ void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
 
   if (cb) {
     auto [key, enqueued] = enqueuedStore.store(std::make_shared<polyregion::invoke::vulkan::details::Enqueued>(
-        polyregion::invoke::vulkan::details::Enqueued{std::move(pipe), ctx.createFence(vk::FenceCreateInfo()), std::move(argObj)}));
+        polyregion::invoke::vulkan::details::Enqueued{pipe, ctx.createFence(vk::FenceCreateInfo()), std::move(argObj)}));
 
     computeQueue.submit(vk::SubmitInfo{{}, {}, *fn.cmdBuffer}, *(enqueued->fence));
     callbackQueue.push([this, &fn, cb, key = key]() {
@@ -607,3 +664,5 @@ void VulkanDeviceQueue::enqueueWaitBlocking() {
   POLYINVOKE_TRACE();
   ctx.waitIdle();
 }
+bool VulkanDeviceQueue::quiescent() { return enqueuedStore.empty(); }
+size_t VulkanDeviceQueue::pipelineCreations() const { return pipelineCount; }

@@ -802,6 +802,13 @@ __supports_sub_group_size(const sycl::queue&, std::size_t)
     "        else\n        {\n            return __sycl_buf.get_host_access"
     "  private:\n    bool\n    is_USM() const"
     "        else\n        {\n            return *(__scratch_buf.get() + __scratch_n + _Idx);\n        }\n    }\n\n")
+  # A by-value brick is a work-item-local copy of the user's capture, which logical addressing (Vulkan)
+  # cannot hold once the capture carries a pointer; the strided loop only calls it, so pass it by reference.
+  copy_and_replace_literal(
+    "oneapi/dpl/pstl/hetero/dpcpp/parallel_backend_sycl_utils.h"
+    [=[std::uint16_t __stride, _LoopBodyOp __loop_body_op,]=]
+    [=[std::uint16_t __stride, const _LoopBodyOp& __loop_body_op,]=]
+    2)
 else()
   message(FATAL_ERROR "unsupported Spectra package overlay backend: ${BACKEND}")
 endif()

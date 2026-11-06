@@ -1,6 +1,10 @@
 #pragma once
 
+#include <atomic>
+#include <map>
+#include <mutex>
 #include <thread>
+#include <vector>
 
 #include "polyregion/compat.h"
 
@@ -58,6 +62,8 @@ struct Resolved {
   vk::raii::CommandPool cmdPool;
   vk::raii::CommandBuffer cmdBuffer;
 
+  std::map<std::vector<uint32_t>, std::shared_ptr<vk::raii::Pipeline>> pipelines;
+
   Resolved(uint32_t computeQueueId,
            const std::shared_ptr<vk::raii::ShaderModule> &shaderModule, //
            const std::vector<vk::DescriptorSetLayoutBinding> &bindings, //
@@ -73,7 +79,7 @@ struct MemObject {
 };
 
 struct Enqueued {
-  vk::raii::Pipeline pipeline;
+  std::shared_ptr<vk::raii::Pipeline> pipeline;
   vk::raii::Fence fence;
   std::shared_ptr<MemObject> argObject;
 };
@@ -111,6 +117,7 @@ class POLYREGION_EXPORT VulkanDevice final : public Device {
 
   details::VulkanModuleStore store;
   detail::MemoryObjects<details::VkMemObject> memoryObjects;
+  std::mutex growMutex;
 
 public:
   explicit VulkanDevice(vk::raii::Instance &instance,              //
@@ -136,6 +143,9 @@ public:
   POLYREGION_EXPORT std::optional<size_t> arenaViewStart(const std::string &name) override;
   POLYREGION_EXPORT uintptr_t mallocDevice(size_t size, Access access) override;
   POLYREGION_EXPORT void freeDevice(uintptr_t ptr) override;
+  POLYREGION_EXPORT std::optional<HeapLimits> heapLimits() override;
+  POLYREGION_EXPORT uintptr_t reserveDevice(size_t maxBytes, size_t committedBytes) override;
+  POLYREGION_EXPORT void growDevice(uintptr_t handle, size_t committedBytes) override;
   POLYREGION_EXPORT std::optional<void *> mallocShared(size_t size, Access access) override;
   POLYREGION_EXPORT void freeShared(void *ptr) override;
   POLYREGION_EXPORT std::unique_ptr<DeviceQueue> createQueue(const std::chrono::duration<int64_t> &timeout) override;
@@ -155,6 +165,7 @@ class POLYREGION_EXPORT VulkanDeviceQueue final : public DeviceQueue {
   detail::BlockingQueue<std::function<void()>> callbackQueue;
   std::thread callbackThread;
   std::shared_ptr<details::MemObject> nullObject;
+  std::atomic<size_t> pipelineCount{0};
 
   void enqueueCallback(const MaybeCallback &cb);
 
@@ -175,6 +186,8 @@ public:
   POLYREGION_EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
                                             std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) override;
   POLYREGION_EXPORT void enqueueWaitBlocking() override;
+  [[nodiscard]] POLYREGION_EXPORT bool quiescent() override;
+  [[nodiscard]] POLYREGION_EXPORT size_t pipelineCreations() const;
 };
 
 } // namespace polyregion::invoke::vulkan

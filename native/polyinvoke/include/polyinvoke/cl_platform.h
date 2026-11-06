@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -66,6 +67,7 @@ public:
   std::optional<cl_int> mapForHost(void *ptr, const Map &map);
   cl_int mapAllForHost(const Map &map);
   cl_int unmapAllForDevice(const Unmap &unmap);
+  bool anyDeviceOwned() const;
   std::vector<void *> pointers() const;
   std::optional<Ownership> ownership(void *ptr) const;
   bool freeReleasesHostMap() const;
@@ -140,6 +142,7 @@ class POLYREGION_EXPORT ClDeviceQueue final : public DeviceQueue {
   std::shared_ptr<details::SVMTracker> svmTracker;
   void *nullArgStub = nullptr;
   cl_mem nullArgBuffer = {};
+  std::atomic<bool> pending = false;
 
   void enqueueCallback(const MaybeCallback &cb, cl_event event);
   void *ensureNullArgStub();
@@ -165,6 +168,7 @@ public:
                                             std::vector<std::byte> argData, //
                                             const Policy &policy, const MaybeCallback &cb) override;
   POLYREGION_EXPORT void enqueueWaitBlocking() override;
+  [[nodiscard]] POLYREGION_EXPORT bool quiescent() override;
 };
 
 } // namespace polyregion::invoke::cl

@@ -22,4 +22,8 @@ template <class R, class... A> struct [[clang::annotate("polyregion_callable_var
 #define SPECTRA_VARIANT "thrust"
 #include <polyregion/spectra/implementation/thrust.hpp>
 
-#include "export_instantiations.inc"
+#ifdef SPECTRA_CORE
+  #include "core.inc"
+#else
+  #include "export_instantiations.inc"
+#endif

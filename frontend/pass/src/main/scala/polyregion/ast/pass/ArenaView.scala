@@ -22,6 +22,8 @@ private[pass] object LogicalArenaViewAbi {
     ).zipWithIndex
       .map((tpe, index) => p.Named(s"#av$index", p.Type.Ptr(tpe, Global)))
 
+  val rootBinding: p.Named = p.Named("#aroot", p.Type.IntS64)
+
   val addressBinding: p.Named = bindings
     .collectFirst { case binding @ p.Named(_, p.Type.Ptr(p.Type.IntS64, p.Type.Space.Global), _) =>
       binding
@@ -37,12 +39,12 @@ private[pass] object LogicalArenaViewAbi {
 }
 
 // generic single-arena lowering for logical SPIR-V (Vulkan glcompute): no flat address space, no int<->ptr
-// cast, no pointer load/store/offset. the capture sits at arena offset 0 and every pointer is an i64 byte
-// offset; each deref reads/writes through a fixed roster of typed scalar "view" descriptors indexed by
+// cast, no pointer load/store/offset. the capture sits at the arena offset passed as `#aroot` and every pointer is an
+// i64 byte offset; each deref reads/writes through a fixed roster of typed scalar "view" descriptors indexed by
 // `offset / sizeof(elem)`, the only legal access form. pointer struct fields are retyped to i64 so an arena
 // object's `_M_p` and a local iterator's `_M_current` are uniform
 // examples:
-//   cap                         ->  0                                      // capture is arena offset 0
+//   cap                         ->  #aroot                                 // capture is the root offset argument
 //   cap.x   (scalar field)      ->  view_i32[offsetof(cap, x) / 4]         // read/write via the typed view
 //   p[i]    (p arena offset)    ->  view_T[(p + i*sizeof T) / sizeof T]    // arena-relative deref
 //   it._M_current               ->  the i64 offset directly (field retyped)
@@ -1123,7 +1125,8 @@ object ArenaView extends ProgramPass {
       // The dispatch binds one arena buffer through this canonical typed-view ABI. Float16 needs its own view:
       // PolyAST Cast is numeric, so reading f16 bits through the i16 view would convert rather than reinterpret.
       // Unused views are pruned by the backend.
-      val views = LogicalArenaViewAbi.bindings
+      val views      = LogicalArenaViewAbi.bindings
+      val rootOffset = LogicalArenaViewAbi.rootBinding
 
       def rootedLocally(t: p.Term): Boolean = analysis.provenancesOf(t).exists {
         case _: Provenance.Local => true
@@ -1217,6 +1220,7 @@ object ArenaView extends ProgramPass {
             capN,
             capTpe,
             views,
+            rootOffset,
             analysis,
             isArena,
             f.collectAll[p.Stmt]
@@ -1236,7 +1240,9 @@ object ArenaView extends ProgramPass {
       // a kernel that never reads its capture keeps the (unread) capture argument, so the views are declared exactly
       // when a dispatch must bind them
       val viewArgs =
-        if (usedViews.exists(symbol => views.exists(_.symbol == symbol))) pinnedViews.map(p.Arg(_)) else Nil
+        if (usedViews.exists(symbol => rootOffset.symbol == symbol || views.exists(_.symbol == symbol)))
+          p.Arg(rootOffset) :: pinnedViews.map(p.Arg(_))
+        else Nil
       val receiverCap = f.receiver.exists(_.named == capN) && viewArgs.nonEmpty
       val newArgs =
         if (viewArgs.isEmpty) f.args
@@ -1266,6 +1272,7 @@ object ArenaView extends ProgramPass {
       capN: p.Named,
       capTpe: p.Type.Struct,
       views: List[p.Named],
+      rootOffset: p.Named,
       analysis: AddressRefinement.Solution,
       isArena: p.Named => Boolean,
       mutatedRoots: Set[p.Named]
@@ -1390,7 +1397,7 @@ object ArenaView extends ProgramPass {
 
     def i64Var(n: p.Named): p.Named = p.Named(n.symbol, I64)
     def base(root: p.Named): (p.Term, p.Type) =
-      if (root == capN) (i64(0), capTpe) else (sel(i64Var(root)), pointee(root.tpe))
+      if (root == capN) (sel(rootOffset), capTpe) else (sel(i64Var(root)), pointee(root.tpe))
 
     def rwStep(s: p.PathStep): p.PathStep = s match {
       case p.PathStep.IndexDyn(i) => p.PathStep.IndexDyn(rwTerm(i)); case x: p.PathStep => x
@@ -1486,7 +1493,7 @@ object ArenaView extends ProgramPass {
 
     // the i64 offset value a pointer-typed term denotes
     def ptrValue(t: p.Term): p.Term = t match {
-      case p.Term.Select(root, Nil, _) => if (root == capN) i64(0) else sel(i64Var(root))
+      case p.Term.Select(root, Nil, _) => if (root == capN) sel(rootOffset) else sel(i64Var(root))
       case p.Term.Select(root, steps, _) =>
         lvalueOffset(root, steps) match {
           case Some(off) => loadAt(off, I64)
@@ -1496,7 +1503,7 @@ object ArenaView extends ProgramPass {
     }
 
     def rwTerm(t: p.Term): p.Term = t match {
-      case p.Term.Select(root, Nil, _) if root == capN => i64(0) // the capture itself is arena offset 0
+      case p.Term.Select(root, Nil, _) if root == capN                     => sel(rootOffset)
       case p.Term.Select(root, Nil, _) if isArena(root) && isPtr(root.tpe) => sel(i64Var(root))
       case p.Term.Select(root, Nil, _) if fieldAliases.get(root).exists(x => identityFields(x._1)) =>
         rwTerm(fieldAliases(root)._2)

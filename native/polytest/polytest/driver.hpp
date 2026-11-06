@@ -184,7 +184,8 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
   // child env replaced wholesale; forward overrides + QEMU shim inputs or they vanish
   for (const auto *name : {polyregion::env::PolycppLinkThreads, polyregion::env::PolyfcLinkThreads,           //
                            polyregion::env::PolyinvokeDisableSvm, polyregion::env::PolyinvokeDisableBackends, //
-                           polyregion::env::PolyrtMirror, polyregion::env::PolyregionPassLog,                 //
+                           polyregion::env::PolyrtMirror, polyregion::env::PolyrtStats,                       //
+                           polyregion::env::PolyregionPassLog,                                                //
                            polyregion::env::PolyregionDebug, polyregion::env::PolyinvokeOpenclLib,            //
                            polyregion::env::PolyregionSysroot, polyregion::env::PolyregionBitcodeDir,         //
                            polyregion::env::PolypassPlugins, polyregion::env::PolyregionCacheDir,             //

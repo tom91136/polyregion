@@ -4,6 +4,10 @@
   #define POLYREGION_SPECTRA_EXPORT(name)
   #define POLYREGION_SPECTRA_UNDEF_EXPORT
 #endif
+#ifndef POLYREGION_SPECTRA_CORE_EXPORT
+  #define POLYREGION_SPECTRA_CORE_EXPORT(name)
+  #define POLYREGION_SPECTRA_UNDEF_CORE_EXPORT
+#endif
 
 #include <cstdint>
 
@@ -43,6 +47,28 @@
 #include <thrust/unique.h>
 
 namespace spectra::implementation {
+
+template <class F, class... Args>
+[[clang::annotate("__polyregion_element")]] __host__ __device__ decltype(auto) element(F &f, Args... args) {
+  return f(args...);
+}
+
+template <class T, class Map> struct element_map {
+  Map map;
+  __host__ __device__ T operator()(std::int64_t i) const { return element(map, i); }
+};
+
+template <class Body> void core_for_each(std::int64_t n, Body body) {
+  thrust::for_each_n(thrust::device, thrust::counting_iterator<std::int64_t>(0), n,
+                     [=] __host__ __device__(std::int64_t i) { element(body, i); });
+}
+
+template <class T, class Map, class Combine>     //
+POLYREGION_SPECTRA_CORE_EXPORT(transform_reduce) //
+    T core_transform_reduce(std::int64_t n, T init, Map map, Combine combine) {
+  return thrust::transform_reduce(thrust::device, thrust::counting_iterator<std::int64_t>(0), thrust::counting_iterator<std::int64_t>(n),
+                                  element_map<T, Map>{map}, init, combine);
+}
 
 template <class T, class Op>                   //
 POLYREGION_SPECTRA_EXPORT(adjacent_difference) //
@@ -531,4 +557,8 @@ POLYREGION_SPECTRA_EXPORT(upper_bound) //
 #ifdef POLYREGION_SPECTRA_UNDEF_EXPORT
   #undef POLYREGION_SPECTRA_UNDEF_EXPORT
   #undef POLYREGION_SPECTRA_EXPORT
+#endif
+#ifdef POLYREGION_SPECTRA_UNDEF_CORE_EXPORT
+  #undef POLYREGION_SPECTRA_UNDEF_CORE_EXPORT
+  #undef POLYREGION_SPECTRA_CORE_EXPORT
 #endif

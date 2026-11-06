@@ -272,7 +272,7 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
   log(DebugLevel::Debug, "<%s:%s:%zu> localMemBytes=%zu", __func__, moduleId, threadsPerBlock, localMemBytes);
 
   using namespace invoke;
-  uintptr_t errDev = asserts ? polyrt::allocAssertBuffer() : 0;
+  uintptr_t errDev = asserts ? polyrt::allocAssertBuffer(*polyrt::currentContext()) : 0;
   const auto launch = [&](ArgBuffer &buffer) {
     polyrt::appendArgTerminator(buffer);
     polyrt::currentQueue->enqueueInvokeAsync(
@@ -282,7 +282,7 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
                threadsPerBlock > 0 ? std::optional{std::pair{Dim3{threadsPerBlock, 1, 1}, localMemBytes}} : std::nullopt},
         {});
     polyrt::currentQueue->enqueueWaitBlocking();
-    if (asserts) polyrt::reportAssert(polyrt::readAssertBuffer(errDev), g_assert, __func__, moduleId);
+    if (asserts) polyrt::reportAssert(polyrt::readAssertBuffer(*polyrt::currentContext(), errDev), g_assert, __func__, moduleId);
   };
 
   const auto mode = polyrt::sma::mirrorModeFor(polyrt::currentDevice->moduleFormat());
@@ -301,14 +301,11 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
 
   if (mode == polyrt::sma::MirrorMode::Arena) {
     // marshal the whole capture graph into one device arena (pointers -> arena offsets)
-    auto arenaBase = reinterpret_cast<void *>(polyrt::sma::arenaMarshal(allocations, captures, *layout, {}).base);
-    // the arena binds where the capture was passed: once per typed view when the module declares them (logical
-    // SPIR-V), otherwise once
-    const int arenaViews = polyrt::currentDevice->arenaViewStart(moduleId) ? polyrt::sma::arenaViewCount : 1;
+    const polyrt::sma::ContextTransaction transaction;
+    const auto arena = polyrt::sma::arenaMarshal(allocations, captures, *layout, polyrt::sma::currentArenaPlacement());
     ArgBuffer buffer;
     polyrt::bindAssertError(buffer, asserts, errDev);
-    for (int i = 0; i < arenaViews; ++i)
-      buffer.append(Type::Ptr, &arenaBase);
+    polyrt::sma::bindArena(buffer, arena.base, arena.root, polyrt::currentDevice->arenaViewStart(moduleId).has_value());
     buffer.append(Type::Ptr, &mpr.devicePartials);
     if (isReduction) buffer.append(Type::Scratch, nullptr);
     launch(buffer);
@@ -387,7 +384,7 @@ static void dispatchHostThreaded(const int64_t lowerBoundInclusive, const int64_
   ManagedPartialReduction mpr(reductions, groups);
   mpr.allocatePartialsAsync();
   using namespace invoke;
-  uintptr_t errDev = asserts ? polyrt::allocAssertBuffer() : 0;
+  uintptr_t errDev = asserts ? polyrt::allocAssertBuffer(*polyrt::currentContext()) : 0;
   ArgBuffer buffer{{Type::IntS64, nullptr}};
   polyrt::bindAssertError(buffer, asserts, errDev);
   buffer.append(Type::Ptr, &captures);
@@ -397,7 +394,7 @@ static void dispatchHostThreaded(const int64_t lowerBoundInclusive, const int64_
   polyrt::currentQueue->enqueueInvokeAsync(moduleId, conventions::EntryName, buffer, Policy{Dim3{groups, 1, 1}},
                                            [&]() { mpr.releaseAndReduce(); });
   polyrt::currentQueue->enqueueWaitBlocking();
-  if (asserts) polyrt::reportAssert(polyrt::readAssertBuffer(errDev), g_assert, __func__, moduleId);
+  if (asserts) polyrt::reportAssert(polyrt::readAssertBuffer(*polyrt::currentContext(), errDev), g_assert, __func__, moduleId);
   if (polyrt::debugLevel() >= DebugLevel::Debug) {
     for (size_t i = 0; i < layout->memberCount; ++i) {
       if (layout->members[i].sizeInBytes == sizeof(void *)) {

@@ -28,6 +28,7 @@
 #include "polyinvoke/object_platform.h"
 #include "polyregion/conventions.h"
 #include "polyregion/show.hpp"
+#include "polyrt/assert_buffer.hpp"
 #include "polyrt/mem.hpp"
 #include "polyrt/rt.h"
 #include "polyrt/sma_runtime.hpp"
@@ -57,6 +58,8 @@ struct StubDevice final : object::ObjectDevice {
   bool reuseRemoteAddress = false;
   uintptr_t reusableRemoteAddress = 0x1000;
   bool packAllocations = false;
+  std::optional<HeapLimits> heap;
+  std::optional<size_t> viewStart;
   std::vector<std::max_align_t> pool = std::vector<std::max_align_t>(256);
   size_t poolUsed = 0;
   size_t sharedAllocs = 0, sharedFrees = 0, remoteAllocs = 0, remoteFrees = 0;
@@ -109,6 +112,8 @@ struct StubDevice final : object::ObjectDevice {
     if (reuseRemoteAddress || packAllocations) return;
     ObjectDevice::freeDevice(ptr);
   }
+  std::optional<HeapLimits> heapLimits() override { return heap; }
+  std::optional<size_t> arenaViewStart(const std::string &) override { return viewStart; }
   std::unique_ptr<DeviceQueue> createQueue(const std::chrono::duration<int64_t> &) override { return {}; }
 };
 
@@ -119,12 +124,38 @@ struct StubQueue final : object::ObjectDeviceQueue {
   bool mutateFirstPointer = false;
   bool raiseAssert = false;
   std::vector<Type> invokedTypes;
+  std::vector<std::byte> invokedData;
   uintptr_t firstPointer = 0;
+  std::string operations;
+  bool idle = false;
+  std::function<void()> onInvoke;
+  std::function<void()> onCopy;
+
+  void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t size, const MaybeCallback &cb) override {
+    operations += 'H';
+    ObjectDeviceQueue::enqueueHostToDeviceAsync(src, dst, dstOffset, size, cb);
+  }
+  void enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, uintptr_t dst, size_t dstOffset, size_t size,
+                                  const MaybeCallback &cb) override {
+    if (onCopy) onCopy();
+    ObjectDeviceQueue::enqueueDeviceToDeviceAsync(src, srcOffset, dst, dstOffset, size, cb);
+  }
+  void enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, void *dst, size_t bytes, const MaybeCallback &cb) override {
+    operations += 'D';
+    ObjectDeviceQueue::enqueueDeviceToHostAsync(src, srcOffset, dst, bytes, cb);
+  }
+  void enqueueWaitBlocking() override {
+    operations += 'W';
+    ObjectDeviceQueue::enqueueWaitBlocking();
+  }
+  bool quiescent() override { return idle; }
 
   void enqueueInvokeAsync(const std::string &, const std::string &, const std::vector<Type> &types, std::vector<std::byte> data,
                           const Policy &, const MaybeCallback &) override {
+    operations += 'I';
     if (failInvoke) throw std::runtime_error("injected launch failure");
     invokedTypes = types;
+    invokedData = data;
     if (!types.empty() && types.front() == Type::Ptr) {
       const auto arguments = detail::argDataAsPointers(types, data);
       std::memcpy(&firstPointer, arguments.front(), sizeof(firstPointer));
@@ -144,6 +175,7 @@ struct StubQueue final : object::ObjectDeviceQueue {
       std::memcpy(&pointer, arguments[std::distance(types.begin(), pointerArgument)], sizeof(pointer));
       *reinterpret_cast<uint64_t *>(pointer) = 0x123456789ABCDEF0ull;
     }
+    if (onInvoke) onInvoke();
   }
 };
 
@@ -169,8 +201,13 @@ struct StubManagedPlatform final : Platform {
   std::vector<std::unique_ptr<Device>> enumerate() override { return {}; }
 };
 
+std::unique_ptr<Platform> takeCurrentPlatform() {
+  polyregion::polyrt::initialise();
+  return std::move(polyregion::polyrt::currentPlatform);
+}
+
 struct WithStubManagedPlatform {
-  std::unique_ptr<Platform> previousPlatform = std::move(polyregion::polyrt::currentPlatform);
+  std::unique_ptr<Platform> previousPlatform = takeCurrentPlatform();
   std::unique_ptr<DeviceQueue> previousQueue = std::move(polyregion::polyrt::currentQueue);
   WithStubManagedPlatform() {
     polyregion::polyrt::currentPlatform = std::make_unique<StubManagedPlatform>();
@@ -512,8 +549,114 @@ TEST_CASE("asserting remote modules take a leading error buffer and report the a
   REQUIRE(polyrt_remote_launch(&context, "asserting", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(), arguments.data()));
   CHECK(queue.invokedTypes == std::vector{Type::Ptr, Type::IntS64, Type::Void});
   CHECK(assertReported());
-  CHECK(device.stub->remoteAllocs == device.stub->remoteFrees);
-  CHECK(context.remoteAllocations.empty());
+  CHECK(device.stub->remoteAllocs == 1);
+  CHECK(context.remoteAllocations.size() == 1);
+}
+
+TEST_CASE("asserting remote launches reuse one error block per context") {
+  WithStubDevice device(false, false);
+  WithStubManagedPlatform platform;
+  StubQueue queue(std::chrono::seconds(1));
+  const unsigned char image = 0;
+  std::array<const char *, 1> asserting{polyregion::conventions::ErrorArg};
+  int64_t n = 3;
+  const std::array<uint8_t, 1> types{static_cast<uint8_t>(Type::IntS64)};
+  const std::array<void *, 1> arguments{&n};
+  {
+    polyregion::polyrt::ExecutionContext context{polyregion::polyrt::currentPlatform.get(), device.stub, &queue};
+    REQUIRE(polyrt_remote_load(&context, "asserting_reuse", static_cast<int32_t>(PlatformKind::Managed),
+                               static_cast<int32_t>(ModuleFormat::Object), asserting.size(), asserting.data(), sizeof(image), &image));
+    bool stale = false;
+    queue.onInvoke = [&] {
+      if (queue.raiseAssert) return;
+      const auto *block = reinterpret_cast<const uint8_t *>(queue.firstPointer);
+      stale |= std::any_of(block, block + polyregion::polyrt::assertBufferBytes, [](const uint8_t byte) { return byte != 0; });
+    };
+    for (size_t launch = 0; launch < 8; ++launch) {
+      queue.raiseAssert = launch % 3 == 0;
+      REQUIRE(polyrt_remote_launch(&context, "asserting_reuse", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
+                                   arguments.data()));
+    }
+    CHECK_FALSE(stale);
+    CHECK(device.stub->remoteAllocs == 1);
+    CHECK(context.remoteAllocations.size() == 1);
+  }
+  CHECK(device.stub->remoteFrees == 1);
+}
+
+TEST_CASE("assert buffers of stdpar launches come back zeroed from the context pool") {
+  WithStubDevice device(false, false);
+  WithStubManagedPlatform platform;
+  StubQueue queue(std::chrono::seconds(1));
+  {
+    polyregion::polyrt::ExecutionContext context{polyregion::polyrt::currentPlatform.get(), device.stub, &queue};
+    const uint8_t reported[] = {7, 0, 0, 0, 'o', 'o', 'p', 's', 0};
+    uintptr_t first = 0;
+    for (size_t launch = 0; launch < 5; ++launch) {
+      const auto block = polyregion::polyrt::allocAssertBuffer(context);
+      if (launch == 0) first = block;
+      CHECK(block == first);
+      const auto *bytes = reinterpret_cast<const uint8_t *>(block);
+      CHECK(std::all_of(bytes, bytes + polyregion::polyrt::assertBufferBytes, [](const uint8_t byte) { return byte == 0; }));
+      const bool raise = launch % 2 == 0;
+      if (raise) std::memcpy(reinterpret_cast<void *>(block), reported, sizeof(reported));
+      const auto reason = polyregion::polyrt::readAssertBuffer(context, block);
+      CHECK(reason.raised == raise);
+      if (raise) CHECK(reason.message == "oops");
+    }
+    CHECK(device.stub->remoteAllocs == 1);
+  }
+  CHECK(device.stub->remoteFrees == 1);
+}
+
+TEST_CASE("remote launch settles copies in and out of mirrors with one wait each") {
+  WithStubDevice device(false);
+  StubQueue queue(std::chrono::seconds(1));
+  polyregion::polyrt::ExecutionContext context{polyregion::polyrt::currentPlatform.get(), device.stub, &queue};
+  std::array<uint8_t, 4> in{};
+  std::array<uint8_t, 8> inOut{};
+  auto inOutPointer = reinterpret_cast<uintptr_t>(inOut.data());
+  const std::array<uint8_t, 2> types{static_cast<uint8_t>(Type::Ptr), static_cast<uint8_t>(Type::Ptr)};
+  const std::array<void *, 2> arguments{in.data(), &inOutPointer};
+  const std::array<size_t, 2> mirrorSizes{in.size(), inOut.size()};
+  const std::array<uint8_t, 2> mirrorKinds{1, 2};
+  REQUIRE(polyrt_remote_launch_marshalled(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
+                                          arguments.data(), mirrorSizes.data(), mirrorKinds.data(), nullptr));
+  CHECK(queue.operations == "HHIWDW");
+}
+
+TEST_CASE("remote launch leaves a quiescent queue without waits") {
+  WithStubDevice device(false);
+  StubQueue queue(std::chrono::seconds(1));
+  queue.idle = true;
+  polyregion::polyrt::ExecutionContext context{polyregion::polyrt::currentPlatform.get(), device.stub, &queue};
+  std::array<uint8_t, 4> in{};
+  std::array<uint8_t, 8> inOut{};
+  auto inOutPointer = reinterpret_cast<uintptr_t>(inOut.data());
+  const std::array<uint8_t, 2> types{static_cast<uint8_t>(Type::Ptr), static_cast<uint8_t>(Type::Ptr)};
+  const std::array<void *, 2> arguments{in.data(), &inOutPointer};
+  const std::array<size_t, 2> mirrorSizes{in.size(), inOut.size()};
+  const std::array<uint8_t, 2> mirrorKinds{1, 2};
+  REQUIRE(polyrt_remote_launch_marshalled(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
+                                          arguments.data(), mirrorSizes.data(), mirrorKinds.data(), nullptr));
+  CHECK(queue.operations == "HHID");
+}
+
+TEST_CASE("remote sync follows blocking remote operations without waiting again") {
+  WithStubDevice device(false);
+  StubQueue queue(std::chrono::seconds(1));
+  polyregion::polyrt::ExecutionContext context{polyregion::polyrt::currentPlatform.get(), device.stub, &queue};
+  int64_t n = 3;
+  const std::array<uint8_t, 1> types{static_cast<uint8_t>(Type::IntS64)};
+  const std::array<void *, 1> arguments{&n};
+  REQUIRE(polyrt_remote_launch(&context, "plain", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(), arguments.data()));
+  polyrt_remote_sync(&context);
+  auto remote = remoteAlloc(&context, 8);
+  std::array<uint8_t, 8> local{};
+  REQUIRE(polyrt_remote_memcpy(&context, remote, reinterpret_cast<uintptr_t>(local.data()), local.size(), 0));
+  polyrt_remote_sync(&context);
+  CHECK(queue.operations == "IWHW");
+  REQUIRE(polyrt_remote_free(&context, remote));
 }
 
 TEST_CASE("remote launch preserves null aggregate pointers") {
@@ -655,7 +798,7 @@ const static TypeLayout doubleType = NamedType(double);
 
 struct Fixture {
   std::unordered_map<uintptr_t, size_t> localAllocations, remoteAllocations;
-  std::unordered_set<uintptr_t> heapAllocations;
+  std::unordered_set<uintptr_t> heapAllocations, readOnlyAllocations;
   size_t remoteWrites = 0, remoteReads = 0, remoteWriteBytes = 0, reflectQueries = 0;
   // stretches device-to-host copies the way a real transfer does, page by page
   std::chrono::microseconds remoteReadPause{0};
@@ -674,8 +817,10 @@ struct Fixture {
               reflectQueries++;
               const uintptr_t localPtr = reinterpret_cast<uintptr_t>(ptr);
               if (const auto it = localAllocations.find(localPtr); it != localAllocations.end()) {
-                return polyregion::polyrt::PtrQuery{
-                    .sizeInBytes = it->second, .offsetInBytes = 0, .heap = heapAllocations.count(localPtr) != 0};
+                return polyregion::polyrt::PtrQuery{.sizeInBytes = it->second,
+                                                    .offsetInBytes = 0,
+                                                    .hostReadOnly = readOnlyAllocations.count(localPtr) != 0,
+                                                    .heap = heapAllocations.count(localPtr) != 0};
               }
               for (auto [p, size] : localAllocations) {
                 if (localPtr >= static_cast<uintptr_t>(p) && localPtr < static_cast<uintptr_t>(p) + size) {
@@ -784,6 +929,120 @@ TEST_CASE("linked package mirror refreshes cached allocations between launches")
   *x = 6;
   CHECK(launch() == remote);
   CHECK(*x == 7);
+}
+
+TEST_CASE("repeated launches upload only the mirror bytes the host changed") {
+  if (!polyregion::polyrt::guard::AtomicPublish) SKIP("no whole-page publish on this platform");
+  Fixture fixture;
+  const size_t count = 64 * polyregion::polyrt::guard::pageSize() / sizeof(int32_t);
+  std::vector<int32_t *> blocks;
+  for (int32_t i = 0; i < 4; ++i) {
+    blocks.emplace_back(fixture.mallocLocalHeap<int32_t>(count));
+    std::fill(blocks.back(), blocks.back() + count, i);
+  }
+  for (int32_t i = 0; i < 3; ++i) {
+    blocks.emplace_back(fixture.mallocLocal<int32_t>(256));
+    std::fill(blocks.back(), blocks.back() + 256, 10 + i);
+  }
+  struct Capture {
+    int32_t *blocks[7];
+  } capture{};
+
+  const auto launch = [&](const auto &kernel) {
+    const auto before = fixture.remoteWrites;
+    fixture.allocation.mirrorAlloc(&capture, sizeof(capture), false);
+    std::vector<int32_t *> remotes;
+    for (auto *block : blocks)
+      remotes.emplace_back(reinterpret_cast<int32_t *>(fixture.allocation.mirrorEnsure(block)));
+    kernel(remotes);
+    fixture.allocation.unmirrorVisitClear();
+    for (auto *block : blocks)
+      fixture.allocation.unmirrorReadAlloc(block);
+    fixture.allocation.disassociate(&capture, false);
+    return fixture.remoteWrites - before;
+  };
+  const auto idle = [](const std::vector<int32_t *> &) {};
+
+  launch(idle);
+  CHECK(launch(idle) == 1);
+  CHECK(launch(idle) == 1);
+
+  blocks[1][0] = 5;
+  CHECK(launch(idle) == 2);
+  blocks[2][count - 1] = 6;
+  CHECK(launch(idle) == 2);
+  blocks[5][100] = 7;
+  CHECK(launch(idle) == 2);
+  CHECK(launch(idle) == 1);
+
+  launch([&](const std::vector<int32_t *> &remotes) {
+    remotes[0][0] = 21;
+    remotes[0][count - 1] = 22;
+    remotes[6][5] = 23;
+  });
+  CHECK(blocks[0][0] == 21);
+  CHECK(blocks[0][count - 1] == 22);
+  CHECK(blocks[6][5] == 23);
+  CHECK(launch([&](const std::vector<int32_t *> &remotes) {
+          CHECK(remotes[0][0] == 21);
+          CHECK(remotes[0][count - 1] == 22);
+          CHECK(remotes[6][5] == 23);
+        })
+        == 1);
+
+  blocks[0][0] = 0;
+  CHECK(launch([&](const std::vector<int32_t *> &remotes) { CHECK(remotes[0][0] == 0); }) == 2);
+}
+
+TEST_CASE("read-only mirror blocks are uploaded once") {
+  Fixture fixture;
+  auto *xs = fixture.mallocLocal<int32_t>(256);
+  std::fill(xs, xs + 256, 3);
+  fixture.readOnlyAllocations.emplace(reinterpret_cast<uintptr_t>(xs));
+  const auto launch = [&] {
+    const auto before = fixture.remoteWrites;
+    fixture.allocation.unmirrorVisitClear();
+    auto *remote = reinterpret_cast<int32_t *>(fixture.allocation.mirrorEnsure(xs));
+    CHECK(remote[7] == xs[7]);
+    fixture.allocation.unmirrorVisitClear();
+    fixture.allocation.unmirrorReadAlloc(xs);
+    return fixture.remoteWrites - before;
+  };
+  CHECK(launch() == 1);
+  CHECK(launch() == 1);
+  CHECK(launch() == 0);
+  CHECK(launch() == 0);
+  xs[7] = 4;
+  CHECK(launch() == 1);
+  CHECK(launch() == 0);
+}
+
+TEST_CASE("stats count the host transfers of the shared runtime") {
+  WithStubDevice device(false);
+  WithStubManagedPlatform platform;
+  auto &queue = static_cast<StubQueue &>(*polyregion::polyrt::currentQueue);
+  polyregion::polyrt::ExecutionContext context{polyregion::polyrt::currentPlatform.get(), device.stub, &queue};
+  auto remote = remoteAlloc(&context, 16);
+  std::array<char, 16> local{};
+  const auto stats = [&] {
+    PolyrtStats value{};
+    REQUIRE(polyrt_stats(&context, &value));
+    return value;
+  };
+  polyregion::polyrt::sma::stdRemoteWrite()(local.data(), remote, 0, local.size());
+  polyregion::polyrt::sma::stdRemoteRead()(local.data(), remote, 0, local.size());
+  REQUIRE(polyrt_remote_memcpy(&context, remote, reinterpret_cast<uintptr_t>(local.data()), local.size(), 0));
+  REQUIRE(polyrt_remote_memcpy(&context, reinterpret_cast<uintptr_t>(local.data()), remote, local.size(), 1));
+  CHECK(stats().h2dCopies == 2);
+  CHECK(stats().d2hCopies == 2);
+  CHECK(stats().waits == 4);
+  queue.idle = true;
+  polyregion::polyrt::sma::stdRemoteWrite()(local.data(), remote, 0, local.size());
+  polyregion::polyrt::sma::stdRemoteRead()(local.data(), remote, 0, local.size());
+  CHECK(stats().h2dCopies == 3);
+  CHECK(stats().d2hCopies == 3);
+  CHECK(stats().waits == 4);
+  REQUIRE(polyrt_remote_free(&context, remote));
 }
 
 TEST_CASE("resident heap blocks fault their device copy back and upload again only after a host write") {
@@ -1661,7 +1920,7 @@ TEST_CASE("gen-arena-mirror") {
   CHECK(*reinterpret_cast<const uint64_t *>(f.allocation.genArenaStaging.data() + offsetof(Rec, p)) == 0);
 }
 
-TEST_CASE("arena binds a one-past-end remote pointer to the allocation that ends there") {
+TEST_CASE("a capture that references package memory is rejected when the device has no heap") {
   struct Grid {
     int32_t *begin;
     int32_t *end;
@@ -1681,7 +1940,6 @@ TEST_CASE("arena binds a one-past-end remote pointer to the allocation that ends
   } unregister;
 
   const auto begin = remoteAlloc(&context, 100 * sizeof(int32_t));
-  remoteAlloc(&context, 100 * sizeof(int32_t));
   Grid grid{reinterpret_cast<int32_t *>(begin), reinterpret_cast<int32_t *>(begin + 100 * sizeof(int32_t))};
 
   const std::array<uint8_t, 1> types{static_cast<uint8_t>(Type::Ptr)};
@@ -1689,11 +1947,710 @@ TEST_CASE("arena binds a one-past-end remote pointer to the allocation that ends
   const std::array<size_t, 1> mirrorSizes{sizeof(Grid)};
   const std::array<uint8_t, 1> mirrorKinds{1};
   const std::array<const TypeLayout *, 1> layouts{&*gridLayout};
-  REQUIRE(polyrt_remote_launch_marshalled(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
-                                          arguments.data(), mirrorSizes.data(), mirrorKinds.data(), layouts.data()));
-  REQUIRE(queue.firstPointer != 0);
-  const auto *arenaRoot = reinterpret_cast<const uintptr_t *>(queue.firstPointer);
-  CHECK(arenaRoot[1] - arenaRoot[0] == 100 * sizeof(int32_t));
+  CHECK_FALSE(polyrt_remote_launch_marshalled(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
+                                              arguments.data(), mirrorSizes.data(), mirrorKinds.data(), layouts.data()));
+  CHECK(std::string(polyrt_error_message()).find("package memory") != std::string::npos);
+  CHECK(queue.firstPointer == 0);
+}
+
+TEST_CASE("a stdpar capture that references package memory is rejected when the device has no heap") {
+  struct Grid {
+    int32_t *begin;
+    int32_t *end;
+  };
+  auto gridLayout = Struct_(Grid, StructMember_(Grid, begin, &int32Type), StructMember_(Grid, end, &int32Type));
+  WithStubDevice device(false, false, 1024, 1, ModuleFormat::SPIRV_GLCompute);
+  WithStubManagedPlatform platform;
+  device.stub->packAllocations = true;
+  StubQueue queue(std::chrono::seconds(1));
+  polyregion::polyrt::ExecutionContext context{polyregion::polyrt::currentPlatform.get(), device.stub, &queue};
+  Fixture fixture;
+
+  const auto begin = remoteAlloc(&context, 100 * sizeof(int32_t));
+  Grid grid{reinterpret_cast<int32_t *>(begin), reinterpret_cast<int32_t *>(begin + 100 * sizeof(int32_t))};
+  CHECK_THROWS_AS(
+      polyregion::polyrt::sma::arenaMarshal(fixture.allocation, &grid, *gridLayout, polyregion::polyrt::sma::arenaPlacementOf(&context)),
+      std::logic_error);
+
+  auto *host = fixture.mallocLocal<int32_t>(16);
+  Grid plain{host, host + 16};
+  CHECK_NOTHROW(
+      polyregion::polyrt::sma::arenaMarshal(fixture.allocation, &plain, *gridLayout, polyregion::polyrt::sma::arenaPlacementOf(&context)));
+}
+
+namespace {
+struct RootedMarshal final : polyregion::polyrt::sma::CaptureMarshal {
+  polyregion::polyrt::sma::CaptureMarshal &inner;
+  int64_t root;
+  RootedMarshal(polyregion::polyrt::sma::CaptureMarshal &inner, const int64_t root) : inner(inner), root(root) {}
+  void visitClear() override { inner.visitClear(); }
+  uintptr_t ensure(const void *local, const size_t minSize) override { return inner.ensure(local, minSize); }
+  void readAlloc(const void *local) override { inner.readAlloc(local); }
+  uintptr_t mirror(const void *capture, const TypeLayout &layout) override { return inner.mirror(capture, layout); }
+  void readMirror(void *capture) override { inner.readMirror(capture); }
+  polyregion::polyrt::sma::ArenaImage arena(const void *capture, const TypeLayout &layout,
+                                            polyregion::polyrt::ArenaPlacement placement) override {
+    auto image = inner.arena(capture, layout, std::move(placement));
+    image.root = root;
+    return image;
+  }
+  void readArena() override { inner.readArena(); }
+  void releaseArena() override { inner.releaseArena(); }
+};
+
+struct RootLaunch {
+  StubQueue queue{std::chrono::seconds(1)};
+  WithStubDevice device{false, false, 1024, 1, ModuleFormat::SPIRV_GLCompute};
+  WithStubManagedPlatform platform;
+  polyregion::polyrt::ExecutionContext context{polyregion::polyrt::currentPlatform.get(), device.stub, &queue};
+  Fixture fixture;
+  polyregion::polyrt::sma::CaptureMarshalOf<decltype(fixture.allocation)> plain{fixture.allocation};
+  RootedMarshal rooted;
+  struct Span {
+    int32_t *data;
+    int64_t length;
+  } span{};
+
+  explicit RootLaunch(const int64_t root, const std::optional<size_t> viewStart) : rooted(plain, root) {
+    span = {fixture.mallocLocal<int32_t>(4), 4};
+    device.stub->advertised = std::vector<std::string>{"overread_pad:4096"};
+    device.stub->viewStart = viewStart;
+    polyregion::polyrt::sma::registerCaptureMarshal(&rooted);
+  }
+  ~RootLaunch() { polyregion::polyrt::sma::registerCaptureMarshal(nullptr); }
+
+  void launch() {
+    auto layout = Struct_(Span, StructMember_(Span, data, &int32Type), StructMember_(Span, length, &int64Type));
+    const std::array<uint8_t, 1> types{static_cast<uint8_t>(Type::Ptr)};
+    const std::array<void *, 1> arguments{&span};
+    const std::array<size_t, 1> mirrorSizes{sizeof(Span)};
+    const std::array<uint8_t, 1> mirrorKinds{1};
+    const std::array<const TypeLayout *, 1> layouts{&*layout};
+    REQUIRE(polyrt_remote_launch_marshalled(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
+                                            arguments.data(), mirrorSizes.data(), mirrorKinds.data(), layouts.data()));
+  }
+
+  template <typename T> T argument(const size_t index) {
+    const auto pointers = detail::argDataAsPointers(queue.invokedTypes, queue.invokedData);
+    T value{};
+    std::memcpy(&value, pointers[index], sizeof(T));
+    return value;
+  }
+};
+} // namespace
+
+TEST_CASE("a logical arena launch passes the arena offset of the capture ahead of the views") {
+  for (const int64_t root : {int64_t{0}, int64_t{4096}, int64_t{1} << 40}) {
+    RootLaunch f(root, 0);
+    f.launch();
+    REQUIRE(f.queue.invokedTypes.size() == 1 + polyregion::polyrt::sma::arenaViewCount + 1);
+    CHECK(f.queue.invokedTypes.front() == Type::IntS64);
+    CHECK(f.argument<int64_t>(0) == root);
+    for (size_t view = 1; view <= polyregion::polyrt::sma::arenaViewCount; ++view) {
+      CHECK(f.queue.invokedTypes[view] == Type::Ptr);
+      CHECK(f.argument<uintptr_t>(view) == f.argument<uintptr_t>(1));
+    }
+  }
+}
+
+TEST_CASE("a launch without arena views gets no root argument") {
+  RootLaunch f(4096, std::nullopt);
+  f.launch();
+  CHECK(f.queue.invokedTypes == std::vector<Type>{Type::Ptr, Type::Void});
+}
+
+namespace {
+Platform *configureHeapDevice(StubDevice *stub, const std::optional<HeapLimits> heap) {
+  stub->heap = heap;
+  stub->advertised = std::vector<std::string>{"overread_pad:4096"};
+  return polyregion::polyrt::currentPlatform.get();
+}
+
+struct HeapRouting {
+  WithStubDevice device;
+  StubQueue queue{std::chrono::seconds(1)};
+  std::unique_ptr<polyregion::polyrt::ExecutionContext> owned;
+  polyregion::polyrt::ExecutionContext &context;
+
+  explicit HeapRouting(const std::optional<HeapLimits> heap, const ModuleFormat format = ModuleFormat::SPIRV_GLCompute)
+      : device(false, false, 1024, 1, format),
+        owned(std::make_unique<polyregion::polyrt::ExecutionContext>(configureHeapDevice(device.stub, heap), device.stub, &queue)),
+        context(*owned) {}
+
+  void retire() { owned.reset(); }
+
+  PolyrtStats stats() {
+    PolyrtStats stats{};
+    REQUIRE(polyrt_stats(&context, &stats));
+    return stats;
+  }
+};
+} // namespace
+
+TEST_CASE("glcompute package allocations come from one aligned device heap") {
+  HeapRouting f(HeapLimits{size_t{1} << 24, 64});
+  const auto a = remoteAlloc(&f.context, 100);
+  const auto b = remoteAlloc(&f.context, 200);
+  CHECK(f.device.stub->remoteAllocs == 0);
+  CHECK(a % 64 == 0);
+  CHECK(b % 64 == 0);
+  CHECK(f.context.remoteAllocations.size() == 2);
+  const auto *tail = reinterpret_cast<const uint8_t *>(a);
+  for (size_t i = 100; i < 100 + 1 + 4096; ++i)
+    REQUIRE(tail[i] == 0);
+  CHECK(f.stats().remoteMallocs == 2);
+  CHECK(f.stats().heapBytesLive > 300);
+  CHECK(f.stats().heapBytesCommitted >= f.stats().heapBytesLive);
+
+  REQUIRE(polyrt_remote_free(&f.context, a));
+  REQUIRE(polyrt_remote_free(&f.context, b));
+  CHECK(f.device.stub->remoteFrees == 0);
+  CHECK(f.stats().heapBytesLive == 0);
+  CHECK(f.context.remoteAllocations.empty());
+}
+
+TEST_CASE("glcompute temporaries return to the device heap when the scope releases") {
+  HeapRouting f(HeapLimits{size_t{1} << 24, 64});
+  REQUIRE(polyrt_context_acquire(&f.context));
+  const auto temporary = remoteTempAlloc(&f.context, 1000);
+  CHECK(temporary != 0);
+  CHECK(f.stats().heapBytesLive >= 1000);
+  REQUIRE(polyrt_context_release(&f.context));
+  CHECK(f.stats().heapBytesLive == 0);
+  CHECK(f.context.remoteAllocations.empty());
+}
+
+TEST_CASE("only glcompute devices with heap limits use the device heap") {
+  {
+    HeapRouting f(HeapLimits{size_t{1} << 24, 64}, ModuleFormat::Object);
+    const auto pointer = remoteAlloc(&f.context, 64);
+    CHECK(f.device.stub->remoteAllocs == 1);
+    CHECK(f.stats().heapBytesCommitted == 0);
+    REQUIRE(polyrt_remote_free(&f.context, pointer));
+    CHECK(f.device.stub->remoteFrees == 1);
+  }
+  {
+    HeapRouting f(std::nullopt);
+    const auto pointer = remoteAlloc(&f.context, 64);
+    CHECK(f.device.stub->remoteAllocs == 1);
+    REQUIRE(polyrt_remote_free(&f.context, pointer));
+    CHECK(f.device.stub->remoteFrees == 1);
+  }
+}
+
+TEST_CASE("device heap exhaustion is a status failure that names the limit") {
+  HeapRouting f(HeapLimits{size_t{1} << 16, 64});
+  uintptr_t result = 1;
+  CHECK_FALSE(polyrt_remote_malloc(&f.context, size_t{1} << 17, &result));
+  CHECK(result == 0);
+  const std::string message = polyrt_error_message();
+  CHECK(message.find("exhausted") != std::string::npos);
+  CHECK(message.find("65536") != std::string::npos);
+  CHECK(f.context.remoteAllocations.empty());
+  CHECK(polyrt_remote_malloc(&f.context, 100, &result));
+  CHECK(result != 0);
+}
+
+namespace {
+struct HeapArena {
+  WithStubManagedPlatform platform;
+  HeapRouting f;
+  Fixture fixture;
+  polyregion::polyrt::sma::CaptureMarshalOf<decltype(fixture.allocation)> marshal{fixture.allocation};
+
+  explicit HeapArena(const size_t limit = size_t{1} << 26, const ModuleFormat format = ModuleFormat::SPIRV_GLCompute)
+      : f(HeapLimits{limit, 64}, format) {
+    f.device.stub->viewStart = 0;
+    polyregion::polyrt::sma::registerCaptureMarshal(&marshal);
+  }
+  ~HeapArena() { polyregion::polyrt::sma::registerCaptureMarshal(nullptr); }
+
+  uintptr_t heap() { return fixture.allocation.genArenaDevBase; }
+  uint64_t window() { return fixture.allocation.genArenaWindow; }
+  const char *image(const uint64_t offset = 0) { return reinterpret_cast<const char *>(heap() + window() + offset); }
+  const char *at(const uint64_t heapOffset) { return reinterpret_cast<const char *>(heap() + heapOffset); }
+
+  bool launch(void *capture, const TypeLayout &layout) {
+    const std::array<uint8_t, 1> types{static_cast<uint8_t>(Type::Ptr)};
+    const std::array<void *, 1> arguments{capture};
+    const std::array<size_t, 1> mirrorSizes{layout.sizeInBytes};
+    const std::array<uint8_t, 1> mirrorKinds{1};
+    const std::array<const TypeLayout *, 1> layouts{&layout};
+    return polyrt_remote_launch_marshalled(&f.context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
+                                           arguments.data(), mirrorSizes.data(), mirrorKinds.data(), layouts.data());
+  }
+
+  template <typename T> T argument(const size_t index) {
+    const auto pointers = detail::argDataAsPointers(f.queue.invokedTypes, f.queue.invokedData);
+    T value{};
+    std::memcpy(&value, pointers[index], sizeof(T));
+    return value;
+  }
+
+  template <typename T> T slot(const size_t offset) {
+    T value{};
+    std::memcpy(&value, image(offset), sizeof(T));
+    return value;
+  }
+
+  void upload(const uintptr_t block, const void *host, const size_t bytes) {
+    REQUIRE(polyrt_remote_memcpy(&f.context, block, reinterpret_cast<uintptr_t>(host), bytes, 0));
+  }
+};
+
+struct Grid {
+  int32_t *first;
+  int32_t *second;
+  int32_t *host;
+};
+} // namespace
+
+TEST_CASE("heap devices keep the assert buffer in one device heap block") {
+  HeapArena a;
+  const unsigned char image = 0;
+  std::array<const char *, 1> asserting{polyregion::conventions::ErrorArg};
+  REQUIRE(polyrt_remote_load(&a.f.context, "asserting_heap", static_cast<int32_t>(PlatformKind::Managed),
+                             static_cast<int32_t>(ModuleFormat::SPIRV_GLCompute), asserting.size(), asserting.data(), sizeof(image),
+                             &image));
+  int64_t n = 3;
+  const std::array<uint8_t, 1> types{static_cast<uint8_t>(Type::IntS64)};
+  const std::array<void *, 1> arguments{&n};
+  for (size_t launch = 0; launch < 6; ++launch)
+    REQUIRE(polyrt_remote_launch(&a.f.context, "asserting_heap", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
+                                 arguments.data()));
+  CHECK(a.f.stats().remoteMallocs == 1);
+  CHECK(a.f.stats().heapBytesLive >= polyregion::polyrt::assertBufferBytes);
+  CHECK(a.f.device.stub->remoteAllocs == 0);
+}
+
+TEST_CASE("arena binds a one-past-end remote pointer that lives in the device heap") {
+  struct Span {
+    int32_t *begin;
+    int32_t *end;
+  };
+  auto spanLayout = Struct_(Span, StructMember_(Span, begin, &int32Type), StructMember_(Span, end, &int32Type));
+  HeapArena a;
+  const auto begin = remoteAlloc(&a.f.context, 100 * sizeof(int32_t));
+  remoteAlloc(&a.f.context, 100 * sizeof(int32_t));
+  Span span{reinterpret_cast<int32_t *>(begin), reinterpret_cast<int32_t *>(begin + 100 * sizeof(int32_t))};
+  REQUIRE(a.launch(&span, *spanLayout));
+  CHECK(a.slot<uint64_t>(offsetof(Span, begin)) == begin - a.heap());
+  CHECK(a.slot<uint64_t>(offsetof(Span, end)) - a.slot<uint64_t>(offsetof(Span, begin)) == 100 * sizeof(int32_t));
+}
+
+TEST_CASE("arena launches with two bound heap blocks copy no device bytes and wait once") {
+  auto gridLayout =
+      Struct_(Grid, StructMember_(Grid, first, &int32Type), StructMember_(Grid, second, &int32Type), StructMember_(Grid, host, &int32Type));
+  HeapArena a;
+  const auto first = remoteAlloc(&a.f.context, 100 * sizeof(int32_t));
+  const auto second = remoteAlloc(&a.f.context, 50 * sizeof(int32_t));
+  auto *host = a.fixture.mallocLocal<int32_t>(16);
+  std::iota(host, host + 16, 7);
+  Grid grid{reinterpret_cast<int32_t *>(first), reinterpret_cast<int32_t *>(second), host};
+
+  REQUIRE(a.launch(&grid, *gridLayout));
+  constexpr uint64_t launches = 100;
+  const auto before = a.f.stats();
+  for (uint64_t i = 0; i < launches; ++i) {
+    REQUIRE(a.launch(&grid, *gridLayout));
+    CHECK(a.slot<uint64_t>(offsetof(Grid, first)) == first - a.heap());
+    CHECK(a.slot<uint64_t>(offsetof(Grid, second)) == second - a.heap());
+    CHECK(std::memcmp(a.at(a.slot<uint64_t>(offsetof(Grid, host))), host, 16 * sizeof(int32_t)) == 0);
+  }
+  const auto after = a.f.stats();
+  INFO("waits per launch: " << static_cast<double>(after.waits - before.waits) / launches);
+  CHECK(after.arenaLaunches - before.arenaLaunches == launches);
+  CHECK(after.d2dCopies - before.d2dCopies == 0);
+  CHECK(after.waits - before.waits <= launches);
+}
+
+TEST_CASE("growing the heap and the window keeps package handles and bytes") {
+  auto gridLayout =
+      Struct_(Grid, StructMember_(Grid, first, &int32Type), StructMember_(Grid, second, &int32Type), StructMember_(Grid, host, &int32Type));
+  HeapArena a;
+  constexpr size_t count = 100;
+  std::vector<int32_t> pattern(count);
+  std::iota(pattern.begin(), pattern.end(), 1000);
+  const auto first = remoteAlloc(&a.f.context, count * sizeof(int32_t));
+  const auto second = remoteAlloc(&a.f.context, count * sizeof(int32_t));
+  a.upload(first, pattern.data(), pattern.size() * sizeof(int32_t));
+  a.upload(second, pattern.data(), pattern.size() * sizeof(int32_t));
+  auto *small = a.fixture.mallocLocal<int32_t>(16);
+  std::iota(small, small + 16, 1);
+  Grid grid{reinterpret_cast<int32_t *>(first), reinterpret_cast<int32_t *>(second), small};
+  REQUIRE(a.launch(&grid, *gridLayout));
+
+  const auto heap = a.heap();
+  const auto firstSlot = a.slot<uint64_t>(offsetof(Grid, first)), secondSlot = a.slot<uint64_t>(offsetof(Grid, second));
+  const auto before = a.f.stats();
+
+  for (size_t i = 0; i < 64; ++i)
+    remoteAlloc(&a.f.context, 1 << 14);
+  const auto grown = a.f.stats();
+  REQUIRE(grown.heapGrowths > before.heapGrowths);
+
+  constexpr size_t bigCount = size_t{1} << 18;
+  auto *big = a.fixture.mallocLocal<int32_t>(bigCount);
+  std::iota(big, big + bigCount, 5);
+  grid.host = big;
+  REQUIRE(a.launch(&grid, *gridLayout));
+
+  CHECK(a.heap() == heap);
+  CHECK(a.slot<uint64_t>(offsetof(Grid, first)) == firstSlot);
+  CHECK(a.slot<uint64_t>(offsetof(Grid, second)) == secondSlot);
+  CHECK(std::memcmp(a.at(firstSlot), pattern.data(), pattern.size() * sizeof(int32_t)) == 0);
+  CHECK(std::memcmp(a.at(secondSlot), pattern.data(), pattern.size() * sizeof(int32_t)) == 0);
+  CHECK(std::memcmp(a.at(a.slot<uint64_t>(offsetof(Grid, host))), big, bigCount * sizeof(int32_t)) == 0);
+  CHECK(a.f.stats().arenaWindowMoves == 1);
+  CHECK(a.f.stats().d2dCopies == 1);
+}
+
+TEST_CASE("a window that cannot grow in place moves with its resident leaf and guard fault reads follow it") {
+  if (!polyregion::polyrt::guard::AtomicPublish) SKIP("no whole-page publish on this platform");
+  struct Rec {
+    int32_t *xs;
+    uint64_t n;
+    int32_t *extra;
+  };
+  auto recLayout =
+      Struct_(Rec, StructMember_(Rec, xs, &int32Type), StructMember_(Rec, n, &int64Type), StructMember_(Rec, extra, &int32Type));
+  HeapArena a;
+  const size_t count = 64 * polyregion::polyrt::guard::pageSize() / sizeof(int32_t);
+  auto *xs = a.fixture.mallocLocalHeap<int32_t>(count);
+  std::fill(xs, xs + count, 1);
+  auto *small = a.fixture.mallocLocal<int32_t>(16);
+  std::iota(small, small + 16, 1);
+  Rec rec{xs, count, small};
+
+  const auto leaf = [&] { return reinterpret_cast<int32_t *>(const_cast<char *>(a.at(a.slot<uint64_t>(offsetof(Rec, xs))))); };
+
+  a.f.queue.onInvoke = [&] { std::fill(leaf(), leaf() + count, 2); };
+  REQUIRE(a.launch(&rec, *recLayout));
+  const auto firstWindow = a.window();
+  CHECK(a.f.stats().arenaWindowMoves == 0);
+
+  const auto blocker = remoteAlloc(&a.f.context, 64);
+  CHECK(blocker > a.heap() + firstWindow);
+  xs[0] = 7;
+  xs[count - 1] = 9;
+
+  constexpr size_t bigCount = size_t{1} << 18;
+  auto *big = a.fixture.mallocLocal<int32_t>(bigCount);
+  std::iota(big, big + bigCount, 5);
+  rec.extra = big;
+  bool leafIntact = false;
+  a.f.queue.onInvoke = [&] {
+    leafIntact = leaf()[0] == 7 && leaf()[count / 2] == 2 && leaf()[count - 1] == 9;
+    leaf()[count / 2] = 3;
+  };
+  REQUIRE(a.launch(&rec, *recLayout));
+
+  CHECK(a.window() != firstWindow);
+  CHECK(a.f.stats().arenaWindowMoves == 1);
+  CHECK(a.f.stats().d2dCopies == 1);
+  CHECK(leafIntact);
+  CHECK(std::memcmp(a.at(a.slot<uint64_t>(offsetof(Rec, extra))), big, bigCount * sizeof(int32_t)) == 0);
+  CHECK(xs[0] == 7);
+  CHECK(xs[count / 2] == 3);
+  CHECK(xs[count - 1] == 9);
+  a.fixture.allocation.forget(xs, false);
+}
+
+TEST_CASE("a union of pointers is rebased by the window offset once") {
+  struct Either {
+    union {
+      int32_t *a;
+      float *b;
+    };
+  };
+  auto f32 = NamedType(float);
+  auto layout = Struct_(Either, StructMember_(Either, a, &int32Type), StructMember_(Either, b, &f32));
+  HeapArena a;
+  auto *host = a.fixture.mallocLocal<int32_t>(16);
+  std::iota(host, host + 16, 3);
+  Either either{};
+  either.a = host;
+  REQUIRE(a.launch(&either, *layout));
+  const auto value = a.slot<uint64_t>(0);
+  CHECK(value >= a.window());
+  CHECK(value - a.window() < 4 * a.fixture.allocation.genArenaDevCapacity);
+  CHECK(std::memcmp(a.at(value), host, 16 * sizeof(int32_t)) == 0);
+}
+
+TEST_CASE("read-back translates package, interior and cleared pointers through a non-zero window") {
+  struct Rec {
+    int32_t *package;
+    int32_t *interior;
+    int32_t *cleared;
+    int32_t *other;
+  };
+  auto layout = Struct_(Rec, StructMember_(Rec, package, &int32Type), StructMember_(Rec, interior, &int32Type),
+                        StructMember_(Rec, cleared, &int32Type), StructMember_(Rec, other, &int32Type));
+  HeapArena a;
+  const auto first = remoteAlloc(&a.f.context, 100 * sizeof(int32_t));
+  const auto second = remoteAlloc(&a.f.context, 100 * sizeof(int32_t));
+  auto *hostB = a.fixture.mallocLocal<int32_t>(16);
+  auto *hostC = a.fixture.mallocLocal<int32_t>(16);
+  std::iota(hostB, hostB + 16, 100);
+  std::iota(hostC, hostC + 16, 200);
+  Rec rec{reinterpret_cast<int32_t *>(first), hostB, hostC, hostC};
+  a.f.queue.onInvoke = [&] {
+    CHECK(a.window() != 0);
+    const uint64_t otherSlot = a.slot<uint64_t>(offsetof(Rec, other));
+    const uint64_t package = second + 8 - a.heap(), interior = otherSlot + 4, cleared = 0;
+    auto *image = const_cast<char *>(a.image());
+    std::memcpy(image + offsetof(Rec, package), &package, sizeof(package));
+    std::memcpy(image + offsetof(Rec, interior), &interior, sizeof(interior));
+    std::memcpy(image + offsetof(Rec, cleared), &cleared, sizeof(cleared));
+  };
+  REQUIRE(a.launch(&rec, *layout));
+  CHECK(reinterpret_cast<uintptr_t>(rec.package) == second + 8);
+  CHECK(rec.interior == hostC + 1);
+  CHECK(rec.cleared == nullptr);
+  CHECK(rec.other == hostC);
+}
+
+TEST_CASE("an untouched resident leaf is carried across a window move") {
+  if (!polyregion::polyrt::guard::AtomicPublish) SKIP("no whole-page publish on this platform");
+  struct Rec {
+    int32_t *xs;
+    int32_t *extra;
+  };
+  auto layout = Struct_(Rec, StructMember_(Rec, xs, &int32Type), StructMember_(Rec, extra, &int32Type));
+  HeapArena a;
+  const size_t count = 64 * polyregion::polyrt::guard::pageSize() / sizeof(int32_t);
+  auto *xs = a.fixture.mallocLocalHeap<int32_t>(count);
+  std::fill(xs, xs + count, 1);
+  auto *small = a.fixture.mallocLocal<int32_t>(16);
+  Rec rec{xs, small};
+  a.f.queue.onInvoke = [&] {
+    auto *leaf = reinterpret_cast<int32_t *>(const_cast<char *>(a.at(a.slot<uint64_t>(offsetof(Rec, xs)))));
+    std::iota(leaf, leaf + count, 10);
+  };
+  REQUIRE(a.launch(&rec, *layout));
+  const auto window = a.window();
+  remoteAlloc(&a.f.context, 64);
+
+  constexpr size_t bigCount = size_t{1} << 18;
+  auto *big = a.fixture.mallocLocal<int32_t>(bigCount);
+  Rec other{nullptr, big};
+  a.f.queue.onInvoke = nullptr;
+  REQUIRE(a.launch(&other, *layout));
+  CHECK(a.window() != window);
+  CHECK(xs[count / 2] == static_cast<int32_t>(10 + count / 2));
+  CHECK(xs[1] == 11);
+  a.fixture.allocation.forget(xs, false);
+}
+
+TEST_CASE("a guard fault during a window move waits for the move and reads the moved bytes") {
+  if (!polyregion::polyrt::guard::AtomicPublish) SKIP("no whole-page publish on this platform");
+  struct Rec {
+    int32_t *xs;
+    int32_t *extra;
+  };
+  auto layout = Struct_(Rec, StructMember_(Rec, xs, &int32Type), StructMember_(Rec, extra, &int32Type));
+  HeapArena a;
+  const size_t count = 64 * polyregion::polyrt::guard::pageSize() / sizeof(int32_t);
+  auto *xs = a.fixture.mallocLocalHeap<int32_t>(count);
+  std::fill(xs, xs + count, 1);
+  auto *small = a.fixture.mallocLocal<int32_t>(16);
+  Rec rec{xs, small};
+  a.f.queue.onInvoke = [&] {
+    auto *leaf = reinterpret_cast<int32_t *>(const_cast<char *>(a.at(a.slot<uint64_t>(offsetof(Rec, xs)))));
+    std::fill(leaf, leaf + count, 5);
+  };
+  REQUIRE(a.launch(&rec, *layout));
+  a.f.queue.onInvoke = nullptr;
+  remoteAlloc(&a.f.context, 64);
+
+  constexpr size_t bigCount = size_t{1} << 18;
+  auto *big = a.fixture.mallocLocal<int32_t>(bigCount);
+  Rec grown{xs, big};
+  std::atomic<bool> read{false};
+  std::atomic<int32_t> seen{0};
+  std::thread reader;
+  bool readerWaited = false;
+  a.f.queue.onCopy = [&] {
+    reader = std::thread([&] {
+      seen = xs[count / 2];
+      read = true;
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    readerWaited = !read;
+    a.f.queue.onCopy = nullptr;
+  };
+  REQUIRE(a.launch(&grown, *layout));
+  reader.join();
+  CHECK(readerWaited);
+  CHECK(seen == 5);
+  a.fixture.allocation.forget(xs, false);
+}
+
+TEST_CASE("heap growth from another thread waits for an arena launch in flight") {
+  auto gridLayout =
+      Struct_(Grid, StructMember_(Grid, first, &int32Type), StructMember_(Grid, second, &int32Type), StructMember_(Grid, host, &int32Type));
+  HeapArena a;
+  auto *host = a.fixture.mallocLocal<int32_t>(16);
+  Grid grid{nullptr, nullptr, host};
+  REQUIRE(a.launch(&grid, *gridLayout));
+  const auto growths = a.f.stats().heapGrowths;
+  std::thread allocator;
+  uintptr_t block = 0;
+  bool grewDuringLaunch = true;
+  a.f.queue.onInvoke = [&] {
+    allocator = std::thread([&] { polyrt_remote_malloc(&a.f.context, size_t{1} << 23, &block); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    grewDuringLaunch = a.f.stats().heapGrowths != growths;
+  };
+  REQUIRE(a.launch(&grid, *gridLayout));
+  allocator.join();
+  CHECK_FALSE(grewDuringLaunch);
+  CHECK(block != 0);
+  CHECK(a.f.stats().heapGrowths > growths);
+}
+
+TEST_CASE("a device that is not glcompute keeps the arena at root zero even when it advertises heap limits") {
+  struct Span {
+    int32_t *begin;
+    int32_t *end;
+  };
+  auto layout = Struct_(Span, StructMember_(Span, begin, &int32Type), StructMember_(Span, end, &int32Type));
+  HeapArena a(size_t{1} << 26, ModuleFormat::SPIRV_Kernel);
+  auto *host = a.fixture.mallocLocal<int32_t>(16);
+  Span span{host, host + 16};
+  REQUIRE(a.launch(&span, *layout));
+  CHECK(a.argument<int64_t>(0) == 0);
+  CHECK(a.window() == 0);
+  CHECK(a.f.stats().heapBytesCommitted == 0);
+}
+
+TEST_CASE("a host pointer that falls in a free span of the device heap is mirrored, not taken for package memory") {
+  struct Holder {
+    int32_t *pointer;
+  };
+  auto layout = Struct_(Holder, StructMember_(Holder, pointer, &int32Type));
+  HeapArena a;
+  auto *host = a.fixture.mallocLocal<int32_t>(16);
+  Holder holder{host};
+  REQUIRE(a.launch(&holder, *layout));
+  const auto committed = a.f.stats().heapBytesCommitted;
+  const auto address = a.heap() + committed - 4096;
+  a.fixture.localAllocations.emplace(address, 64);
+  holder.pointer = reinterpret_cast<int32_t *>(address);
+  REQUIRE(a.launch(&holder, *layout));
+  const auto value = a.slot<uint64_t>(0);
+  CHECK(value != address - a.heap());
+  CHECK(value >= a.window());
+  a.fixture.localAllocations.erase(address);
+}
+
+TEST_CASE("destroying the context releases guarded arena leaves before the heap goes") {
+  if (!polyregion::polyrt::guard::AtomicPublish) SKIP("no whole-page publish on this platform");
+  struct Rec {
+    int32_t *xs;
+  };
+  auto layout = Struct_(Rec, StructMember_(Rec, xs, &int32Type));
+  HeapArena a;
+  const size_t count = 64 * polyregion::polyrt::guard::pageSize() / sizeof(int32_t);
+  auto *xs = a.fixture.mallocLocalHeap<int32_t>(count);
+  std::fill(xs, xs + count, 1);
+  Rec rec{xs};
+  a.f.queue.onInvoke = [&] {
+    auto *leaf = reinterpret_cast<int32_t *>(const_cast<char *>(a.at(a.slot<uint64_t>(offsetof(Rec, xs)))));
+    std::fill(leaf, leaf + count, 4);
+  };
+  REQUIRE(a.launch(&rec, *layout));
+  a.f.queue.onInvoke = nullptr;
+  a.f.retire();
+  CHECK(xs[count / 2] == 4);
+  a.fixture.allocation.forget(xs, false);
+}
+
+TEST_CASE("a leaf uploaded into reused heap memory brings its zeroed over-read slack") {
+  struct Span {
+    int32_t *begin;
+    int32_t *end;
+  };
+  auto layout = Struct_(Span, StructMember_(Span, begin, &int32Type), StructMember_(Span, end, &int32Type));
+  HeapArena a;
+  auto *host = a.fixture.mallocLocal<int32_t>(16);
+  Span span{host, host + 16};
+  REQUIRE(a.launch(&span, *layout));
+  const auto committed = a.f.stats().heapBytesCommitted;
+  std::memset(const_cast<char *>(a.image()), 0xFF, committed - a.window());
+  REQUIRE(a.launch(&span, *layout));
+  const auto leaf = a.slot<uint64_t>(offsetof(Span, begin));
+  const auto *after = a.at(leaf) + 16 * sizeof(int32_t);
+  for (size_t i = 0; i < 4096; ++i)
+    REQUIRE(after[i] == 0);
+}
+
+TEST_CASE("heap memcpy moves a multi-megabyte span in both directions and into a guarded leaf") {
+  if (!polyregion::polyrt::guard::AtomicPublish) SKIP("no whole-page publish on this platform");
+  struct Rec {
+    int32_t *xs;
+  };
+  auto layout = Struct_(Rec, StructMember_(Rec, xs, &int32Type));
+  HeapArena a;
+  constexpr size_t bytes = size_t{10} << 20;
+  std::vector<uint8_t> pattern(bytes), back(bytes, 0);
+  std::iota(pattern.begin(), pattern.end(), 3);
+  const auto block = remoteAlloc(&a.f.context, bytes);
+  a.upload(block, pattern.data(), bytes);
+  REQUIRE(polyrt_remote_memcpy(&a.f.context, reinterpret_cast<uintptr_t>(back.data()), block, bytes, 1));
+  CHECK(back == pattern);
+  const auto copy = remoteAlloc(&a.f.context, bytes);
+  REQUIRE(polyrt_remote_memcpy(&a.f.context, copy, block, bytes, 2));
+  std::fill(back.begin(), back.end(), 0);
+  REQUIRE(polyrt_remote_memcpy(&a.f.context, reinterpret_cast<uintptr_t>(back.data()), copy, bytes, 1));
+  CHECK(back == pattern);
+
+  const size_t count = 64 * polyregion::polyrt::guard::pageSize() / sizeof(int32_t);
+  auto *xs = a.fixture.mallocLocalHeap<int32_t>(count);
+  std::fill(xs, xs + count, 1);
+  Rec rec{xs};
+  a.f.queue.onInvoke = [&] {
+    auto *leaf = reinterpret_cast<int32_t *>(const_cast<char *>(a.at(a.slot<uint64_t>(offsetof(Rec, xs)))));
+    std::fill(leaf, leaf + count, 6);
+  };
+  REQUIRE(a.launch(&rec, *layout));
+  REQUIRE(polyrt_remote_memcpy(&a.f.context, reinterpret_cast<uintptr_t>(xs), block, count * sizeof(int32_t), 1));
+  CHECK(std::memcmp(xs, pattern.data(), count * sizeof(int32_t)) == 0);
+  a.fixture.allocation.forget(xs, false);
+}
+
+TEST_CASE("a launch cannot move an arena between the device heap and a separate buffer") {
+  auto gridLayout =
+      Struct_(Grid, StructMember_(Grid, first, &int32Type), StructMember_(Grid, second, &int32Type), StructMember_(Grid, host, &int32Type));
+  HeapArena a;
+  auto *small = a.fixture.mallocLocal<int32_t>(16);
+  Grid grid{nullptr, nullptr, small};
+  REQUIRE(a.launch(&grid, *gridLayout));
+  CHECK_THROWS_AS(polyregion::polyrt::sma::arenaMarshal(a.fixture.allocation, &grid, *gridLayout, {}), std::logic_error);
+}
+
+TEST_CASE("a window next to free space grows in place") {
+  auto gridLayout =
+      Struct_(Grid, StructMember_(Grid, first, &int32Type), StructMember_(Grid, second, &int32Type), StructMember_(Grid, host, &int32Type));
+  HeapArena a;
+  auto *small = a.fixture.mallocLocal<int32_t>(16);
+  Grid grid{nullptr, nullptr, small};
+  REQUIRE(a.launch(&grid, *gridLayout));
+  const auto window = a.window();
+  constexpr size_t bigCount = size_t{1} << 18;
+  auto *big = a.fixture.mallocLocal<int32_t>(bigCount);
+  std::iota(big, big + bigCount, 5);
+  grid.host = big;
+  REQUIRE(a.launch(&grid, *gridLayout));
+  CHECK(a.window() == window);
+  CHECK(a.f.stats().arenaWindowMoves == 0);
+  CHECK(a.f.stats().d2dCopies == 0);
+  CHECK(std::memcmp(a.at(a.slot<uint64_t>(offsetof(Grid, host))), big, bigCount * sizeof(int32_t)) == 0);
+}
+
+TEST_CASE("stats are unavailable without a context") {
+  PolyrtStats stats{};
+  CHECK_FALSE(polyrt_stats(nullptr, &stats));
 }
 
 #ifdef POLYRT_TESTS_POLYDCO

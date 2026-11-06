@@ -14,6 +14,9 @@ class ArenaViewSuite extends munit.FunSuite {
   private val iterTpe = p.Type.Struct(iterSym, Nil)
   private val capTpe  = p.Type.Struct(capSym, Nil)
 
+  private val rootSymbol  = "#aroot"
+  private val viewSymbols = LogicalArenaViewAbi.bindings.map(_.symbol)
+
   private val defs = List(
     p.StructDef(nodeSym, Nil, List(named("val", p.Type.IntS32)), Nil),
     p.StructDef(iterSym, Nil, List(named("ptr", p.Type.Ptr(nodeTpe, p.Type.Space.Global))), Nil),
@@ -70,7 +73,7 @@ class ArenaViewSuite extends munit.FunSuite {
 
     assertEquals(
       result.entry.args.find(_.named.symbol == output.named.symbol).flatMap(_.boundary).map(_.extent),
-      Some(p.Arg.Extent.Elements(p.Arg.SizeExpr.Param(8)))
+      Some(p.Arg.Extent.Elements(p.Arg.SizeExpr.Param(9)))
     )
   }
 
@@ -82,8 +85,58 @@ class ArenaViewSuite extends munit.FunSuite {
     val result = ArenaView(PassTest.program(entry, Nil, defs), NoopLog)
     assertEquals(
       result.entry.args.map(_.named.symbol),
-      "before" :: LogicalArenaViewAbi.bindings.map(_.symbol) ::: List("after")
+      "before" :: rootSymbol :: viewSymbols ::: List("after")
     )
+  }
+
+  private def scalarCapture(): p.Function = {
+    val scalarSym = sym("Scalar")
+    val scalarTpe = p.Type.Struct(scalarSym, Nil)
+    val capArg    = arg(p.Conventions.CaptureArg, p.Type.Ptr(scalarTpe, p.Type.Space.Global))
+    val field     = p.Term.Select(capArg.named, List(p.PathStep.Field("count")), p.Type.IntS32)
+    entry(
+      args = List(capArg),
+      body = List(
+        p.Stmt.Mut(field.asInstanceOf[p.Term.Select], p.Expr.Alias(p.Term.IntS32Const(5))),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+  }
+
+  private val scalarDefs = List(p.StructDef(sym("Scalar"), Nil, List(named("count", p.Type.IntS32)), Nil))
+
+  test("the capture's arena offset is the leading root argument") {
+    val result = ArenaView(PassTest.program(scalarCapture(), Nil, scalarDefs), NoopLog)
+    assertEquals(result.entry.args.map(_.named.symbol), rootSymbol :: viewSymbols)
+    assertEquals(result.entry.args.head.named.tpe, p.Type.IntS64)
+  }
+
+  test("a capture field is addressed from the root argument rather than from zero") {
+    val result = ArenaView(PassTest.program(scalarCapture(), Nil, scalarDefs), NoopLog)
+    val root   = result.entry.args.head.named
+    val stores = result.entry.collectAll[p.Stmt].collect { case s @ p.Stmt.Update(_, _, p.Term.IntS32Const(5)) => s }
+    assertEquals(stores.size, 1, result.entry.body.map(_.repr).mkString("\n"))
+    val index = stores.head match { case p.Stmt.Update(_, i, _) => i; case _ => fail("expected a store") }
+    val defs  = result.entry.collectAll[p.Stmt].collect { case p.Stmt.Var(n, Some(e), _) => n -> e }.toMap
+    def reachesRoot(term: p.Term): Boolean = term match {
+      case p.Term.Select(n, Nil, _) => n == root || defs.get(n).exists(_.collectAll[p.Term].exists(reachesRoot))
+      case _                        => false
+    }
+    assert(reachesRoot(index), s"store index ${index.repr} does not depend on ${root.symbol}")
+  }
+
+  test("a kernel that only reads the capture's address still declares the root argument") {
+    val capArg = arg(p.Conventions.CaptureArg, p.Type.Ptr(capTpe, p.Type.Space.Global))
+    val output = arg("output", p.Type.Ptr(p.Type.IntS64, p.Type.Space.Global))
+    val entry = PassTest.entry(
+      args = List(capArg, output),
+      body = List(
+        p.Stmt.Update(selectT(output.named), p.Term.IntS64Const(0), selectT(capArg.named)),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+    val result = ArenaView(PassTest.program(entry, Nil, defs), NoopLog)
+    assertEquals(result.entry.args.map(_.named.symbol), rootSymbol :: viewSymbols ::: List("output"))
   }
 
   test("a kernel that never reads its capture keeps the capture argument in place") {
@@ -113,7 +166,7 @@ class ArenaViewSuite extends munit.FunSuite {
       }
     val result = ArenaView(PassTest.program(entry, Nil, defs), NoopLog)
     assertEquals(result.entry.get.receiver, None)
-    assertEquals(result.entry.args.map(_.named.symbol), LogicalArenaViewAbi.bindings.map(_.symbol) ::: List("after"))
+    assertEquals(result.entry.args.map(_.named.symbol), rootSymbol :: viewSymbols ::: List("after"))
   }
 
   test("a private pointer field in a stack-local closure stays a pointer") {
@@ -950,7 +1003,7 @@ class ArenaViewSuite extends munit.FunSuite {
     )
     val result = ArenaView(program, NoopLog)
     val views  = LogicalArenaViewAbi.bindings.map(_.symbol).toSet
-    assertEquals(result.entry.args.map(_.named.symbol), LogicalArenaViewAbi.bindings.map(_.symbol))
+    assertEquals(result.entry.args.map(_.named.symbol), rootSymbol :: viewSymbols)
     assert(result.entry.collectAll[p.Stmt].exists {
       case p.Stmt.Var(p.Named("loaded", tpe, _), _, _) => tpe == p.Type.IntS64
       case _                                           => false

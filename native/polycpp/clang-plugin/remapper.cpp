@@ -112,6 +112,25 @@ struct VariableMarker {
   return check(expression);
 }
 
+[[nodiscard]] static Vector<Stmt::Any> boundElementBody(Vector<Stmt::Any> body, const Type::Any &rtn) {
+  const auto ret = body.empty() ? Opt<Stmt::Return>{} : body.back().get<Stmt::Return>();
+  if (!ret) raise("Element boundary function must end in a return");
+  body.pop_back();
+  const auto result = Named("#element_result", rtn);
+  Vector<Stmt::Any> out;
+  Expr::Any value = Expr::Alias(Term::Unit0Const());
+  if (rtn.is<Type::Unit0>()) {
+    if (!ret->value.is<Expr::Alias>()) body.emplace_back(Stmt::Var(result, ret->value, false));
+  } else {
+    out.emplace_back(Stmt::Var(result, std::optional<Expr::Any>{}, true));
+    body.emplace_back(Stmt::Mut(Term::Select(result, {}, rtn), ret->value));
+    value = Expr::Alias(Term::Select(result, {}, rtn));
+  }
+  out.emplace_back(elementBoundary(body));
+  out.emplace_back(Stmt::Return(value));
+  return out;
+}
+
 [[nodiscard]] static Expr::Any defaultValue(const Type::Any &tpe) {
   return tpe.match_total(                                                                     //
       [&](const Type::Float16 &) -> Expr::Any { return Expr::Alias(Term::Float16Const(0)); }, //
@@ -1377,6 +1396,8 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
   if (rtnType.is<Type::Unit0>() && !(body | last_maybe() | exists([](const auto &x) { return x.template is<Stmt::Return>(); }))) {
     body.emplace_back(Stmt::Return(Expr::Alias(Term::Unit0Const())));
   }
+
+  if (hasAnnotation(decl, POLYREGION_ELEMENT_ANNOTATION)) body = boundElementBody(std::move(body), rtnType);
 
   fn->body = body;
   return {name, fn};

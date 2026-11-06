@@ -751,6 +751,7 @@ object PolyAST {
     inline val ExceptionCode           = "#exception_code"
     inline val ExceptionWhatSuffix     = "#what"
     inline val ExceptionCodeSuffix     = "#code"
+    inline val ElementBoundary         = "#element"
     inline val BaseFieldPrefix         = "#base"
     inline val EmptyStructStorageField = "#empty_struct_storage"
     inline val KernelBundleType        = "KernelBundle"
@@ -765,6 +766,7 @@ object PolyAST {
       inline val PolyreflectRtProtectAnnotation = "polyreflect-rt-protect"
       inline val PolyreflectRtOdrAnnotation     = "polyreflect-rt-odr"
       inline val PolyregionLocalAnnotation      = "__polyregion_local"
+      inline val PolyregionElementAnnotation    = "__polyregion_element"
     }
     object RuntimeAbi {
       inline val SmaAlloc       = "polyrt_sma_alloc"

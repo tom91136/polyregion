@@ -50,3 +50,45 @@ execute_process(
 if(NOT _build_rc EQUAL 0)
   message(FATAL_ERROR "Spectra install consumer build failed (${_build_rc}):\n${_build_stdout}${_build_stderr}")
 endif()
+
+if(DEFINED PACKAGES)
+  string(REPLACE "," ";" _packages "${PACKAGES}")
+  set(_package_root "${_prefix}/${LIBDIR}/polyregion/packages")
+  foreach(_package IN LISTS _packages)
+    if(NOT EXISTS "${_package_root}/${_package}/lib.polyast")
+      message(FATAL_ERROR "Spectra install has no ${_package} package under ${_package_root}")
+    endif()
+  endforeach()
+endif()
+
+if(DEFINED POLYCPP)
+  file(WRITE "${_source}/core.cpp" [=[
+#include <algorithm>
+#include <execution>
+#include <vector>
+void scale(std::vector<int> &xs) { std::for_each(std::execution::par_unseq, xs.begin(), xs.end(), [](int &x) { x *= 2; }); }
+]=])
+  set(_core_flags -std=c++17 -fstdpar "-fstdpar-arch=${CORE_ARCH}" -c "${_source}/core.cpp")
+  foreach(_lookup IN ITEMS flag env)
+    if(_lookup STREQUAL "flag")
+      set(_command "${POLYCPP}" ${_core_flags} "-fstdpar-library-path=${_package_root}"
+                   "-fstdpar-library-capabilities=${CORE_CAPABILITY}" -o "${_build}/core-flag.o")
+    else()
+      set(_command "${CMAKE_COMMAND}" -E env "POLYFRONT_LIBRARY_PATH=${_package_root}"
+                   "POLYFRONT_LIBRARY_CAPABILITIES=${CORE_CAPABILITY}" "${POLYCPP}" ${_core_flags} -o "${_build}/core-env.o")
+    endif()
+    execute_process(
+      COMMAND ${_command}
+      RESULT_VARIABLE _core_rc
+      OUTPUT_VARIABLE _core_stdout
+      ERROR_VARIABLE _core_stderr
+    )
+    if(NOT _core_rc EQUAL 0)
+      message(FATAL_ERROR "polycpp against the installed packages (${_lookup}) failed (${_core_rc}):\n${_core_stdout}${_core_stderr}")
+    endif()
+    string(FIND "${_core_stderr}" "bound to polyregion.core" _bound)
+    if(_bound EQUAL -1)
+      message(FATAL_ERROR "polycpp did not bind the installed polyregion.core package (${_lookup}):\n${_core_stderr}")
+    endif()
+  endforeach()
+endif()

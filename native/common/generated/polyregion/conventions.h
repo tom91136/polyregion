@@ -5,6 +5,7 @@
 #define POLYREFLECT_RT_PROTECT_ANNOTATION "polyreflect-rt-protect"
 #define POLYREFLECT_RT_ODR_ANNOTATION "polyreflect-rt-odr"
 #define POLYREGION_LOCAL_ANNOTATION "__polyregion_local"
+#define POLYREGION_ELEMENT_ANNOTATION "__polyregion_element"
 
 #define POLYREGION_RUNTIME_ABI(X)                                                                                                          \
   X(SmaAlloc, polyrt_sma_alloc)                                                                                                            \
@@ -33,6 +34,7 @@ inline constexpr auto ExceptionWhat = "#exception_what";
 inline constexpr auto ExceptionCode = "#exception_code";
 inline constexpr auto ExceptionWhatSuffix = "#what";
 inline constexpr auto ExceptionCodeSuffix = "#code";
+inline constexpr auto ElementBoundary = "#element";
 inline constexpr auto BaseFieldPrefix = "#base";
 inline constexpr auto EmptyStructStorageField = "#empty_struct_storage";
 inline constexpr auto KernelBundleType = "KernelBundle";

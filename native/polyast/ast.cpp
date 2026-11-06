@@ -5,6 +5,8 @@
 #include "aspartame/all.hpp"
 #include "fmt/format.h"
 
+#include "polyregion/conventions.h"
+
 #include "polyast_codec.h"
 
 using namespace std::string_literals;
@@ -13,6 +15,10 @@ using namespace polyregion;
 using std::string;
 
 using namespace aspartame;
+
+Stmt::Any polyast::elementBoundary(const Vector<Stmt::Any> &body) {
+  return Stmt::Try(body, {Handler(ExceptionKind(Type::Nothing(), conventions::ElementBoundary), {}, {})}, {});
+}
 
 string polyast::fqcn(const Sym &symbol) { return symbol.fqn ^ mk_string("."); }
 

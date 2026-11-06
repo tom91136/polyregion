@@ -15,6 +15,7 @@
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/Regex.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/TargetParser/Host.h"
 #include "llvm/TargetParser/Triple.h"
@@ -2397,7 +2398,7 @@ TEST_CASE("Vulkan backs dynamic local arrays with one typed workgroup global", "
   REQUIRE(compiled.binary);
   const auto ir = llvmIrOf(compiled);
   CHECK_THAT(ir, !Catch::Matchers::ContainsSubstring("alloca [0 x"));
-  CHECK_THAT(ir, Catch::Matchers::Matches("(.|\n)*internal addrspace\\(3\\) global \\[[1-9][0-9]* x i32\\](.|\n)*"));
+  CHECK(llvm::Regex("internal addrspace\\(3\\) global \\[[1-9][0-9]* x i32\\]").match(ir));
   CHECK_THAT(ir, !Catch::Matchers::ContainsSubstring("@first_wg"));
   CHECK_THAT(ir, !Catch::Matchers::ContainsSubstring("@second_wg"));
 }

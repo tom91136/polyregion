@@ -62,6 +62,7 @@ inline constexpr auto PolyrtJitSpecialiseHot = "POLYRT_JIT_SPECIALISE_HOT";
 inline constexpr auto PolyrtJitSpecialiseLimit = "POLYRT_JIT_SPECIALISE_LIMIT";
 inline constexpr auto PolyrtStrictSelect = "POLYRT_STRICT_SELECT";
 inline constexpr auto PolyrtQueueTimeoutSec = "POLYRT_QUEUE_TIMEOUT_SEC";
+inline constexpr auto PolyrtStats = "POLYRT_STATS";
 
 inline constexpr auto PolytestDebug = "POLYTEST_DEBUG";
 inline constexpr auto PolytestForwardEnv = "POLYTEST_FORWARD_ENV";

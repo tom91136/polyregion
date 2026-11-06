@@ -41,6 +41,7 @@
 #include "polyregion/polyc_jit_symbols.h"
 #include "polyregion/types.h"
 #include "polyrt/assert_buffer.hpp"
+#include "polyrt/device_heap.hpp"
 #include "polyrt/rt.h"
 #include "polyrt/sma_runtime.hpp"
 
@@ -317,6 +318,24 @@ void forgetTemporaryAllocation(polyregion::polyrt::ExecutionContext &execution, 
     std::erase(scope, pointer);
 }
 
+polyregion::polyrt::DeviceHeap *heapOf(polyregion::polyrt::ExecutionContext &execution) {
+  if (!execution.heapResolved) {
+    execution.heapResolved = true;
+    if (execution.device->moduleFormat() == polyregion::polyrt::ModuleFormat::SPIRV_GLCompute)
+      if (const auto limits = execution.device->heapLimits())
+        execution.heap = std::make_unique<polyregion::polyrt::DeviceHeap>(
+            *execution.device, *execution.queue, [&execution] { execution.settle(); },
+            polyregion::invoke::overReadPadBytes(execution.device->features()), *limits, execution.heapCounters, execution.arenaMutex);
+    execution.heapActive.store(execution.heap != nullptr, std::memory_order_release);
+  }
+  return execution.heap.get();
+}
+
+void releaseRemote(polyregion::polyrt::ExecutionContext &execution, const uintptr_t pointer) {
+  if (execution.heap && execution.heap->owns(pointer)) execution.heap->release(pointer);
+  else execution.device->freeDevice(pointer);
+}
+
 void retryPendingCleanups(polyregion::polyrt::ExecutionContext &execution) {
   std::exception_ptr failure;
   for (auto allocation = execution.remoteAllocations.begin(); allocation != execution.remoteAllocations.end();) {
@@ -326,7 +345,7 @@ void retryPendingCleanups(polyregion::polyrt::ExecutionContext &execution) {
     }
     const auto pointer = allocation->first;
     try {
-      execution.device->freeDevice(pointer);
+      releaseRemote(execution, pointer);
       forgetTemporaryAllocation(execution, pointer);
       allocation = execution.remoteAllocations.erase(allocation);
     } catch (...) {
@@ -354,13 +373,115 @@ template <class Fn> bool runtimeStatus(const char *operation, Fn &&fn) noexcept 
 
 } // namespace
 
+namespace {
+std::mutex &contextRegistryMutex() {
+  static std::mutex mutex;
+  return mutex;
+}
+
+std::vector<polyregion::polyrt::ExecutionContext *> &contextRegistry() {
+  static std::vector<polyregion::polyrt::ExecutionContext *> contexts;
+  return contexts;
+}
+
+PolyrtStats snapshotStats(const polyregion::polyrt::ExecutionContext &execution) {
+  const auto &counters = execution.counters;
+  const auto &heap = execution.heapCounters;
+  return {counters.launches.load(),
+          counters.arenaLaunches.load(),
+          counters.arenaWindowMoves.load(),
+          counters.d2dCopies.load(),
+          counters.h2dCopies.load(),
+          counters.d2hCopies.load(),
+          counters.waits.load(),
+          counters.remoteMallocs.load(),
+          heap.live.load(),
+          heap.committed.load(),
+          heap.growths.load()};
+}
+} // namespace
+
+polyregion::polyrt::ExecutionContext::ExecutionContext(Platform *platform, Device *device, DeviceQueue *queue)
+    : platform(platform), device(device), queue(queue) {
+  const std::lock_guard lock(contextRegistryMutex());
+  contextRegistry().emplace_back(this);
+}
+
+static polyregion::polyrt::ExecutionContext *contextOf(DeviceQueue &queue) {
+  polyregion::polyrt::ExecutionContext *owner = nullptr;
+  const std::lock_guard lock(contextRegistryMutex());
+  for (auto *context : contextRegistry())
+    if (context->queue == &queue) owner = context;
+  return owner;
+}
+
+void polyregion::polyrt::settleQueue(DeviceQueue &queue) {
+  if (auto *owner = contextOf(queue)) owner->settle();
+  else queue.settle();
+}
+
+void polyregion::polyrt::copyToDevice(DeviceQueue &queue, const void *src, const uintptr_t dst, const size_t dstOffset,
+                                      const size_t bytes) {
+  if (auto *owner = contextOf(queue)) {
+    owner->copyHostToDevice(src, dst, dstOffset, bytes);
+    owner->settle();
+  } else {
+    queue.enqueueHostToDeviceAsync(src, dst, dstOffset, bytes, {});
+    queue.settle();
+  }
+}
+
+void polyregion::polyrt::copyToHost(DeviceQueue &queue, const uintptr_t src, const size_t srcOffset, void *dst, const size_t bytes) {
+  if (auto *owner = contextOf(queue)) {
+    owner->copyDeviceToHost(src, srcOffset, dst, bytes);
+    owner->settle();
+  } else {
+    queue.enqueueDeviceToHostAsync(src, srcOffset, dst, bytes, {});
+    queue.settle();
+  }
+}
+
+POLYREGION_EXPORT extern "C" bool polyrt_stats(void *context, PolyrtStats *stats) noexcept {
+  if (!context || !stats) return false;
+  *stats = snapshotStats(*static_cast<polyregion::polyrt::ExecutionContext *>(context));
+  return true;
+}
+
 polyregion::polyrt::ExecutionContext::~ExecutionContext() {
+  {
+    const std::lock_guard registry(contextRegistryMutex());
+    std::erase(contextRegistry(), this);
+  }
+  if (const auto *target = std::getenv(polyregion::env::PolyrtStats); target && *target) {
+    const auto stats = snapshotStats(*this);
+    const auto line =
+        fmt::format("[PolyRT] stats launches={} arena_launches={} arena_window_moves={} d2d_copies={} h2d_copies={} "
+                    "d2h_copies={} waits={} remote_mallocs={} heap_live={} heap_committed={} heap_growths={}\n",
+                    stats.launches, stats.arenaLaunches, stats.arenaWindowMoves, stats.d2dCopies, stats.h2dCopies, stats.d2hCopies,
+                    stats.waits, stats.remoteMallocs, stats.heapBytesLive, stats.heapBytesCommitted, stats.heapGrowths);
+    if (std::string_view(target) == "1") std::fputs(line.c_str(), stderr);
+    else if (auto *file = std::fopen(target, "a")) {
+      std::fputs(line.c_str(), file);
+      std::fclose(file);
+    }
+  }
   const std::unique_lock lock(transaction, std::try_to_lock);
   if (!lock) return;
   try {
     retryPendingCleanups(*this);
   } catch (...) {
   }
+  for (const auto block : errorBlocks) {
+    try {
+      releaseRemote(*this, block);
+      remoteAllocations.erase(block);
+    } catch (...) {
+    }
+  }
+  errorBlocks.clear();
+  if (heap)
+    if (auto *marshal = sma::captureMarshal()) marshal->releaseArena();
+  heap.reset();
 }
 
 POLYREGION_EXPORT extern "C" bool polyrt_context_acquire(void *context) noexcept {
@@ -392,7 +513,7 @@ POLYREGION_EXPORT extern "C" bool polyrt_context_release(void *context) noexcept
       if (allocation == execution.remoteAllocations.end()) continue;
       allocation->second.cleanupPending = true;
       try {
-        execution.device->freeDevice(pointer);
+        releaseRemote(execution, pointer);
         execution.remoteAllocations.erase(allocation);
         forgetTemporaryAllocation(execution, pointer);
       } catch (...) {
@@ -480,13 +601,15 @@ static uintptr_t remoteMalloc(void *context, const size_t bytes) {
   if (bytes == 0) return 0;
   auto &execution = requireContext(context, __func__);
   const std::lock_guard lock(execution.transaction);
-  const auto pointer = execution.device->mallocDevice(tailPadded(bytes), Access::RW);
+  auto *heap = heapOf(execution);
+  execution.counters.remoteMallocs.fetch_add(1, std::memory_order_relaxed);
+  const auto pointer = heap ? heap->allocate(bytes) : execution.device->mallocDevice(tailPadded(bytes), Access::RW);
   try {
     execution.remoteAllocations.insert_or_assign(pointer, polyregion::polyrt::ExecutionContext::RemoteAllocation{bytes});
   } catch (...) {
     const auto failure = std::current_exception();
     try {
-      execution.device->freeDevice(pointer);
+      releaseRemote(execution, pointer);
     } catch (...) {
     }
     std::rethrow_exception(failure);
@@ -510,20 +633,51 @@ static void remoteFree(void *context, const uintptr_t ptr) {
   if (ptr == 0) return;
   auto &execution = requireContext(context, __func__);
   const std::lock_guard lock(execution.transaction);
-  execution.device->freeDevice(ptr);
+  releaseRemote(execution, ptr);
   execution.remoteAllocations.erase(ptr);
   forgetTemporaryAllocation(execution, ptr);
 }
 
-static void remoteMemcpy(void *context, const uintptr_t dst, const uintptr_t src, const size_t bytes, const int32_t direction) {
-  if (bytes == 0 || src == 0 || dst == 0) return;
-  auto &queue = *requireContext(context, __func__).queue;
-  switch (direction) {
-    case 0: queue.enqueueHostToDeviceAsync(reinterpret_cast<const void *>(src), dst, 0, bytes, {}); break;
-    case 1: queue.enqueueDeviceToHostAsync(src, 0, reinterpret_cast<void *>(dst), bytes, {}); break;
-    default: queue.enqueueDeviceToDeviceAsync(src, 0, dst, 0, bytes, {}); break;
+static bool enqueueRemoteMemcpy(void *context, const uintptr_t dst, const uintptr_t src, const size_t bytes, const int32_t direction) {
+  if (bytes == 0 || src == 0 || dst == 0) return false;
+  auto &execution = requireContext(context, __func__);
+  if (!execution.heapActive.load(std::memory_order_acquire)) {
+    switch (direction) {
+      case 0: execution.copyHostToDevice(reinterpret_cast<const void *>(src), dst, 0, bytes); break;
+      case 1: execution.copyDeviceToHost(src, 0, reinterpret_cast<void *>(dst), bytes); break;
+      default: execution.copyDeviceToDevice(src, 0, dst, 0, bytes); break;
+    }
+    return true;
   }
-  queue.enqueueWaitBlocking();
+  // heap devices copy synchronously; host memory is touched outside arenaMutex so a guard fault cannot re-enter it
+  switch (direction) {
+    case 0: {
+      std::vector<char> staging(bytes);
+      std::memcpy(staging.data(), reinterpret_cast<const void *>(src), bytes);
+      const std::shared_lock reader(*execution.arenaMutex);
+      execution.copyHostToDevice(staging.data(), dst, 0, bytes);
+      break;
+    }
+    case 1: {
+      std::vector<char> staging(bytes);
+      {
+        const std::shared_lock reader(*execution.arenaMutex);
+        execution.copyDeviceToHost(src, 0, staging.data(), bytes);
+      }
+      std::memcpy(reinterpret_cast<void *>(dst), staging.data(), bytes);
+      break;
+    }
+    default: {
+      const std::shared_lock reader(*execution.arenaMutex);
+      execution.copyDeviceToDevice(src, 0, dst, 0, bytes);
+      break;
+    }
+  }
+  return true;
+}
+
+static void remoteMemcpy(void *context, const uintptr_t dst, const uintptr_t src, const size_t bytes, const int32_t direction) {
+  if (enqueueRemoteMemcpy(context, dst, src, bytes, direction)) requireContext(context, __func__).settle();
 }
 
 POLYREGION_EXPORT extern "C" void *polyrt_device_usm_host_acquire(void *context, void *remote, const uint64_t bytes, const int32_t mode) {
@@ -564,12 +718,12 @@ POLYREGION_EXPORT extern "C" void polyrt_device_memset(void *context, void *dst,
   if (count > std::numeric_limits<size_t>::max()) POLYREGION_FATAL("PolyRT", "%s", "Device memset size exceeds size_t");
   const auto size = static_cast<size_t>(count);
   const std::vector<char> hostBuffer(size, static_cast<char>(value));
-  auto &queue = *requireContext(context, __func__).queue;
-  queue.enqueueHostToDeviceAsync(hostBuffer.data(), reinterpret_cast<uintptr_t>(dst), 0, size, {});
-  queue.enqueueWaitBlocking();
+  auto &execution = requireContext(context, __func__);
+  execution.queue->enqueueHostToDeviceAsync(hostBuffer.data(), reinterpret_cast<uintptr_t>(dst), 0, size, {});
+  execution.settle();
 }
 
-POLYREGION_EXPORT extern "C" void polyrt_remote_sync(void *context) { requireContext(context, __func__).queue->enqueueWaitBlocking(); }
+POLYREGION_EXPORT extern "C" void polyrt_remote_sync(void *context) { (void)requireContext(context, __func__); }
 
 static std::mutex &assertingModulesMutex() {
   static std::mutex mutex;
@@ -621,16 +775,60 @@ POLYREGION_EXPORT extern "C" void polyrt_remote_fallback(const char *site) noexc
   log(DebugLevel::Debug, "<%s> No kernel object matched the device, running the interface fallback", site);
 }
 
+static const std::vector<uint8_t> &zeroErrorBlock() {
+  static const std::vector<uint8_t> zero(polyregion::polyrt::assertBufferBytes, 0);
+  return zero;
+}
+
+static void zeroRemote(void *context, const uintptr_t block) {
+  const auto &zero = zeroErrorBlock();
+  enqueueRemoteMemcpy(context, block, reinterpret_cast<uintptr_t>(zero.data()), zero.size(), 0);
+}
+
+uintptr_t polyregion::polyrt::acquireErrorBlock(ExecutionContext &execution) {
+  const std::lock_guard lock(execution.transaction);
+  if (!execution.errorBlocks.empty()) {
+    const auto block = execution.errorBlocks.back();
+    execution.errorBlocks.pop_back();
+    return block;
+  }
+  const auto block = remoteMalloc(&execution, assertBufferBytes);
+  try {
+    zeroRemote(&execution, block);
+  } catch (...) {
+    const auto failure = std::current_exception();
+    try {
+      remoteFree(&execution, block);
+    } catch (...) {
+    }
+    std::rethrow_exception(failure);
+  }
+  return block;
+}
+
+void polyregion::polyrt::releaseErrorBlock(ExecutionContext &execution, const uintptr_t block, const bool dirty) {
+  try {
+    const std::lock_guard lock(execution.transaction);
+    if (dirty) zeroRemote(&execution, block);
+    execution.errorBlocks.emplace_back(block);
+  } catch (...) {
+    const auto failure = std::current_exception();
+    try {
+      discardErrorBlock(execution, block);
+    } catch (...) {
+    }
+    std::rethrow_exception(failure);
+  }
+}
+
+void polyregion::polyrt::discardErrorBlock(ExecutionContext &execution, const uintptr_t block) { remoteFree(&execution, block); }
+
 static void remoteLaunch(void *context, const char *moduleName, const char *kernelName, const size_t gridX, const size_t gridY,
                          const size_t gridZ, const size_t blockX, const size_t blockY, const size_t blockZ, const size_t localMemBytes,
-                         const size_t argCount, const uint8_t *argTypes, void *const *argPtrs) {
+                         const size_t argCount, const uint8_t *argTypes, void *const *argPtrs, const int64_t arenaRoot = 0) {
   auto &value = requireContext(context, __func__);
-  uintptr_t error = 0;
-  if (takesErrorBuffer(moduleName)) {
-    error = remoteMalloc(context, polyregion::polyrt::assertBufferBytes);
-    const std::vector<uint8_t> zero(polyregion::polyrt::assertBufferBytes, 0);
-    remoteMemcpy(context, error, reinterpret_cast<uintptr_t>(zero.data()), zero.size(), 0);
-  }
+  value.counters.launches.fetch_add(1, std::memory_order_relaxed);
+  uintptr_t error = takesErrorBuffer(moduleName) ? polyregion::polyrt::acquireErrorBlock(value) : 0;
   try {
     std::vector<uint8_t> types;
     std::vector<void *> ptrs;
@@ -642,26 +840,30 @@ static void remoteLaunch(void *context, const char *moduleName, const char *kern
     ptrs.insert(ptrs.end(), argPtrs, argPtrs + argCount);
     ArgBuffer buffer{};
     if (value.platform->kind() == PlatformKind::HostThreaded) buffer.append(Type::IntS64, nullptr);
-    // a logical SPIR-V kernel reads its capture through the typed arena views bound where the capture was passed
+    // a logical SPIR-V kernel reads its capture through the typed arena views, led by the capture's arena offset
     const auto pointerArgs =
         iota(size_t{0}, types.size()) | filter([&](const size_t i) { return static_cast<Type>(types[i]) == Type::Ptr; }) | to_vector();
     const auto capture = value.device->arenaViewStart(moduleName) ^ flat_map([&](const size_t view) {
                            return view < pointerArgs.size() ? std::optional{pointerArgs[view]} : std::nullopt;
                          });
-    for (size_t i = 0; i < types.size(); ++i)
-      for (int copy = 0; copy < (capture == i ? polyregion::polyrt::sma::arenaViewCount : 1); ++copy)
-        buffer.append(static_cast<Type>(types[i]), ptrs[i]);
+    for (size_t i = 0; i < types.size(); ++i) {
+      if (capture == i) polyregion::polyrt::sma::bindArena(buffer, *static_cast<const uintptr_t *>(ptrs[i]), arenaRoot, true);
+      else buffer.append(static_cast<Type>(types[i]), ptrs[i]);
+    }
     buffer.append(Type::Void, nullptr);
+    log(DebugLevel::Debug, "<%s> Launch %s grid=(%zu,%zu,%zu) block=(%zu,%zu,%zu)", __func__, moduleName, gridX, gridY, gridZ, blockX,
+        blockY, blockZ);
     value.queue->enqueueInvokeAsync(
         moduleName, kernelName, buffer,
         Policy{Dim3{gridX, gridY, gridZ},
                blockX > 0 ? std::optional{std::pair{Dim3{blockX, blockY, blockZ}, localMemBytes}} : std::nullopt},
         {});
-    value.queue->enqueueWaitBlocking();
+    value.settle();
     if (error) {
       std::vector<uint8_t> reported(polyregion::polyrt::assertBufferBytes, 0);
       remoteMemcpy(context, reinterpret_cast<uintptr_t>(reported.data()), error, reported.size(), 1);
-      remoteFree(context, std::exchange(error, 0));
+      const auto dirty = std::any_of(reported.begin(), reported.end(), [](const uint8_t byte) { return byte != 0; });
+      polyregion::polyrt::releaseErrorBlock(value, std::exchange(error, 0), dirty);
       const auto reason = polyregion::polyrt::decodeAssertBuffer(reported.data());
       polyregion::polyrt::logAssertReason(reason, __func__, moduleName);
       if (reason.raised) __polyregion_builtin_assert(reason.code, reason.message.c_str());
@@ -669,7 +871,8 @@ static void remoteLaunch(void *context, const char *moduleName, const char *kern
   } catch (...) {
     const auto failure = std::current_exception();
     try {
-      remoteFree(context, error);
+      value.wait();
+      if (error) polyregion::polyrt::discardErrorBlock(value, error);
     } catch (...) {
     }
     std::rethrow_exception(failure);
@@ -686,6 +889,39 @@ static std::optional<std::pair<uintptr_t, size_t>> remoteAllocation(polyregion::
   return std::pair{base, allocation.bytes};
 }
 
+static polyregion::polyrt::ArenaPlacement arenaPlacement(polyregion::polyrt::ExecutionContext &execution) {
+  polyregion::polyrt::ArenaPlacement placement;
+  placement.mutex = execution.arenaMutex;
+  placement.isPackage = [&execution](const uintptr_t pointer) { return remoteAllocation(execution, pointer).has_value(); };
+  const std::lock_guard lock(execution.transaction);
+  auto *heap = heapOf(execution);
+  if (!heap) return placement;
+  const auto locked = [&execution](auto &&fn) {
+    return [&execution, fn](auto... arguments) {
+      const std::lock_guard lock(execution.transaction);
+      return fn(arguments...);
+    };
+  };
+  placement.allocate = locked([heap](const size_t bytes) { return heap->allocate(bytes); });
+  placement.extend = locked([heap](const uintptr_t pointer, const size_t bytes) { return heap->extend(pointer, bytes); });
+  placement.release = locked([heap](const uintptr_t pointer) { heap->release(pointer); });
+  placement.handle = locked([heap] { return heap->handle(); });
+  placement.move = [&execution](const uintptr_t dst, const uintptr_t src, const size_t bytes) {
+    execution.counters.arenaWindowMoves.fetch_add(1, std::memory_order_relaxed);
+    execution.copyDeviceToDevice(src, 0, dst, 0, bytes);
+  };
+  return placement;
+}
+
+polyregion::polyrt::ArenaPlacement polyregion::polyrt::sma::arenaPlacementOf(void *context) {
+  return arenaPlacement(requireContext(context, __func__));
+}
+
+polyregion::polyrt::ArenaPlacement polyregion::polyrt::sma::currentArenaPlacement() {
+  auto *execution = currentContext();
+  return execution ? arenaPlacementOf(execution) : ArenaPlacement{};
+}
+
 static bool pointerBearing(const polyregion::runtime::TypeLayout *layout) {
   return layout && view(layout->members, layout->members + layout->memberCount) | exists([](const auto &member) {
                      return member.ptrIndirection > 0 || pointerBearing(member.type);
@@ -699,6 +935,7 @@ static void remoteLaunchMarshalled(void *context, const char *moduleName, const 
                                    const polyregion::runtime::TypeLayout *const *layouts) {
   namespace sma = polyregion::polyrt::sma;
   auto &execution = requireContext(context, __func__);
+  const std::lock_guard transaction(execution.transaction);
   struct Mirror {
     uintptr_t remote = 0;
     uintptr_t source = 0;
@@ -735,10 +972,8 @@ static void remoteLaunchMarshalled(void *context, const char *moduleName, const 
       if (mirrorKinds[i] != 1 || !marshal || !pointerBearing(layouts ? layouts[i] : nullptr)) continue;
       if (mode == sma::MirrorMode::Arena) {
         if (arenaCapture) throw std::logic_error(fmt::format("{}: launch of {} has more than one arena capture", __func__, kernelName));
-        arena = marshal->arena(argPtrs[i], *layouts[i], [&](const uintptr_t pointer) { return remoteAllocation(execution, pointer); });
-        for (const auto &bound : arena.remotes)
-          execution.queue->enqueueDeviceToDeviceAsync(bound.remote, 0, arena.base, bound.offset, bound.sizeInBytes, {});
-        if (!arena.remotes.empty()) execution.queue->enqueueWaitBlocking();
+        arena = marshal->arena(argPtrs[i], *layouts[i], arenaPlacement(execution));
+        execution.counters.arenaLaunches.fetch_add(1, std::memory_order_relaxed);
         marshalled[i] = arena.base;
         arenaCapture = i;
       } else {
@@ -772,26 +1007,28 @@ static void remoteLaunchMarshalled(void *context, const char *moduleName, const 
         const std::lock_guard lock(execution.transaction);
         execution.remoteAllocations.at(mirrors[i].remote).cleanupPending = true;
       }
-      remoteMemcpy(context, mirrors[i].remote, source, mirrorSizes[i], 0);
+      enqueueRemoteMemcpy(context, mirrors[i].remote, source, mirrorSizes[i], 0);
       launchArgPtrs[i] = &mirrors[i].remote;
     }
     remoteLaunch(context, moduleName, kernelName, gridX, gridY, gridZ, blockX, blockY, blockZ, localMemBytes, argCount, argTypes,
-                 launchArgPtrs.data());
+                 launchArgPtrs.data(), arena.root);
     if (marshal) marshal->visitClear();
     for (const auto i : mirroredCaptures)
       marshal->readMirror(argPtrs[i]);
-    if (arenaCapture) {
-      for (const auto &bound : arena.remotes)
-        execution.queue->enqueueDeviceToDeviceAsync(arena.base, bound.offset, bound.remote, 0, bound.sizeInBytes, {});
-      if (!arena.remotes.empty()) execution.queue->enqueueWaitBlocking();
-      marshal->readArena();
-    }
+    if (arenaCapture) marshal->readArena();
     for (const auto i : ensuredPointers)
       marshal->readAlloc(*static_cast<void *const *>(argPtrs[i]));
+    bool copiedBack = false;
     for (size_t i = 0; i < argCount; ++i)
-      if (mirrorKinds[i] == 2 && mirrors[i].remote != 0) remoteMemcpy(context, mirrors[i].source, mirrors[i].remote, mirrorSizes[i], 1);
+      if (mirrorKinds[i] == 2 && mirrors[i].remote != 0)
+        copiedBack |= enqueueRemoteMemcpy(context, mirrors[i].source, mirrors[i].remote, mirrorSizes[i], 1);
+    if (copiedBack) execution.settle();
   } catch (...) {
     const auto failure = std::current_exception();
+    try {
+      execution.wait();
+    } catch (...) {
+    }
     (void)release();
     std::rethrow_exception(failure);
   }

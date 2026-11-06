@@ -11,8 +11,12 @@
 #include <cstring>
 #include <functional>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
+#include <shared_mutex>
+#include <stdexcept>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
@@ -24,13 +28,17 @@
 
 namespace polyregion::polyrt {
 
-struct ArenaRemote {
-  uintptr_t remote;
-  uint64_t offset;
-  size_t sizeInBytes;
-};
+struct ArenaPlacement {
+  std::function<bool(uintptr_t)> isPackage;
+  std::function<uintptr_t(size_t)> allocate;
+  std::function<bool(uintptr_t, size_t)> extend;
+  std::function<void(uintptr_t)> release;
+  std::function<void(uintptr_t, uintptr_t, size_t)> move;
+  std::function<uintptr_t()> handle;
+  std::shared_ptr<std::shared_mutex> mutex;
 
-using RemoteRangeOf = std::function<std::optional<std::pair<uintptr_t, size_t>>(uintptr_t)>;
+  bool heap() const { return static_cast<bool>(allocate); }
+};
 
 struct PtrQuery {
   size_t sizeInBytes;
@@ -358,6 +366,7 @@ public:
     // the mirror patched a translated device pointer into this alloc; a raw copy-back would clobber it
     bool hasDevicePtrs = false;
     RangedAllocation remote;
+    std::vector<char> deviceBytes{};
   };
 
   std::unordered_map<uintptr_t, RemoteAllocation> localToRemoteAlloc{};
@@ -370,11 +379,13 @@ public:
   struct Guard {
     uintptr_t local, remote, bodyBegin, bodyEnd;
     size_t sizeInBytes;
-    // arena leaves sit at an offset into the arena, whose base moves when it grows
+    // arena leaves sit at an offset into the arena window, which moves when it grows
     uint64_t remoteOffset = 0;
     bool arena = false;
     enum class State : uint8_t { Open, Clean, Stale } state = State::Open;
     size_t slot = 0;
+    std::vector<char> endBytes{};
+    bool endsKnown = false;
   };
   static constexpr size_t MinGuardPages = 16;
 
@@ -431,13 +442,27 @@ private:
   }
 
   uintptr_t remoteOf(const Guard &g) const { return g.arena ? genArenaDevBase : g.remote; }
+  uint64_t remoteOffsetOf(const Guard &g) const { return g.arena ? genArenaWindow + g.remoteOffset : g.remoteOffset; }
+
+  std::shared_lock<std::shared_mutex> arenaReader(const Guard &g) const {
+    return g.arena && genArenaMutex ? std::shared_lock(*genArenaMutex) : std::shared_lock<std::shared_mutex>();
+  }
+
+  void guardRead(const Guard &g, void *dst, const uint64_t offset, const size_t bytes) {
+    const auto reader = arenaReader(g);
+    remoteRead(dst, remoteOf(g), remoteOffsetOf(g) + offset, bytes);
+  }
+
+  void guardWrite(const Guard &g, const void *src, const uint64_t offset, const size_t bytes) {
+    const auto reader = arenaReader(g);
+    remoteWrite(src, remoteOf(g), remoteOffsetOf(g) + offset, bytes);
+  }
 
   // pull the device copy home without any other thread seeing the body half-filled
   void publishBody(const Guard &g, const guard::Access access) {
     const size_t bytes = g.bodyEnd - g.bodyBegin;
-    const uint64_t offset = g.remoteOffset + (g.bodyBegin - g.local);
     if (guard::publish(reinterpret_cast<void *>(g.bodyBegin), bytes, access,
-                       [&](void *staging) { remoteRead(staging, remoteOf(g), offset, bytes); })) {
+                       [&](void *staging) { guardRead(g, staging, g.bodyBegin - g.local, bytes); })) {
       guard::bump(g.slot);
       return;
     }
@@ -446,19 +471,27 @@ private:
   }
 
   void writeBody(const Guard &g) {
-    remoteWrite(reinterpret_cast<const char *>(g.bodyBegin), remoteOf(g), g.remoteOffset + (g.bodyBegin - g.local),
-                g.bodyEnd - g.bodyBegin);
+    guardWrite(g, reinterpret_cast<const char *>(g.bodyBegin), g.bodyBegin - g.local, g.bodyEnd - g.bodyBegin);
   }
 
-  void copyEnds(const Guard &g, const bool toRemote) {
+  void copyEnds(Guard &g, const bool toRemote) {
     const size_t head = g.bodyBegin - g.local, tailOffset = g.bodyEnd - g.local, tail = g.sizeInBytes - tailOffset;
-    const auto copy = [&](const size_t offset, const size_t size) {
+    const bool track = !g.arena, skip = track && toRemote && g.endsKnown;
+    g.endsKnown = false;
+    if (track && !toRemote) g.endBytes.resize(head + tail);
+    const auto copy = [&](const size_t offset, const size_t size, const size_t shadow) {
       if (size == 0) return;
-      if (toRemote) remoteWrite(reinterpret_cast<const char *>(g.local) + offset, remoteOf(g), g.remoteOffset + offset, size);
-      else remoteRead(reinterpret_cast<char *>(g.local) + offset, remoteOf(g), g.remoteOffset + offset, size);
+      auto *host = reinterpret_cast<char *>(g.local) + offset;
+      if (toRemote) {
+        if (!skip || std::memcmp(host, g.endBytes.data() + shadow, size) != 0) guardWrite(g, host, offset, size);
+      } else {
+        guardRead(g, host, offset, size);
+        if (track) std::memcpy(g.endBytes.data() + shadow, host, size);
+      }
     };
-    copy(0, head);
-    copy(tailOffset, tail);
+    copy(0, head, 0);
+    copy(tailOffset, tail, head);
+    g.endsKnown = track && !toRemote;
   }
 
   // an existing guard on `local`, or a new one when the block spans enough whole heap pages to be worth it
@@ -528,6 +561,10 @@ private:
     return residencyEnabled() && !alloc.hostReadOnly && !alloc.hasDevicePtrs && pointerFree(alloc.layout);
   }
 
+  static bool shadowable(const RemoteAllocation &alloc) {
+    return !alloc.hasDevicePtrs && pointerFree(alloc.layout) && alloc.remote.sizeInBytes <= MinGuardPages * guard::pageSize();
+  }
+
   // where a pointer-free block would copy back after a launch: leave the device copy authoritative instead
   void settle(const char *local, RemoteAllocation &alloc) {
     const std::lock_guard lock(guardMutex);
@@ -535,6 +572,7 @@ private:
     if (!g && guardable(alloc)) g = guardFor(local, alloc.remote.sizeInBytes, alloc.remote.ptr, 0, /*arena*/ false);
     if (!g) {
       remoteRead(const_cast<char *>(local), alloc.remote.ptr, 0, alloc.remote.sizeInBytes);
+      if (shadowable(alloc)) alloc.deviceBytes.assign(local, local + alloc.remote.sizeInBytes);
       return;
     }
     markStale(*g);
@@ -548,7 +586,14 @@ private:
       if (g->state == Guard::State::Open) writeBody(*g);
       return;
     }
+    if (alloc.deviceBytes.size() == alloc.remote.sizeInBytes && shadowable(alloc)
+        && std::memcmp(local, alloc.deviceBytes.data(), alloc.deviceBytes.size()) == 0) {
+      if (!alloc.hostReadOnly) alloc.deviceBytes.clear();
+      return;
+    }
+    alloc.deviceBytes.clear();
     remoteWrite(local, alloc.remote.ptr, 0, alloc.remote.sizeInBytes);
+    if (alloc.hostReadOnly && shadowable(alloc)) alloc.deviceBytes.assign(local, local + alloc.remote.sizeInBytes);
   }
 
   void unguard(const uintptr_t local) {
@@ -921,14 +966,21 @@ public:
   // generic single-arena offset-rewrite mirror: the binding-slot dual of mirrorToRemote. the whole reachable
   // graph is laid into one host byte arena, every pointer slot rewritten to a byte offset into it (null ->
   // arenaNull); genArenaFinish uploads it once. cycles/sharing dedup by host base, so depth is unbounded.
-  // null sentinel = 0: the capture root sits at arena offset 0 with nothing pointing back, so real offsets are > 0
+  // null sentinel = 0: the capture root sits at window offset 0 with nothing pointing back, so real offsets are > 0.
+  // staging offsets are relative to the window, the span of the device buffer holding the image. on a device heap
+  // the window is one block of it that may move; its offset is added where an offset crosses to the device and
+  // package pointers are heap offsets already
   static constexpr uint64_t arenaNull = 0;
   std::vector<char> genArenaStaging{};
   std::unordered_map<uintptr_t, uint64_t> genArenaOffsetOf{};
   uintptr_t genArenaDevBase = 0;
-  size_t genArenaDevCapacity = 0; // reuse the device arena across launches; realloc only to grow
-  size_t genArenaDevValid = 0;    // persist: bytes of live device content to carry across a realloc (kernel outputs)
-  bool genArenaActive = false;    // a backend may hand out device handle 0 (cl_mem index), so track validity separately
+  uint64_t genArenaWindow = 0;
+  ArenaPlacement genArenaPlacement{};
+  std::shared_ptr<std::shared_mutex> genArenaMutex{};
+  std::unordered_map<uint64_t, size_t> genArenaSlots{}; // staged slots holding a window offset, rebased once the window is final
+  size_t genArenaDevCapacity = 0;                       // reuse the device arena across launches; realloc only to grow
+  size_t genArenaDevValid = 0;                          // persist: bytes of live device content to carry across a realloc (kernel outputs)
+  bool genArenaActive = false; // a backend may hand out device handle 0 (cl_mem index), so track validity separately
   // trailing zeroed pad after each arena object: the arena packs objects adjacently, so a vectoriser's
   // over-read past an array end must land in zeroed slack, not neighbour bytes (Mesa/llvmpipe runs
   // unpredicated SIMD-remainder lanes). set from the device's overread_pad feature (0 = off for sound backends)
@@ -957,11 +1009,18 @@ public:
   // host regions of resident leaves to H2D this launch, applied after any arena growth
   std::vector<std::tuple<const char *, uint64_t, size_t>> genArenaHostUploads{};
   std::vector<uint64_t> genArenaTouched{}; // leaf offsets this kernel reached
-  std::vector<ArenaRemote> genArenaRemotes{};
-  RemoteRangeOf genArenaRemoteOf{};
+
+  void genArenaAdopt(ArenaPlacement placement) {
+    if (genArenaActive && placement.heap() != genArenaPlacement.heap())
+      throw std::logic_error("the arena window lives in a different kind of device memory than this launch places it in");
+    if (genArenaActive && placement.heap() && placement.handle() != genArenaDevBase)
+      throw std::logic_error("the arena window lives in a different device heap than this launch places it in");
+    if (placement.mutex != genArenaMutex) genArenaMutex = placement.mutex;
+    genArenaPlacement = std::move(placement);
+  }
 
   void genArenaReset() {
-    genArenaRemotes.clear();
+    genArenaSlots.clear();
     genArenaUploads.clear();
     genArenaHostUploads.clear();
     genArenaTouched.clear();
@@ -986,9 +1045,10 @@ public:
     uint64_t childOff = arenaNull;
     if (const char *target = readPtrValue(hostBase + hostOff); target) {
       const auto address = reinterpret_cast<uintptr_t>(target);
-      if (const auto remote = genArenaRemoteOf ? genArenaRemoteOf(address) : std::nullopt) {
-        childOff = genArenaBindRemote(remote->first, remote->second) + (address - remote->first);
-        writeSlot(genArenaStaging.data() + arenaPtrOff, childOff, slot);
+      if (genArenaPlacement.isPackage && genArenaPlacement.isPackage(address)) {
+        if (!genArenaPlacement.heap())
+          throw std::logic_error("a capture references package memory but the device format has no heap to address it in");
+        writeSlot(genArenaStaging.data() + arenaPtrOff, address - genArenaPlacement.handle(), slot);
         return;
       }
       // interior pointer into an already-mirrored object (e.g. an SSO string's `_M_p` -> its own
@@ -1000,7 +1060,7 @@ public:
           break;
         }
       if (childOff != arenaNull) {
-        writeSlot(genArenaStaging.data() + arenaPtrOff, childOff, slot);
+        writeWindowSlot(arenaPtrOff, childOff, slot);
         return;
       }
       const char *base = target;
@@ -1028,7 +1088,12 @@ public:
         if (childOff != arenaNull) childOff += pastEndAdd;
       } else return; // XXX foreign / unsized: preserve copied bytes
     }
+    writeWindowSlot(arenaPtrOff, childOff, slot);
+  }
+
+  void writeWindowSlot(const uint64_t arenaPtrOff, const uint64_t childOff, const size_t slot) {
     writeSlot(genArenaStaging.data() + arenaPtrOff, childOff, slot);
+    if (childOff != arenaNull) genArenaSlots.emplace(arenaPtrOff, slot);
   }
 
   // recurse the typed prefix copied at arena `arenaOff` (mirror of host `hostBase+hostOff`); a const link
@@ -1107,7 +1172,7 @@ public:
     if (genArenaObjectSlack) genArenaStaging.resize(genArenaStaging.size() + genArenaObjectSlack);
     if (resident) genArenaResidentEnd = genArenaStaging.size();
     if (genArenaPersist) {
-      genArenaUploads.emplace_back(off, allocSize);
+      genArenaUploads.emplace_back(off, allocSize + genArenaObjectSlack);
       genArenaTouched.push_back(off);
     }
     if (indirection > 1)
@@ -1118,20 +1183,8 @@ public:
     return off;
   }
 
-  uint64_t genArenaBindRemote(const uintptr_t remote, const size_t size) {
-    for (const auto &r : genArenaRemotes)
-      if (r.remote == remote) return r.offset;
-    constexpr size_t align = alignof(std::max_align_t);
-    if (const size_t pad = (align - genArenaStaging.size() % align) % align; pad) genArenaStaging.resize(genArenaStaging.size() + pad);
-    const uint64_t off = genArenaStaging.size();
-    genArenaStaging.resize(off + size + genArenaObjectSlack);
-    genArenaRemotes.push_back({remote, off, size});
-    return off;
-  }
-
-  uintptr_t genArenaFinish() {
-    const size_t need = genArenaStaging.size() + 1;
-    if (!genArenaActive || need > genArenaDevCapacity) {
+  void genArenaPlaceWindow(const size_t capacity) {
+    if (!genArenaPlacement.heap()) {
       // the resident leaves carry kernel outputs (not in staging), so preserve the live device image across
       // the realloc instead of re-uploading stale staging - else a growth (a later kernel's new leaf) clobbers
       // every prior kernel's result. headroom keeps growths logarithmic during warmup
@@ -1140,12 +1193,45 @@ public:
         keep.resize(genArenaDevValid);
         remoteRead(keep.data(), genArenaDevBase, 0, genArenaDevValid);
       }
-      if (genArenaActive) remoteRelease(genArenaDevBase);
-      genArenaDevCapacity = std::max(need, genArenaDevCapacity * 2);
-      genArenaDevBase = remoteAlloc(genArenaDevCapacity);
+      const auto previous = genArenaDevBase;
+      const auto replacement = remoteAlloc(capacity);
+      {
+        std::unique_lock<std::shared_mutex> exclusive;
+        if (genArenaMutex) exclusive = std::unique_lock(*genArenaMutex);
+        if (!keep.empty()) remoteWrite(keep.data(), replacement, 0, keep.size());
+        if (genArenaActive) remoteRelease(previous);
+        genArenaDevBase = replacement;
+      }
+      genArenaDevCapacity = capacity;
       genArenaActive = true;
-      if (!keep.empty()) remoteWrite(keep.data(), genArenaDevBase, 0, keep.size());
+      return;
     }
+    if (!genArenaActive) {
+      const auto block = genArenaPlacement.allocate(capacity);
+      genArenaDevBase = genArenaPlacement.handle();
+      genArenaWindow = block - genArenaDevBase;
+      genArenaActive = true;
+    } else if (!genArenaPlacement.extend(genArenaDevBase + genArenaWindow, capacity)) {
+      // resident leaves are pointer free, so no device-held window offset goes stale when the image moves
+      const auto block = genArenaPlacement.allocate(capacity);
+      const auto previous = genArenaDevBase + genArenaWindow;
+      {
+        const std::unique_lock lock(*genArenaMutex);
+        if (genArenaPersist && genArenaDevValid) genArenaPlacement.move(block, previous, genArenaDevValid);
+        genArenaWindow = block - genArenaDevBase;
+      }
+      genArenaPlacement.release(previous);
+    }
+    genArenaDevCapacity = capacity;
+  }
+
+  uintptr_t genArenaFinish() {
+    const size_t need = genArenaStaging.size() + 1;
+    if (!genArenaActive || need > genArenaDevCapacity) genArenaPlaceWindow(std::max(need, genArenaDevCapacity * 2));
+    if (genArenaWindow)
+      for (const auto &[off, width] : genArenaSlots)
+        writeSlot(genArenaStaging.data() + off, readSlot(genArenaStaging.data() + off, width) + genArenaWindow, width);
+    genArenaSlots.clear();
     if (genArenaPersist && genArenaDevValid) {
       // resident leaves are already on-device (just restored if we grew); only the capture + dirty/new leaves
       // merge regions separated by less than a page: a resident leaf spans whole pages, so no gap that small holds
@@ -1158,17 +1244,17 @@ public:
         else merged.emplace_back(off, sz);
       }
       for (const auto &[off, sz] : merged)
-        remoteWrite(genArenaStaging.data() + off, genArenaDevBase, off, sz);
+        remoteWrite(genArenaStaging.data() + off, genArenaDevBase, genArenaWindow + off, sz);
       if (debug)
         std::fprintf(stderr, "[SMA] genArenaFinish(persist) -> %zu region(s), %zu bytes resident\n", genArenaUploads.size(),
                      genArenaStaging.size());
     } else {
       // first launch (or a re-laid union): nothing resident yet, upload the whole image once
-      remoteWrite(genArenaStaging.data(), genArenaDevBase, 0, genArenaStaging.size());
+      remoteWrite(genArenaStaging.data(), genArenaDevBase, genArenaWindow, genArenaStaging.size());
       if (debug) std::fprintf(stderr, "[SMA] genArenaFinish -> %zu bytes\n", genArenaStaging.size());
     }
     for (const auto &[host, off, sz] : genArenaHostUploads)
-      remoteWrite(host, genArenaDevBase, off, sz);
+      remoteWrite(host, genArenaDevBase, genArenaWindow + off, sz);
     genArenaDevValid = genArenaStaging.size();
     return genArenaDevBase;
   }
@@ -1230,13 +1316,18 @@ public:
   }
 
   // inverse of genArenaPatch's interior search: a device arena byte offset -> the host address it mirrors.
-  // arenaNull -> nullptr; inside a rec -> its host interior; in no rec (foreign / seam) -> nullopt (leave untouched)
-  std::optional<const char *> genArenaHostOf(const uint64_t off) const {
-    if (off == arenaNull) return static_cast<const char *>(nullptr);
+  // arenaNull -> nullptr; inside a rec -> its host interior; outside the window -> the package pointer at that heap
+  // offset; in no rec (foreign / seam) -> nullopt (leave untouched)
+  std::optional<const char *> genArenaHostOf(const uint64_t devOff) const {
+    if (devOff == arenaNull) return static_cast<const char *>(nullptr);
+    if (genArenaPlacement.heap() && (devOff < genArenaWindow || devOff - genArenaWindow >= genArenaDevCapacity)) {
+      if (const auto pointer = genArenaDevBase + devOff; genArenaPlacement.isPackage(pointer))
+        return reinterpret_cast<const char *>(pointer);
+      return std::nullopt;
+    }
+    const auto off = devOff - genArenaWindow;
     for (const auto &r : genArenaRecs)
       if (off >= r.off && off < r.off + r.size) return r.host + (off - r.off);
-    for (const auto &r : genArenaRemotes)
-      if (off >= r.offset && off <= r.offset + r.sizeInBytes) return reinterpret_cast<const char *>(r.remote + (off - r.offset));
     return std::nullopt;
   }
 
@@ -1315,7 +1406,7 @@ public:
           hi = std::max<uint64_t>(hi, r->off + r->size);
         }
         std::vector<char> buf(hi - lo);
-        remoteRead(buf.data(), genArenaDevBase, lo, buf.size());
+        remoteRead(buf.data(), genArenaDevBase, genArenaWindow + lo, buf.size());
         for (const auto *r : recs)
           genArenaScatterRec(ArenaView{buf.data(), lo}, *r);
       };
@@ -1327,7 +1418,7 @@ public:
       return;
     }
     std::vector<char> buf(genArenaStaging.size());
-    remoteRead(buf.data(), genArenaDevBase, 0, buf.size());
+    remoteRead(buf.data(), genArenaDevBase, genArenaWindow, buf.size());
     for (const auto &r : genArenaRecs)
       genArenaScatterRec(ArenaView{buf.data(), 0}, r);
   }

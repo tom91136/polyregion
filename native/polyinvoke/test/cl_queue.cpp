@@ -56,8 +56,10 @@ int runSvmOwnership() {
   auto *interior = reinterpret_cast<void *>(uintptr_t{0x10020});
 
   details::SVMTracker tracker;
+  POLYTEST_CHECK(ctx, !tracker.anyDeviceOwned());
   tracker.track(base, 64);
   POLYTEST_CHECK(ctx, tracker.ownership(base) == Ownership::Device);
+  POLYTEST_CHECK(ctx, tracker.anyDeviceOwned());
   POLYTEST_CHECK(ctx, !tracker.ownership(reinterpret_cast<void *>(uintptr_t{0x20000})));
 
   size_t maps = 0;
@@ -71,6 +73,7 @@ int runSvmOwnership() {
   POLYTEST_CHECK(ctx, tracker.mapForHost(base, map) == CL_SUCCESS);
   POLYTEST_CHECK(ctx, maps == 1);
   POLYTEST_CHECK(ctx, tracker.ownership(base) == Ownership::Host);
+  POLYTEST_CHECK(ctx, !tracker.anyDeviceOwned());
 
   size_t unmaps = 0;
   POLYTEST_CHECK(ctx, tracker.unmapAllForDevice([&](void *ptr) {

@@ -24,6 +24,10 @@ import polyregion.ast.{Log, PolyAST as p, *, given}
 //   value-returning entry        ->  drains to `return poison`; the host discards it once it reads the buffer
 //   string-literal message       ->  inlined as byte stores (rusticl's SPIR-V loader panics on a string global)
 //   assert in a barrier loop     ->  rejected: draining it would skip the barrier and hang the workgroup
+// an element boundary (a `Try` whose only handler names `Conventions.ElementBoundary`, emitted around the user
+// functor invocation of a parallel algorithm) ends an exit there instead of at the entry: the flag clears after the
+// body, an escaping raise is reported and cleaned up, and the next element runs. a boundary holding a barrier is
+// transparent
 // try/catch/finally uses the same drain flag plus a dense type tag and one payload slot per raised type:
 // the first compatible handler clears the flag and binds its projected payload; an unmatched raise keeps
 // draining. finally saves pending exception state, runs once on normal, exceptional, and abrupt exits, and
@@ -61,6 +65,18 @@ object StructuredExit extends ProgramPass {
   private val raisedArg   = p.Named(RaisedSym, FlagPtr)
   private val error       = sel(p.Named(ErrorSym, ErrorPtr))
   private val tagSel      = sel(p.Named(TagSym, p.Type.IntS32))
+
+  private val BoundaryKind = p.ExceptionKind(p.Type.Nothing, p.Conventions.ElementBoundary)
+
+  private[pass] def elementBoundary(body: List[p.Stmt]): p.Stmt =
+    p.Stmt.Try(body, List(p.Handler(Some(BoundaryKind), None, Nil)), Nil)
+
+  private def isBoundary(t: p.Stmt.Try): Boolean = t.fin.isEmpty && (t.handlers match {
+    case List(p.Handler(Some(kind), None, Nil)) => kind == BoundaryKind
+    case _                                      => false
+  })
+
+  private def swallows(t: p.Stmt.Try): Boolean = isBoundary(t) && !t.body.exists(containsBarrier)
 
   private def declarations(body: List[p.Stmt]): List[p.Named] = body.flatMap {
     case p.Stmt.Var(n, _, _)            => List(n)
@@ -258,6 +274,7 @@ object StructuredExit extends ProgramPass {
       case p.Stmt.While(_, b)                => raised(b)
       case p.Stmt.ForRange(_, _, _, _, b)    => raised(b)
       case p.Stmt.Annotated(inner, _, _)     => raised(inner)
+      case t: p.Stmt.Try if swallows(t)      => Set.empty
       case t: p.Stmt.Try                     => unhandled(t) ++ raised(t.handlers.flatMap(_.body)) ++ raised(t.fin)
       case _                                 => Set.empty
     }
@@ -274,11 +291,15 @@ object StructuredExit extends ProgramPass {
       case p.Stmt.While(_, b)             => b.exists(escapes)
       case p.Stmt.ForRange(_, _, _, _, b) => b.exists(escapes)
       case p.Stmt.Annotated(inner, _, _)  => escapes(inner)
+      case t: p.Stmt.Try if swallows(t)   => false
       case t: p.Stmt.Try =>
         t.body.exists(mayExit) || t.handlers.exists(_.body.exists(escapes)) || t.fin.exists(escapes) ||
         unhandled(t).nonEmpty
       case _ => false
     }
+
+    def reportsRaise(s: p.Stmt): Boolean =
+      s.collectFirst_[p.Stmt] { case t: p.Stmt.Try if swallows(t) && raised(t.body).nonEmpty => t }.isDefined
 
     def hasBarrierEscape(s: p.Stmt): Boolean = s
       .collectFirst_[p.Stmt] {
@@ -819,6 +840,7 @@ object StructuredExit extends ProgramPass {
         lowerRaise(v, exceptionKind) ::: Option.when(breakOnRaise)(p.Stmt.Break).toList
       case p.Stmt.Rethrow =>
         throw IllegalStateException("rethrow reached structured-exit lowering outside a handler")
+      case t: p.Stmt.Try if swallows(t)      => guard(t.body) ::: settle(t.body)
       case p.Stmt.Try(b, hs, f)              => lowerTry(b, hs, f)
       case p.Stmt.While(c, b)                => List(p.Stmt.While(c, drainTop(b)))
       case p.Stmt.ForRange(i, lb, ub, st, b) => List(p.Stmt.ForRange(i, lb, ub, st, drainTop(b)))
@@ -860,8 +882,7 @@ object StructuredExit extends ProgramPass {
       }
     }
 
-    // only an escaping raise writes the exception report; assertions already filled the buffer at their site
-    def escapeReport: List[p.Stmt] = {
+    private def exceptionReport: List[p.Stmt] = {
       val code = p.Enums.AssertCode.Exception.value
       val head = (0 until CodeBytes).toList.map { k =>
         p.Stmt.Update(error, p.Term.IntU32Const(k), p.Term.IntS8Const(((code >> (8 * k)) & 0xff).toByte))
@@ -876,12 +897,23 @@ object StructuredExit extends ProgramPass {
       if (chain.isEmpty) Nil
       else {
         val cleanup = selectTag(tagSel, tags.map(x => x.thrown -> cleanupFor(x.thrown, slotOf(x.thrown))))
-        val report = ifThen(
-          p.Expr.IntrOp(p.Intr.LogicNeq(tagSel, p.Term.IntS32Const(AssertTag))),
-          head ::: chain ::: cleanup,
-          Nil
-        )
-        List(p.Stmt.Cond(asserted, report, Nil))
+        ifThen(p.Expr.IntrOp(p.Intr.LogicNeq(tagSel, p.Term.IntS32Const(AssertTag))), head ::: chain ::: cleanup, Nil)
+      }
+    }
+
+    // only an escaping raise writes the exception report; assertions already filled the buffer at their site
+    def escapeReport: List[p.Stmt] = {
+      val report = exceptionReport
+      if (report.isEmpty) Nil else List(p.Stmt.Cond(asserted, report, Nil))
+    }
+
+    // the exit ends at the element boundary; the host reads the error buffer after the launch
+    private def settle(body: List[p.Stmt]): List[p.Stmt] = {
+      val raises = flow.raised(body).nonEmpty
+      if (!raises && !body.exists(flow.mayExit)) Nil
+      else {
+        val reported = if (raises && !report) exceptionReport else Nil
+        List(p.Stmt.Cond(asserted, reported :+ p.Stmt.Mut(asserted, p.Expr.Alias(p.Term.Bool1Const(false))), Nil))
       }
     }
   }
@@ -943,7 +975,8 @@ object StructuredExit extends ProgramPass {
         val args = exit match {
           case Exit.Buffer =>
             log.info(s"${e.signatureKey}: lowered ${tags.size} raised type(s) to a structured drain + error buffer")
-            val needsError = e.body.exists(flow.mayExit) || e.body.exists(flow.escapes)
+            val needsError =
+              e.body.exists(flow.mayExit) || e.body.exists(flow.escapes) || e.body.exists(flow.reportsRaise)
             if (!needsError || e.args.exists(_.named.symbol == ErrorSym)) e.args
             else p.Arg(p.Named(ErrorSym, ErrorPtr)) +: e.args
           case Exit.Report(propagates) =>

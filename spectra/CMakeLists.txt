@@ -110,6 +110,7 @@ if(NOT SPECTRA_VENDOR_ONLY)
     set(_spectra_profile_cuda_arch "")
     set(_spectra_profile_rocm_arch "")
     set(_spectra_profile_dpl OFF)
+    set(_spectra_profile_dpl_target "")
     foreach(_target IN LISTS _spectra_profile_targets)
       if(NOT _target MATCHES "^([^@!]+)@([^!]*)")
         continue()
@@ -122,6 +123,9 @@ if(NOT SPECTRA_VENDOR_ONLY)
         set(_spectra_profile_rocm_arch "${_arch}")
       elseif(_backend MATCHES "^(opencl|opencl1_1|opencl2_0|spirv64_kernel|spirv_glcompute|vulkan|vulkan_spirv|metal|metal1_0)$")
         set(_spectra_profile_dpl ON)
+        if(NOT _spectra_profile_dpl_target)
+          set(_spectra_profile_dpl_target "${_backend}@${_arch}")
+        endif()
       endif()
     endforeach()
     set(_spectra_CUDA_THRUST "${SPECTRA_PACKAGE_CUDA_THRUST}")
@@ -178,6 +182,42 @@ if(NOT SPECTRA_VENDOR_ONLY)
   else()
     set(_spectra_package "${SPECTRA_PACKAGE_ROOT}/spectra/lib.polyast")
   endif()
+  set(_spectra_core_producers)
+  if(_spectra_CUDA_THRUST)
+    list(APPEND _spectra_core_producers thrust)
+  endif()
+  if(_spectra_ROCTHRUST)
+    list(APPEND _spectra_core_producers rocthrust)
+  endif()
+  if(_spectra_ONEDPL)
+    list(APPEND _spectra_core_producers onedpl)
+  endif()
+  set(_spectra_core_package "${SPECTRA_PACKAGE_ROOT}/polyregion.core/lib.polyast")
+  if(NOT SPECTRA_ENABLE_PACKAGE
+     OR (SPECTRA_PREBUILT_PACKAGE AND NOT EXISTS "${_spectra_core_package}")
+     OR (NOT SPECTRA_PREBUILT_PACKAGE AND NOT _spectra_core_producers))
+    set(_spectra_core_package "")
+  endif()
+
+  # Each implementation serves only the compile targets it was produced for; one qualified list binds every target to its own.
+  set(_spectra_served_backends)
+  set(_spectra_qualified_capabilities)
+  if(_spectra_CUDA_THRUST OR SPECTRA_PREBUILT_PACKAGE)
+    list(APPEND _spectra_served_backends cuda)
+    list(APPEND _spectra_qualified_capabilities spectra.thrust@cuda)
+  endif()
+  if(_spectra_ROCTHRUST OR SPECTRA_PREBUILT_PACKAGE)
+    list(APPEND _spectra_served_backends hip hsa)
+    list(APPEND _spectra_qualified_capabilities spectra.hip@hip spectra.hip@hsa)
+  endif()
+  if(_spectra_ONEDPL OR SPECTRA_PREBUILT_PACKAGE)
+    set(_spectra_dpl_backends opencl1_1 opencl2_0 spirv64_kernel spirv_glcompute metal1_0 host)
+    list(APPEND _spectra_served_backends ${_spectra_dpl_backends})
+    foreach(_backend IN LISTS _spectra_dpl_backends)
+      list(APPEND _spectra_qualified_capabilities spectra.dpl@${_backend})
+    endforeach()
+  endif()
+  string(JOIN "," _spectra_qualified_capabilities ${_spectra_qualified_capabilities})
 endif()
 
 if(NOT SPECTRA_VENDOR_ONLY)
@@ -227,12 +267,35 @@ if(NOT SPECTRA_VENDOR_ONLY)
     FILES ${CMAKE_CURRENT_BINARY_DIR}/spectra-config.cmake
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/spectra
   )
+  set(_spectra_install_args)
+  if(SPECTRA_ENABLE_PACKAGE)
+    set(_spectra_installed_packages spectra)
+    if(_spectra_core_package)
+      list(APPEND _spectra_installed_packages polyregion.core)
+      set(_spectra_install_core_target)
+      if(_spectra_ONEDPL AND _spectra_profile_dpl_target)
+        set(_spectra_install_core_target "${_spectra_profile_dpl_target}")
+      elseif(_spectra_CUDA_THRUST AND _spectra_profile_cuda_arch)
+        set(_spectra_install_core_target "cuda@${_spectra_profile_cuda_arch}")
+      elseif(_spectra_ROCTHRUST AND _spectra_profile_rocm_arch)
+        set(_spectra_install_core_target "hsa@${_spectra_profile_rocm_arch}")
+      endif()
+      if(_spectra_install_core_target)
+        list(APPEND _spectra_install_args
+             -DPOLYCPP=${_spectra_polycpp} -DCORE_ARCH=${_spectra_install_core_target}
+             -DCORE_CAPABILITY=${_spectra_qualified_capabilities})
+      endif()
+    endif()
+    string(REPLACE ";" "," _spectra_installed_packages "${_spectra_installed_packages}")
+    list(APPEND _spectra_install_args -DLIBDIR=${CMAKE_INSTALL_LIBDIR} -DPACKAGES=${_spectra_installed_packages})
+  endif()
   add_test(
     NAME spectra.install-consumer
     COMMAND ${CMAKE_COMMAND}
             -DBUILD_DIR=${CMAKE_CURRENT_BINARY_DIR}
             -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/install-consumer-test
             -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
+            ${_spectra_install_args}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_spectra_install.cmake
   )
   set_tests_properties(spectra.install-consumer PROPERTIES LABELS "spectra;install")
@@ -397,6 +460,7 @@ if(NOT SPECTRA_VENDOR_ONLY AND SPECTRA_ENABLE_PACKAGE)
     endif()
 
     set(_spectra_interface "${CMAKE_CURRENT_SOURCE_DIR}/generated/package/spectra.interface.polyast")
+    set(_spectra_core_interface "${CMAKE_CURRENT_SOURCE_DIR}/generated/package/polyregion.core.interface.polyast")
     set(_spectra_java_env)
     if(SPECTRA_JAVA_HOME)
       set(_spectra_java_env "JAVA_HOME=${SPECTRA_JAVA_HOME}" "PATH=${SPECTRA_JAVA_HOME}/bin:$ENV{PATH}")
@@ -404,7 +468,7 @@ if(NOT SPECTRA_VENDOR_ONLY AND SPECTRA_ENABLE_PACKAGE)
     file(GLOB_RECURSE _spectra_codegen_inputs CONFIGURE_DEPENDS
          "${CMAKE_CURRENT_SOURCE_DIR}/src/main/scala/*.scala" "${Polyregion_MAVEN_REPOSITORY}/*.jar")
     add_custom_command(
-      OUTPUT "${_spectra_interface}"
+      OUTPUT "${_spectra_interface}" "${_spectra_core_interface}"
       COMMAND ${CMAKE_COMMAND} -E env ${_spectra_java_env} "POLYREGION_DIST=${Polyregion_ROOT}"
               bash "${CMAKE_CURRENT_SOURCE_DIR}/sbtx" -no-colors -batch -J-Dsbt.server.autostart=false
               genSpectraInterface
@@ -413,13 +477,14 @@ if(NOT SPECTRA_VENDOR_ONLY AND SPECTRA_ENABLE_PACKAGE)
               "${CMAKE_CURRENT_SOURCE_DIR}/build.sbt"
               "${CMAKE_CURRENT_SOURCE_DIR}/project/build.properties"
               "${CMAKE_CURRENT_SOURCE_DIR}/project/plugins.sbt"
-      COMMENT "Generating the Spectra interface package"
+      COMMENT "Generating the Spectra and polyregion.core interface packages"
       VERBATIM
     )
 
     file(GLOB _spectra_impl_includes CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/implementation/*.inc")
     set(_spectra_linked_fragments)
     set(_spectra_fragment_index 0)
+    set(_spectra_core_fragments)
     set(_spectra_cuda_overlay "${CMAKE_CURRENT_BINARY_DIR}/cuda-package-overlay")
     set(_spectra_cuda_path "${SPECTRA_CUDA_PATH}")
     if(NOT _spectra_cuda_path)
@@ -526,7 +591,25 @@ if(NOT SPECTRA_VENDOR_ONLY AND SPECTRA_ENABLE_PACKAGE)
             -I ${SPECTRA_VENDOR_ROOT}/onedpl/include)
       endif()
 
+      set(_parts)
       foreach(_part RANGE 1 ${_spectra_part_count})
+        list(APPEND _parts ${_part})
+      endforeach()
+      if(_producer IN_LIST _spectra_core_producers)
+        list(APPEND _parts core)
+      endif()
+      foreach(_part IN LISTS _parts)
+        if(_part STREQUAL "core")
+          set(_part_flags -DSPECTRA_CORE)
+          set(_part_interface "${_spectra_core_interface}")
+          list(LENGTH _spectra_core_fragments _part_index)
+          set(_part_label "core")
+        else()
+          set(_part_flags -DSPECTRA_PART=${_part})
+          set(_part_interface "${_spectra_interface}")
+          set(_part_index ${_spectra_fragment_index})
+          set(_part_label "${_part}/${_spectra_part_count}")
+        endif()
         set(_base "${CMAKE_CURRENT_BINARY_DIR}/fragments/${_producer}-${_part}")
         set(_program "${_base}.polyast")
         add_custom_command(
@@ -535,13 +618,13 @@ if(NOT SPECTRA_VENDOR_ONLY AND SPECTRA_ENABLE_PACKAGE)
           COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/fragments"
           COMMAND ${CMAKE_COMMAND} -E env ${_spectra_tool_library_env} "POLYPASS_PLUGINS=${_spectra_polypass}"
                   "${_spectra_polycpp}" --driver "${_spectra_clangxx}"
-                  -std=c++17 -w -DNDEBUG -DSPECTRA_PART=${_part}
+                  -std=c++17 -w -DNDEBUG ${_part_flags}
                   -I ${CMAKE_CURRENT_SOURCE_DIR}/include -I ${CMAKE_CURRENT_SOURCE_DIR}/src/implementation
                   -fstdpar -fstdpar-mem=direct -fstdpar-emit-library=${_program} ${_flags}
                   -c "${_source}" -o "${_base}.o"
           DEPENDS "${_source}" ${_spectra_impl_includes} "${_producer_impl_header}" ${_producer_deps}
                   ${_spectra_package_tools}
-          COMMENT "Compiling Spectra ${_producer} fragment ${_part}/${_spectra_part_count}"
+          COMMENT "Compiling Spectra ${_producer} fragment ${_part_label}"
           VERBATIM
         )
         set(_linked "${_base}.package.polyast")
@@ -549,15 +632,19 @@ if(NOT SPECTRA_VENDOR_ONLY AND SPECTRA_ENABLE_PACKAGE)
           OUTPUT "${_linked}"
           COMMAND ${CMAKE_COMMAND} -E env ${_spectra_tool_library_env} "POLYPASS_PLUGINS=${_spectra_polypass}"
                   "${_spectra_polyc}" package link-fragment "--capabilities=${_capability}"
-                  "${_spectra_interface}"
-                  ${_spectra_fragment_index} "${_program}" "${_linked}"
-          DEPENDS "${_spectra_interface}"
+                  "${_part_interface}"
+                  ${_part_index} "${_program}" "${_linked}"
+          DEPENDS "${_part_interface}"
                   "${_program}" "${_spectra_polyc}" "${_spectra_polypass}"
-          COMMENT "Linking Spectra ${_producer} fragment ${_part}/${_spectra_part_count}"
+          COMMENT "Linking Spectra ${_producer} fragment ${_part_label}"
           VERBATIM
         )
-        list(APPEND _spectra_linked_fragments "${_linked}")
-        math(EXPR _spectra_fragment_index "${_spectra_fragment_index} + 1")
+        if(_part STREQUAL "core")
+          list(APPEND _spectra_core_fragments "${_linked}")
+        else()
+          list(APPEND _spectra_linked_fragments "${_linked}")
+          math(EXPR _spectra_fragment_index "${_spectra_fragment_index} + 1")
+        endif()
       endforeach()
     endforeach()
 
@@ -573,12 +660,29 @@ if(NOT SPECTRA_VENDOR_ONLY AND SPECTRA_ENABLE_PACKAGE)
       COMMENT "Packing the Spectra package"
       VERBATIM
     )
-    add_custom_target(spectra-package ALL DEPENDS "${_spectra_package}")
+    if(_spectra_core_package)
+      add_custom_command(
+        OUTPUT "${_spectra_core_package}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${SPECTRA_PACKAGE_ROOT}"
+        COMMAND ${CMAKE_COMMAND} -E env ${_spectra_tool_library_env} "POLYPASS_PLUGINS=${_spectra_polypass}"
+                "${_spectra_polyc}" package pack
+                "${_spectra_core_interface}"
+                "${SPECTRA_PACKAGE_ROOT}" ${_spectra_core_fragments}
+        DEPENDS "${_spectra_core_interface}"
+                ${_spectra_core_fragments} "${_spectra_polyc}"
+        COMMENT "Packing the polyregion.core package"
+        VERBATIM
+      )
+    endif()
+    add_custom_target(spectra-package ALL DEPENDS "${_spectra_package}" ${_spectra_core_package})
   endif()
   if(TARGET spectra-vendor AND NOT SPECTRA_PREBUILT_PACKAGE)
     add_dependencies(spectra-package spectra-vendor)
   endif()
   install(FILES "${_spectra_package}" DESTINATION "${CMAKE_INSTALL_LIBDIR}/polyregion/packages/spectra")
+  if(_spectra_core_package)
+    install(FILES "${_spectra_core_package}" DESTINATION "${CMAKE_INSTALL_LIBDIR}/polyregion/packages/polyregion.core")
+  endif()
 endif()
 
 if(NOT SPECTRA_VENDOR_ONLY AND SPECTRA_ENABLE_PACKAGE_TESTS)
@@ -590,48 +694,75 @@ if(NOT SPECTRA_VENDOR_ONLY AND SPECTRA_ENABLE_PACKAGE_TESTS)
     message(FATAL_ERROR "Spectra package matrix has no generated cases")
   endif()
 
-  # Each implementation serves only the compile targets it was produced for; unserved targets are not tested.
   set(_spectra_capabilities)
-  if(_spectra_CUDA_THRUST OR SPECTRA_PREBUILT_PACKAGE)
-    list(APPEND _spectra_capabilities cuda=spectra.thrust)
+  foreach(_backend IN LISTS _spectra_served_backends)
+    list(APPEND _spectra_capabilities "${_backend}=${_spectra_qualified_capabilities}")
+  endforeach()
+
+  set(_spectra_suite_kinds generated closure)
+  if(_spectra_core_package)
+    list(APPEND _spectra_suite_kinds core)
+    if(EXISTS "${Polyregion_ROOT}/bin/polyfc${CMAKE_EXECUTABLE_SUFFIX}")
+      list(APPEND _spectra_suite_kinds core-fortran)
+    endif()
   endif()
-  if(_spectra_ROCTHRUST OR SPECTRA_PREBUILT_PACKAGE)
-    list(APPEND _spectra_capabilities hip=spectra.hip hsa=spectra.hip)
-  endif()
-  if(_spectra_ONEDPL OR SPECTRA_PREBUILT_PACKAGE)
-    list(APPEND _spectra_capabilities
-         opencl1_1=spectra.dpl opencl2_0=spectra.dpl spirv64_kernel=spectra.dpl spirv_glcompute=spectra.dpl metal1_0=spectra.dpl
-         host=spectra.dpl)
+  if(WIN32)
+    set(_spectra_fortran_stdpar "-fstdpar-mem=interpose")
+  elseif(APPLE)
+    set(_spectra_fortran_stdpar "-fuse-ld=lld")
+  else()
+    set(_spectra_fortran_stdpar "-fuse-ld=lld -lstdc++")
   endif()
 
-  # Captured pointers are mirrored only when allocations are tracked, so the closure suite needs reflect.
+  # Captured pointers are mirrored only when allocations are tracked, so the closure and core suites need reflect.
   file(GLOB _spectra_closure_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/test/closure/*.cpp")
-  foreach(_spectra_suite_kind IN ITEMS generated closure)
+  file(GLOB _spectra_core_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/test/core/*.cpp")
+  file(GLOB _spectra_core_fortran_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/test/core/*.f90")
+  set(_spectra_package_stdpar
+      "-fstdpar-library-path=${SPECTRA_PACKAGE_ROOT} -fstdpar-library-capabilities={spectra_capability} "
+      "-I${CMAKE_CURRENT_SOURCE_DIR}/generated/cpp/include -I${CMAKE_CURRENT_SOURCE_DIR}/include "
+      "-I${CMAKE_CURRENT_SOURCE_DIR}/test/generated")
+  string(JOIN "" _spectra_package_stdpar ${_spectra_package_stdpar})
+  foreach(_spectra_suite_kind IN LISTS _spectra_suite_kinds)
+    set(_spectra_suite_file "${CMAKE_CURRENT_BINARY_DIR}/spectra-${_spectra_suite_kind}.suite.env")
+    set(_spectra_suite_name spectra-${_spectra_suite_kind})
+    set(_spectra_suite_extra "")
+    set(_spectra_suite_target_values ${_spectra_capabilities})
+    set(_spectra_suite_stdpar
+        "{apple_target}-std=c++17 -fstdpar -fstdpar-mem=reflect -fstdpar-rt={stdpar_rt} -fstdpar-arch={spectra_arch}")
     if(_spectra_suite_kind STREQUAL "generated")
       set(_spectra_suite_name spectra)
       set(_spectra_suite_file "${_spectra_suite}")
-      set(_spectra_suite_mem direct)
+      set(_spectra_suite_stdpar
+          "{apple_target}-std=c++17 -fstdpar -fstdpar-mem=direct -fstdpar-rt={stdpar_rt} -fstdpar-arch={spectra_arch} "
+          "${_spectra_package_stdpar}")
       set(_spectra_suite_tests ${_spectra_generated_tests})
-    else()
-      set(_spectra_suite_name spectra-closure)
-      set(_spectra_suite_file "${CMAKE_CURRENT_BINARY_DIR}/spectra-closure.suite.env")
-      set(_spectra_suite_mem reflect)
+    elseif(_spectra_suite_kind STREQUAL "closure")
+      string(APPEND _spectra_suite_stdpar " ${_spectra_package_stdpar}")
       set(_spectra_suite_tests ${_spectra_closure_tests})
+    else()
+      set(_spectra_suite_extra "POLYTEST_VAR+=:spectra_packages=${SPECTRA_PACKAGE_ROOT}\n")
+      set(_spectra_suite_tests ${_spectra_core_tests})
+      if(_spectra_suite_kind STREQUAL "core-fortran")
+        set(_spectra_suite_stdpar
+            "{apple_target}-cpp -fstdpar -fstdpar-arch={spectra_arch} -fstdpar-rt={stdpar_rt} ${_spectra_fortran_stdpar}")
+        string(APPEND _spectra_suite_extra "POLYTEST_DIRECTIVE=!CHECK\n")
+        set(_spectra_suite_tests ${_spectra_core_fortran_tests})
+      endif()
     endif()
+    string(JOIN "" _spectra_suite_stdpar ${_spectra_suite_stdpar})
     set(_spectra_suite_text "${_spectra_suite_profile}")
     string(APPEND _spectra_suite_text
            "POLYTEST_WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/test-work-${_spectra_suite_kind}\n"
            "POLYTEST_ARCH_VAR=spectra_arch\n"
            "POLYTEST_STDPAR_VAR=spectra_stdpar\n"
-           "POLYTEST_STDPAR={apple_target}-std=c++17 -fstdpar -fstdpar-mem=${_spectra_suite_mem} -fstdpar-rt={stdpar_rt} "
-           "-fstdpar-arch={spectra_arch} -fstdpar-library-path=${SPECTRA_PACKAGE_ROOT} "
-           "-fstdpar-library-capabilities={spectra_capability} -I${CMAKE_CURRENT_SOURCE_DIR}/generated/cpp/include "
-           "-I${CMAKE_CURRENT_SOURCE_DIR}/include -I${CMAKE_CURRENT_SOURCE_DIR}/test/generated\n"
+           "POLYTEST_STDPAR=${_spectra_suite_stdpar}\n"
            "POLYTEST_TARGET_VAR=spectra_capability\n"
            "POLYTEST_OUTPUT_PREFIX=spectra_test_\n"
            "POLYTEST_TEMP_PREFIX=spectra_\n"
-           "POLYTEST_DEFAULT_ENV+=:POLYTEST_REPRO_CHECK=0\n")
-    foreach(_capability IN LISTS _spectra_capabilities)
+           "POLYTEST_DEFAULT_ENV+=:POLYTEST_REPRO_CHECK=0\n"
+           "${_spectra_suite_extra}")
+    foreach(_capability IN LISTS _spectra_suite_target_values)
       string(APPEND _spectra_suite_text "POLYTEST_TARGET_VALUE+=:${_capability}\n")
     endforeach()
     foreach(_source IN LISTS _spectra_suite_tests)
@@ -639,5 +770,8 @@ if(NOT SPECTRA_VENDOR_ONLY AND SPECTRA_ENABLE_PACKAGE_TESTS)
     endforeach()
     file(WRITE "${_spectra_suite_file}" "${_spectra_suite_text}")
     polyregion_add_polytest_suite(${_spectra_suite_name} SUITE "${_spectra_suite_file}" DEPENDS ${_spectra_suite_tests})
+    list(APPEND _spectra_discover_targets ${_spectra_suite_name}-discover)
   endforeach()
+  add_custom_target(spectra-test-discover)
+  add_dependencies(spectra-test-discover ${_spectra_discover_targets})
 endif()

@@ -56,3 +56,8 @@ template <class R, class... A> using fn2 = polyregion::spectra::function2<R(A...
   [[clang::annotate("polyregion_export_template:spectra.implementation." SPECTRA_VARIANT "." #name),                 \
     clang::annotate("polyregion_implements:spectra." #name),                                                         \
     clang::annotate("polyregion_requires:spectra." SPECTRA_VARIANT)]]
+
+#define POLYREGION_SPECTRA_CORE_EXPORT(name)                                                                          \
+  [[clang::annotate("polyregion_export_template:spectra.implementation." SPECTRA_VARIANT ".core_" #name),            \
+    clang::annotate("polyregion_implements:polyregion.core." #name),                                                 \
+    clang::annotate("polyregion_requires:spectra." SPECTRA_VARIANT)]]

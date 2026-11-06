@@ -1,5 +1,6 @@
 #include "polyinvoke/cl_platform.h"
 
+#include <algorithm>
 #include <cinttypes>
 #include <cstring>
 #include <limits>
@@ -89,6 +90,11 @@ cl_int cl_details::SVMTracker::unmapAllForDevice(const Unmap &unmap) {
     entry.ownership = Ownership::Device;
   }
   return CL_SUCCESS;
+}
+
+bool cl_details::SVMTracker::anyDeviceOwned() const {
+  std::lock_guard lock(mutex);
+  return std::any_of(entries.begin(), entries.end(), [](const auto &entry) { return entry.second.ownership == Ownership::Device; });
 }
 
 std::vector<void *> cl_details::SVMTracker::pointers() const {
@@ -809,7 +815,9 @@ void ClDeviceQueue::enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, 
     const auto dstMem = detail::MemoryObjects<cl_mem>::subrange(queryMemObject(dst), dstOffset, size);
     if (!srcMem) POLYINVOKE_FATAL(PREFIX, "Source range exceeds memory object: %" PRIuPTR "+%zu (%zu bytes)", src, srcOffset, size);
     if (!dstMem) POLYINVOKE_FATAL(PREFIX, "Destination range exceeds memory object: %" PRIuPTR "+%zu (%zu bytes)", dst, dstOffset, size);
-    CHECKED(clEnqueueCopyBuffer(queue, srcMem->value, dstMem->value, srcMem->offset, dstMem->offset, size, 0, nullptr, &event));
+    CHECKED(
+        clEnqueueCopyBuffer(queue, srcMem->value, dstMem->value, srcMem->offset, dstMem->offset, size, 0, nullptr, cb ? &event : nullptr));
+    pending = true;
   }
   enqueueCallback(cb, event);
 }
@@ -825,7 +833,8 @@ void ClDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, siz
   } else {
     const auto mem = detail::MemoryObjects<cl_mem>::subrange(queryMemObject(dst), dstOffset, size);
     if (!mem) POLYINVOKE_FATAL(PREFIX, "Destination range exceeds memory object: %" PRIuPTR "+%zu (%zu bytes)", dst, dstOffset, size);
-    CHECKED(clEnqueueWriteBuffer(queue, mem->value, CL_FALSE, mem->offset, size, src, 0, nullptr, &event));
+    CHECKED(clEnqueueWriteBuffer(queue, mem->value, cb ? CL_FALSE : CL_TRUE, mem->offset, size, src, 0, nullptr, cb ? &event : nullptr));
+    pending = cb.has_value();
   }
   enqueueCallback(cb, event);
 }
@@ -846,7 +855,8 @@ void ClDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, vo
   } else {
     const auto mem = detail::MemoryObjects<cl_mem>::subrange(queryMemObject(src), srcOffset, size);
     if (!mem) POLYINVOKE_FATAL(PREFIX, "Source range exceeds memory object: %" PRIuPTR "+%zu (%zu bytes)", src, srcOffset, size);
-    CHECKED(clEnqueueReadBuffer(queue, mem->value, CL_FALSE, mem->offset, size, dst, 0, nullptr, &event));
+    CHECKED(clEnqueueReadBuffer(queue, mem->value, cb ? CL_FALSE : CL_TRUE, mem->offset, size, dst, 0, nullptr, cb ? &event : nullptr));
+    pending = cb.has_value();
   }
   enqueueCallback(cb, event);
 }
@@ -995,7 +1005,7 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
                                   nullptr,                          //
                                   dimensions.global.sizes().data(), //
                                   dimensions.local.sizes().data(),  //
-                                  0, nullptr, &event);
+                                  0, nullptr, cb ? &event : nullptr);
   };
   auto dimensions = cl_details::launchDimensions(policy.global, local);
   cl_int result = enqueue(dimensions);
@@ -1008,6 +1018,7 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
     }
   }
   CHECKED(result);
+  pending = true;
   for (const auto subBuffer : subBuffers)
     CHECKED(clReleaseMemObject(subBuffer));
   enqueueCallback(cb, event);
@@ -1015,11 +1026,11 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
 }
 void ClDeviceQueue::enqueueWaitBlocking() {
   POLYINVOKE_TRACE();
-  cl_event event = {};
-  CHECKED(clEnqueueBarrierWithWaitList(queue, 0, nullptr, &event));
-  CHECKED(clWaitForEvents(1, &event));
+  CHECKED(clFinish(queue));
+  pending = false;
   mapAllSvmForHost();
 }
+bool ClDeviceQueue::quiescent() { return !pending && !(svm && *svm == 0 && svmTracker && svmTracker->anyDeviceOwned()); }
 
 #undef CHECKED
 #undef OUT_CHECKED

@@ -6,6 +6,8 @@
 
 #include "aspartame/all.hpp"
 
+#include "polyregion/enums.h"
+
 #include "call_prism_internal.hpp"
 
 namespace polyregion::polystl::call_prism {
@@ -368,18 +370,100 @@ static Opt<MatchedCall> singleThreaded(const clang::CallExpr &call, const clang:
                      false};
 }
 
+static const clang::Expr *peelAssertArgument(const clang::Expr *expression) {
+  while (expression) {
+    expression = expression->IgnoreParenImpCasts();
+    if (const auto *unary = llvm::dyn_cast<clang::UnaryOperator>(expression); unary && unary->getOpcode() == clang::UO_Extension)
+      expression = unary->getSubExpr();
+    else if (const auto *predefined = llvm::dyn_cast<clang::PredefinedExpr>(expression)) expression = predefined->getFunctionName();
+    else break;
+  }
+  return expression;
+}
+
+static Opt<std::string> assertTextArgument(const clang::Expr *expression) {
+  const auto *literal = llvm::dyn_cast_or_null<clang::StringLiteral>(peelAssertArgument(expression));
+  if (!literal) return {};
+  std::string text;
+  text.reserve(literal->getLength());
+  for (unsigned i = 0; i < literal->getLength(); ++i) {
+    const auto unit = literal->getCodeUnit(i);
+    text.push_back(unit < 0x80 ? static_cast<char>(unit) : '?');
+  }
+  return text;
+}
+
+static Opt<int64_t> assertLineArgument(const clang::Expr *expression, const clang::ASTContext &context) {
+  clang::Expr::EvalResult evaluated;
+  if (!expression->EvaluateAsInt(evaluated, context)) return {};
+  return evaluated.Val.getInt().getExtValue();
+}
+
+struct AssertArguments {
+  int expression, file, line, function;
+  std::string_view fallback;
+};
+
+static Opt<AssertArguments> assertArguments(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
+  const auto *identifier = decl.getIdentifier();
+  if (!identifier || !call.getType()->isVoidType() || !decl.getDeclContext()->getRedeclContext()->isTranslationUnit()) return {};
+  const auto name = identifier->getName();
+  const auto arity = call.getNumArgs();
+  if (name == "__assert_fail" && arity == 4) return AssertArguments{0, 1, 2, 3, "Assertion failed."};
+  if (name == "__assert_perror_fail" && arity == 4) return AssertArguments{-1, 1, 2, 3, "Unexpected error."};
+  if (name == "__assert_rtn" && arity == 4) return AssertArguments{3, 1, 2, 0, "Assertion failed."};
+  if ((name == "_wassert" || name == "_assert") && arity == 3) return AssertArguments{0, 1, 2, -1, "Assertion failed."};
+  if (name == "__assert" && arity == 4) return AssertArguments{3, 1, 2, 0, "Assertion failed."};
+  if (name == "__assert" && arity == 3)
+    return call.getArg(1)->getType()->isPointerType() ? AssertArguments{0, 1, 2, -1, "Assertion failed."}
+                                                      : AssertArguments{2, 0, 1, -1, "Assertion failed."};
+  return {};
+}
+
+static Opt<MatchedCall> platformAssert(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
+  const auto layout = assertArguments(call, decl);
+  if (!layout) return {};
+  const auto &context = decl.getASTContext();
+  const auto text = [&](const int index) { return index < 0 ? Opt<std::string>{} : assertTextArgument(call.getArg(index)); };
+  const auto file = text(layout->file);
+  const auto line = layout->line < 0 ? Opt<int64_t>{} : assertLineArgument(call.getArg(layout->line), context);
+  const auto function = text(layout->function);
+  const auto expression = text(layout->expression);
+  std::string message;
+  if (file) message += *file + ":";
+  if (line) message += std::to_string(*line) + ":";
+  if (!message.empty()) message += " ";
+  if (function) message += *function + ": ";
+  message += expression ? "Assertion `" + *expression + "' failed." : std::string(layout->fallback);
+
+  Vector<const clang::Expr *> evaluated;
+  for (unsigned i = 0; i < call.getNumArgs(); ++i) {
+    const auto *argument = call.getArg(i);
+    if (!assertTextArgument(argument) && !assertLineArgument(argument, context)) evaluated.emplace_back(argument);
+  }
+  return MatchedCall{Lowering{[message, evaluated](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+                       for (const auto *argument : evaluated)
+                         (void)r.newVar(self.handleExpr(argument, r));
+                       (void)r.newVar(Expr::SpecOp(
+                           Spec::Assert(Term::IntU32Const(static_cast<int32_t>(invoke::AssertCode::Assert)), Term::StringConst(message))));
+                       return Expr::Alias(Term::Unit0Const());
+                     }},
+                     false};
+}
+
 static Opt<MatchedCall> hostOnlyNoReturnSink(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
   if (!decl.isNoReturn() || decl.hasBody() || !call.getType()->isVoidType()) return {};
   return MatchedCall{Lowering{[](Remapper &, Remapper::RemapContext &r) -> Expr::Any {
-                       (void)r.newVar(Expr::SpecOp(Spec::Assert(Term::IntU32Const(1330795077), Term::StringConst("abort"))));
+                       (void)r.newVar(Expr::SpecOp(
+                           Spec::Assert(Term::IntU32Const(static_cast<int32_t>(invoke::AssertCode::Error)), Term::StringConst("abort"))));
                        return Expr::Alias(Term::Unit0Const());
                      }},
                      false};
 }
 
 Vector<CallPrism> corePrisms() {
-  return {addressOf,  errorCategory, makeErrorCode,   minMaxInitList,   byteMemcpy,    hostAllocation,
-          thrustNext, standardVisit, compilerBuiltin, badVariantAccess, singleThreaded};
+  return {addressOf,  errorCategory, makeErrorCode,   minMaxInitList,   byteMemcpy,     hostAllocation,
+          thrustNext, standardVisit, compilerBuiltin, badVariantAccess, singleThreaded, platformAssert};
 }
 
 Vector<CallPrism> coreFallbackPrisms() { return {hostOnlyNoReturnSink}; }

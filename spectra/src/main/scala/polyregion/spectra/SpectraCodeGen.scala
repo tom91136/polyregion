@@ -4,7 +4,8 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path, Paths}
 
 import polyregion.ast.generated.PolyPackageWireSchema
-import polyregion.ast.{InterfaceCodeGen, MsgPack}
+import polyregion.ast.PolyAST as p
+import polyregion.ast.{Core, InterfaceCodeGen, MsgPack}
 
 import scala.jdk.CollectionConverters.*
 import scala.util.Using
@@ -25,11 +26,14 @@ object SpectraCodeGen {
       root.resolve("generated/scala/polyregion/spectra.scala")         -> scalaObject
     ) ++ SpectraTestCodeGen.textOutputs(root)
 
-  private def interfaceBytes: Array[Byte] =
-    MsgPack.encode(MsgPack.Versioned(PolyPackageWireSchema.PackageHash, Spectra.interfaceDef))
+  private def interfaceBytes(interfaceDef: p.Interface): Array[Byte] =
+    MsgPack.encode(MsgPack.Versioned(PolyPackageWireSchema.PackageHash, interfaceDef))
 
-  private def binaryOutputs(root: Path): List[(Path, Array[Byte])] =
-    List(root.resolve("generated/package/spectra.interface.polyast") -> interfaceBytes)
+  private[spectra] def binaryOutputs(root: Path): List[(Path, Array[Byte])] =
+    List(
+      root.resolve("generated/package/spectra.interface.polyast")         -> interfaceBytes(Spectra.interfaceDef),
+      root.resolve("generated/package/polyregion.core.interface.polyast") -> interfaceBytes(Core.interfaceDef)
+    )
 
   def checkGenerated(root: Path): List[String] = {
     val normalized     = root.toAbsolutePath.normalize

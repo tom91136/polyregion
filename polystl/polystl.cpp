@@ -106,7 +106,7 @@ POLYREGION_EXPORT void polystl::details::dispatchManaged(const size_t global, co
       reinterpret_cast<void *>(prelude));
 
   g_assert.reset();
-  uintptr_t errDev = asserts ? polyrt::allocAssertBuffer() : 0;
+  uintptr_t errDev = asserts ? polyrt::allocAssertBuffer(*polyrt::currentContext()) : 0;
   const auto newBuffer = [] {
     return polyrt::currentPlatform->kind() == PlatformKind::HostThreaded ? ArgBuffer{{Type::IntS64, nullptr}} : ArgBuffer{};
   };
@@ -118,7 +118,7 @@ POLYREGION_EXPORT void polystl::details::dispatchManaged(const size_t global, co
         Policy{Dim3{global, 1, 1}, local > 0 ? std::optional{std::pair{Dim3{local, 1, 1}, localMemBytes}} : std::nullopt}, {});
     log(DebugLevel::Debug, "<%s:%s:%zu> Submitted", __func__, moduleId, global);
     polyrt::currentQueue->enqueueWaitBlocking();
-    if (asserts) polyrt::reportAssert(polyrt::readAssertBuffer(errDev), g_assert, __func__, moduleId);
+    if (asserts) polyrt::reportAssert(polyrt::readAssertBuffer(*polyrt::currentContext(), errDev), g_assert, __func__, moduleId);
   };
 
   const auto mode = polyrt::sma::mirrorModeFor(polyrt::currentDevice->moduleFormat());
@@ -134,16 +134,13 @@ POLYREGION_EXPORT void polystl::details::dispatchManaged(const size_t global, co
 
   if (mode == polyrt::sma::MirrorMode::Arena) {
     // lay the whole capture graph into one device arena (pointers -> arena offsets); the
-    // arena-lowered kernel takes the arena base (capture root at offset 0) and derefs arena[off + i]
-    auto arenaBase = reinterpret_cast<void *>(polyrt::sma::arenaMarshal(allocations, functorData, *layout, {}).base);
-    // logical SPIR-V reads the arena through a fixed roster of typed views, so a module that declares them binds the one
-    // buffer to every view slot; flat backends, and kernels that never read their capture, take it once
-    const int arenaViews = polyrt::currentDevice->arenaViewStart(moduleId) ? polyrt::sma::arenaViewCount : 1;
+    // arena-lowered kernel takes the arena base and derefs arena[off + i]
+    const polyrt::sma::ContextTransaction transaction;
+    const auto arena = polyrt::sma::arenaMarshal(allocations, functorData, *layout, polyrt::sma::currentArenaPlacement());
     auto buffer = newBuffer();
     bindError(buffer);
     if (localMemBytes > 0) buffer.append(Type::Scratch, nullptr);
-    for (int i = 0; i < arenaViews; ++i)
-      buffer.append(Type::Ptr, &arenaBase);
+    polyrt::sma::bindArena(buffer, arena.base, arena.root, polyrt::currentDevice->arenaViewStart(moduleId).has_value());
     launch(buffer);
     allocations.genArenaReadback();
     log(DebugLevel::Debug, "<%s:%s:%zu> Done (arena)", __func__, moduleId, global);

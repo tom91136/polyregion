@@ -44,6 +44,8 @@ std::variant<std::string, Package> decodePackage(const uint8_t *begin, const uin
 std::variant<std::string, Interface> decodeInterface(const uint8_t *begin, const uint8_t *end) noexcept;
 std::variant<std::string, Program> decodeHashedProgram(const uint8_t *begin, const uint8_t *end) noexcept;
 
+Stmt::Any elementBoundary(const Vector<Stmt::Any> &body);
+
 Opt<Type::Any> extractComponent(const Type::Any &t);
 
 Opt<size_t> primitiveSize(const Type::Any &t);

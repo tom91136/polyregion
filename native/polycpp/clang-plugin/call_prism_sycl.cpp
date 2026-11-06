@@ -5,6 +5,8 @@
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/Stmt.h"
 
+#include "polyregion/types.h"
+
 #include "call_prism_internal.hpp"
 
 namespace polyregion::polystl::call_prism {
@@ -960,7 +962,9 @@ static Opt<MatchedCall> syclQueue(const clang::CallExpr &call, const clang::Func
           } else
             for (unsigned i = 0; i < dimensions; ++i)
               plainRangeCounts.emplace_back(rangeDimension(range, i));
-          blockX = Term::IntU32Const(dimensions == 1 ? 256 : dimensions == 2 ? 16 : 8);
+          blockX = Term::IntU32Const(dimensions == 1   ? static_cast<uint32_t>(program_meta::VkWorkgroupSizeXValue)
+                                     : dimensions == 2 ? 16
+                                                       : 8);
           blockY = Term::IntU32Const(dimensions == 1 ? 1 : dimensions == 2 ? 16 : 8);
           blockZ = Term::IntU32Const(dimensions < 3 ? 1 : 4);
           const auto groups = [&](const unsigned i, const Term::Any &block) -> Term::Any {

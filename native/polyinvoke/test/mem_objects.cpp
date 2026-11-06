@@ -1,3 +1,6 @@
+#include <stdexcept>
+#include <string>
+
 #include "polyinvoke/runtime.h"
 
 #include "polytest/test_case.hpp"
@@ -59,7 +62,63 @@ int runMemoryObjects() {
   return ctx.failed ? 1 : 0;
 }
 
-std::vector<Task> discoverAll() { return {Task{"memory-objects", "", &runMemoryObjects}}; }
+int runMemoryObjectsReserve() {
+  Context ctx;
+  MemoryObjects<int> objects;
+
+  constexpr size_t reserved = 1 << 20;
+  const auto grown = objects.reserve(reserved, 4096, 1);
+  POLYTEST_CHECK(ctx, grown != 0);
+  POLYTEST_CHECK(ctx, objects.reservedSize(grown) == reserved);
+  POLYTEST_CHECK(ctx, objects.query(grown + 4096)->remaining == 0);
+  POLYTEST_CHECK_S(ctx, !objects.query(grown + 4097), "a pointer past the committed size resolved");
+  POLYTEST_CHECK(ctx, objects.query(grown + 100)->remaining == 4096 - 100);
+
+  const auto after = objects.malloc(16, 2);
+  POLYTEST_CHECK_S(ctx, after >= grown + reserved, "the next handle {} lies inside the reservation [{}, {})", after, grown,
+                   grown + reserved);
+  POLYTEST_CHECK(ctx, !objects.insert(grown + reserved / 2, 16, 3));
+
+  objects.commit(grown, 8192, 4);
+  POLYTEST_CHECK(ctx, objects.query(grown + 4097)->remaining == 8192 - 4097);
+  POLYTEST_CHECK(ctx, objects.query(grown)->value == 4);
+  POLYTEST_CHECK(ctx, objects.query(after)->value == 2);
+
+  objects.commit(grown, reserved, 5);
+  POLYTEST_CHECK(ctx, objects.query(grown + reserved)->remaining == 0);
+
+  try {
+    objects.commit(grown, reserved + 1, 6);
+    POLYTEST_FAIL(ctx, "commit past the reservation succeeded");
+  } catch (const std::length_error &error) {
+    POLYTEST_CHECK_S(ctx, std::string(error.what()).find(std::to_string(reserved)) != std::string::npos,
+                     "the error `{}` does not name the {} byte limit", error.what(), reserved);
+  }
+  try {
+    objects.commit(grown, 4096, 7);
+    POLYTEST_FAIL(ctx, "commit shrank an allocation");
+  } catch (const std::invalid_argument &) {
+  }
+  try {
+    objects.commit(after + 1, 16, 8);
+    POLYTEST_FAIL(ctx, "commit of an unknown handle succeeded");
+  } catch (const std::out_of_range &) {
+  }
+  try {
+    (void)objects.reserve(16, 32, 9);
+    POLYTEST_FAIL(ctx, "reserve committed more than it reserved");
+  } catch (const std::invalid_argument &) {
+  }
+  POLYTEST_CHECK(ctx, objects.query(grown)->value == 5);
+  POLYTEST_CHECK(ctx, objects.erase(grown));
+  POLYTEST_CHECK(ctx, !objects.reservedSize(grown));
+
+  return ctx.failed ? 1 : 0;
+}
+
+std::vector<Task> discoverAll() {
+  return {Task{"memory-objects", "", &runMemoryObjects}, Task{"memory-objects-reserve", "", &runMemoryObjectsReserve}};
+}
 
 } // namespace
 

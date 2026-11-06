@@ -5,6 +5,7 @@
 #include "magic_enum/magic_enum.hpp"
 
 #include "polyinvoke/device_lock.h"
+#include "polyinvoke/vulkan_platform.h"
 #include "polyregion/concurrency_utils.hpp"
 
 #include "kernels/generated_cpu_reloc_fma.hpp"
@@ -75,6 +76,64 @@ void runFma(Context &ctx, Backend backend, Platform &platform, Device &device, c
   device.freeDevice(out_d);
 }
 
+void runPipelineReuse(Context &ctx, Backend, Platform &platform, Device &device, const ImageGroup &imageGroup) {
+  POLYTEST_REQUIRE_S(ctx, imageGroup.size() == 1, "expected exactly 1 image group, got {}", imageGroup.size());
+  device.loadModule("fma", imageGroup[0].second);
+  auto q = device.createQueue(std::chrono::seconds(10));
+  auto *vulkanQueue = static_cast<vulkan::VulkanDeviceQueue *>(q.get());
+  auto out_d = device.template mallocDeviceTyped<float>(1, Access::RW);
+  const auto launch = [&](const size_t lanes) {
+    float a = 2.f, b = 3.f, c = 4.f;
+    ArgBuffer buffer;
+    prependTidArg(platform, buffer);
+    buffer.append({{Type::Float32, &a}, {Type::Float32, &b}, {Type::Float32, &c}, {Type::Ptr, &out_d}, {Type::Void, {}}});
+    waitAll([&](auto &h) { q->enqueueInvokeAsync("fma", "main", buffer, Policy{{1, 1, 1}, {{{lanes, 1, 1}, 0}}}, h); });
+    float out = {};
+    waitAll([&](auto &h) { q->enqueueDeviceToHostAsyncTyped(out_d, &out, 1, h); });
+    POLYTEST_CHECK_S(ctx, out == 10.f, "lanes={} actual={}", lanes, out);
+  };
+  for (int i = 0; i < 8; ++i)
+    launch(1);
+  POLYTEST_CHECK_S(ctx, vulkanQueue->pipelineCreations() == 1, "same local size created {} pipelines", vulkanQueue->pipelineCreations());
+  launch(2);
+  POLYTEST_CHECK_S(ctx, vulkanQueue->pipelineCreations() == 2, "new local size left {} pipelines", vulkanQueue->pipelineCreations());
+  launch(1);
+  launch(2);
+  POLYTEST_CHECK_S(ctx, vulkanQueue->pipelineCreations() == 2, "revisited local sizes created {} pipelines",
+                   vulkanQueue->pipelineCreations());
+  device.freeDevice(out_d);
+}
+
+void runQueueSettle(Context &ctx, Backend, Platform &platform, Device &device, const ImageGroup &imageGroup) {
+  POLYTEST_REQUIRE_S(ctx, imageGroup.size() == 1, "expected exactly 1 image group, got {}", imageGroup.size());
+  const auto module_ = device.singleEntryPerModule() ? "fma" : "module";
+  const auto function_ = device.singleEntryPerModule() ? "main" : "_fma";
+  device.loadModule(module_, imageGroup[0].second);
+  auto q = device.createQueue(std::chrono::seconds(10));
+  auto out_d = device.template mallocDeviceTyped<float>(1, Access::RW);
+
+  const bool copiesComplete = device.pagingMode() == PagingMode::None;
+  float in = 1.5f, out = 0.f;
+  q->enqueueHostToDeviceAsyncTyped(&in, out_d, 1);
+  if (copiesComplete) POLYTEST_CHECK(ctx, q->quiescent());
+  q->enqueueDeviceToHostAsyncTyped(out_d, &out, 1);
+  if (copiesComplete) POLYTEST_CHECK(ctx, q->quiescent());
+  POLYTEST_CHECK_S(ctx, out == in, "copy round trip returned {}", out);
+
+  float a = 2.f, b = 3.f, c = 4.f;
+  ArgBuffer buffer;
+  prependTidArg(platform, buffer);
+  buffer.append({{Type::Float32, &a}, {Type::Float32, &b}, {Type::Float32, &c}, {Type::Ptr, &out_d}, {Type::Void, {}}});
+  q->enqueueInvokeAsync(module_, function_, buffer, {}, {});
+  POLYTEST_CHECK(ctx, !q->quiescent());
+  q->settle();
+  POLYTEST_CHECK(ctx, q->quiescent());
+  q->enqueueDeviceToHostAsyncTyped(out_d, &out, 1);
+  q->settle();
+  POLYTEST_CHECK_S(ctx, out == 10.f, "invoke result was {}", out);
+  device.freeDevice(out_d);
+}
+
 std::vector<Task> discoverAll() {
   return discoverMatrix({
 #ifndef __APPLE__
@@ -82,8 +141,10 @@ std::vector<Task> discoverAll() {
       {"fma-hsa", generated::hsa::fma, {Backend::HSA}, &runFma},
       {"fma-hip", generated::hsa::fma, {Backend::HIP}, &runFma},
       {"fma-opencl-source", generated::opencl_source::fma, {Backend::OpenCL}, &runFma, skipHasSpirv},
+      {"queue-settle-opencl-source", generated::opencl_source::fma, {Backend::OpenCL}, &runQueueSettle, skipHasSpirv},
       {"fma-opencl-spirv", generated::opencl_spirv::fma, {Backend::OpenCL}, &runFma, skipNoSpirv},
       {"fma-vulkan", generated::vulkan::fma, {Backend::Vulkan}, &runFma},
+      {"pipeline-reuse-vulkan", generated::vulkan::fma, {Backend::Vulkan}, &runPipelineReuse},
       {"fma-levelzero", generated::opencl_spirv::fma, {Backend::LevelZero}, &runFma},
 #endif
 #ifdef RUNTIME_ENABLE_METAL

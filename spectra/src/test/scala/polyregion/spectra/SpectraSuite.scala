@@ -3,7 +3,8 @@ package polyregion.spectra
 import java.nio.file.{Files, Paths}
 
 import polyregion.ast.PolyAST as p
-import polyregion.ast.{validate, validateInterfaceDeclaration}
+import polyregion.ast.generated.PolyPackageWireSchema
+import polyregion.ast.{Core, MsgPack, validate, validateInterfaceDeclaration}
 
 import scala.jdk.CollectionConverters.*
 import scala.util.Using
@@ -18,6 +19,20 @@ class SpectraSuite extends munit.FunSuite {
     assertEquals(interfaceDef.name, p.Sym("spectra"))
     assertEquals(interfaceDef.declarations.flatMap(_.validate), Nil)
     assertEquals(interfaceDef.declarations.flatMap(_.validateInterfaceDeclaration), Nil)
+  }
+
+  test("core interface package carries polyregion.core") {
+    val bytes = SpectraCodeGen
+      .binaryOutputs(root)
+      .toMap
+      .apply(root.resolve("generated/package/polyregion.core.interface.polyast"))
+
+    assertEquals(
+      MsgPack.decode[MsgPack.Versioned[p.Interface]](bytes),
+      Right(MsgPack.Versioned(PolyPackageWireSchema.PackageHash, Core.interfaceDef))
+    )
+    assertEquals(Core.interfaceDef.name, p.Sym("polyregion.core"))
+    assertEquals(Core.interfaceDef.declarations.flatMap(_.validateInterfaceDeclaration), Nil)
   }
 
   test("generated APIs are current") {
