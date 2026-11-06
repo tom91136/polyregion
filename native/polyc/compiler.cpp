@@ -23,6 +23,7 @@
 
 #include "polyregion/compat.h"
 #include "polyregion/conventions.h"
+#include "polyregion/env.h"
 #include "polyregion/env_keys.h"
 #include "polyregion/group_native.h"
 #include "polyregion/io.hpp"
@@ -349,14 +350,7 @@ std::string packageEntryPipeline(const compiletime::Target target, const std::st
   }
 }
 
-unsigned compileJobs() {
-  if (const char *value = std::getenv(polyregion::env::PolycJobs); value && *value) {
-    char *end = nullptr;
-    const auto parsed = std::strtoul(value, &end, 10);
-    if (end != value && *end == '\0') return static_cast<unsigned>(parsed);
-  }
-  return 0;
-}
+unsigned compileJobs() { return polyregion::env::jobs(polyregion::env::PolycJobs); }
 
 std::vector<polyast::Sym> consumerRoots(const polyast::ProgramLinkRequest &request) {
   std::vector<polyast::Sym> roots;

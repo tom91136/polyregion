@@ -460,26 +460,34 @@ Value polyregion::polyfc::interface_resolution::emitPackageCall(OpBuilder &build
   return LLVM::LoadOp::create(builder, loc, builder.getI1Type(), bound).getResult();
 }
 
-polyfront::package::Checked<polyregion::polyfc::interface_resolution::LinkedPackage>
-polyregion::polyfc::interface_resolution::linkPackageProgram(const polyfront::Options &opts, const polyfront::package::Archive &archive,
-                                                             const polyast::Function &root,
-                                                             std::vector<polyast::Function> consumerFunctions,
-                                                             std::vector<polyast::StructDef> consumerDefs,
-                                                             std::vector<polyast::ProgramTypeSize> typeSizes,
-                                                             std::vector<std::string> &bitcodeFiles) {
-  const auto declaration = root.implements ? polyast::fqcn(*root.implements) : std::string{};
-  const auto unfit = [](std::string reason) -> polyfront::package::Checked<LinkedPackage> {
-    return {{LinkedPackage{{}, {}, {std::move(reason)}}}, {}};
-  };
-  if (archive.entriesByDeclaration.count(declaration) == 0) return unfit(polyfront::package::undeclaredReason(archive, declaration));
-  auto selected = polyfront::package::loadPackageHeaders(archive, declaration);
-  if (!selected) return {{}, std::move(selected.errors)};
-  consumerFunctions.insert(consumerFunctions.begin(), root);
-  return linkGroups(opts, {*selected.value}, consumerFunctions, {root.decl.name.fqn.front()}, consumerDefs, typeSizes, {archive.path},
-                    bitcodeFiles, [&](const std::vector<std::string> &capabilities) -> std::optional<std::string> {
-                      if (polyfront::package::satisfiable(*selected.value, declaration, capabilities)) return {};
-                      return polyfront::package::unsatisfiedReason(capabilities);
-                    });
+std::shared_future<std::shared_ptr<polyregion::polyfc::interface_resolution::PackageLink>>
+polyregion::polyfc::interface_resolution::startPackageLink(llvm::ThreadPoolInterface &pool, const polyfront::Options &opts,
+                                                           const polyfront::package::Archive &archive, const polyast::Function &root,
+                                                           std::vector<polyast::Function> consumerFunctions,
+                                                           std::vector<polyast::StructDef> consumerDefs,
+                                                           std::vector<polyast::ProgramTypeSize> typeSizes) {
+  return pool.async([&opts, &archive, root, consumerFunctions = std::move(consumerFunctions), consumerDefs = std::move(consumerDefs),
+                     typeSizes = std::move(typeSizes)]() mutable {
+    auto link = std::make_shared<PackageLink>();
+    const auto declaration = root.implements ? polyast::fqcn(*root.implements) : std::string{};
+    if (archive.entriesByDeclaration.count(declaration) == 0) {
+      link->linked = {{LinkedPackage{{}, {}, {polyfront::package::undeclaredReason(archive, declaration)}}}, {}};
+      return link;
+    }
+    auto selected = polyfront::package::loadPackageHeaders(archive, declaration);
+    if (!selected) {
+      link->linked = {{}, std::move(selected.errors)};
+      return link;
+    }
+    consumerFunctions.insert(consumerFunctions.begin(), root);
+    link->linked =
+        linkGroups(opts, {*selected.value}, consumerFunctions, {root.decl.name.fqn.front()}, consumerDefs, typeSizes, {archive.path},
+                   link->bitcodeFiles, [&](const std::vector<std::string> &capabilities) -> std::optional<std::string> {
+                     if (polyfront::package::satisfiable(*selected.value, declaration, capabilities)) return {};
+                     return polyfront::package::unsatisfiedReason(capabilities);
+                   });
+    return link;
+  });
 }
 
 std::optional<polyfront::package::Archive> polyregion::polyfc::interface_resolution::corePackage(clang::DiagnosticsEngine &diag,

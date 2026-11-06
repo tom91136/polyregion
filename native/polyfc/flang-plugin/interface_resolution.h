@@ -1,10 +1,13 @@
 #pragma once
 
+#include <future>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
 #include "clang/Basic/Diagnostic.h"
+#include "llvm/Support/ThreadPool.h"
 #include "mlir/IR/BuiltinOps.h"
 
 #include "polyfront/options_backend.hpp"
@@ -40,11 +43,18 @@ struct PackageEntry {
 
 std::vector<PackageEntry> entriesFor(const LinkedPackage &linked, const std::string &entryName);
 
-// links `root` against the archive's implementations of its declaration; unfit when the archive has none the capabilities allow
-polyfront::package::Checked<LinkedPackage>
-linkPackageProgram(const polyfront::Options &opts, const polyfront::package::Archive &archive, const polyast::Function &root,
-                   std::vector<polyast::Function> consumerFunctions, std::vector<polyast::StructDef> consumerDefs,
-                   std::vector<polyast::ProgramTypeSize> typeSizes, std::vector<std::string> &bitcodeFiles);
+struct PackageLink {
+  polyfront::package::Checked<LinkedPackage> linked;
+  std::vector<std::string> bitcodeFiles;
+};
+
+// links `root` against the archive's implementations of its declaration on the pool; unfit when the archive has none the capabilities
+// allow. `opts` and `archive` must outlive the future
+std::shared_future<std::shared_ptr<PackageLink>> startPackageLink(llvm::ThreadPoolInterface &pool, const polyfront::Options &opts,
+                                                                  const polyfront::package::Archive &archive, const polyast::Function &root,
+                                                                  std::vector<polyast::Function> consumerFunctions,
+                                                                  std::vector<polyast::StructDef> consumerDefs,
+                                                                  std::vector<polyast::ProgramTypeSize> typeSizes);
 
 // calls the linked package entries at the builder's insertion point inside an acquired runtime context, loading their remote modules
 // first and running the entry whose modules the device accepts; with a fallback, a missing context or module skips the call instead of

@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <future>
+#include <memory>
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -17,6 +19,7 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/ThreadPool.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/LLVMIR/LLVMTypes.h"
@@ -37,6 +40,8 @@
 
 #include "polyfront/options_backend.hpp"
 #include "polyregion/conventions.h"
+#include "polyregion/env.h"
+#include "polyregion/env_keys.h"
 #include "polyregion/program_import.hpp"
 #include "polyregion/types.h"
 
@@ -454,33 +459,57 @@ public:
 
   void hostFallback(OpBuilder &B) { dco.hostFallback(B); }
 
-  // lowers the loop to `polyregion.core.for_each`, or `polyregion.core.transform_reduce` for a core reduction, over a closure of
-  // its body when the core package implements it; the returned i1 is false at runtime when the package call could not run
-  Value invokeCore(OpBuilder &B, clang::DiagnosticsEngine &diag, const std::string &diagLoc, const polyfront::Options &opts,
-                   const std::string &moduleId, fir::DoLoopOp &doLoop, const polyfront::package::Archive &core,
-                   std::vector<std::string> &bitcodeFiles) {
+  struct CoreSite {
+    std::string moduleId;
+    std::string diagLoc;
+    std::string entryName;
+    polyast::Function root;
+    Remapper::DoConcurrentRegion region;
+    std::shared_future<std::shared_ptr<interface_resolution::PackageLink>> link;
+  };
+
+  // starts linking the loop against `polyregion.core.for_each`, or `polyregion.core.transform_reduce` for a core reduction, over a
+  // closure of its body; empty when the loop cannot take either
+  std::optional<CoreSite> prepareCore(llvm::ThreadPoolInterface &pool, const std::string &diagLoc, const polyfront::Options &opts,
+                                      const std::string &moduleId, fir::DoLoopOp &doLoop, const polyfront::package::Archive &core) {
     if (doLoop.getNumResults() != 0 || !doLoop.getReduceOperands().empty()) return {};
     DataLayout L(M);
     auto symbol = moduleId;
     std::replace_if(symbol.begin(), symbol.end(), [](const char c) { return !std::isalnum(static_cast<unsigned char>(c)); }, '_');
-    const auto region = Remapper::createRegion(diagLoc, /*gpu*/ true, M, L, doLoop, polyast::Sym({symbol + "_body"}));
+    auto region = Remapper::createRegion(diagLoc, /*gpu*/ true, M, L, doLoop, polyast::Sym({symbol + "_body"}));
     const auto captureDef =
         region.program.defs ^ find([&](const auto &def) { return polyast::fqcn(def.name) == region.captureLayout.name; });
     if (!captureDef) raise(fmt::format("Capture struct missing for {}", diagLoc));
     const auto captureType = polyast::Type::Struct(captureDef->name, {}).widen();
-    const auto entryName = fmt::format("__polyregion_package_program_{}", symbol);
+    auto entryName = fmt::format("__polyregion_package_program_{}", symbol);
     const auto &reduction = region.coreReduce;
     std::vector<polyast::ProgramTypeSize> typeSizes{{polyast::Type::IntS64().widen(), 8},
                                                     {captureType, static_cast<int32_t>(region.captureLayout.sizeInBytes)}};
     if (reduction) typeSizes.emplace_back(reduction->resultType, static_cast<int32_t>(reduction->resultLayout.sizeInBytes));
-    const auto root = reduction ? program::importRoot(entryName, polyast::Sym({"polyregion", "core", "transform_reduce"}),
-                                                      {polyast::Type::IntS64().widen(), reduction->resultType, captureType,
-                                                       polyast::Type::FnRef(reduction->combine).widen()},
-                                                      reduction->resultType)
-                                : program::importRoot(entryName, polyast::Sym({"polyregion", "core", "for_each"}),
-                                                      {polyast::Type::IntS64().widen(), captureType}, polyast::Type::Unit0().widen());
-    const auto linked =
-        interface_resolution::linkPackageProgram(opts, core, root, region.program.functions, region.program.defs, typeSizes, bitcodeFiles);
+    auto root = reduction ? program::importRoot(entryName, polyast::Sym({"polyregion", "core", "transform_reduce"}),
+                                                {polyast::Type::IntS64().widen(), reduction->resultType, captureType,
+                                                 polyast::Type::FnRef(reduction->combine).widen()},
+                                                reduction->resultType)
+                          : program::importRoot(entryName, polyast::Sym({"polyregion", "core", "for_each"}),
+                                                {polyast::Type::IntS64().widen(), captureType}, polyast::Type::Unit0().widen());
+    auto link =
+        interface_resolution::startPackageLink(pool, opts, core, root, region.program.functions, region.program.defs, std::move(typeSizes));
+    return CoreSite{moduleId, diagLoc, std::move(entryName), std::move(root), std::move(region), std::move(link)};
+  }
+
+  // lowers the loop to the linked core package call; the returned i1 is false at runtime when the package call could not run
+  Value invokeCore(OpBuilder &B, clang::DiagnosticsEngine &diag, CoreSite &site, fir::DoLoopOp &doLoop,
+                   std::vector<std::string> &bitcodeFiles) {
+    DataLayout L(M);
+    const auto &moduleId = site.moduleId;
+    const auto &diagLoc = site.diagLoc;
+    const auto &entryName = site.entryName;
+    const auto &root = site.root;
+    const auto &region = site.region;
+    const auto &reduction = region.coreReduce;
+    const auto link = site.link.get();
+    bitcodeFiles.insert(bitcodeFiles.end(), link->bitcodeFiles.begin(), link->bitcodeFiles.end());
+    const auto &linked = link->linked;
     if (!linked) {
       linked.errors ^ for_each([&](const auto &error) { emit(diag, clang::DiagnosticsEngine::Error, "%0", error); });
       return {};
@@ -1396,17 +1425,34 @@ void polyfc::rewriteFIR(clang::DiagnosticsEngine &diag, ModuleOp &m, std::vector
   OpBuilder B(m);
   Rewriter rewriter(m);
   const auto core = interface_resolution::corePackage(diag, opts);
+
+  const auto isSite = [](fir::DoLoopOp &doLoop) { return doLoop.getUnordered() && doLoop->hasAttr(DoConcurrentAsWritten); };
+  const auto namesOf = [](fir::DoLoopOp &doLoop) {
+    std::string moduleId = fmt::format("kernel_{:p}", fmt::ptr(doLoop.getOperation()));
+    std::string diagLoc = show(doLoop.getLoc());
+    if (const auto flc = llvm::dyn_cast<FileLineColLoc>(doLoop.getLoc())) {
+      const auto filename = llvm::sys::path::filename(flc.getFilename()).str();
+      moduleId = fmt::format("kernel_{}:{}:{}", filename, flc.getLine(), flc.getColumn());
+      diagLoc = fmt::format("{}:{}:{}", filename, flc.getLine(), flc.getColumn());
+    }
+    return std::pair{std::move(moduleId), std::move(diagLoc)};
+  };
+
+  llvm::StdThreadPool pool(llvm::hardware_concurrency(env::jobs(env::PolycJobs)));
+  std::unordered_map<Operation *, Rewriter::CoreSite> coreSites;
+  if (core)
+    m.walk([&](fir::DoLoopOp doLoop) {
+      if (!isSite(doLoop)) return;
+      const auto [moduleId, diagLoc] = namesOf(doLoop);
+      if (auto site = rewriter.prepareCore(pool, diagLoc, opts, moduleId, doLoop, *core)) coreSites.emplace(doLoop, std::move(*site));
+    });
+
   m.walk([&](Operation *op) {
     if (auto doLoop = llvm::dyn_cast<fir::DoLoopOp>(op)) {
-      if (!doLoop.getUnordered() || !doLoop->hasAttr(DoConcurrentAsWritten)) return;
-
-      std::string moduleId = fmt::format("kernel_{:p}", fmt::ptr(&doLoop));
-      std::string diagLoc = show(doLoop.getLoc());
-      if (const auto flc = llvm::dyn_cast<FileLineColLoc>(doLoop.getLoc())) {
-        const auto filename = llvm::sys::path::filename(flc.getFilename()).str();
-        moduleId = fmt::format("kernel_{}:{}:{}", filename, flc.getLine(), flc.getColumn());
-        diagLoc = fmt::format("{}:{}:{}", filename, flc.getLine(), flc.getColumn());
-      }
+      if (!isSite(doLoop)) return;
+      const auto names = namesOf(doLoop);
+      const auto &moduleId = names.first;
+      const auto &diagLoc = names.second;
 
       // The overall outlining logic is as follows:
       //   bool executeOriginal = true;
@@ -1422,7 +1468,8 @@ void polyfc::rewriteFIR(clang::DiagnosticsEngine &diag, ModuleOp &m, std::vector
       // still run the host doLoop instead of silently no-op'ing, unless host fallback is disabled.
 
       B.setInsertionPoint(doLoop);
-      if (const auto bound = core ? rewriter.invokeCore(B, diag, diagLoc, opts, moduleId, doLoop, *core, bitcodeFiles) : Value{}) {
+      const auto coreSite = coreSites.find(op);
+      if (const auto bound = coreSite != coreSites.end() ? rewriter.invokeCore(B, diag, coreSite->second, doLoop, bitcodeFiles) : Value{}) {
         auto unbound = fir::IfOp::create(B, uLoc(B), arith::XOrIOp::create(B, uLoc(B), bound, boolConst(B, true)), false);
         auto &then = unbound.getThenRegion().front();
         doLoop->moveBefore(&then, then.begin());
