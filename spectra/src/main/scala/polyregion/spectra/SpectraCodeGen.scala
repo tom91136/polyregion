@@ -52,8 +52,8 @@ object SpectraCodeGen {
             _.iterator.asScala.filter(Files.isRegularFile(_)).filterNot(expectedPaths).toList
           )
           .map(path => s"unexpected generated output: $path")
-    val testRoot = normalized.resolve("test/generated")
-    val unexpectedTests =
+    val unexpectedTests = List("test/generated", "test/host").flatMap { dir =>
+      val testRoot = normalized.resolve(dir)
       if (!Files.exists(testRoot)) Nil
       else
         Using
@@ -61,6 +61,7 @@ object SpectraCodeGen {
             _.iterator.asScala.filter(Files.isRegularFile(_)).filterNot(expectedPaths).toList
           )
           .map(path => s"unexpected generated output: $path")
+    }
     current ++ unexpectedGenerated ++ unexpectedTests
   }
 

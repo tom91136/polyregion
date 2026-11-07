@@ -286,7 +286,7 @@ private[spectra] object SpectraTestCodeGen {
   private def callableArgs(decl: p.FunctionDecl): List[p.Arg] =
     decl.args.collect { case arg @ p.Arg(p.Named(_, _: p.Type.Exec, _), _, _) => arg }
 
-  private def cppTestRun(decl: p.FunctionDecl, captured: Boolean): String = {
+  private def cppTestRun(decl: p.FunctionDecl, captured: Boolean, api: String): String = {
     val name = decl.name.last
     val sem  = oracles.getOrElse(name, sys.error(s"no test oracle for algo '$name'"))
     val fns  = callableArgs(decl)
@@ -308,7 +308,7 @@ private[spectra] object SpectraTestCodeGen {
     val templateParams  = decl.tpeVars.map(variable => s"class ${variable.name}").mkString(", ")
     val templateArgs    = decl.tpeVars.map(_.name).mkString(", ")
     val call =
-      s"  ${cppTestRetCap(decl.rtn)}spectra::$name<$templateArgs>(${decl.args.map(cppTestCallArg).mkString(", ")});"
+      s"  ${cppTestRetCap(decl.rtn)}$api::$name<$templateArgs>(${decl.args.map(cppTestCallArg).mkString(", ")});"
     s"""template <$templateParams> static bool $runName(const char *scenario, int n) {
        |${indentBlock(sem.setup, "  ")}$live
        |$fdecls
@@ -319,7 +319,12 @@ private[spectra] object SpectraTestCodeGen {
        |}""".stripMargin
   }
 
-  private def cppTestFile(decl: p.FunctionDecl): String = {
+  private enum CaseKind(val api: String, val header: String, val call: String) {
+    case Offload extends CaseKind("spectra", "polyregion/spectra.hpp", "device")
+    case Host    extends CaseKind("spectra::host", "polyregion/spectra/host.hpp", "spectra::host")
+  }
+
+  private def cppTestFile(decl: p.FunctionDecl, kind: CaseKind): String = {
     val name = decl.name.last
     val sem  = oracles(name)
     val namespaceFunctors =
@@ -345,22 +350,24 @@ private[spectra] object SpectraTestCodeGen {
           s"  ok &= run_captured<${baseline.types.mkString(", ")}>(\"${baseline.label}/n$n/captured\", $n);"
         )
     val runs =
-      if (callableArgs(decl).isEmpty) cppTestRun(decl, captured = false)
-      else s"${cppTestRun(decl, captured = false)}\n\n${cppTestRun(decl, captured = true)}"
+      if (callableArgs(decl).isEmpty) cppTestRun(decl, captured = false, kind.api)
+      else s"${cppTestRun(decl, captured = false, kind.api)}\n\n${cppTestRun(decl, captured = true, kind.api)}"
     val calls = (typeCalls ++ sizeCalls ++ capturedCalls).mkString("\n")
-    s"""#pragma region case: $name
-       |#pragma region offload-only
-       |#pragma region do: polycpp {spectra_stdpar} -o {output} {input}
-       |#pragma region do: {output}
-       |#pragma region requires: pass
+    val directives = List(s"case: $name") ++ Option.when(kind == CaseKind.Offload)("offload-only") ++ List(
+      "do: polycpp {spectra_stdpar} -o {output} {input}",
+      "do: {output}",
+      "requires: pass"
+    )
+    val pragmas = directives.map(directive => s"#pragma region $directive").mkString("\n")
+    s"""$pragmas
        |
        |// $Banner
-       |// Self-checking Spectra API test for `$name`: deterministic input -> device call -> host-oracle comparison.
+       |// Self-checking Spectra API test for `$name`: deterministic input -> ${kind.call} call -> host-oracle comparison.
        |#include <algorithm>
        |#include <cstdio>
        |#include <iterator>
        |
-       |#include <polyregion/spectra.hpp>
+       |#include <${kind.header}>
        |
        |#include "support.hpp"
        |
@@ -380,22 +387,24 @@ private[spectra] object SpectraTestCodeGen {
       scalaType: String,
       scalaZero: String,
       fortranType: String,
-      fortranZero: String
+      fortranZero: String,
+      cppType: String
   )
 
   private val surfaceValues = List(
-    SurfaceValue("4", "Int", "0", "integer(c_int32_t)", "0_c_int32_t"),
-    SurfaceValue("8", "Long", "0L", "integer(c_int64_t)", "0_c_int64_t"),
+    SurfaceValue("4", "Int", "0", "integer(c_int32_t)", "0_c_int32_t", "std::int32_t"),
+    SurfaceValue("8", "Long", "0L", "integer(c_int64_t)", "0_c_int64_t", "std::int64_t"),
     SurfaceValue(
       "12",
       "SpectraSurfaceValue12",
       "SpectraSurfaceValue12(0, 0, 0)",
       "type(spectra_surface_value12)",
-      "spectra_surface_value12(0, 0, 0)"
+      "spectra_surface_value12(0, 0, 0)",
+      "SpectraSurfaceValue12"
     )
   )
-  private val surfaceBool = SurfaceValue("bool", "Boolean", "false", "logical(c_bool)", ".false.")
-  private val surfaceUnit = SurfaceValue("unit", "Unit", "()", "", "")
+  private val surfaceBool = SurfaceValue("bool", "Boolean", "false", "logical(c_bool)", ".false.", "bool")
+  private val surfaceUnit = SurfaceValue("unit", "Unit", "()", "", "", "void")
 
   private def surfaceMapping(decl: p.FunctionDecl): Map[String, SurfaceValue] = {
     val base = Math.floorMod(decl.name.last.hashCode, surfaceValues.size)
@@ -554,6 +563,67 @@ private[spectra] object SpectraTestCodeGen {
        |
        |${calls.mkString("\n\n")}
        |end program check
+       |""".stripMargin
+  }
+
+  private def cppSurfaceCallable(signature: p.Type.Exec, mapping: Map[String, SurfaceValue]): String = {
+    val parameters = signature.args.map(tpe => surfaceValue(tpe, mapping).cppType).mkString(", ")
+    val result     = surfaceValue(signature.rtn, mapping).cppType
+    val body       = if (signature.rtn == p.Type.Unit0) "" else s"return ${result}{}; "
+    s"[]($parameters) -> $result { $body}"
+  }
+
+  private def cppSurfaceArg(arg: p.Arg, buf: String, mapping: Map[String, SurfaceValue]): String = arg.named.tpe match {
+    case p.Type.Ptr(_, _)       => buf
+    case variable: p.Type.Var   => s"value${surfaceValue(variable, mapping).suffix}"
+    case p.Type.IntS32          => "n"
+    case signature: p.Type.Exec => cppSurfaceCallable(signature, mapping)
+    case _                      => "{}"
+  }
+
+  private def cppSurfaceCall(decl: p.FunctionDecl): String = {
+    val mapping   = surfaceMapping(decl)
+    val profile   = surfaceProfile(decl, mapping)
+    val comment   = Option.when(profile.nonEmpty)(s"  // ${decl.name.last}: $profile\n").getOrElse("")
+    val templates = decl.tpeVars.map(variable => mapping(variable.name).cppType).mkString(", ")
+    def buffer(arg: p.Arg): String = s"${decl.name.last}_${arg.named.symbol}"
+    // merge-like outputs need room for both inputs, and no two arguments may alias
+    val buffers = decl.args.flatMap { arg =>
+      arg.named.tpe match {
+        case p.Type.Ptr(comp, _) => Some(s"  ${surfaceValue(comp, mapping).cppType} ${buffer(arg)}[2 * n]{};")
+        case _                   => None
+      }
+    }
+    val args   = decl.args.map(arg => cppSurfaceArg(arg, buffer(arg), mapping))
+    val inline = s"  spectra::host::${decl.name.last}<$templates>(${args.mkString(", ")});"
+    val call =
+      if (inline.length <= 120) inline
+      else s"  spectra::host::${decl.name.last}<$templates>(\n${args.map("      " + _).mkString(",\n")}\n  );"
+    comment + (buffers :+ call).mkString("\n")
+  }
+
+  private def cppSurface: String = {
+    val calls = declarations.map(cppSurfaceCall)
+    s"""// $Banner
+       |// Compile-only instantiations of every host reference body; runtime coverage is in test/host.
+       |#include <cstdint>
+       |
+       |#include <polyregion/spectra/host.hpp>
+       |
+       |namespace {
+       |struct SpectraSurfaceValue12 {
+       |  std::int32_t x, y, z;
+       |};
+       |}
+       |
+       |void check_surface() {
+       |  constexpr std::int32_t n = 4;
+       |  std::int32_t value4{};
+       |  std::int64_t value8{};
+       |  SpectraSurfaceValue12 value12{};
+       |
+       |${calls.mkString("\n\n")}
+       |}
        |""".stripMargin
   }
 
@@ -1590,10 +1660,17 @@ private[spectra] object SpectraTestCodeGen {
     }
 
     val testRoot = root.resolve("test/generated")
+    val hostRoot = root.resolve("test/host")
     List(
       root.resolve("test/scala/polyregion/check_surface.scala") -> scalaSurface,
       root.resolve("test/fortran/check_surface.f90")            -> fortranSurface,
+      root.resolve("test/cpp/check_surface.cpp")                -> cppSurface,
       testRoot.resolve("support.hpp")                           -> cppTestHeader
-    ) ++ declarations.map(decl => testRoot.resolve(s"${decl.name.last}.cpp") -> cppTestFile(decl))
+    ) ++ declarations.flatMap { decl =>
+      List(
+        testRoot.resolve(s"${decl.name.last}.cpp") -> cppTestFile(decl, CaseKind.Offload),
+        hostRoot.resolve(s"${decl.name.last}.cpp") -> cppTestFile(decl, CaseKind.Host)
+      )
+    }
   }
 }

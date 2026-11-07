@@ -74,6 +74,28 @@ class SpectraSuite extends munit.FunSuite {
     }
   }
 
+  test("generated host C++ cases cover every declaration without offload") {
+    val dir      = root.resolve("test/host")
+    val expected = Spectra.interfaceDef.declarations.map(decl => s"${decl.name.last}.cpp").toSet
+    val actual = Using.resource(Files.list(dir)) { paths =>
+      paths.iterator.asScala
+        .filter(Files.isRegularFile(_))
+        .map(_.getFileName.toString)
+        .toSet
+    }
+
+    assertEquals(actual, expected)
+    actual.foreach { name =>
+      val algo = name.stripSuffix(".cpp")
+      val text = Files.readString(dir.resolve(name))
+      assert(text.contains(s"#pragma region case: $algo"), name)
+      assert(!text.contains("offload-only"), name)
+      assert(text.contains("#include <polyregion/spectra/host.hpp>"), name)
+      assert(text.contains(s"spectra::host::$algo<"), name)
+      assert(text.contains("#include \"support.hpp\""), name)
+    }
+  }
+
   test("generated C++ coverage combines rather than multiplies type and size rows") {
     val reduce = Files.readString(root.resolve("test/generated/reduce.cpp"))
     assert(reduce.contains("w4/n31"))
@@ -97,6 +119,15 @@ class SpectraSuite extends munit.FunSuite {
     List("w4", "w8", "w12").foreach { width =>
       assert(scalaSurface.contains(width), s"Scala surface has no $width instantiation")
       assert(fortranSurface.contains(width), s"Fortran surface has no $width instantiation")
+    }
+  }
+
+  test("generated C++ surface instantiates every host body") {
+    val cppSurface = Files.readString(root.resolve("test/cpp/check_surface.cpp"))
+
+    Spectra.interfaceDef.declarations.foreach { decl =>
+      val name = decl.name.last
+      assertEquals(raw"spectra::host::$name<".r.findAllIn(cppSurface).size, 1, s"C++: $name")
     }
   }
 

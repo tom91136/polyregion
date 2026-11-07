@@ -782,3 +782,29 @@ if(NOT SPECTRA_VENDOR_ONLY AND SPECTRA_ENABLE_PACKAGE_TESTS)
   add_custom_target(spectra-test-discover)
   add_dependencies(spectra-test-discover ${_spectra_discover_targets})
 endif()
+
+if(NOT SPECTRA_VENDOR_ONLY AND SPECTRA_ENABLE_PACKAGE)
+  file(GLOB _spectra_host_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/test/host/*.cpp")
+  if(NOT _spectra_host_tests)
+    message(FATAL_ERROR "Spectra host matrix has no cases")
+  endif()
+  set(_spectra_host_suite "${CMAKE_CURRENT_BINARY_DIR}/spectra-host.suite.env")
+  set(_spectra_host_stdpar
+      "{apple_target}-std=c++17 -I${CMAKE_CURRENT_SOURCE_DIR}/generated/cpp/include -I${CMAKE_CURRENT_SOURCE_DIR}/include "
+      "-I${CMAKE_CURRENT_SOURCE_DIR}/test/generated")
+  string(JOIN "" _spectra_host_stdpar ${_spectra_host_stdpar})
+  set(_spectra_host_text "${_spectra_suite_profile}")
+  string(APPEND _spectra_host_text
+         "POLYTEST_WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/test-work-host\n"
+         "POLYTEST_ARCH_VAR=spectra_arch\n"
+         "POLYTEST_STDPAR_VAR=spectra_stdpar\n"
+         "POLYTEST_STDPAR=${_spectra_host_stdpar}\n"
+         "POLYTEST_OUTPUT_PREFIX=spectra_test_\n"
+         "POLYTEST_TEMP_PREFIX=spectra_\n"
+         "POLYTEST_DEFAULT_ENV+=:POLYTEST_REPRO_CHECK=0\n")
+  foreach(_source IN LISTS _spectra_host_tests)
+    string(APPEND _spectra_host_text "POLYTEST_FILES+=:${_source}\n")
+  endforeach()
+  file(WRITE "${_spectra_host_suite}" "${_spectra_host_text}")
+  polyregion_add_polytest_suite(spectra-host SUITE "${_spectra_host_suite}" DEPENDS ${_spectra_host_tests})
+endif()
