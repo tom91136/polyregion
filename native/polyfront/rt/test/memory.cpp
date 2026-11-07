@@ -876,8 +876,10 @@ struct Fixture {
   template <typename T> std::optional<uintptr_t> remoteToLocal(T *t) { return allocation.syncRemoteToLocal(t); }
 
   ~Fixture() {
-    for (auto &[k, _] : localAllocations)
+    for (auto &[k, size] : localAllocations) {
+      allocation.forget(reinterpret_cast<void *>(k), size, false);
       std::free(reinterpret_cast<void *>(k));
+    }
     for (auto &[k, _] : remoteAllocations)
       std::free(reinterpret_cast<void *>(k));
   }
