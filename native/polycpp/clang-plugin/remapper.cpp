@@ -112,18 +112,17 @@ struct VariableMarker {
   return check(expression);
 }
 
-[[nodiscard]] static Vector<Stmt::Any> boundElementBody(Vector<Stmt::Any> body, const Type::Any &rtn) {
+[[nodiscard]] Vector<Stmt::Any> Remapper::boundElementBody(Vector<Stmt::Any> body, const Type::Any &rtn) {
   const auto ret = body.empty() ? Opt<Stmt::Return>{} : body.back().get<Stmt::Return>();
-  if (!ret) raise("Element boundary function must end in a return");
-  body.pop_back();
+  if (ret) body.pop_back();
   const auto result = Named("#element_result", rtn);
   Vector<Stmt::Any> out;
   Expr::Any value = Expr::Alias(Term::Unit0Const());
   if (rtn.is<Type::Unit0>()) {
-    if (!ret->value.is<Expr::Alias>()) body.emplace_back(Stmt::Var(result, ret->value, false));
+    if (ret && !ret->value.is<Expr::Alias>()) body.emplace_back(Stmt::Var(result, ret->value, false));
   } else {
     out.emplace_back(Stmt::Var(result, std::optional<Expr::Any>{}, true));
-    body.emplace_back(Stmt::Mut(Term::Select(result, {}, rtn), ret->value));
+    if (ret) body.emplace_back(Stmt::Mut(Term::Select(result, {}, rtn), ret->value));
     value = Expr::Alias(Term::Select(result, {}, rtn));
   }
   out.emplace_back(elementBoundary(body));

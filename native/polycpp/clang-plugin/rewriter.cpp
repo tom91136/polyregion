@@ -360,6 +360,7 @@ static std::optional<PreparedInterfaceCall> prepareInterfaceCall(clang::Compiler
     const auto sizeInBytes = static_cast<int32_t>(C.getTypeSize(sized) / 8);
     if (!sizeKey.is<Type::Nothing>() && sizeInBytes > 0) typeSizes.emplace_back(sizeKey, sizeInBytes);
   }
+  std::unordered_set<std::string> boundCallables;
   for (size_t i = 0; i < site.call->getNumArgs(); ++i) {
     const auto *argument = site.call->getArg(i)->IgnoreUnlessSpelledInSource();
     const auto *record = argument->getType()->getAsCXXRecordDecl();
@@ -391,6 +392,8 @@ static std::optional<PreparedInterfaceCall> prepareInterfaceCall(clang::Compiler
       return {};
     }
     auto [name, function] = remapper.handleCall(callable, context);
+    if (!hasAnnotation(callable, POLYREGION_ELEMENT_ANNOTATION) && boundCallables.emplace(name).second)
+      function->body = Remapper::boundElementBody(function->body, function->decl.rtn);
     auto args = function->decl.args;
     const auto leadingReceiver = !args.empty() && args.front().named.symbol == conventions::ThisReceiver;
     const auto receiver = leadingReceiver ? Opt<Arg>{args.front()} : function->decl.receiver;

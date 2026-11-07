@@ -588,6 +588,14 @@ int main(int argc, char **argv) {
   const auto applyImplementation = Function(
       applyImplementationDecl, {applyReceiverDecl, ret(Expr::Invoke(Type::Var("Op"), {}, applyReceiver, {applyX}, element).widen())},
       FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), CallConvention::RegularCall());
+  const auto forEachIndexName = Sym({"bar", "for_each_index"});
+  const auto forEachIndexImplementationName = Sym({"bar", "implementation", "for_each_index"});
+  const auto forEachIndexExtent = ArgExtent::Elements(ArgSizeExpr::Param(0));
+  const auto forEachIndexDecl =
+      FunctionDecl(forEachIndexName, {}, {},
+                   {Arg(Named("n", i32), {}), Arg(Named("out", i32p), {}, ArgBoundary(ArgAccess::Write(), forEachIndexExtent)),
+                    Arg(Named("op", Type::Exec({}, {i32}, i32)), {})},
+                   {}, {}, Type::Unit0(), FunctionAffinity::Host());
   const auto combineName = Sym({"bar", "combine"});
   const auto combineImplementationName = Sym({"bar", "implementation", "combine"});
   const auto combineDecl =
@@ -662,17 +670,9 @@ int main(int argc, char **argv) {
   const auto [targetedA, targetedAKernel] = targetedVariant("a", 1);
   const auto [targetedB, targetedBKernel] = targetedVariant("b", 2);
   const auto interface = Interface(Sym({"foo"}),
-                                   {publicDecl, copyDecl, applyDecl, combineDecl, capableDecl, remoteDecl,
+                                   {publicDecl, copyDecl, applyDecl, combineDecl, forEachIndexDecl, capableDecl, remoteDecl,
                                     publicDecl.withName(remoteAssertName), publicDecl.withName(targetedName)},
                                    {});
-  const auto program = polyregion::polyfront::packageProgram(
-      {implementation.withImplements(publicName), copyImplementation.withImplements(copyName),
-       applyImplementation.withImplements(applyName), combineImplementation.withImplements(combineName),
-       capableImplementation.withImplements(capableName).withRequiredCapabilities({"demo"}),
-       remoteImplementation.withImplements(remoteName), remoteKernel, remoteAssertImplementation.withImplements(remoteAssertName),
-       remoteAssertKernel, targetedA, targetedAKernel, targetedB, targetedBKernel},
-      {});
-
   const auto i64 = Type::IntS64().widen();
   const auto unit = Type::Unit0().widen();
   const auto n = NamedBuilder(Named("n", i64));
@@ -780,6 +780,42 @@ int main(int argc, char **argv) {
                      ret()},
                     FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), CallConvention::RegularCall());
   }();
+
+  const auto opType = Type::Var("Op");
+  const auto forEachIndexCaptureName = Sym({"bar", "implementation", "for_each_index_capture"});
+  const auto forEachIndexCaptureType = Type::Struct(forEachIndexCaptureName, {opType});
+  const auto forEachIndexKernelName = Sym({"bar", "implementation", "for_each_index_kernel"});
+  const auto forEachIndexKernel = [&] {
+    const Named capture(polyregion::conventions::CaptureArg, Type::Ptr(forEachIndexCaptureType, TypeSpace::Global()));
+    const Named first("first", Type::Bool1()), count("count", i32), out("out", i32p), i("i", i32), body("body", opType),
+        result("result", i32);
+    std::vector<Stmt::Any> apply{local(count, Expr::Alias(field(capture, "n", i32))), local(out, Expr::Alias(field(capture, "out", i32p))),
+                                 local(body, Expr::Alias(field(capture, "body", opType)))};
+    const auto receiver = receiverOf(body, apply);
+    apply.emplace_back(Stmt::ForRange(i, Term::IntS32Const(0), selected(count), Term::IntS32Const(1),
+                                      {local(result, Expr::Invoke(opType, {}, receiver, {selected(i)}, i32)),
+                                       Stmt::Update(selected(out), selected(i), selected(result))}));
+    return kernelOf(forEachIndexKernelName, {opType}, capture,
+                    {gidDecl, local(first, Expr::IntrOp(Intr::LogicEq(selected(gid), u32Zero))), Stmt::Cond(selected(first), apply, {})});
+  }();
+  const auto forEachIndexImplementation = [&] {
+    const Named n("n", i32), out("out", i32p), op("op", opType), capture("capture", forEachIndexCaptureType);
+    return Function(FunctionDecl(forEachIndexImplementationName, {opType}, {}, {Arg(context, {}), Arg(n, {}), Arg(out, {}), Arg(op, {})},
+                                 {}, {}, unit, FunctionAffinity::Host()),
+                    {Stmt::Var(capture, {}, true), Stmt::Mut(field(capture, "n", i32), Expr::Alias(selected(n))),
+                     Stmt::Mut(field(capture, "out", i32p), Expr::Alias(selected(out))),
+                     Stmt::Mut(field(capture, "body", opType), Expr::Alias(selected(op))),
+                     local(Named("launched", unit), launchOf(forEachIndexKernelName, {opType}, u32One, capture)), ret()},
+                    FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), CallConvention::RegularCall());
+  }();
+  const auto program = polyregion::polyfront::packageProgram(
+      {implementation.withImplements(publicName), copyImplementation.withImplements(copyName),
+       applyImplementation.withImplements(applyName), combineImplementation.withImplements(combineName),
+       forEachIndexImplementation.withImplements(forEachIndexName), forEachIndexKernel,
+       capableImplementation.withImplements(capableName).withRequiredCapabilities({"demo"}),
+       remoteImplementation.withImplements(remoteName), remoteKernel, remoteAssertImplementation.withImplements(remoteAssertName),
+       remoteAssertKernel, targetedA, targetedAKernel, targetedB, targetedBKernel},
+      {StructDef(forEachIndexCaptureName, {opType}, {Named("n", i32), Named("out", i32p), Named("body", opType)}, {}, false)});
 
   const auto mapType = Type::Var("Map"), combineType = Type::Var("Combine");
   const auto reduceCaptureName = Sym({"polyregion", "core", "device", "ReduceCapture"});

@@ -38,6 +38,14 @@
 #pragma region do: {output}
 #pragma region requires: 1 7 -1 9 101
 
+#pragma region case: core-package-element-assert
+#pragma region offload-only
+#pragma region do: {package_fixture} {output}.packages
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DELEMENT_ASSERT -fstdpar-library-path={output}.packages -o {output} {input}
+#pragma region stderr-count: 1 bound to polyregion.core
+#pragma region do: {output}
+#pragma region requires: 1 7 0 9 101
+
 #pragma region case: core-package-specialisations
 #pragma region offload-only
 #pragma region do: {package_fixture} {output}.packages
@@ -267,6 +275,27 @@ int main() {
   std::iota(xs.begin(), xs.end(), 1);
   xs[6] = -1;
   std::for_each(std::execution::par_unseq, xs.begin(), xs.end(), [](int &x) { x = checked(x); });
+  const bool raised = polyregion::polystl::details::lastAssert().raised;
+  std::printf("%d %d %d %d %d", raised ? 1 : 0, xs[5], xs[6], xs[7], xs[99]);
+  return 0;
+}
+#elif defined(ELEMENT_ASSERT)
+  #include "polyregion/enums.h"
+  #include "polystl/polystl.h"
+
+int checked(int x) {
+  if (x < 0) __polyregion_builtin_assert(static_cast<uint32_t>(polyregion::invoke::AssertCode::Assert), "core");
+  return x + 1;
+}
+
+int main() {
+  std::vector<int> xs(100);
+  std::iota(xs.begin(), xs.end(), 1);
+  xs[6] = -1;
+  std::for_each(std::execution::par_unseq, xs.begin(), xs.end(), [](int &x) {
+    auto checkedElement = [](int v) { return checked(v); };
+    x = polyregion::polystl::details::element(checkedElement, x);
+  });
   const bool raised = polyregion::polystl::details::lastAssert().raised;
   std::printf("%d %d %d %d %d", raised ? 1 : 0, xs[5], xs[6], xs[7], xs[99]);
   return 0;
