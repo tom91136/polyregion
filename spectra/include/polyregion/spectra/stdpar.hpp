@@ -9,6 +9,7 @@
 #include <limits>
 #include <memory>
 #include <type_traits>
+#include <utility>
 
 #include <polyregion/spectra/host.hpp>
 
@@ -390,6 +391,186 @@ template <class It, class OutIt> OutIt reverse_copy(execution::parallel_unsequen
     }
   }
   return std::reverse_copy(first, last, result);
+}
+
+template <class It, class T> It find(execution::parallel_unsequenced_policy, It first, It last, T value) {
+  using V = ::spectra::stdpar::details::value_t<It>;
+  if constexpr (::spectra::stdpar::details::element_v<It> && std::is_same_v<T, V>) {
+    const auto n = last - first;
+    if (::spectra::stdpar::details::contiguous(first, n))
+      return first + ::spectra::find(std::addressof(*first), static_cast<std::int32_t>(n), value, [](V x, V y) -> bool { return x == y; });
+  }
+  return std::find(first, last, value);
+}
+
+template <class It, class Pred> It find_if(execution::parallel_unsequenced_policy, It first, It last, Pred pred) {
+  using V = ::spectra::stdpar::details::value_t<It>;
+  if constexpr (::spectra::stdpar::details::element_v<It> && ::spectra::stdpar::details::callable_v<bool, Pred, const V &>) {
+    const auto n = last - first;
+    if (::spectra::stdpar::details::contiguous(first, n))
+      return first + ::spectra::find_if(std::addressof(*first), static_cast<std::int32_t>(n), [pred](V x) { return pred(x); });
+  }
+  return std::find_if(first, last, pred);
+}
+
+template <class It, class Pred> It find_if_not(execution::parallel_unsequenced_policy, It first, It last, Pred pred) {
+  using V = ::spectra::stdpar::details::value_t<It>;
+  if constexpr (::spectra::stdpar::details::element_v<It> && ::spectra::stdpar::details::callable_v<bool, Pred, const V &>) {
+    const auto n = last - first;
+    if (::spectra::stdpar::details::contiguous(first, n))
+      return first + ::spectra::find_if_not(std::addressof(*first), static_cast<std::int32_t>(n), [pred](V x) { return pred(x); });
+  }
+  return std::find_if_not(first, last, pred);
+}
+
+template <class It1, class It2> std::pair<It1, It2> mismatch(execution::parallel_unsequenced_policy, It1 first1, It1 last1, It2 first2) {
+  using V = ::spectra::stdpar::details::value_t<It1>;
+  if constexpr (::spectra::stdpar::details::same_element_v<It1, It2>) {
+    const auto n = last1 - first1;
+    if (::spectra::stdpar::details::contiguous(first1, n) && ::spectra::stdpar::details::contiguous(first2, n)) {
+      const auto i = ::spectra::mismatch(std::addressof(*first1), std::addressof(*first2), static_cast<std::int32_t>(n),
+                                         [](V x, V y) -> bool { return x == y; });
+      return {first1 + i, first2 + i};
+    }
+  }
+  return std::mismatch(first1, last1, first2);
+}
+
+template <class It1, class It2, class Pred, class = std::enable_if_t<!::spectra::stdpar::details::iterator_v<Pred>>>
+std::pair<It1, It2> mismatch(execution::parallel_unsequenced_policy, It1 first1, It1 last1, It2 first2, Pred pred) {
+  using V = ::spectra::stdpar::details::value_t<It1>;
+  if constexpr (::spectra::stdpar::details::same_element_v<It1, It2>
+                && ::spectra::stdpar::details::callable_v<bool, Pred, const V &, const V &>) {
+    const auto n = last1 - first1;
+    if (::spectra::stdpar::details::contiguous(first1, n) && ::spectra::stdpar::details::contiguous(first2, n)) {
+      const auto i = ::spectra::mismatch(std::addressof(*first1), std::addressof(*first2), static_cast<std::int32_t>(n),
+                                         [pred](V x, V y) { return pred(x, y); });
+      return {first1 + i, first2 + i};
+    }
+  }
+  return std::mismatch(first1, last1, first2, pred);
+}
+
+template <class It1, class It2>
+std::pair<It1, It2> mismatch(execution::parallel_unsequenced_policy, It1 first1, It1 last1, It2 first2, It2 last2) {
+  using V = ::spectra::stdpar::details::value_t<It1>;
+  if constexpr (::spectra::stdpar::details::same_element_v<It1, It2>) {
+    const auto n = std::min<std::ptrdiff_t>(last1 - first1, last2 - first2);
+    if (::spectra::stdpar::details::contiguous(first1, n) && ::spectra::stdpar::details::contiguous(first2, n)) {
+      const auto i = ::spectra::mismatch(std::addressof(*first1), std::addressof(*first2), static_cast<std::int32_t>(n),
+                                         [](V x, V y) -> bool { return x == y; });
+      return {first1 + i, first2 + i};
+    }
+  }
+  return std::mismatch(first1, last1, first2, last2);
+}
+
+template <class It1, class It2, class Pred>
+std::pair<It1, It2> mismatch(execution::parallel_unsequenced_policy, It1 first1, It1 last1, It2 first2, It2 last2, Pred pred) {
+  using V = ::spectra::stdpar::details::value_t<It1>;
+  if constexpr (::spectra::stdpar::details::same_element_v<It1, It2>
+                && ::spectra::stdpar::details::callable_v<bool, Pred, const V &, const V &>) {
+    const auto n = std::min<std::ptrdiff_t>(last1 - first1, last2 - first2);
+    if (::spectra::stdpar::details::contiguous(first1, n) && ::spectra::stdpar::details::contiguous(first2, n)) {
+      const auto i = ::spectra::mismatch(std::addressof(*first1), std::addressof(*first2), static_cast<std::int32_t>(n),
+                                         [pred](V x, V y) { return pred(x, y); });
+      return {first1 + i, first2 + i};
+    }
+  }
+  return std::mismatch(first1, last1, first2, last2, pred);
+}
+
+template <class It, class Op = std::less<>> It is_sorted_until(execution::parallel_unsequenced_policy, It first, It last, Op op = {}) {
+  using V = ::spectra::stdpar::details::value_t<It>;
+  if constexpr (::spectra::stdpar::details::element_v<It> && ::spectra::stdpar::details::callable_v<bool, Op, const V &, const V &>) {
+    const auto n = last - first;
+    if (::spectra::stdpar::details::contiguous(first, n))
+      return first + ::spectra::is_sorted_until(std::addressof(*first), static_cast<std::int32_t>(n), [op](V x, V y) { return op(x, y); });
+  }
+  return std::is_sorted_until(first, last, op);
+}
+
+template <class It1, class It2> It1 search(execution::parallel_unsequenced_policy, It1 first1, It1 last1, It2 first2, It2 last2) {
+  using V = ::spectra::stdpar::details::value_t<It1>;
+  if constexpr (::spectra::stdpar::details::same_element_v<It1, It2>) {
+    const auto n = last1 - first1;
+    const auto m = last2 - first2;
+    if (::spectra::stdpar::details::contiguous(first1, n) && ::spectra::stdpar::details::contiguous(first2, m) && m <= n) {
+      const auto i = ::spectra::search(std::addressof(*first1), static_cast<std::int32_t>(n), std::addressof(*first2),
+                                       static_cast<std::int32_t>(m), [](V x, V y) -> bool { return x == y; });
+      return i > n - m ? last1 : first1 + i;
+    }
+  }
+  return std::search(first1, last1, first2, last2);
+}
+
+template <class It1, class It2, class Pred>
+It1 search(execution::parallel_unsequenced_policy, It1 first1, It1 last1, It2 first2, It2 last2, Pred pred) {
+  using V = ::spectra::stdpar::details::value_t<It1>;
+  if constexpr (::spectra::stdpar::details::same_element_v<It1, It2>
+                && ::spectra::stdpar::details::callable_v<bool, Pred, const V &, const V &>) {
+    const auto n = last1 - first1;
+    const auto m = last2 - first2;
+    if (::spectra::stdpar::details::contiguous(first1, n) && ::spectra::stdpar::details::contiguous(first2, m) && m <= n) {
+      const auto i = ::spectra::search(std::addressof(*first1), static_cast<std::int32_t>(n), std::addressof(*first2),
+                                       static_cast<std::int32_t>(m), [pred](V x, V y) { return pred(x, y); });
+      return i > n - m ? last1 : first1 + i;
+    }
+  }
+  return std::search(first1, last1, first2, last2, pred);
+}
+
+template <class It, class Size, class T>
+It search_n(execution::parallel_unsequenced_policy, It first, It last, Size count, T value) {
+  using V = ::spectra::stdpar::details::value_t<It>;
+  if constexpr (::spectra::stdpar::details::element_v<It> && std::is_same_v<T, V>) {
+    const auto n = last - first;
+    const auto m = static_cast<std::ptrdiff_t>(count);
+    if (::spectra::stdpar::details::contiguous(first, n) && m > 0 && m <= n) {
+      const auto i = ::spectra::search_n(std::addressof(*first), static_cast<std::int32_t>(n), static_cast<std::int32_t>(m), value,
+                                         [](V x, V y) -> bool { return x == y; });
+      return i > n - m ? last : first + i;
+    }
+  }
+  return std::search_n(first, last, count, value);
+}
+
+template <class It, class Size, class T, class Pred>
+It search_n(execution::parallel_unsequenced_policy, It first, It last, Size count, T value, Pred pred) {
+  using V = ::spectra::stdpar::details::value_t<It>;
+  if constexpr (::spectra::stdpar::details::element_v<It> && std::is_same_v<T, V>
+                && ::spectra::stdpar::details::callable_v<bool, Pred, const V &, const V &>) {
+    const auto n = last - first;
+    const auto m = static_cast<std::ptrdiff_t>(count);
+    if (::spectra::stdpar::details::contiguous(first, n) && m > 0 && m <= n) {
+      const auto i = ::spectra::search_n(std::addressof(*first), static_cast<std::int32_t>(n), static_cast<std::int32_t>(m), value,
+                                         [pred](V x, V y) { return pred(x, y); });
+      return i > n - m ? last : first + i;
+    }
+  }
+  return std::search_n(first, last, count, value, pred);
+}
+
+template <class It, class T>
+typename std::iterator_traits<It>::difference_type count(execution::parallel_unsequenced_policy, It first, It last, T value) {
+  using V = ::spectra::stdpar::details::value_t<It>;
+  if constexpr (::spectra::stdpar::details::element_v<It> && std::is_same_v<T, V>) {
+    const auto n = last - first;
+    if (::spectra::stdpar::details::contiguous(first, n))
+      return ::spectra::count(std::addressof(*first), static_cast<std::int32_t>(n), value, [](V x, V y) -> bool { return x == y; });
+  }
+  return std::count(first, last, value);
+}
+
+template <class It, class Pred>
+typename std::iterator_traits<It>::difference_type count_if(execution::parallel_unsequenced_policy, It first, It last, Pred pred) {
+  using V = ::spectra::stdpar::details::value_t<It>;
+  if constexpr (::spectra::stdpar::details::element_v<It> && ::spectra::stdpar::details::callable_v<bool, Pred, const V &>) {
+    const auto n = last - first;
+    if (::spectra::stdpar::details::contiguous(first, n))
+      return ::spectra::count_if(std::addressof(*first), static_cast<std::int32_t>(n), [pred](V x) { return pred(x); });
+  }
+  return std::count_if(first, last, pred);
 }
 
 }
