@@ -178,8 +178,7 @@ class SynchronisedMemAllocation {
         std::fprintf(stderr, "[SMA]   localReflect(%p) = {size=%zu, offset=%zu}\n", static_cast<void *>(memberLocalPtr), meta.sizeInBytes,
                      meta.offsetInBytes); //
       const char *baseLocalPtr = memberLocalPtr - meta.offsetInBytes;
-      const size_t pointeeEnd = meta.offsetInBytes < meta.sizeInBytes ? meta.offsetInBytes + pointeeMinBytes : 0;
-      const size_t effectiveSize = std::max(meta.sizeInBytes, pointeeEnd);
+      const size_t effectiveSize = pointeeExtent(meta, pointeeMinBytes);
       const size_t typedBegin = typedStart(meta.offsetInBytes, meta.sizeInBytes, typedUnit(indirection, &tl));
       const uintptr_t baseRemotePtr = mirrorToRemote(baseLocalPtr, indirection, effectiveSizeToCount(effectiveSize - typedBegin), tl,
                                                      effectiveSize, readOnly || meta.hostReadOnly, typedBegin);
@@ -252,6 +251,11 @@ class SynchronisedMemAllocation {
 
   static size_t typedUnit(const size_t ptrIndirections, const runtime::TypeLayout *tl) {
     return ptrIndirections > 1 || !tl ? sizeof(uintptr_t) : tl->sizeInBytes;
+  }
+
+  static size_t pointeeExtent(const PtrQuery &meta, const size_t pointeeMinBytes) {
+    const bool undersized = meta.offsetInBytes < meta.sizeInBytes && meta.sizeInBytes < pointeeMinBytes;
+    return undersized ? meta.offsetInBytes + pointeeMinBytes : meta.sizeInBytes;
   }
 
   static size_t typedStart(const size_t offsetInBytes, const size_t sizeInBytes, const size_t unit) {
@@ -1133,7 +1137,7 @@ public:
       if (!sized) {
         if (const PtrQuery meta = localReflect(target); meta.sizeInBytes != 0) {
           base = target - meta.offsetInBytes;
-          sz = std::max(meta.sizeInBytes, meta.offsetInBytes < meta.sizeInBytes ? meta.offsetInBytes + pointeeMinBytes : 0);
+          sz = pointeeExtent(meta, pointeeMinBytes);
           typedBegin = typedStart(meta.offsetInBytes, meta.sizeInBytes, typedUnit(indirection, &tl));
           innerOffset = meta.offsetInBytes;
           ro = ro || meta.hostReadOnly;

@@ -798,7 +798,7 @@ const static TypeLayout doubleType = NamedType(double);
 
 struct Fixture {
   std::unordered_map<uintptr_t, size_t> localAllocations, remoteAllocations;
-  std::unordered_set<uintptr_t> heapAllocations, readOnlyAllocations;
+  std::unordered_set<uintptr_t> heapAllocations, readOnlyAllocations, releasedRemote;
   size_t remoteWrites = 0, remoteReads = 0, remoteWriteBytes = 0, reflectQueries = 0;
   // stretches device-to-host copies the way a real transfer does, page by page
   std::chrono::microseconds remoteReadPause{0};
@@ -832,7 +832,8 @@ struct Fixture {
             }, //
             [&](size_t size) {
               auto p = std::malloc(size);
-              remoteAllocations.emplace(reinterpret_cast<uintptr_t>(p), size);
+              remoteAllocations.insert_or_assign(reinterpret_cast<uintptr_t>(p), size);
+              releasedRemote.erase(reinterpret_cast<uintptr_t>(p));
               return reinterpret_cast<uintptr_t>(p);
             }, //
             [&](void *dst, uintptr_t src, size_t srcOffset, size_t size) {
@@ -850,7 +851,11 @@ struct Fixture {
               remoteWriteBytes += size;
               return std::memcpy(reinterpret_cast<char *>(dst) + dstOffset, src, size);
             }, //
-            [](uintptr_t remotePtr) { std::free(reinterpret_cast<void *>(remotePtr)); }, false) {}
+            [&](uintptr_t remotePtr) {
+              releasedRemote.insert(remotePtr);
+              std::free(reinterpret_cast<void *>(remotePtr));
+            },
+            false) {}
 
   template <typename T> T *mallocLocal(size_t count = 1) {
     auto p = std::malloc(sizeof(T) * count);
@@ -881,7 +886,14 @@ struct Fixture {
       std::free(reinterpret_cast<void *>(k));
     }
     for (auto &[k, _] : remoteAllocations)
-      std::free(reinterpret_cast<void *>(k));
+      if (!releasedRemote.count(k)) std::free(reinterpret_cast<void *>(k));
+  }
+
+  bool remoteLive(const void *p) const {
+    const auto addr = reinterpret_cast<uintptr_t>(p);
+    return std::any_of(remoteAllocations.begin(), remoteAllocations.end(), [&](const auto &entry) {
+      return !releasedRemote.count(entry.first) && addr >= entry.first && addr < entry.first + entry.second;
+    });
   }
 };
 
@@ -2008,6 +2020,71 @@ TEST_CASE("ptr-offset-into-pointer-bearing-array") {
     CHECK(*actual.y[-1].data == 102);
     CHECK(fixture.remoteAllocations.size() == 3);
   }
+}
+
+TEST_CASE("an end pointer in the trailing slack of an allocation keeps the mirror of the elements before it") {
+  struct Elem {
+    int32_t tag;
+    int32_t *data;
+  };
+  struct Span {
+    Elem *begin;
+    Elem *end;
+  };
+  auto elemMeta = Struct_(Elem,                                 //
+                          StructMember_(Elem, tag, &int32Type), //
+                          StructMember_(Elem, data, &int32Type));
+  auto spanMeta = Struct_(Span,                                   //
+                          StructMember_(Span, begin, &*elemMeta), //
+                          StructMember_(Span, end, &*elemMeta));
+
+  constexpr size_t N = 4, Head = 32, Slack = 7;
+  const auto run = [&](const bool endFirst) {
+    Fixture fixture;
+    auto pool = fixture.mallocLocal<int32_t>(N);
+    std::iota(pool, pool + N, 100);
+    auto block = fixture.mallocLocalHeap<char>(Head + N * sizeof(Elem) + Slack);
+    std::memset(block, 0, Head + N * sizeof(Elem) + Slack);
+    auto elems = reinterpret_cast<Elem *>(block + Head);
+    for (size_t i = 0; i < N; ++i)
+      elems[i] = Elem{static_cast<int32_t>(i), pool + i};
+
+    const Span actual =
+        endFirst ? fixture.localToRemote(Span{elems + N, elems}, *spanMeta) : fixture.localToRemote(Span{elems, elems + N}, *spanMeta);
+    Elem *begin = endFirst ? actual.end : actual.begin;
+    Elem *end = endFirst ? actual.begin : actual.end;
+    REQUIRE(fixture.remoteLive(begin));
+    CHECK(fixture.releasedRemote.empty());
+    CHECK(fixture.remoteAllocations.size() == 3);
+    CHECK(end == begin + N);
+    for (size_t i = 0; i < N; ++i) {
+      CHECK(begin[i].tag == static_cast<int32_t>(i));
+      CHECK(begin[i].data != pool + i);
+      CHECK(*begin[i].data == static_cast<int32_t>(100 + i));
+    }
+  };
+  SECTION("begin then end") { run(false); }
+  SECTION("end then begin") { run(true); }
+}
+
+TEST_CASE("a record smaller than its pointee is mirrored at the pointee size") {
+  struct Wide {
+    int64_t value;
+  };
+  struct Capture {
+    Wide *wide;
+  };
+  auto wideMeta = Struct_(Wide, StructMember_(Wide, value, &int64Type));
+  auto captureMeta = Struct_(Capture, StructMember_(Capture, wide, &*wideMeta));
+
+  Fixture fixture;
+  auto slot = fixture.mallocLocal<int32_t>();
+  *slot = 7;
+  const Capture actual = fixture.localToRemote(Capture{reinterpret_cast<Wide *>(slot)}, *captureMeta);
+  CHECK(fixture.remoteLive(actual.wide));
+  CHECK(std::any_of(fixture.remoteAllocations.begin(), fixture.remoteAllocations.end(), [&](const auto &entry) {
+    return entry.first == reinterpret_cast<uintptr_t>(actual.wide) && entry.second >= sizeof(Wide);
+  }));
 }
 
 TEST_CASE("resident arena leaves keep kernel output on the device until the host touches it") {
