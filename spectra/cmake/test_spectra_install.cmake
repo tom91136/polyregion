@@ -59,8 +59,22 @@ if(DEFINED PACKAGES)
       message(FATAL_ERROR "Spectra install has no ${_package} package under ${_package_root}")
     endif()
   endforeach()
-  if(NOT IS_DIRECTORY "${_package_root}/spectra/include")
-    message(FATAL_ERROR "Spectra install has no include directory under ${_package_root}/spectra")
+  set(_package_include "${_package_root}/spectra/include")
+  if(NOT EXISTS "${_package_include}/polyregion/spectra_api.hpp")
+    message(FATAL_ERROR "Spectra install has no polyregion/spectra_api.hpp under ${_package_include}")
+  endif()
+  file(WRITE "${_source}/stdpar.cpp" [=[
+#include <polyregion/spectra/stdpar.hpp>
+int main() { return 0; }
+]=])
+  execute_process(
+    COMMAND "${CXX_COMPILER}" -std=c++17 -fsyntax-only -isystem "${_package_include}" "${_source}/stdpar.cpp"
+    RESULT_VARIABLE _stdpar_rc
+    OUTPUT_VARIABLE _stdpar_stdout
+    ERROR_VARIABLE _stdpar_stderr
+  )
+  if(NOT _stdpar_rc EQUAL 0)
+    message(FATAL_ERROR "stdpar.hpp does not compile against the installed package headers (${_stdpar_rc}):\n${_stdpar_stdout}${_stdpar_stderr}")
   endif()
 endif()
 

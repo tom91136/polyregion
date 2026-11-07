@@ -438,6 +438,16 @@ add_custom_target(
 )
 
 if(NOT SPECTRA_VENDOR_ONLY AND SPECTRA_ENABLE_PACKAGE)
+  file(GLOB_RECURSE _spectra_package_headers CONFIGURE_DEPENDS
+       "${CMAKE_CURRENT_SOURCE_DIR}/include/polyregion/spectra/*.hpp")
+  list(FILTER _spectra_package_headers EXCLUDE REGEX "/implementation/")
+  list(APPEND _spectra_package_headers
+       "${CMAKE_CURRENT_SOURCE_DIR}/generated/cpp/include/polyregion/spectra_api.hpp")
+  set(_spectra_package_header_names)
+  foreach(_spectra_header IN LISTS _spectra_package_headers)
+    string(REGEX REPLACE "^.*/include/" "" _spectra_header_name "${_spectra_header}")
+    list(APPEND _spectra_package_header_names "${_spectra_header_name}")
+  endforeach()
   if(SPECTRA_PREBUILT_PACKAGE)
     add_custom_target(spectra-package ALL DEPENDS "${_spectra_package}")
   else()
@@ -674,7 +684,22 @@ if(NOT SPECTRA_VENDOR_ONLY AND SPECTRA_ENABLE_PACKAGE)
         VERBATIM
       )
     endif()
-    add_custom_target(spectra-package ALL DEPENDS "${_spectra_package}" ${_spectra_core_package})
+    set(_spectra_package_include "${SPECTRA_PACKAGE_ROOT}/spectra/include")
+    set(_spectra_package_header_copies)
+    foreach(_spectra_header _spectra_header_name IN ZIP_LISTS _spectra_package_headers _spectra_package_header_names)
+      get_filename_component(_spectra_header_dir "${_spectra_header_name}" DIRECTORY)
+      set(_spectra_header_copy "${_spectra_package_include}/${_spectra_header_name}")
+      add_custom_command(
+        OUTPUT "${_spectra_header_copy}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_spectra_package_include}/${_spectra_header_dir}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_spectra_header}" "${_spectra_header_copy}"
+        DEPENDS "${_spectra_header}"
+        VERBATIM
+      )
+      list(APPEND _spectra_package_header_copies "${_spectra_header_copy}")
+    endforeach()
+    add_custom_target(spectra-package-headers DEPENDS ${_spectra_package_header_copies})
+    add_custom_target(spectra-package ALL DEPENDS "${_spectra_package}" ${_spectra_core_package} spectra-package-headers)
   endif()
   if(TARGET spectra-vendor AND NOT SPECTRA_PREBUILT_PACKAGE)
     add_dependencies(spectra-package spectra-vendor)
@@ -683,13 +708,11 @@ if(NOT SPECTRA_VENDOR_ONLY AND SPECTRA_ENABLE_PACKAGE)
   if(_spectra_core_package)
     install(FILES "${_spectra_core_package}" DESTINATION "${CMAKE_INSTALL_LIBDIR}/polyregion/packages/polyregion.core")
   endif()
-  install(
-    DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/polyregion/spectra"
-    DESTINATION "${CMAKE_INSTALL_LIBDIR}/polyregion/packages/spectra/include/polyregion"
-    FILES_MATCHING
-    PATTERN "*.hpp"
-    PATTERN "implementation" EXCLUDE
-  )
+  foreach(_spectra_header _spectra_header_name IN ZIP_LISTS _spectra_package_headers _spectra_package_header_names)
+    get_filename_component(_spectra_header_dir "${_spectra_header_name}" DIRECTORY)
+    install(FILES "${_spectra_header}"
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}/polyregion/packages/spectra/include/${_spectra_header_dir}")
+  endforeach()
 endif()
 
 if(NOT SPECTRA_VENDOR_ONLY AND SPECTRA_ENABLE_PACKAGE_TESTS)
@@ -731,6 +754,10 @@ if(NOT SPECTRA_VENDOR_ONLY AND SPECTRA_ENABLE_PACKAGE_TESTS)
       "-I${CMAKE_CURRENT_SOURCE_DIR}/generated/cpp/include -I${CMAKE_CURRENT_SOURCE_DIR}/include "
       "-I${CMAKE_CURRENT_SOURCE_DIR}/test/generated")
   string(JOIN "" _spectra_package_stdpar ${_spectra_package_stdpar})
+  set(_spectra_suite_package_deps)
+  if(NOT SPECTRA_PREBUILT_PACKAGE)
+    set(_spectra_suite_package_deps spectra-package-headers)
+  endif()
   foreach(_spectra_suite_kind IN LISTS _spectra_suite_kinds)
     set(_spectra_suite_file "${CMAKE_CURRENT_BINARY_DIR}/spectra-${_spectra_suite_kind}.suite.env")
     set(_spectra_suite_name spectra-${_spectra_suite_kind})
@@ -749,8 +776,6 @@ if(NOT SPECTRA_VENDOR_ONLY AND SPECTRA_ENABLE_PACKAGE_TESTS)
       string(APPEND _spectra_suite_stdpar " ${_spectra_package_stdpar}")
       set(_spectra_suite_tests ${_spectra_closure_tests})
     elseif(_spectra_suite_kind STREQUAL "stdpar")
-      string(APPEND _spectra_suite_stdpar
-             " -I${CMAKE_CURRENT_SOURCE_DIR}/generated/cpp/include -I${CMAKE_CURRENT_SOURCE_DIR}/include")
       set(_spectra_suite_extra "POLYTEST_VAR+=:spectra_packages=${SPECTRA_PACKAGE_ROOT}\n")
       set(_spectra_suite_tests ${_spectra_stdpar_tests})
     else()
@@ -782,7 +807,8 @@ if(NOT SPECTRA_VENDOR_ONLY AND SPECTRA_ENABLE_PACKAGE_TESTS)
       string(APPEND _spectra_suite_text "POLYTEST_FILES+=:${_source}\n")
     endforeach()
     file(WRITE "${_spectra_suite_file}" "${_spectra_suite_text}")
-    polyregion_add_polytest_suite(${_spectra_suite_name} SUITE "${_spectra_suite_file}" DEPENDS ${_spectra_suite_tests})
+    polyregion_add_polytest_suite(${_spectra_suite_name} SUITE "${_spectra_suite_file}"
+                                  DEPENDS ${_spectra_suite_tests} ${_spectra_suite_package_deps})
     list(APPEND _spectra_discover_targets ${_spectra_suite_name}-discover)
   endforeach()
   add_custom_target(spectra-test-discover)
