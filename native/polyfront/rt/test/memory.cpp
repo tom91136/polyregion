@@ -1372,7 +1372,8 @@ TEST_CASE("record wrappers reclaim guarded blocks before libc or the kernel touc
   CHECK(all(grown, 9));
 
   std::fclose(file);
-  std::free(grown);
+  polyrt_record_free(grown);
+  CHECK(polyregion::rt_reflect::_rt_reflect_v(reinterpret_cast<uintptr_t>(grown)).size == 0);
   polyregion::rt_reflect::_rt_set_reclaim_cb(nullptr);
   polyregion::rt_reflect::_rt_set_release_cb(nullptr);
   active = nullptr;
