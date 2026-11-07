@@ -1585,8 +1585,12 @@ POLYREGION_EXPORT extern "C" void *polyrt_record_aligned_alloc(const size_t alig
   return p;
 }
 
-POLYREGION_EXPORT void *polyrt_record_operator_new(const size_t size) {
-  void *p = __RT_ALTERNATIVE(malloc)(tailPadded(size));
+static void *recordCXXNew(void *p, const size_t size) {
+  if (p) polyregion::rt_reflect::_rt_record(p, size, polyregion::rt_reflect::Type::HeapCXXNew);
+  return p;
+}
+
+static void *throwingCXXNew(void *p, const size_t size) {
   if (!p) {
 #if __cpp_exceptions == 199711
     throw std::bad_alloc{};
@@ -1594,18 +1598,44 @@ POLYREGION_EXPORT void *polyrt_record_operator_new(const size_t size) {
     std::abort();
 #endif
   }
-  polyregion::rt_reflect::_rt_record(p, size, polyregion::rt_reflect::Type::HeapCXXNew);
-  return p;
+  return recordCXXNew(p, size);
 }
 
-POLYREGION_EXPORT extern "C" void polyrt_record_operator_delete(void *ptr) {
+static void releaseCXXNew(void *ptr) {
   if (!ptr) return;
   polyregion::rt_reflect::_rt_release(ptr, polyregion::rt_reflect::Type::HeapCXXDelete);
   __RT_ALTERNATIVE(free)(ptr);
 }
 
-POLYREGION_EXPORT extern "C" void polyrt_record_operator_delete_sized(void *ptr, size_t /*size*/) {
-  if (!ptr) return;
-  polyregion::rt_reflect::_rt_release(ptr, polyregion::rt_reflect::Type::HeapCXXDelete);
-  __RT_ALTERNATIVE(free)(ptr);
+POLYREGION_EXPORT void *polyrt_record_operator_new(const size_t size) {
+  return throwingCXXNew(__RT_ALTERNATIVE(malloc)(tailPadded(size)), size);
+}
+
+POLYREGION_EXPORT extern "C" void *polyrt_record_operator_new_nothrow(const size_t size, const void * /*tag*/) {
+  return recordCXXNew(__RT_ALTERNATIVE(malloc)(tailPadded(size)), size);
+}
+
+POLYREGION_EXPORT extern "C" void *polyrt_record_operator_new_aligned(const size_t size, const size_t alignment) {
+  return throwingCXXNew(__RT_ALTERNATIVE(memalign)(alignment, tailPadded(size)), size);
+}
+
+POLYREGION_EXPORT extern "C" void *polyrt_record_operator_new_aligned_nothrow(const size_t size, const size_t alignment,
+                                                                              const void * /*tag*/) {
+  return recordCXXNew(__RT_ALTERNATIVE(memalign)(alignment, tailPadded(size)), size);
+}
+
+POLYREGION_EXPORT extern "C" void polyrt_record_operator_delete(void *ptr) { releaseCXXNew(ptr); }
+
+POLYREGION_EXPORT extern "C" void polyrt_record_operator_delete_sized(void *ptr, size_t /*size*/) { releaseCXXNew(ptr); }
+
+POLYREGION_EXPORT extern "C" void polyrt_record_operator_delete_nothrow(void *ptr, const void * /*tag*/) { releaseCXXNew(ptr); }
+
+POLYREGION_EXPORT extern "C" void polyrt_record_operator_delete_aligned(void *ptr, size_t /*alignment*/) { releaseCXXNew(ptr); }
+
+POLYREGION_EXPORT extern "C" void polyrt_record_operator_delete_aligned_sized(void *ptr, size_t /*size*/, size_t /*alignment*/) {
+  releaseCXXNew(ptr);
+}
+
+POLYREGION_EXPORT extern "C" void polyrt_record_operator_delete_aligned_nothrow(void *ptr, size_t /*alignment*/, const void * /*tag*/) {
+  releaseCXXNew(ptr);
 }

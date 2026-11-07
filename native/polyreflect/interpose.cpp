@@ -26,22 +26,12 @@ constexpr std::pair<llvm::StringLiteral, llvm::StringLiteral> ReplaceMap[]{
     //      {"reallocarray", "realloc_array"},
     // Itanium C++ ABI new/delete:
     {"_ZdaPv", "operator_delete"},
-    //      {"_ZdaPvm", "operator_delete_sized"},
-    //      {"_ZdaPvSt11align_val_t", "operator_delete_aligned"},
-    //      {"_ZdaPvmSt11align_val_t", "operator_delete_aligned_sized"},
+    {"_ZdaPvm", "operator_delete_sized"},
     {"_ZdlPv", "operator_delete"},
     {"_ZdlPvm", "operator_delete_sized"},
-    //      {"_ZdlPvSt11align_val_t", "operator_delete_aligned"},
-    //      {"_ZdlPvmSt11align_val_t", "operator_delete_aligned_sized"},
     {"_Znam", "operator_new"},
-    //      {"_ZnamRKSt9nothrow_t", "operator_new_nothrow"},
-    //      {"_ZnamSt11align_val_t", "operator_new_aligned"},
-    //      {"_ZnamSt11align_val_tRKSt9nothrow_t", "operator_new_aligned_nothrow"},
 
     {"_Znwm", "operator_new"},
-    //      {"_ZnwmRKSt9nothrow_t", "operator_new_nothrow"},
-    //      {"_ZnwmSt11align_val_t", "operator_new_aligned"},
-    //      {"_ZnwmSt11align_val_tRKSt9nothrow_t", "operator_new_aligned_nothrow"},
     //      {"__builtin_calloc", "calloc"},
     {"__builtin_free", "free"},
     {"__builtin_malloc", "malloc"},
@@ -69,9 +59,29 @@ constexpr std::pair<llvm::StringLiteral, llvm::StringLiteral> RecordOnlyReplaceM
     {"pwrite", "pwrite"},   {"fread", "fread"}, {"fwrite", "fwrite"},
 };
 
+constexpr std::pair<llvm::StringLiteral, llvm::StringLiteral> RecordOnlyCXXReplaceMap[]{
+    {"_ZnamRKSt9nothrow_t", "operator_new_nothrow"},
+    {"_ZnwmRKSt9nothrow_t", "operator_new_nothrow"},
+    {"_ZnamSt11align_val_t", "operator_new_aligned"},
+    {"_ZnwmSt11align_val_t", "operator_new_aligned"},
+    {"_ZnamSt11align_val_tRKSt9nothrow_t", "operator_new_aligned_nothrow"},
+    {"_ZnwmSt11align_val_tRKSt9nothrow_t", "operator_new_aligned_nothrow"},
+    {"_ZdaPvRKSt9nothrow_t", "operator_delete_nothrow"},
+    {"_ZdlPvRKSt9nothrow_t", "operator_delete_nothrow"},
+    {"_ZdaPvSt11align_val_t", "operator_delete_aligned"},
+    {"_ZdlPvSt11align_val_t", "operator_delete_aligned"},
+    {"_ZdaPvmSt11align_val_t", "operator_delete_aligned_sized"},
+    {"_ZdlPvmSt11align_val_t", "operator_delete_aligned_sized"},
+    {"_ZdaPvSt11align_val_tRKSt9nothrow_t", "operator_delete_aligned_nothrow"},
+    {"_ZdlPvSt11align_val_tRKSt9nothrow_t", "operator_delete_aligned_nothrow"},
+};
+
 bool runSplice(llvm::Module &M, const llvm::StringRef tag, const llvm::StringRef targetPrefix, const bool verbose) {
   llvm::SmallDenseMap<llvm::StringRef, llvm::StringRef> AllocReplacements(std::cbegin(ReplaceMap), std::cend(ReplaceMap));
-  if (targetPrefix == "polyrt_record_") AllocReplacements.insert(std::cbegin(RecordOnlyReplaceMap), std::cend(RecordOnlyReplaceMap));
+  if (targetPrefix == "polyrt_record_") {
+    AllocReplacements.insert(std::cbegin(RecordOnlyReplaceMap), std::cend(RecordOnlyReplaceMap));
+    AllocReplacements.insert(std::cbegin(RecordOnlyCXXReplaceMap), std::cend(RecordOnlyCXXReplaceMap));
+  }
   std::string recordNewName;
   if (targetPrefix == "polyrt_record_")
     for (auto &F : M) {
