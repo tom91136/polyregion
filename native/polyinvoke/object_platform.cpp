@@ -798,7 +798,7 @@ struct HostTable {
 #undef POLYREGION_HOST_TABLE_FIELD
 };
 
-static void fillHostTable(void *handle) {
+static void fillHostTable(polyregion_dl_handle handle) {
   if (auto *table = reinterpret_cast<HostTable *>(polyregion_dl_find(handle, polyregion::program_meta::HostTableSymbol))) {
 #define POLYREGION_HOST_TABLE_FILL(name, ret, params) table->name = &__polyregion_host_##name;
     POLYREGION_HOST_TABLE(POLYREGION_HOST_TABLE_FILL)
