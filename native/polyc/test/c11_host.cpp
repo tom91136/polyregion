@@ -296,17 +296,16 @@ TEST_CASE("C11 rejects work-group barriers in an entry that runs on the lane abi
 TEST_CASE("C11 images run through the shared object platform", "[c11]") {
   Host host;
   if (!host.buildsC()) SKIP("the shared object device found no dist clang to build C images");
-  for (const auto &kernel : {flatKernel(), tidKernel(), minMaxKernel(), idsKernel(), reverseKernel(), reduceKernel(), continueKernel(),
-                             earlyKernel(), stateKernel(), zeroKernel(), collectiveKernel(), nestedKernel()})
-    host.load(kernel);
 
   SECTION("tid") {
+    host.load(tidKernel());
     const auto out = host.run(tidKernel(), {37, 1}, ramp(37), 37, false);
     for (size_t i = 0; i < 37; ++i)
       REQUIRE(out[i] == 2 * (static_cast<int32_t>(i) * 3 + 1));
   }
 
   SECTION("min and max") {
+    host.load(minMaxKernel());
     for (const int32_t x : {-3, 5, 7, 10, 40}) {
       const auto out = host.run(minMaxKernel(), {1, 1}, {x}, 1);
       REQUIRE(out[0] == std::min(x, 10) + std::max(x, 5));
@@ -314,6 +313,7 @@ TEST_CASE("C11 images run through the shared object platform", "[c11]") {
   }
 
   SECTION("flat") {
+    host.load(flatKernel());
     for (const auto shape : AnyShapes) {
       const auto n = shape.groups * shape.lanes;
       const auto out = host.run(flatKernel(), shape, ramp(n), n);
@@ -326,6 +326,7 @@ TEST_CASE("C11 images run through the shared object platform", "[c11]") {
   }
 
   SECTION("ids") {
+    host.load(idsKernel());
     for (const auto shape : AnyShapes) {
       const auto n = shape.groups * shape.lanes;
       const auto out = host.run(idsKernel(), shape, {}, n * 4);
@@ -340,6 +341,7 @@ TEST_CASE("C11 images run through the shared object platform", "[c11]") {
   }
 
   SECTION("reverse through local memory") {
+    host.load(reverseKernel());
     for (const auto shape : AnyShapes) {
       const auto n = shape.groups * shape.lanes;
       const auto in = ramp(n);
@@ -353,6 +355,7 @@ TEST_CASE("C11 images run through the shared object platform", "[c11]") {
   }
 
   SECTION("tree reduction") {
+    host.load(reduceKernel());
     for (const auto shape : PowerShapes) {
       const auto n = shape.groups * shape.lanes;
       const auto in = ramp(n, 1, 0);
@@ -368,6 +371,7 @@ TEST_CASE("C11 images run through the shared object platform", "[c11]") {
   }
 
   SECTION("lane-varying continue in a loop with barriers") {
+    host.load(continueKernel());
     for (const auto shape : AnyShapes) {
       const auto n = shape.groups * shape.lanes;
       const auto out = host.run(continueKernel(), shape, {}, n);
@@ -383,6 +387,7 @@ TEST_CASE("C11 images run through the shared object platform", "[c11]") {
   }
 
   SECTION("early exit before a barrier") {
+    host.load(earlyKernel());
     for (const auto shape : AnyShapes) {
       const auto n = shape.groups * shape.lanes;
       const auto out = host.run(earlyKernel(), shape, {}, n);
@@ -394,6 +399,7 @@ TEST_CASE("C11 images run through the shared object platform", "[c11]") {
   }
 
   SECTION("per-lane array live across a barrier") {
+    host.load(stateKernel());
     for (const auto shape : AnyShapes) {
       const auto n = shape.groups * shape.lanes;
       const auto out = host.run(stateKernel(), shape, {}, n);
@@ -405,6 +411,7 @@ TEST_CASE("C11 images run through the shared object platform", "[c11]") {
   }
 
   SECTION("group collectives") {
+    host.load(collectiveKernel());
     for (const auto shape : PowerShapes) {
       const auto n = shape.groups * shape.lanes;
       const auto in = ramp(n, 1, 0);
@@ -425,6 +432,7 @@ TEST_CASE("C11 images run through the shared object platform", "[c11]") {
   }
 
   SECTION("nested conditionals around barriers") {
+    host.load(nestedKernel());
     for (const auto shape : AnyShapes) {
       const auto n = shape.groups * shape.lanes;
       const auto out = host.run(nestedKernel(), shape, {}, n);
@@ -438,6 +446,7 @@ TEST_CASE("C11 images run through the shared object platform", "[c11]") {
   }
 
   SECTION("local memory starts zeroed for every group") {
+    host.load(zeroKernel());
     for (const auto shape : {Shape{3, 64}, Shape{9, 1}, Shape{5, 1024}}) {
       const auto n = shape.groups * shape.lanes;
       const auto out = host.run(zeroKernel(), shape, {}, n);
