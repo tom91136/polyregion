@@ -134,7 +134,8 @@ class SynchronisedMemAllocation {
     return offsetQuery(remoteToLocalPtr, p, [](const auto &x) { return x.sizeInBytes; }, allowPastEnd);
   }
 
-  uintptr_t createDeviceAllocation(const char *local, size_t sizeInBytes, const runtime::TypeLayout *s, bool hostReadOnly = false) {
+  uintptr_t createDeviceAllocation(const char *local, size_t sizeInBytes, const runtime::TypeLayout *s, bool hostReadOnly = false,
+                                   const size_t typedBegin = 0) {
     // XXX +1 guard so adjacent USM allocs aren't bit-touching; otherwise A's past-end pointer aliases B's base in offsetQuery.
     const uintptr_t remotePtr = remoteAlloc(sizeInBytes + 1);
     mutateTables([&] {
@@ -142,6 +143,7 @@ class SynchronisedMemAllocation {
                                  RemoteAllocation{.layout = s, //
                                                   .localModified = false,
                                                   .hostReadOnly = hostReadOnly,
+                                                  .typedBegin = typedBegin,
                                                   .remote = RangedAllocation{.ptr = remotePtr, .sizeInBytes = sizeInBytes}});
       remoteToLocalPtr.emplace(remotePtr, RangedAllocation{.ptr = reinterpret_cast<uintptr_t>(local), .sizeInBytes = sizeInBytes});
     });
@@ -175,14 +177,13 @@ class SynchronisedMemAllocation {
       if (debug)
         std::fprintf(stderr, "[SMA]   localReflect(%p) = {size=%zu, offset=%zu}\n", static_cast<void *>(memberLocalPtr), meta.sizeInBytes,
                      meta.offsetInBytes); //
-      // XXX Anchor at the allocation base so past-end pointers (offset == size) still map; passing
-      // the past-end pointer as host data would request a zero-byte device alloc and fail.
-      const bool pastEnd = meta.offsetInBytes == meta.sizeInBytes;
-      const char *baseLocalPtr = pastEnd ? memberLocalPtr - meta.offsetInBytes : memberLocalPtr;
-      const size_t effectiveSize = std::max(pastEnd ? meta.sizeInBytes : meta.sizeInBytes - meta.offsetInBytes, pointeeMinBytes);
-      const uintptr_t baseRemotePtr =
-          mirrorToRemote(baseLocalPtr, indirection, effectiveSizeToCount(effectiveSize), tl, effectiveSize, readOnly || meta.hostReadOnly);
-      const uintptr_t memberRemotePtr = pastEnd ? baseRemotePtr + meta.offsetInBytes : baseRemotePtr;
+      const char *baseLocalPtr = memberLocalPtr - meta.offsetInBytes;
+      const size_t pointeeEnd = meta.offsetInBytes < meta.sizeInBytes ? meta.offsetInBytes + pointeeMinBytes : 0;
+      const size_t effectiveSize = std::max(meta.sizeInBytes, pointeeEnd);
+      const size_t typedBegin = typedStart(meta.offsetInBytes, meta.sizeInBytes, typedUnit(indirection, &tl));
+      const uintptr_t baseRemotePtr = mirrorToRemote(baseLocalPtr, indirection, effectiveSizeToCount(effectiveSize - typedBegin), tl,
+                                                     effectiveSize, readOnly || meta.hostReadOnly, typedBegin);
+      const uintptr_t memberRemotePtr = baseRemotePtr + meta.offsetInBytes;
       remoteWrite(&memberRemotePtr, devicePtr, memberOffsetInBytes, sizeof(uintptr_t));
     } else {
       static std::atomic<bool> warnedOnce{false};
@@ -249,60 +250,85 @@ class SynchronisedMemAllocation {
     return devicePtr;
   }
 
+  static size_t typedUnit(const size_t ptrIndirections, const runtime::TypeLayout *tl) {
+    return ptrIndirections > 1 || !tl ? sizeof(uintptr_t) : tl->sizeInBytes;
+  }
+
+  static size_t typedStart(const size_t offsetInBytes, const size_t sizeInBytes, const size_t unit) {
+    return unit != 0 && offsetInBytes % unit == 0 && sizeInBytes % unit == 0 ? 0 : offsetInBytes;
+  }
+
+  void writeAllocation(const char *hostData, const uintptr_t devicePtr, const size_t sizeInBytes, const size_t typedBegin,
+                       const size_t ptrIndirections, const size_t count, const runtime::TypeLayout &tl, const bool readOnly) {
+    if (ptrIndirections == 1 && pointerFree(&tl)) {
+      remoteWrite(hostData, devicePtr, 0, sizeInBytes);
+      return;
+    }
+    // Trailing bytes outside the polyc type (list node payload, vtable slots, etc.) are copied
+    // verbatim; writeStruct then walks the known-typed prefix to mirror pointer fields.
+    const size_t typedEnd = std::min(sizeInBytes, typedBegin + typedUnit(ptrIndirections, &tl) * count);
+    if (typedBegin) remoteWrite(hostData, devicePtr, 0, typedBegin);
+    if (sizeInBytes > typedEnd) remoteWrite(hostData + typedEnd, devicePtr, typedEnd, sizeInBytes - typedEnd);
+    if (ptrIndirections > 1) writeIndirect(hostData + typedBegin, devicePtr + typedBegin, ptrIndirections, count, tl, readOnly);
+    else writeStruct(hostData, typedBegin, devicePtr, count, tl, true, readOnly);
+  }
+
   // `hostAllocSizeInBytes` is the real host allocation size (from localReflect / a ptr-size resolver), or 0 to
   // infer from the type. they diverge for inheritance-via-base-pointer (std::list): the kernel walks
   // `_List_node_base*` (16B) but the heap node is `_List_node<T>` (24B+); sizing to the polyc type OOBs the payload
   uintptr_t mirrorToRemote(const char *hostData, const size_t ptrIndirections, const size_t count, const runtime::TypeLayout &l,
-                           const size_t hostAllocSizeInBytes = 0, const bool hostReadOnly = false) {
+                           const size_t hostAllocSizeInBytes = 0, const bool hostReadOnly = false, const size_t typedBegin = 0) {
     if (debug)
-      std::fprintf(stderr, "[SMA] mirrorToRemote(hostData=%p, ptrIndirections=%zu, count=%zu, t=@%s, hostAllocSize=%zu)\n", //
-                   static_cast<const void *>(hostData), ptrIndirections, count, l.name, hostAllocSizeInBytes);
+      std::fprintf(stderr,
+                   "[SMA] mirrorToRemote(hostData=%p, ptrIndirections=%zu, count=%zu, t=@%s, hostAllocSize=%zu, typedBegin=%zu)\n", //
+                   static_cast<const void *>(hostData), ptrIndirections, count, l.name, hostAllocSizeInBytes, typedBegin);
+    const size_t unit = typedUnit(ptrIndirections, &l);
     if (const auto query = queryLocal(hostData)) {
       const auto [alloc, offsetInBytes] = *query;
       const bool eligible = ptrIndirections == 1 && offsetInBytes == 0;
       const size_t cachedSize = alloc->remote.sizeInBytes;
-      const size_t requiredSize = staleFloor(l.sizeInBytes * count, hostAllocSizeInBytes);
+      const size_t requiredSize = staleFloor(typedBegin + l.sizeInBytes * count, hostAllocSizeInBytes);
       const bool stale = eligible && cachedSize < requiredSize;
-      if (eligible && !stale) adoptLayout(*alloc, l);
+      const size_t previousBegin = alloc->typedBegin;
+      if (!stale) adoptLayout(*alloc, l, ptrIndirections, offsetInBytes + typedBegin);
       if (stale) {
         reclaim(hostData, /*forWrite*/ true);
         disassociate(hostData);
         if (debug) std::fprintf(stderr, "[SMA]   stale base hit (cached %zu < required %zu), re-mirroring\n", cachedSize, requiredSize);
-      } else if (!localSyncVisited.insert(alloc->remote.ptr).second && !alloc->localModified) {
-        if (debug)
-          std::fprintf(stderr, "[SMA]   hit (0x%" PRIxPTR " = %4zu + %4zu)\n", alloc->remote.ptr, alloc->remote.sizeInBytes, offsetInBytes);
-        return alloc->remote.ptr + offsetInBytes;
       } else {
-        alloc->localModified = false;
+        const bool visited = !localSyncVisited.insert(alloc->remote.ptr).second;
         const auto &effLayout = alloc->layout ? *alloc->layout : l;
         const bool ro = hostReadOnly || alloc->hostReadOnly;
+        const char *baseLocalPtr = hostData - offsetInBytes;
+        if (visited && !alloc->localModified) {
+          if (debug)
+            std::fprintf(stderr, "[SMA]   hit (0x%" PRIxPTR " = %4zu + %4zu)\n", alloc->remote.ptr, alloc->remote.sizeInBytes,
+                         offsetInBytes);
+          if (const size_t begin = alloc->typedBegin; begin < previousBegin) {
+            const size_t extra = (previousBegin - begin) / unit;
+            if (ptrIndirections > 1) writeIndirect(baseLocalPtr + begin, alloc->remote.ptr + begin, ptrIndirections, extra, effLayout, ro);
+            else writeStruct(baseLocalPtr, begin, alloc->remote.ptr, extra, effLayout, true, ro);
+          }
+          return alloc->remote.ptr + offsetInBytes;
+        }
+        alloc->localModified = false;
         // Optimisation can reuse an interior stack slot for a new object. Refresh the cached allocation from its
         // original base and preserve the interior offset returned to the capture, rather than shifting it to the base.
-        const char *baseLocalPtr = hostData - offsetInBytes;
         if (ptrIndirections == 1 && guardAt(reinterpret_cast<uintptr_t>(baseLocalPtr))) {
           refresh(baseLocalPtr, *alloc);
           return alloc->remote.ptr + offsetInBytes;
         }
-        const uintptr_t remoteBase =
-            ptrIndirections > 1
-                ? writeIndirect(baseLocalPtr, alloc->remote.ptr, ptrIndirections, cachedSize / sizeof(uintptr_t), effLayout, ro)
-                : writeStruct(baseLocalPtr, 0, alloc->remote.ptr, cachedSize / effLayout.sizeInBytes, effLayout, true, ro);
-        return remoteBase + offsetInBytes;
+        const size_t begin = std::min(alloc->typedBegin, cachedSize);
+        writeAllocation(baseLocalPtr, alloc->remote.ptr, cachedSize, begin, ptrIndirections,
+                        (cachedSize - begin) / typedUnit(ptrIndirections, &effLayout), effLayout, ro);
+        return alloc->remote.ptr + offsetInBytes;
       }
     }
-    if (ptrIndirections > 1) {
-      const auto devicePtr = createDeviceAllocation(hostData, sizeof(uintptr_t) * count, nullptr, hostReadOnly);
-      localSyncVisited.insert(devicePtr);
-      return writeIndirect(hostData, devicePtr, ptrIndirections, count, l, hostReadOnly);
-    }
-    const size_t typeSizeTotal = l.sizeInBytes * count;
-    const size_t allocSize = std::max(typeSizeTotal, hostAllocSizeInBytes);
-    const auto devicePtr = createDeviceAllocation(hostData, allocSize, &l, hostReadOnly);
+    const size_t allocSize = std::max(typedBegin + unit * count, hostAllocSizeInBytes);
+    const auto devicePtr = createDeviceAllocation(hostData, allocSize, ptrIndirections > 1 ? nullptr : &l, hostReadOnly, typedBegin);
     localSyncVisited.insert(devicePtr);
-    // Trailing bytes outside the polyc type (list node payload, vtable slots, etc.) are copied
-    // verbatim; writeStruct then walks the known-typed prefix to mirror pointer fields.
-    if (allocSize > typeSizeTotal) remoteWrite(hostData + typeSizeTotal, devicePtr, typeSizeTotal, allocSize - typeSizeTotal);
-    return writeStruct(hostData, 0, devicePtr, count, l, true, hostReadOnly);
+    writeAllocation(hostData, devicePtr, allocSize, typedBegin, ptrIndirections, count, l, hostReadOnly);
+    return devicePtr;
   }
 
   // orig = host bytes snapshotted before the read-back clobber, to restore a slot left foreign
@@ -365,6 +391,7 @@ public:
     bool hostReadOnly = false;
     // the mirror patched a translated device pointer into this alloc; a raw copy-back would clobber it
     bool hasDevicePtrs = false;
+    size_t typedBegin = 0;
     RangedAllocation remote;
     std::vector<char> deviceBytes{};
   };
@@ -413,11 +440,25 @@ public:
                                                       .memberCount = 0,
                                                       .members = nullptr};
 
-  static void adoptLayout(RemoteAllocation &alloc, const runtime::TypeLayout &view) {
-    if (!pointerFree(&view)) {
-      if (alloc.layout && pointerFree(alloc.layout)) alloc.layout = nullptr;
-    } else if (!alloc.layout && !alloc.hasDevicePtrs && view.sizeInBytes != 0 && alloc.remote.sizeInBytes % view.sizeInBytes == 0) {
+  static bool sameLayout(const runtime::TypeLayout *a, const runtime::TypeLayout *b) {
+    return a == b || (a && b && a->sizeInBytes == b->sizeInBytes && std::strcmp(a->name, b->name) == 0);
+  }
+
+  static void adoptLayout(RemoteAllocation &alloc, const runtime::TypeLayout &view, const size_t ptrIndirections, const size_t begin) {
+    if (begin > alloc.remote.sizeInBytes) return;
+    if (ptrIndirections > 1) {
+      if (!alloc.layout) alloc.typedBegin = std::min(alloc.typedBegin, begin);
+    } else if (!pointerFree(&view)) {
+      if (alloc.layout && pointerFree(alloc.layout)) {
+        alloc.layout = nullptr;
+        alloc.typedBegin = begin;
+      } else if (!alloc.layout) alloc.typedBegin = std::min(alloc.typedBegin, begin);
+      else if (sameLayout(alloc.layout, &view) && begin < alloc.typedBegin && (alloc.typedBegin - begin) % view.sizeInBytes == 0)
+        alloc.typedBegin = begin;
+    } else if (!alloc.layout && !alloc.hasDevicePtrs && view.sizeInBytes != 0
+               && (alloc.remote.sizeInBytes - begin) % view.sizeInBytes == 0) {
       alloc.layout = &view;
+      alloc.typedBegin = begin;
     }
   }
 
@@ -661,10 +702,11 @@ public:
       if (!alloc->localModified) return alloc->remote.ptr + offsetInBytes;
       const char *baseLocalPtr = static_cast<const char *>(p) - offsetInBytes;
       alloc->localModified = false;
-      if (alloc->layout)
-        writeStruct(baseLocalPtr, 0, alloc->remote.ptr, alloc->remote.sizeInBytes / alloc->layout->sizeInBytes, *alloc->layout, true,
-                    alloc->hostReadOnly);
-      else remoteWrite(baseLocalPtr, alloc->remote.ptr, 0, alloc->remote.sizeInBytes);
+      if (alloc->layout) {
+        const size_t begin = std::min(alloc->typedBegin, alloc->remote.sizeInBytes);
+        writeAllocation(baseLocalPtr, alloc->remote.ptr, alloc->remote.sizeInBytes, begin, 1,
+                        (alloc->remote.sizeInBytes - begin) / alloc->layout->sizeInBytes, *alloc->layout, alloc->hostReadOnly);
+      } else remoteWrite(baseLocalPtr, alloc->remote.ptr, 0, alloc->remote.sizeInBytes);
       return alloc->remote.ptr + offsetInBytes;
     }
     return {};
@@ -718,45 +760,53 @@ public:
       // inclusive copy: an object is copied if its range intersects the request range
       const runtime::TypeLayout *tl = alloc->layout;
 
-      const size_t objSize = tl ? tl->sizeInBytes : sizeof(uintptr_t);
-      const size_t objIdxOffset = offsetInBytes % objSize;
-      char *baseAtObjIdx = static_cast<char *>(p) - objIdxOffset;
-
-      const size_t maxObjCount = alloc->remote.sizeInBytes / objSize;
-      const size_t objIdxBegin = integralFloor(offsetInBytes, objSize);
-      const size_t startByte = objIdxBegin * objSize;
-      const size_t requestedBytes = sizeInByte.value_or(alloc->remote.sizeInBytes - startByte);
-      const size_t objIdxEnd = std::min(maxObjCount, objIdxBegin + integralCeil(requestedBytes, objSize));
-      const size_t totalObjBytes =
-          std::max(objIdxEnd * objSize, std::min(alloc->remote.sizeInBytes, startByte + requestedBytes)) - startByte;
+      const size_t allocSize = alloc->remote.sizeInBytes;
+      const size_t typedBegin = std::min(alloc->typedBegin, allocSize);
+      const size_t requestEnd = sizeInByte ? offsetInBytes + std::min(allocSize - offsetInBytes, *sizeInByte) : allocSize;
+      char *allocBase = static_cast<char *>(p) - offsetInBytes;
 
       // XXX skip writeback when host page is RO; cuMemcpyDtoH/hsa fault, and the pointer-rewrite walk would too.
       if (!alloc->hostReadOnly) {
-        const bool walkable = tl ? !isSet(tl->attrs, runtime::LayoutAttrs::Opaque) && !pointerFree(tl) : true;
-        // snapshot the original outgoing pointers before the read-back overwrites them with device addresses
-        std::vector<void *> origPtrs;
-        // snapshot for readSubObject to restore a slot the read-back leaves untranslatable
-        std::vector<char> origBytes;
-        // index from baseAtObjIdx (= alloc byte startByte): local (i - objIdxBegin) * objSize, not global i * objSize
-        if (walkable) {
-          origBytes.assign(baseAtObjIdx, baseAtObjIdx + totalObjBytes);
-          for (size_t i = objIdxBegin; i < objIdxEnd; ++i) {
-            const size_t localOff = (i - objIdxBegin) * objSize;
-            if (tl) collectHostPtrs(baseAtObjIdx, localOff, tl, origPtrs);
-            else if (const auto ptr = readPtrValue(baseAtObjIdx + localOff)) origPtrs.push_back(const_cast<char *>(ptr));
+        if (offsetInBytes < typedBegin)
+          remoteRead(allocBase + offsetInBytes, alloc->remote.ptr, offsetInBytes, std::min(requestEnd, typedBegin) - offsetInBytes);
+        if (requestEnd > typedBegin) {
+          const size_t objSize = tl ? tl->sizeInBytes : sizeof(uintptr_t);
+          const size_t typedOffset = std::max(offsetInBytes, typedBegin) - typedBegin;
+          const size_t typedSize = allocSize - typedBegin;
+          const size_t maxObjCount = typedSize / objSize;
+          const size_t objIdxBegin = integralFloor(typedOffset, objSize);
+          const size_t startByte = objIdxBegin * objSize;
+          const size_t requestedBytes = sizeInByte ? requestEnd - typedBegin - typedOffset : typedSize - startByte;
+          const size_t objIdxEnd = std::min(maxObjCount, objIdxBegin + integralCeil(requestedBytes, objSize));
+          const size_t totalObjBytes = std::max(objIdxEnd * objSize, std::min(typedSize, startByte + requestedBytes)) - startByte;
+          char *baseAtObjIdx = allocBase + typedBegin + startByte;
+
+          const bool walkable = tl ? !isSet(tl->attrs, runtime::LayoutAttrs::Opaque) && !pointerFree(tl) : true;
+          // snapshot the original outgoing pointers before the read-back overwrites them with device addresses
+          std::vector<void *> origPtrs;
+          // snapshot for readSubObject to restore a slot the read-back leaves untranslatable
+          std::vector<char> origBytes;
+          // index from baseAtObjIdx (= typed byte startByte): local (i - objIdxBegin) * objSize, not global i * objSize
+          if (walkable) {
+            origBytes.assign(baseAtObjIdx, baseAtObjIdx + totalObjBytes);
+            for (size_t i = objIdxBegin; i < objIdxEnd; ++i) {
+              const size_t localOff = (i - objIdxBegin) * objSize;
+              if (tl) collectHostPtrs(baseAtObjIdx, localOff, tl, origPtrs);
+              else if (const auto ptr = readPtrValue(baseAtObjIdx + localOff)) origPtrs.push_back(const_cast<char *>(ptr));
+            }
           }
+          remoteRead(baseAtObjIdx, alloc->remote.ptr, typedBegin + startByte, totalObjBytes);
+          if (walkable)
+            for (size_t i = objIdxBegin; i < objIdxEnd; ++i) {
+              const size_t localOff = (i - objIdxBegin) * objSize;
+              if (tl) readStruct(baseAtObjIdx, localOff, tl, origBytes.data(), totalObjBytes);
+              else readSubObject(baseAtObjIdx, localOff, origBytes.data(), totalObjBytes);
+            }
+          // follow the original graph too: a kernel that disconnects nodes (reverses a list) leaves them
+          // unreachable through the read-back device pointers, but they are still mirrored and must come home
+          for (void *op : origPtrs)
+            syncRemoteToLocal(op);
         }
-        remoteRead(baseAtObjIdx, alloc->remote.ptr, startByte, totalObjBytes);
-        if (walkable)
-          for (size_t i = objIdxBegin; i < objIdxEnd; ++i) {
-            const size_t localOff = (i - objIdxBegin) * objSize;
-            if (tl) readStruct(baseAtObjIdx, localOff, tl, origBytes.data(), totalObjBytes);
-            else readSubObject(baseAtObjIdx, localOff, origBytes.data(), totalObjBytes);
-          }
-        // follow the original graph too: a kernel that disconnects nodes (reverses a list) leaves them
-        // unreachable through the read-back device pointers, but they are still mirrored and must come home
-        for (void *op : origPtrs)
-          syncRemoteToLocal(op);
       }
       if (topLevel) syncVisited.clear();
       return alloc->remote.ptr + offsetInBytes;
@@ -998,6 +1048,7 @@ public:
     const runtime::TypeLayout *l;
     bool readOnly;         // a const input the device cannot have written; never copy it back (would corrupt it)
     bool resident = false; // kept at a stable offset across launches, page-guarded; others are re-laid every launch
+    size_t typedBegin = 0;
   };
   std::vector<GenArenaRec> genArenaRecs{};
 
@@ -1058,10 +1109,12 @@ public:
       }
       // interior pointer into an already-mirrored object (e.g. an SSO string's `_M_p` -> its own
       // `_M_local_buf`): point at that object's interior, don't re-mirror or fall to arenaNull
-      for (auto &r : genArenaRecs)
-        if (target >= r.host && target < r.host + r.size) {
-          childOff = r.off + (target - r.host);
-          if (genArenaPersist && r.off != 0) touchArenaLeaf(r, readOnly);
+      for (size_t i = 0; i < genArenaRecs.size(); ++i)
+        if (const auto &r = genArenaRecs[i]; target >= r.host && target < r.host + r.size) {
+          const size_t within = target - r.host;
+          childOff = r.off + within;
+          genArenaExtend(i, tl, indirection, within, readOnly);
+          if (genArenaPersist && genArenaRecs[i].off != 0) touchArenaLeaf(genArenaRecs[i], readOnly);
           break;
         }
       if (childOff != arenaNull) {
@@ -1069,7 +1122,7 @@ public:
         return;
       }
       const char *base = target;
-      size_t sz = 0, pastEndAdd = 0;
+      size_t sz = 0, typedBegin = 0, innerOffset = 0;
       bool sized = false, ro = readOnly;
       if (resolve) {
         if (const size_t resolvedSize = resolve(hostBase + hostOff); resolvedSize != 0) {
@@ -1079,18 +1132,18 @@ public:
       }
       if (!sized) {
         if (const PtrQuery meta = localReflect(target); meta.sizeInBytes != 0) {
-          const bool pastEnd = meta.offsetInBytes == meta.sizeInBytes;
-          base = pastEnd ? target - meta.offsetInBytes : target;
-          sz = std::max(pastEnd ? meta.sizeInBytes : meta.sizeInBytes - meta.offsetInBytes, pointeeMinBytes);
-          pastEndAdd = pastEnd ? meta.offsetInBytes : 0;
+          base = target - meta.offsetInBytes;
+          sz = std::max(meta.sizeInBytes, meta.offsetInBytes < meta.sizeInBytes ? meta.offsetInBytes + pointeeMinBytes : 0);
+          typedBegin = typedStart(meta.offsetInBytes, meta.sizeInBytes, typedUnit(indirection, &tl));
+          innerOffset = meta.offsetInBytes;
           ro = ro || meta.hostReadOnly;
           sized = true;
         }
       }
       if (sized) {
-        const size_t cnt = componentSize ? sz / componentSize : 1;
-        childOff = genArenaMirror(base, cnt ? cnt : 1, indirection, tl, slot, sz, ro);
-        if (childOff != arenaNull) childOff += pastEndAdd;
+        const size_t cnt = componentSize ? (indirection > 1 ? sz : sz - typedBegin) / componentSize : 1;
+        childOff = genArenaMirror(base, cnt ? cnt : (typedBegin < sz ? 1 : 0), indirection, tl, slot, sz, ro, typedBegin);
+        if (childOff != arenaNull) childOff += innerOffset;
       } else return; // XXX foreign / unsized: preserve copied bytes
     }
     writeWindowSlot(arenaPtrOff, childOff, slot);
@@ -1099,6 +1152,24 @@ public:
   void writeWindowSlot(const uint64_t arenaPtrOff, const uint64_t childOff, const size_t slot) {
     writeSlot(genArenaStaging.data() + arenaPtrOff, childOff, slot);
     if (childOff != arenaNull) genArenaSlots.emplace(arenaPtrOff, slot);
+  }
+
+  void genArenaExtend(const size_t index, const runtime::TypeLayout &tl, const size_t indirection, const size_t begin,
+                      const bool readOnly) {
+    const GenArenaRec r = genArenaRecs[index];
+    if (begin >= r.typedBegin || r.indirection != indirection || !sameLayout(r.l, &tl)) return;
+    if (indirection > 1) {
+      if (begin % sizeof(uintptr_t) != 0) return;
+      for (size_t i = begin / sizeof(uintptr_t); i < r.typedBegin / sizeof(uintptr_t); ++i)
+        genArenaPatch(r.host, i * sizeof(uintptr_t), r.off + i * r.slot, r.slot, indirection - 1,
+                      indirection - 1 == 1 ? r.l->sizeInBytes : sizeof(uintptr_t), 0, *r.l, nullptr, readOnly);
+    } else {
+      if (pointerFree(&tl) || (r.typedBegin - begin) % tl.sizeInBytes != 0) return;
+      const size_t extra = (r.typedBegin - begin) / tl.sizeInBytes;
+      genArenaWalk(r.host, r.off + begin, begin, extra, *r.l, readOnly);
+      genArenaRecs[index].count += extra;
+    }
+    genArenaRecs[index].typedBegin = begin;
   }
 
   // recurse the typed prefix copied at arena `arenaOff` (mirror of host `hostBase+hostOff`); a const link
@@ -1124,10 +1195,12 @@ public:
   // append `count` elements of `hostData` to the arena and patch their pointers; dedup by host ptr.
   // indirection>1: the elements are themselves pointers (an array of pointers)
   uint64_t genArenaMirror(const char *hostData, const size_t count, const size_t indirection, const runtime::TypeLayout &l,
-                          const size_t slot, const size_t hostAllocSizeInBytes = 0, const bool readOnly = false) {
+                          const size_t slot, const size_t hostAllocSizeInBytes = 0, const bool readOnly = false,
+                          const size_t typedBegin = 0) {
     if (!hostData) return arenaNull;
     const size_t unit = indirection > 1 ? slot : l.sizeInBytes;
-    const size_t allocSize = std::max(unit * count, hostAllocSizeInBytes);
+    const size_t allocSize = std::max(indirection > 1 ? unit * count : typedBegin + unit * count, hostAllocSizeInBytes);
+    const size_t firstSlot = indirection > 1 ? typedBegin / sizeof(uintptr_t) : 0;
 
     if (genArenaPersist) {
       if (!genArenaSeenRoot) { // the capture root: re-laid at offset 0 each launch, never persisted/deduped
@@ -1169,7 +1242,7 @@ public:
     const uint64_t off = genArenaStaging.size();
     mutateTables([&] { genArenaOffsetOf[reinterpret_cast<uintptr_t>(hostData)] = off; });
     const bool resident = genArenaPersist && indirection == 1 && pointerFree(&l) && arenaGuardable(hostData, allocSize);
-    genArenaRecs.push_back({hostData, off, count, indirection, slot, allocSize, &l, readOnly, resident});
+    genArenaRecs.push_back({hostData, off, count, indirection, slot, allocSize, &l, readOnly, resident, typedBegin});
     const size_t at = genArenaStaging.size();
     genArenaStaging.resize(at + allocSize);
     copyInArena(genArenaStaging.data() + at, hostData, count, indirection, slot, allocSize);
@@ -1181,10 +1254,10 @@ public:
       genArenaTouched.push_back(off);
     }
     if (indirection > 1)
-      for (size_t i = 0; i < count; ++i)
+      for (size_t i = firstSlot; i < count; ++i)
         genArenaPatch(hostData, i * sizeof(uintptr_t), off + i * slot, slot, indirection - 1,
                       indirection - 1 == 1 ? l.sizeInBytes : sizeof(uintptr_t), 0, l, nullptr, readOnly);
-    else genArenaWalk(hostData, off, 0, count, l, readOnly);
+    else genArenaWalk(hostData, off + typedBegin, typedBegin, count, l, readOnly);
     return off;
   }
 
@@ -1379,11 +1452,16 @@ public:
         genArenaReadbackPtr(buf, host + i * sizeof(uintptr_t), r.off + i * r.slot, r.slot);
       return;
     }
-    if (r.l->memberCount == 0) std::memcpy(host, buf.at(r.off), r.count * r.l->sizeInBytes);
-    else genArenaReadbackWalk(buf, host, r.off, 0, r.count, *r.l);
+    if (r.l->memberCount == 0) {
+      std::memcpy(host, buf.at(r.off), std::min(r.size, r.typedBegin + r.count * r.l->sizeInBytes));
+    } else {
+      if (r.typedBegin) std::memcpy(host, buf.at(r.off), r.typedBegin);
+      genArenaReadbackWalk(buf, host, r.off + r.typedBegin, r.typedBegin, r.count, *r.l);
+    }
     // a downcast widens the object past its static pointee type (a `_List_node_base*` link reaches a
     // `_List_node<int>` tail beyond the prefix); copy the remainder wholesale, it holds no pointer slot
-    if (const size_t typed = r.count * r.l->sizeInBytes; r.size > typed) std::memcpy(host + typed, buf.at(r.off + typed), r.size - typed);
+    if (const size_t typed = r.typedBegin + r.count * r.l->sizeInBytes; r.size > typed)
+      std::memcpy(host + typed, buf.at(r.off + typed), r.size - typed);
   }
 
   void genArenaReadback() {

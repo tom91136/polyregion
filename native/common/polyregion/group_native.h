@@ -1,9 +1,11 @@
 #pragma once
 
 #include <array>
+#include <cstdlib>
 #include <string>
 #include <string_view>
 
+#include "polyregion/env_keys.h"
 #include "polyregion/types.h"
 
 namespace polyregion::compiletime {
@@ -79,6 +81,18 @@ inline std::string groupNativeArg(const Target target, const std::string_view ar
 inline std::string groupLowerArgs(const Target target, const std::string_view arch) {
   const auto native = groupNativeArg(target, arch);
   return native.empty() ? "lowerGroups=true" : "lowerGroups=true,nativeGroups=" + native;
+}
+
+// POLYREGION_HOST_ABI=lane builds the thread-per-lane kernels that the group abi is checked against
+inline bool hostLaneAbiForced() {
+  const char *abi = std::getenv(env::PolyregionHostAbi);
+  return abi && std::string_view(abi) == "lane";
+}
+
+// pass tail shared by the host and C11 entry pipelines; GroupFission picks the host launch abi
+inline std::string hostGroupPipelineTail(const std::string &groupArgs, const bool respace) {
+  return ";SubgroupLower(lowerSubgroups=false," + groupArgs + ",maxGroupSize=" + std::to_string(program_meta::HostWorkgroupMaxLanes)
+         + ");StructuredExit" + (respace ? ";RegionRespace" : "") + (hostLaneAbiForced() ? "" : ";GroupFission");
 }
 
 } // namespace polyregion::compiletime

@@ -333,7 +333,7 @@ macro(_emit_cpu VARIANT PROGRAM)
     list(APPEND ALL_HEADERS ${_hdr})
 endmacro()
 
-set(RELOC_ONLY_PROGRAMS groups)
+set(RELOC_ONLY_PROGRAMS groups group_abi)
 
 foreach (C_SRC ${C_SRC_FILES})
     get_filename_component(PROGRAM ${C_SRC} NAME_WE)

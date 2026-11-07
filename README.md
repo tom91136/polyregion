@@ -93,6 +93,7 @@ Runtime platform selectors (`POLYRT_PLATFORM`):
 | `POLYRT_DEBUG` | `0`-`3` | runtime log level; `2` (Debug) prints SMA mirror/sync trace |
 | `POLYSTL_NO_OFFLOAD` | any non-empty | skip GPU/host dispatch entirely; run the lambda inline on the calling thread |
 | `POLYFRONT_VERBOSE` | `0`/`1` | when `1`, dump polyAST IR before invoking polyc |
+| `POLYREGION_HOST_ABI` | `lane` | at compile time, keep host kernels on one thread per work-item instead of one call per work-group |
 
 ### Native test suite
 

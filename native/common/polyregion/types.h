@@ -30,6 +30,20 @@ inline constexpr int64_t VkWorkgroupSizeXValue = 256;
 inline constexpr uint64_t HostWorkgroupMemoryBytes = 64 * 1024;
 inline constexpr uint64_t HostWorkgroupMaxLanes = 1024;
 inline constexpr char HostStaticLocalBytesSuffix[] = "__polyc_static_local_bytes";
+inline constexpr char HostAbiSuffix[] = "__polyc_host_abi";
+inline constexpr int64_t HostAbiLane = 0;
+inline constexpr int64_t HostAbiFlat = 1;
+inline constexpr int64_t HostAbiGroup = 2;
+inline constexpr char HostTableSymbol[] = "__polyc_host";
+
+// X(name, return type, parameter list) is the runtime function __polyregion_host_<name> that a C image calls through HostTableSymbol
+#define POLYREGION_HOST_TABLE(X)                                                                                                           \
+  X(thread_global_idx, uint64_t, (void))                                                                                                   \
+  X(thread_global_size, uint64_t, (void))                                                                                                  \
+  X(local_size, uint64_t, (void))                                                                                                          \
+  X(group_idx, uint64_t, (void))                                                                                                           \
+  X(group_size, uint64_t, (void))                                                                                                          \
+  X(group_state, void *, (uint64_t))
 } // namespace polyregion::program_meta
 
 namespace polyregion::invoke {

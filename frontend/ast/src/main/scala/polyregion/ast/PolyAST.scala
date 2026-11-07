@@ -758,6 +758,9 @@ object PolyAST {
     inline val LinkImplementationMeta  = "#link_implementation:"
     inline val LinkUnfitMeta           = "#link_unfit:"
     inline val LinkCallableMeta        = "#link_callable:"
+    inline val HostAbiMeta             = "#host_abi:"
+    inline val HostAbiNoteMeta         = "#host_abi_note:"
+    inline val HostGroupState          = "__polyregion_host_group_state"
 
     def assertMessageLimit: Int = 1024
 

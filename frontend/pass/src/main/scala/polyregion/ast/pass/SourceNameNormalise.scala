@@ -113,9 +113,21 @@ final case class SourceNameNormalise(metalKeywords: Boolean = false) extends Pro
       )
     }
 
+    val hostMeta = List(p.Conventions.HostAbiMeta, p.Conventions.HostAbiNoteMeta)
+    val renamedMeta = program.metadata.map { entry =>
+      hostMeta
+        .collectFirst {
+          case prefix if entry.key.startsWith(prefix) =>
+            val function = functionNames.find { case (name, _) => name.fqcn == entry.key.stripPrefix(prefix) }
+            function.fold(entry) { case (_, renamed) => entry.copy(key = prefix + renamed.fqcn) }
+        }
+        .getOrElse(entry)
+    }
+
     program.copy(
       entry = program.entry.map(renameFunction),
       functions = program.functions.map(renameFunction),
+      metadata = renamedMeta,
       defs = program.defs.map { definition =>
         val fields = fieldNames(definition.name)
         definition

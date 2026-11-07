@@ -31,6 +31,8 @@ using namespace polyregion;
 void requireGroupNative(compiletime::Target target, const std::string &arch, compiletime::GroupKind kind, const polyast::AtomicOp::Any &op,
                         const polyast::Type::Any &type);
 
+std::optional<int64_t> hostAbiOf(const polyast::Program &program, const polyast::Function &fn);
+
 class Backend {
 public:
   [[nodiscard]] virtual polyast::CompileResult compileProgram(const polyast::Program &program, const compiletime::OptLevel &opt) = 0;

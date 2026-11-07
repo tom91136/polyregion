@@ -105,6 +105,29 @@ TEST_CASE("Task output names are stable across processes") {
   }
 }
 
+TEST_CASE("A case limited to listed targets expands for those targets only") {
+  using namespace polyregion::polytest;
+  TempDir dir;
+  polyregion::env::ScopedEnv targets(polyregion::env::PolyregionTestTargets, "host@native;cuda@sm_89;arm@native");
+  std::ofstream(dir.file("check_two.cpp"))
+      << "#pragma region case: anywhere\n#pragma region do: echo {output}\n"
+         "#pragma region case: cpu\n#pragma region targets: native arm\n#pragma region do: echo {output}\n";
+  auto cfg = testConfig(dir.path);
+  cfg.testFiles = {dir.file("check_two.cpp")};
+  const auto tasks = enumerateTasks(cfg, true, false, {});
+  const auto archesOf = [&](const std::string &name) {
+    using namespace aspartame;
+    return tasks                                                       //
+           ^ filter([&](const auto &t) { return t.caseName == name; }) //
+           ^ flat_map([](const auto &t) {
+               return t.variables ^ collect([](const auto &k, const auto &v) { return k == "arch" ? std::optional{v} : std::nullopt; });
+             }) //
+           ^ sort();
+  };
+  CHECK(archesOf("anywhere") == std::vector<std::string>{"arm@native", "cuda@sm_89", "host@native"});
+  CHECK(archesOf("cpu") == std::vector<std::string>{"arm@native", "host@native"});
+}
+
 TEST_CASE("Cache and library locations reach the child environment") {
   using namespace polyregion::polytest;
   TempDir dir;

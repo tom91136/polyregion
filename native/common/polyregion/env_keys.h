@@ -11,6 +11,7 @@ inline constexpr auto PolyregionBitcodeDir = "POLYREGION_BITCODE_DIR";
 inline constexpr auto PolyregionTestProfile = "POLYREGION_TEST_PROFILE";
 inline constexpr auto PolyregionTestTargets = "POLYREGION_TEST_TARGETS";
 inline constexpr auto PolyregionSysroot = "POLYREGION_SYSROOT";
+inline constexpr auto PolyregionHostAbi = "POLYREGION_HOST_ABI";
 
 inline constexpr auto PolycDebugLld = "POLYC_DEBUG_LLD";
 inline constexpr auto PolycJobs = "POLYC_JOBS";
@@ -43,6 +44,7 @@ inline constexpr auto PolydcoInclude = "POLYDCO_INCLUDE";
 inline constexpr auto PolydcoLib = "POLYDCO_LIB";
 
 inline constexpr auto PolyinvokeDisableBackends = "POLYINVOKE_DISABLE_BACKENDS";
+inline constexpr auto PolyinvokeCCompiler = "POLYINVOKE_C_COMPILER";
 inline constexpr auto PolyinvokeDisableSvm = "POLYINVOKE_DISABLE_SVM";
 inline constexpr auto PolyinvokeOpenclLib = "POLYINVOKE_OPENCL_LIB";
 inline constexpr auto PolyinvokeTestLock = "POLYINVOKE_TEST_LOCK";

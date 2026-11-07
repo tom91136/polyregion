@@ -43,6 +43,28 @@ class SourceNameNormaliseSuite extends munit.FunSuite {
     )
   }
 
+  test("host abi metadata follows the renamed entry") {
+    val kernel = fn("ns.kernel", convention = p.CallConvention.OffloadEntry)
+    val other  = p.MetaEntry(p.Conventions.HostAbiMeta + "elsewhere", "2")
+    val input = program(kernel).copy(metadata =
+      List(
+        p.MetaEntry(p.Conventions.HostAbiMeta + "ns.kernel", "2"),
+        p.MetaEntry(p.Conventions.HostAbiNoteMeta + "ns.kernel", "spin"),
+        other
+      )
+    )
+    val out = SourceNameNormalise()(input, NoopLog)
+    assertEquals(out.entry.required.name.fqcn, "ns_kernel")
+    assertEquals(
+      out.metadata,
+      List(
+        p.MetaEntry(p.Conventions.HostAbiMeta + "ns_kernel", "2"),
+        p.MetaEntry(p.Conventions.HostAbiNoteMeta + "ns_kernel", "spin"),
+        other
+      )
+    )
+  }
+
   test("Metal keywords are target-selective") {
     val symbol     = sym("thread")
     val definition = p.StructDef(symbol, Nil, Nil, Nil)

@@ -72,6 +72,9 @@ protected:
     }
   }
 
+  void launchHost(const char *prefix, const Policy &policy, uint64_t abiAddr, uint64_t staticLocalBytesAddr, const MaybeCallback &cb,
+                  std::function<void(size_t)> task);
+
 public:
   POLYREGION_EXPORT explicit ObjectDeviceQueue(const std::chrono::duration<int64_t> &timeout);
   POLYREGION_EXPORT ~ObjectDeviceQueue() noexcept override;
@@ -159,10 +162,14 @@ public:
 class POLYREGION_EXPORT SharedDevice final : public ObjectDevice {
   details::DynamicModules modules;
   std::shared_mutex mutex;
+  std::string compiler, compilerUnavailable;
 
 public:
+  SharedDevice();
   ~SharedDevice() override;
   POLYREGION_EXPORT std::string name() override;
+  POLYREGION_EXPORT ModuleFormat moduleFormat() override;
+  POLYREGION_EXPORT std::vector<Property> properties() override;
   POLYREGION_EXPORT void loadModule(const std::string &name, const std::string &image) override;
   POLYREGION_EXPORT bool moduleLoaded(const std::string &name) override;
   POLYREGION_EXPORT std::unique_ptr<DeviceQueue> createQueue(const std::chrono::duration<int64_t> &timeout) override;

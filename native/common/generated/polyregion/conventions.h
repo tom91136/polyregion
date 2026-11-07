@@ -41,6 +41,9 @@ inline constexpr auto KernelBundleType = "KernelBundle";
 inline constexpr auto LinkImplementationMeta = "#link_implementation:";
 inline constexpr auto LinkUnfitMeta = "#link_unfit:";
 inline constexpr auto LinkCallableMeta = "#link_callable:";
+inline constexpr auto HostAbiMeta = "#host_abi:";
+inline constexpr auto HostAbiNoteMeta = "#host_abi_note:";
+inline constexpr auto HostGroupState = "__polyregion_host_group_state";
 inline constexpr auto AssertMessageLimit = 1024;
 
 namespace reflect {

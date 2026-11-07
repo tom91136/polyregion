@@ -1879,6 +1879,134 @@ TEST_CASE("ptr-offset-internal") {
   CHECK(expected.b[0] == 43);
 }
 
+TEST_CASE("ptr-offset-below-base") {
+  struct Foo {
+    float *a;
+  };
+  auto fooMeta = Struct_(Foo, StructMember_(Foo, a, &floatType));
+
+  Fixture fixture;
+  size_t N = 10;
+  size_t Offset = 5;
+  auto as = fixture.mallocLocal<float>(N);
+  std::iota(as, as + N, 0);
+
+  Foo expected{as + Offset};
+  auto actual = fixture.localToRemote(expected, *fooMeta);
+  CHECK(std::memcmp(actual.a - Offset, as, sizeof(float) * N) == 0);
+  CHECK(fixture.remoteAllocations.size() == 2);
+}
+
+TEST_CASE("ptr-offset-alias-shares-one-mirror") {
+  struct Foo {
+    float *a;
+    float *b;
+  };
+  auto fooMeta = Struct_(Foo,                               //
+                         StructMember_(Foo, a, &floatType), //
+                         StructMember_(Foo, b, &floatType)  //
+  );
+  Fixture fixture;
+  size_t N = 10;
+  size_t Offset = 5;
+  auto as = fixture.mallocLocal<float>(N);
+  std::iota(as, as + N, 0);
+
+  Foo expected{as + Offset, as};
+  auto actual = fixture.localToRemote(expected, *fooMeta);
+  CHECK(actual.a == actual.b + Offset);
+  CHECK(fixture.remoteAllocations.size() == 2);
+
+  actual.a[0] = 77;
+  actual.b[1] = 88;
+  CHECK(actual.b[Offset] == 77);
+  const size_t reads = fixture.remoteReads;
+  fixture.allocation.syncRemoteToLocalAfterLaunch(&expected);
+  CHECK(fixture.remoteReads - reads == 2);
+  CHECK(as[Offset] == 77);
+  CHECK(as[1] == 88);
+  CHECK(expected.a == as + Offset);
+  CHECK(expected.b == as);
+}
+
+TEST_CASE("ptr-offset-into-pointer-bearing-array") {
+  struct Rec {
+    int32_t tag;
+    int32_t *data;
+  };
+  struct Foo {
+    Rec *x;
+    Rec *y;
+  };
+  auto recMeta = Struct_(Rec,                                 //
+                         StructMember_(Rec, tag, &int32Type), //
+                         StructMember_(Rec, data, &int32Type));
+  auto fooMeta = Struct_(Foo,                              //
+                         StructMember_(Foo, x, &*recMeta), //
+                         StructMember_(Foo, y, &*recMeta));
+
+  constexpr size_t N = 6, J = 3;
+  const auto setup = [&](Fixture &fixture) {
+    auto pool = fixture.mallocLocal<int32_t>(N);
+    std::iota(pool, pool + N, 100);
+    auto recs = fixture.mallocLocal<Rec>(N);
+    for (size_t i = 0; i < N; ++i)
+      recs[i] = Rec{static_cast<int32_t>(i), pool + i};
+    return recs;
+  };
+
+  SECTION("only the interior pointer into an array types the whole array") {
+    Fixture fixture;
+    auto recs = setup(fixture);
+    const Foo actual = fixture.localToRemote(Foo{recs + J, nullptr}, *fooMeta);
+    CHECK(actual.x[-2].tag == 1);
+    CHECK(actual.x[-1].tag == 2);
+    CHECK(actual.x[-1].data != recs[2].data);
+    CHECK(*actual.x[-1].data == 102);
+    CHECK(*actual.x[0].data == 103);
+    CHECK(*actual.x[1].data == 104);
+    CHECK(fixture.remoteAllocations.size() == 3);
+  }
+  SECTION("a pointer to a member keeps the bytes before it raw") {
+    struct Wrap {
+      int32_t pad[2];
+      Rec rec;
+    };
+    Fixture fixture;
+    auto recs = setup(fixture);
+    auto wrap = fixture.mallocLocal<Wrap>();
+    wrap->pad[0] = 11;
+    wrap->pad[1] = 12;
+    wrap->rec = recs[1];
+    const Foo actual = fixture.localToRemote(Foo{&wrap->rec, nullptr}, *fooMeta);
+    CHECK(reinterpret_cast<const int32_t *>(actual.x)[-1] == 12);
+    CHECK(reinterpret_cast<const int32_t *>(actual.x)[-2] == 11);
+    CHECK(actual.x->tag == 1);
+    CHECK(*actual.x->data == 101);
+    CHECK(fixture.remoteAllocations.size() == 3);
+  }
+  SECTION("interior pointer then base: the earlier elements are typed too") {
+    Fixture fixture;
+    auto recs = setup(fixture);
+    const Foo actual = fixture.localToRemote(Foo{recs + J, recs}, *fooMeta);
+    CHECK(actual.x == actual.y + J);
+    CHECK(actual.x[-1].data != recs[J - 1].data);
+    CHECK(*actual.x[-1].data == 102);
+    CHECK(*actual.y[0].data == 100);
+    CHECK(*actual.x[0].data == 103);
+    CHECK(fixture.remoteAllocations.size() == 3);
+  }
+  SECTION("base then interior pointer") {
+    Fixture fixture;
+    auto recs = setup(fixture);
+    const Foo actual = fixture.localToRemote(Foo{recs, recs + J}, *fooMeta);
+    CHECK(actual.y == actual.x + J);
+    CHECK(actual.y[-1].data != recs[J - 1].data);
+    CHECK(*actual.y[-1].data == 102);
+    CHECK(fixture.remoteAllocations.size() == 3);
+  }
+}
+
 TEST_CASE("resident arena leaves keep kernel output on the device until the host touches it") {
   if (!polyregion::polyrt::guard::AtomicPublish) SKIP("no whole-page publish on this platform");
   Fixture f;

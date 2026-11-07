@@ -176,8 +176,8 @@ bool hasFeature(Device &d, const std::string_view token) {
   return d.features() ^ exists([&](const auto &f) { return (f ^ to_lower()) == needle; });
 }
 
-bool lacksRequiredPaging(Device &d) {
-  return polyregion::polyrt::sma::mirrorModeFor(d.moduleFormat()) == polyregion::polyrt::sma::MirrorMode::Off
+bool lacksRequiredPaging(Device &d, const PlatformKind kind) {
+  return polyregion::polyrt::sma::mirrorModeFor(d.moduleFormat(), kind) == polyregion::polyrt::sma::MirrorMode::Off
          && !hasFeature(d, polyregion::runtime::SystemPagingFeature);
 }
 
@@ -943,7 +943,7 @@ static void remoteLaunchMarshalled(void *context, const char *moduleName, const 
   std::vector<Mirror> mirrors(argCount);
   std::vector<uintptr_t> marshalled(argCount, 0);
   std::vector<void *> launchArgPtrs(argCount, nullptr);
-  const auto mode = sma::mirrorModeFor(execution.device->moduleFormat());
+  const auto mode = sma::mirrorModeFor(execution.device->moduleFormat(), execution.platform->kind());
   const bool hostThreaded = execution.platform && execution.platform->kind() == PlatformKind::HostThreaded;
   const auto marshalling = iota(size_t{0}, argCount) | exists([&](const size_t i) {
                              return mirrorKinds[i] == 3 || (mirrorKinds[i] == 1 && layouts && pointerBearing(layouts[i]));
@@ -1101,7 +1101,7 @@ void polyregion::polyrt::skipExit(const char *reason) {
 }
 
 bool polyregion::polyrt::hostFallback() {
-  if (currentDevice && lacksRequiredPaging(*currentDevice)) return false;
+  if (currentDevice && lacksRequiredPaging(*currentDevice, currentPlatform->kind())) return false;
   static bool fallback = []() {
     if (const auto env = std::getenv(polyregion::env::PolyrtHostFallback); env) {
       if (const auto v = parseIntNoExcept(env); v && *v == 0) {
@@ -1340,7 +1340,7 @@ bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelOb
       missing.emplace_back(req);
     }
   }
-  if (lacksRequiredPaging(*currentDevice)) missing.emplace_back(polyregion::runtime::SystemPagingFeature);
+  if (lacksRequiredPaging(*currentDevice, currentPlatform->kind())) missing.emplace_back(polyregion::runtime::SystemPagingFeature);
   if (!missing.empty()) {
     note("lacks", std::move(missing));
     return false;

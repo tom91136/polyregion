@@ -87,10 +87,10 @@ template <typename F> //
 }
 
 template <typename F> //
-void __polyregion_offload_workgroup__(size_t lanes, F f) {
+void __polyregion_offload_workgroups__(size_t groups, size_t lanes, F f) {
   static bool offload = polyregionTestOffloadEnabled();
   if (!offload) {
-    for (size_t i = 0; i < lanes; ++i)
+    for (size_t i = 0; i < groups * lanes; ++i)
       f(static_cast<uint32_t>(i));
     return;
   }
@@ -101,10 +101,15 @@ void __polyregion_offload_workgroup__(size_t lanes, F f) {
     if (polyregion::polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i], &kernel, &bundle.structs[bundle.interfaceLayoutIdx],
                                              &loadedModule)) {
       void *kernelPtr = polyregion::polystl::details::polyreflectTrackPtr(&kernel);
-      polyregion::polystl::details::dispatchManaged(1, lanes, 0, &bundle.structs[bundle.interfaceLayoutIdx], kernelPtr,
+      polyregion::polystl::details::dispatchManaged(groups, lanes, 0, &bundle.structs[bundle.interfaceLayoutIdx], kernelPtr,
                                                     loadedModule.c_str(), bundle.prelude, bundle.postlude, bundle.asserts);
       return;
     }
   }
-  polyregion::polyrt::noCompatibleKernelExit("__polyregion_offload_workgroup__");
+  polyregion::polyrt::noCompatibleKernelExit("__polyregion_offload_workgroups__");
+}
+
+template <typename F> //
+void __polyregion_offload_workgroup__(size_t lanes, F f) {
+  __polyregion_offload_workgroups__(1, lanes, f);
 }

@@ -22,23 +22,22 @@ polyfront::KernelBundle polyfc::compileRegion( //
     const std::string &moduleId, const Remapper::DoConcurrentRegion &region) {
   using Level = clang::DiagnosticsEngine::Level;
   if (opts.jit) {
-    auto jitObjects =
-        opts.targets                                                                                            //
-        | filter([&](const auto &target, const auto &) { return runtime::targetPlatformKind(target) == kind; }) //
-        | collect([&](const auto &target, const auto &arch) -> std::optional<polyfront::KernelObject> {
-            auto format = runtime::moduleFormatOf(target);
-            if (!format) return std::nullopt;
-            const auto pp = polyfront::passes::arenaPassesFor(target, arch, opts.stackDepth);
-            polyfront::KernelObject ko;
-            ko.format = *format;
-            ko.kind = *format == runtime::ModuleFormat::Object ? runtime::PlatformKind::HostThreaded : runtime::PlatformKind::Managed;
-            ko.features = polyfront::passes::jitFeaturesFor(target, arch);
-            ko.target = target;
-            ko.arch = arch;
-            ko.pipelineSpec = pp.size() >= 2 ? pp[1] : std::string{};
-            return ko;
-          }) //
-        | to_vector();
+    auto jitObjects = opts.targets                                                                                            //
+                      | filter([&](const auto &target, const auto &) { return runtime::targetPlatformKind(target) == kind; }) //
+                      | collect([&](const auto &target, const auto &arch) -> std::optional<polyfront::KernelObject> {
+                          auto format = runtime::moduleFormatOf(target);
+                          if (!format) return std::nullopt;
+                          const auto pp = polyfront::passes::arenaPassesFor(target, arch, opts.stackDepth);
+                          polyfront::KernelObject ko;
+                          ko.format = *format;
+                          ko.kind = runtime::targetPlatformKind(target);
+                          ko.features = polyfront::passes::jitFeaturesFor(target, arch);
+                          ko.target = target;
+                          ko.arch = arch;
+                          ko.pipelineSpec = pp.size() >= 2 ? pp[1] : std::string{};
+                          return ko;
+                        }) //
+                      | to_vector();
     const auto packed = polyast::hashed_program_to_msgpack(region.program);
     const bool jitAsserts = !region.program.template collect_all<polyast::Spec::Assert>().empty();
     return polyfront::recorded(polyfront::KernelBundle{moduleId,
@@ -87,10 +86,10 @@ polyfront::KernelBundle polyfc::compileRegion( //
                  diagLoc, size, moduleId, targetName, features);
           if (auto format = runtime::moduleFormatOf(target)) {
             return polyfront::KernelObject{
-                *format,                                                                                                         //
-                *format == runtime::ModuleFormat::Object ? runtime::PlatformKind::HostThreaded : runtime::PlatformKind::Managed, //
-                result.features,                                                                                                 //
-                std::string(bin->begin(), bin->end())                                                                            //
+                *format,                              //
+                runtime::targetPlatformKind(target),  //
+                result.features,                      //
+                std::string(bin->begin(), bin->end()) //
             };
           } else
             emit(diag, Level::Remark,

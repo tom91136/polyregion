@@ -234,6 +234,7 @@ object Verify {
         (from.tpe, as) match {
           case (a, b) if a == b                       => c0
           case (_: p.Type.Struct, _: p.Type.Struct)   => c0
+          case (_: p.Type.Ptr, _: p.Type.Ptr)         => c0
           case (a, b) if isNumeric(a) && isNumeric(b) => c0
           case (a, b) => c0 ~ s"Cannot cast unrelated type ${a.repr} to ${b.repr}: ${e.repr}"
         }

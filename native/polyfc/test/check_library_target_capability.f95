@@ -1,5 +1,6 @@
 !CHECK case: target-qualified-capability
 !CHECK offload-only
+!CHECK targets: host x86_64 aarch64 arm cuda hsa hip spirv64_kernel spirv32_kernel level_zero spirv_glcompute opencl1_1 opencl2_0 metal1_0
 !CHECK do: {package_fixture} {output}.packages
 !CHECK do: polyfc {polyfc_defaults} {polyfc_stdpar} -fstdpar-library-path={output}.packages -fstdpar-library-capabilities=demo.a@host,demo.a@cuda,demo.a@opencl1_1,demo.a@opencl2_0,demo.a@spirv64_kernel,demo.a@spirv_glcompute,demo.a@metal1_0,demo.b@c11 -o {output} {input}
 !CHECK do: {output}
@@ -7,6 +8,7 @@
 
 !CHECK case: target-qualified-capability-multi-target
 !CHECK offload-only
+!CHECK targets: host x86_64 aarch64 arm cuda hsa hip spirv64_kernel spirv32_kernel level_zero spirv_glcompute opencl1_1 opencl2_0 metal1_0
 !CHECK do: {package_fixture} {output}.packages
 !CHECK do: polyfc {polyfc_defaults} {polyfc_stdpar} -fstdpar-arch={polyfc_arch};c11@native -fstdpar-library-path={output}.packages -fstdpar-library-capabilities=demo.a@host,demo.a@cuda,demo.a@opencl1_1,demo.a@opencl2_0,demo.a@spirv64_kernel,demo.a@spirv_glcompute,demo.a@metal1_0,demo.b@c11 -o {output} {input}
 !CHECK do: {output}

@@ -182,14 +182,26 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
   else put("UBSAN_OPTIONS", "print_stacktrace=1");
   if (std::getenv(polyregion::env::PolytestDebug)) put(polyregion::env::PolyrtDebug, "2");
   // child env replaced wholesale; forward overrides + QEMU shim inputs or they vanish
-  for (const auto *name : {polyregion::env::PolycppLinkThreads, polyregion::env::PolyfcLinkThreads,           //
-                           polyregion::env::PolyinvokeDisableSvm, polyregion::env::PolyinvokeDisableBackends, //
-                           polyregion::env::PolyrtMirror, polyregion::env::PolyrtStats,                       //
-                           polyregion::env::PolyregionPassLog,                                                //
-                           polyregion::env::PolyregionDebug, polyregion::env::PolyinvokeOpenclLib,            //
-                           polyregion::env::PolyregionSysroot, polyregion::env::PolyregionBitcodeDir,         //
-                           polyregion::env::PolypassPlugins, polyregion::env::PolyregionCacheDir,             //
-                           "XDG_CACHE_HOME", "POCL_CACHE_DIR", "QEMU_LD_PREFIX", "CUEW_LIB_PATH", "HIPEW_LIB_PATH", "HSAEW_LIB_PATH"})
+  for (const auto *name : {polyregion::env::PolycppLinkThreads,
+                           polyregion::env::PolyfcLinkThreads, //
+                           polyregion::env::PolyinvokeDisableSvm,
+                           polyregion::env::PolyinvokeDisableBackends, //
+                           polyregion::env::PolyrtMirror,
+                           polyregion::env::PolyrtStats,       //
+                           polyregion::env::PolyregionPassLog, //
+                           polyregion::env::PolyregionDebug,
+                           polyregion::env::PolyinvokeOpenclLib, //
+                           polyregion::env::PolyinvokeCCompiler, //
+                           polyregion::env::PolyregionSysroot,
+                           polyregion::env::PolyregionBitcodeDir, //
+                           polyregion::env::PolypassPlugins,
+                           polyregion::env::PolyregionCacheDir, //
+                           "XDG_CACHE_HOME",
+                           "POCL_CACHE_DIR",
+                           "QEMU_LD_PREFIX",
+                           "CUEW_LIB_PATH",
+                           "HIPEW_LIB_PATH",
+                           "HSAEW_LIB_PATH"})
     if (auto v = std::getenv(name)) put(name, v);
   for (const auto *name : {polyregion::env::PolyfrontLibraryPath, polyregion::env::PolyfrontLibraryCapabilities,
                            polyregion::env::PolyinvokeVulkanLib, "VK_LOADER_DEBUG"})
@@ -541,6 +553,15 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
   const auto tasksFor = [&](const std::string &file, const std::string &shortName, const auto &tc, const auto &vars,
                             const std::string &label, const std::string &value) {
     const auto varsWithLabel = vars ^ append(std::pair{cfg.defaultsLabelVar, label});
+    if (!tc.targets.empty()) {
+      const auto caseArch =
+          vars ^ collect_first([&](const auto &k, const auto &v) { return k == cfg.archVar ? std::optional{v} : std::nullopt; });
+      const auto canonical = [](const std::string &name) {
+        return compiletime::TargetSpec::findByName(name.substr(0, name.find('@'))) ^ map([](const auto &s) { return s.canonical; });
+      };
+      const auto wanted = caseArch ^ flat_map(canonical);
+      if (!wanted || !(tc.targets ^ exists([&](const auto &t) { return canonical(t) == wanted; }))) return std::vector<Task>{};
+    }
     std::vector<std::pair<std::string, std::string>> targetVars;
     if (!cfg.targetVar.empty()) {
       const auto targetArch =

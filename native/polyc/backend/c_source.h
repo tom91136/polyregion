@@ -33,8 +33,17 @@ private:
   Set<std::string> unionDefNames;
   Map<std::string, std::string> stringConstNames;
   Map<std::string, std::string> localNames;
+  std::string currentFn;
   Set<std::string> fileScopeNames;
   size_t localNameCounter = 0;
+  struct LocalUsage {
+    uint64_t fixedBytes = 0;
+    std::vector<std::string> fixedSizeExprs;
+    const Named *dynamic = nullptr;
+  };
+  static std::vector<Stmt::Var> localArrays(const Function &fn);
+  LocalUsage localUsage(const std::vector<Stmt::Var> &localVars);
+  std::string hostSpec(const Term::Any &dim, const char *tableEntry, int fallback);
   void bindLocalNames(const Function &fn);
   std::string localName(const std::string &symbol);
   Type::Any resolveFieldType(const Type::Any &owner, const std::string &fieldName) const;

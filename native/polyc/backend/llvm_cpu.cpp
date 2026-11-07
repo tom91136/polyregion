@@ -174,18 +174,17 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
     auto *dim = cg.B.CreateZExtOrTrunc(cg.mkTermVal(dimension), i32);
     return cg.B.CreateSelect(cg.B.CreateICmpEQ(dim, llvm::ConstantInt::get(i32, 0)), zero, nonzero);
   };
-  const auto threadId = [&]() -> ValPtr {
-    auto *value = cg.B.CreateCall(external("__polyregion_host_thread_global_idx", i64, {}));
-    return cg.B.CreateZExtOrTrunc(value, i32);
+  const auto hostId = [&](const std::string &name) -> ValPtr {
+    auto callee = external("__polyregion_host_" + name, i64, {});
+    auto *getter = llvm::cast<llvm::Function>(callee.getCallee());
+    getter->setMemoryEffects(llvm::MemoryEffects::none());
+    getter->setDoesNotThrow();
+    getter->setWillReturn();
+    getter->setNoSync();
+    return cg.B.CreateZExtOrTrunc(cg.B.CreateCall(callee), i32);
   };
-  const auto globalSize = [&]() -> ValPtr {
-    auto *value = cg.B.CreateCall(external("__polyregion_host_thread_global_size", i64, {}));
-    return cg.B.CreateZExtOrTrunc(value, i32);
-  };
-  const auto hostId = [&](const char *name) -> ValPtr {
-    auto *value = cg.B.CreateCall(external(std::string("__polyregion_host_") + name, i64, {}));
-    return cg.B.CreateZExtOrTrunc(value, i32);
-  };
+  const auto threadId = [&]() -> ValPtr { return hostId("thread_global_idx"); };
+  const auto globalSize = [&]() -> ValPtr { return hostId("thread_global_size"); };
   const auto groupBarrier = [&]() -> ValPtr {
     cg.B.CreateCall(external("__polyregion_host_group_barrier", unit, {}));
     return noop();

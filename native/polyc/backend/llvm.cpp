@@ -1108,6 +1108,11 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
       },
       [&](const Expr::ForeignCall &x) -> ValPtr {
         auto *fn = resolveExtFn(x.rtn, x.name, x.args ^ map([](const auto &a) { return a.tpe(); }));
+        if (x.name == conventions::HostGroupState) {
+          fn->addFnAttr(llvm::Attribute::NoUnwind);
+          fn->addFnAttr(llvm::Attribute::WillReturn);
+          fn->addRetAttr(llvm::Attribute::NoAlias);
+        }
         const auto call = B.CreateCall(fn, x.args ^ map([&](const auto &a) { return mkTermVal(a); }));
         return x.rtn.is<Type::Unit0>() ? mkTermVal(Term::Unit0Const()) : call;
       },
@@ -1809,9 +1814,12 @@ Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program, c
   if (cpuTarget) {
     for (const auto &[llvmFn, fn, argsNoUnit] : prototypes) {
       if (!fn.convention.is<CallConvention::OffloadEntry>()) continue;
-      const auto _ =
-          new llvm::GlobalVariable(M, B.getInt64Ty(), /*isConstant*/ true, llvm::GlobalValue::ExternalLinkage,
-                                   B.getInt64(moduleStaticBytes), llvmFn->getName().str() + program_meta::HostStaticLocalBytesSuffix);
+      const auto exportConstant = [&](const std::string &suffix, const int64_t value) {
+        const auto _ = new llvm::GlobalVariable(M, B.getInt64Ty(), /*isConstant*/ true, llvm::GlobalValue::ExternalLinkage,
+                                                B.getInt64(value), llvmFn->getName().str() + suffix);
+      };
+      exportConstant(program_meta::HostStaticLocalBytesSuffix, moduleStaticBytes);
+      if (const auto abi = hostAbiOf(program, fn)) exportConstant(program_meta::HostAbiSuffix, *abi);
     }
   }
 

@@ -29,7 +29,7 @@ add_library(polyc ${LIB_SOURCES})
 add_library(polyc-driver driver_package.cpp driver_polyc.cpp)
 
 add_executable(polyc-tests test/ast_codegen.cpp test/backend.cpp test/ast.cpp test/jit.cpp test/js_runner.cpp test/vendor_bitcode.cpp
-        test/treeshake.cpp)
+        test/treeshake.cpp test/c11_host.cpp)
 add_executable(polyc-benchmarks benchmark/babelstream.cpp)
 add_executable(polyc-bin driver_main.cpp)
 
@@ -131,7 +131,7 @@ target_link_libraries(polyc
         ${LLVM_LIBS}
         ${LLD_LIBS}
 )
-target_link_libraries(polyc-tests PRIVATE polyc Catch2::Catch2WithMain Aspartame::Aspartame)
+target_link_libraries(polyc-tests PRIVATE polyc polyinvoke-static Catch2::Catch2WithMain Aspartame::Aspartame)
 add_test(NAME polyc-tests COMMAND polyc-tests)
 set_tests_properties(polyc-tests PROPERTIES ENVIRONMENT "POLYREGION_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/module-cache")
 polyregion_test_dist_record(NAME polyc-tests COMMAND :bin:polyc-tests)

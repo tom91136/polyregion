@@ -44,9 +44,9 @@ inline constexpr int arenaViewCount = 7;
 POLYREGION_RT_PROTECT inline bool arenaViewForm(const invoke::ModuleFormat fmt) {
   return fmt == invoke::ModuleFormat::SPIRV_GLCompute || fmt == invoke::ModuleFormat::SPIRV_Kernel;
 }
-POLYREGION_RT_PROTECT inline MirrorMode mirrorModeFor(const invoke::ModuleFormat fmt) {
+POLYREGION_RT_PROTECT inline MirrorMode mirrorModeFor(const invoke::ModuleFormat fmt, const invoke::PlatformKind kind) {
   if (std::getenv(env::PolyrtMirror)) return mirrorMode();
-  return arenaFormat(fmt) ? MirrorMode::Arena : MirrorMode::Compiletime;
+  return kind != invoke::PlatformKind::HostThreaded && arenaFormat(fmt) ? MirrorMode::Arena : MirrorMode::Compiletime;
 }
 
 POLYREGION_RT_PROTECT inline auto stdRemoteAlloc() {

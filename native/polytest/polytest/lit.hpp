@@ -35,6 +35,7 @@ struct TestCase {
   std::string name;
   std::vector<std::vector<std::pair<std::string, std::string>>> matrices;
   bool offloadOnly = false;
+  std::vector<std::string> targets;
   std::optional<std::string> compileFailure;
   std::vector<Run> runs;
 
@@ -130,6 +131,8 @@ struct TestCase {
                                             | to_vector()) //
                                            ^ cartesian_product(),
                                .offloadOnly = parseFlag("offload-only"),
+                               .targets = parseValue("targets:") ^ map([](const auto &xs) { return xs ^ split(' '); })
+                                          ^ get_or_else(std::vector<std::string>{}),
                                .compileFailure = parseValue("compile-fails:"),
                                .runs = parseRuns()};
              });

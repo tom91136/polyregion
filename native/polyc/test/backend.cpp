@@ -904,6 +904,219 @@ TEST_CASE("CPU Bool1 boundaries use canonical byte values", "[backend]") {
   CHECK_THAT(ir, !Catch::Matchers::ContainsSubstring("i8 -1"));
 }
 
+TEST_CASE("CPU entries export the host abi from program metadata", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto entry = [](const std::string &name) {
+    return mkFn(name, {}, Type::Unit0(), {ret()}, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  };
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  const auto compile = [&](const std::vector<MetaEntry> &metadata) {
+    const auto compiled = polyregion::compiler::compile(Program(entry("kernel"), {}, {}, PassPhase::Initial(), metadata),
+                                                        {Target::Object_LLVM_HOST, "native"}, OptLevel::O0);
+    REQUIRE(compiled.binary);
+    return llvmIrOf(compiled);
+  };
+
+  const auto annotated = compile({MetaEntry(polyregion::conventions::HostAbiMeta + std::string("kernel"), "2")});
+  CHECK_THAT(annotated, Catch::Matchers::ContainsSubstring("@kernel__polyc_host_abi = constant i64 2"));
+  CHECK_THAT(annotated, Catch::Matchers::ContainsSubstring("@kernel__polyc_static_local_bytes"));
+
+  const auto plain = compile({});
+  CHECK_THAT(plain, !Catch::Matchers::ContainsSubstring("__polyc_host_abi"));
+  CHECK_THAT(plain, Catch::Matchers::ContainsSubstring("@kernel__polyc_static_local_bytes"));
+
+  const auto other = compile({MetaEntry(polyregion::conventions::HostAbiMeta + std::string("other"), "2")});
+  CHECK_THAT(other, !Catch::Matchers::ContainsSubstring("__polyc_host_abi"));
+}
+
+TEST_CASE("the host pipeline tail lets GroupFission choose the launch abi", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto i32 = Type::IntS32().widen();
+  const auto flagPtr = Type::Ptr(i32, TypeSpace::Global()).widen();
+  const Named flags("flags", flagPtr), id("id", Type::IntU32()), value("value", i32), done("done", Type::Bool1()),
+      unit("unit", Type::Unit0());
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  const auto compile = [&](const std::vector<Stmt::Any> &stmts) {
+    auto body = stmts;
+    body.emplace_back(ret());
+    const auto entry =
+        mkFn("kernel", {Arg(flags, {})}, Type::Unit0(), body, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+    polyregion::compiler::Options opts{Target::Object_LLVM_HOST, "native"};
+    opts.pipelineSpec = "FullOpt(level=0)" + polyregion::compiletime::hostGroupPipelineTail("lowerGroups=true", false);
+    auto compiled = polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+    INFO(repr(compiled));
+    REQUIRE(compiled.binary);
+    return compiled;
+  };
+  const auto idVar = [&](const auto &spec) { return Var(id, Expr::SpecOp(spec).widen(), false).widen(); };
+
+  const auto flat = compile({idVar(Spec::GpuGlobalIdx(Term::IntU32Const(0).widen()))});
+  CHECK_THAT(llvmIrOf(flat), Catch::Matchers::ContainsSubstring("@kernel__polyc_host_abi = constant i64 1"));
+  CHECK(flat.messages == "");
+
+  const auto group = compile({idVar(Spec::GpuLocalIdx(Term::IntU32Const(0).widen()))});
+  CHECK_THAT(llvmIrOf(group), Catch::Matchers::ContainsSubstring("@kernel__polyc_host_abi = constant i64 2"));
+  CHECK_THAT(llvmIrOf(group), Catch::Matchers::ContainsSubstring("__polyregion_host_local_size"));
+  CHECK_THAT(llvmIrOf(group), Catch::Matchers::ContainsSubstring("icmp ult i32"));
+
+  const auto barrierBody = std::vector{idVar(Spec::GpuLocalIdx(Term::IntU32Const(0).widen())),
+                                       Var(unit, Expr::SpecOp(Spec::GpuBarrierLocal()).widen(), false).widen()};
+  const auto barrier = compile(barrierBody);
+  CHECK_THAT(llvmIrOf(barrier), Catch::Matchers::ContainsSubstring("@kernel__polyc_host_abi = constant i64 2"));
+  CHECK_THAT(llvmIrOf(barrier), !Catch::Matchers::ContainsSubstring(polyregion::conventions::HostGroupState));
+  CHECK_THAT(llvmIrOf(barrier), !Catch::Matchers::ContainsSubstring("__polyregion_host_group_barrier"));
+  CHECK(barrier.messages == "");
+
+  const auto carried =
+      compile({idVar(Spec::GpuLocalIdx(Term::IntU32Const(0).widen())),
+               Var(value, Expr::Index(Term::Select(flags, {}, flagPtr), selectNamed(id).widen(), i32).widen(), false).widen(),
+               Var(unit, Expr::SpecOp(Spec::GpuBarrierLocal()).widen(), false).widen(),
+               Stmt::Update(Term::Select(flags, {}, flagPtr), selectNamed(id).widen(), selectNamed(value).widen()).widen()});
+  CHECK_THAT(llvmIrOf(carried), Catch::Matchers::ContainsSubstring("@kernel__polyc_host_abi = constant i64 2"));
+  CHECK_THAT(llvmIrOf(carried), Catch::Matchers::ContainsSubstring(polyregion::conventions::HostGroupState));
+  {
+    const ScopedEnv lane(polyregion::env::PolyregionHostAbi, std::string("lane"));
+    const auto threads = compile(barrierBody);
+    CHECK_THAT(llvmIrOf(threads), !Catch::Matchers::ContainsSubstring("__polyc_host_abi"));
+    CHECK_THAT(llvmIrOf(threads), Catch::Matchers::ContainsSubstring("__polyregion_host_group_barrier"));
+  }
+
+  const auto spin =
+      compile({Stmt::While(Term::Bool1Const(true).widen(),
+                           {Var(value, Expr::SpecOp(Spec::GpuVolatileLoad(Term::Select(flags, {}, flagPtr), i32)).widen(), false).widen(),
+                            Var(done, Expr::IntrOp(LogicNeq(selectNamed(value), Term::IntS32Const(0).widen())).widen(), false).widen(),
+                            Stmt::Cond(selectNamed(done).widen(), {Stmt::Break().widen()}, {}).widen()})
+                   .widen()});
+  CHECK_THAT(llvmIrOf(spin), Catch::Matchers::ContainsSubstring("@kernel__polyc_host_abi = constant i64 0"));
+  CHECK_THAT(spin.messages, Catch::Matchers::ContainsSubstring("kernel kernel: loop waits on a volatile or atomic value"));
+}
+
+static const std::vector<llvm::StringRef> hostIdGetters{"__polyregion_host_thread_global_idx", "__polyregion_host_thread_global_size",
+                                                        "__polyregion_host_group_idx",         "__polyregion_host_group_size",
+                                                        "__polyregion_host_local_idx",         "__polyregion_host_local_size"};
+
+static bool callsHostIdGetter(const llvm::Instruction &I) {
+  const auto *call = llvm::dyn_cast<llvm::CallBase>(&I);
+  const auto *callee = call ? call->getCalledFunction() : nullptr;
+  return callee && llvm::is_contained(hostIdGetters, callee->getName());
+}
+
+TEST_CASE("host id getters are readnone", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto dim = Term::IntU32Const(0).widen();
+  const Named globalIdx("globalIdx", Type::IntU32()), globalSize("globalSize", Type::IntU32()), groupIdx("groupIdx", Type::IntU32()),
+      groupSize("groupSize", Type::IntU32()), localIdx("localIdx", Type::IntU32()), localSize("localSize", Type::IntU32());
+  const auto bind = [](const Named &name, const auto &spec) { return Var(name, Expr::SpecOp(spec).widen(), false).widen(); };
+  const Function entry = mkFn("kernel", {}, Type::Unit0(),
+                              {bind(globalIdx, Spec::GpuGlobalIdx(dim)), bind(globalSize, Spec::GpuGlobalSize(dim)),
+                               bind(groupIdx, Spec::GpuGroupIdx(dim)), bind(groupSize, Spec::GpuGroupSize(dim)),
+                               bind(localIdx, Spec::GpuLocalIdx(dim)), bind(localSize, Spec::GpuLocalSize(dim)), ret()},
+                              FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const ScopedEnv captureIr(polyregion::env::PolyregionDebug, std::string("1"));
+  polyregion::compiler::Options opts{Target::Object_LLVM_HOST, "native"};
+  opts.pipelineSpec = "FullOpt(level=0)";
+  const auto compiled = polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  INFO(repr(compiled));
+  REQUIRE(compiled.binary);
+
+  llvm::LLVMContext context;
+  llvm::SMDiagnostic diagnostic;
+  const auto module = llvm::parseAssemblyString(llvmIrOf(compiled), diagnostic, context);
+  REQUIRE(module);
+  for (const auto name : hostIdGetters) {
+    INFO(name.str());
+    const auto *F = module->getFunction(name);
+    REQUIRE(F);
+    CHECK(F->doesNotAccessMemory());
+    CHECK(F->doesNotThrow());
+    CHECK(F->willReturn());
+    CHECK(F->hasFnAttribute(llvm::Attribute::NoSync));
+  }
+}
+
+TEST_CASE("host id getters hoist out of the group lane loop", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto u32 = Type::IntU32().widen();
+  const auto outTpe = Type::Ptr(Type::IntU32(), TypeSpace::Global()).widen();
+  const Named output("output", outTpe), group("group", u32), lane("lane", u32);
+  const auto dim = Term::IntU32Const(0).widen();
+  const Function entry = mkFn("kernel", {Arg(output, {})}, Type::Unit0(),
+                              {Var(group, Expr::SpecOp(Spec::GpuGroupIdx(dim)).widen(), false).widen(),
+                               Var(lane, Expr::SpecOp(Spec::GpuLocalIdx(dim)).widen(), false).widen(),
+                               Update(selectNamed(output), selectNamed(lane).widen(), selectNamed(group).widen()).widen(), ret()},
+                              FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const ScopedEnv captureIr(polyregion::env::PolyregionDebug, std::string("1"));
+  polyregion::compiler::Options opts{Target::Object_LLVM_HOST, "native"};
+  opts.pipelineSpec = "FullOpt(level=0)" + polyregion::compiletime::hostGroupPipelineTail("lowerGroups=true", false);
+  const auto compiled = polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), opts, OptLevel::O3);
+  INFO(repr(compiled));
+  REQUIRE(compiled.binary);
+  CHECK(compiled.messages == "");
+
+  llvm::LLVMContext context;
+  llvm::SMDiagnostic diagnostic;
+  const auto module = llvm::parseAssemblyString(eventDataOf(compiled, "llvm_to_obj_opt"), diagnostic, context);
+  REQUIRE(module);
+  std::size_t loops = 0, calls = 0, callsInLoops = 0;
+  for (auto &F : *module) {
+    if (F.isDeclaration()) continue;
+    for (const auto &I : llvm::instructions(F))
+      if (callsHostIdGetter(I)) ++calls;
+    llvm::DominatorTree dom(F);
+    llvm::LoopInfo info(dom);
+    for (const auto *loop : info.getLoopsInPreorder()) {
+      ++loops;
+      for (const auto *BB : loop->blocks())
+        for (const auto &I : *BB)
+          if (callsHostIdGetter(I)) ++callsInLoops;
+    }
+  }
+  CHECK(loops > 0);
+  CHECK(calls > 0);
+  CHECK(callsInLoops == 0);
+}
+
+TEST_CASE("CPU entries reject a malformed host abi", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Function entry = mkFn("kernel", {}, Type::Unit0(), {ret()}, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  for (const std::string value : {"3", "-1", "x"}) {
+    const Program program(entry, {}, {}, PassPhase::Initial(),
+                          {MetaEntry(polyregion::conventions::HostAbiMeta + std::string("kernel"), value)});
+    CHECK_THROWS_WITH(polyregion::compiler::compile(program, {Target::Object_LLVM_HOST, "native"}, OptLevel::O0),
+                      Catch::Matchers::ContainsSubstring("kernel"));
+  }
+}
+
+TEST_CASE("the host group state hook is a fresh allocation that returns", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto ptrTpe = Type::Ptr(Type::IntS8(), TypeSpace::Global());
+  const Named state("state", ptrTpe);
+  const Function entry =
+      mkFn("kernel", {}, Type::Unit0(),
+           {Var(state, Expr::ForeignCall(polyregion::conventions::HostGroupState, {Term::IntS64Const(64)}, ptrTpe).widen(), false).widen(),
+            ret()},
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  const auto compiled =
+      polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), {Target::Object_LLVM_HOST, "native"}, OptLevel::O0);
+  REQUIRE(compiled.binary);
+  const auto &ir = llvmIrOf(compiled);
+  CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("declare noalias ptr @__polyregion_host_group_state(i64)"));
+  CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("nounwind willreturn"));
+}
+
 TEST_CASE("C source bounds local names and retains source names on request", "[backend]") {
   polyregion::compiler::initialise();
   using namespace polyregion::polyast::dsl;

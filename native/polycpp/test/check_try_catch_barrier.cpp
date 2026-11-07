@@ -8,6 +8,13 @@
 #pragma region do: {output}
 #pragma region requires: 2 2
 
+#pragma region case: catch-inside-barrier-loop-lane-abi
+#pragma region offload-only
+#pragma region targets: host x86_64 aarch64 arm
+#pragma region do: POLYREGION_HOST_ABI=lane polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_KIND=1 -o {output} {input}
+#pragma region do: {output}
+#pragma region requires: 2 2
+
 #ifndef CHECK_KIND
   #define CHECK_KIND 0
 #endif

@@ -285,7 +285,7 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
     if (asserts) polyrt::reportAssert(polyrt::readAssertBuffer(*polyrt::currentContext(), errDev), g_assert, __func__, moduleId);
   };
 
-  const auto mode = polyrt::sma::mirrorModeFor(polyrt::currentDevice->moduleFormat());
+  const auto mode = polyrt::sma::mirrorModeFor(polyrt::currentDevice->moduleFormat(), polyrt::currentPlatform->kind());
   if (mode == polyrt::sma::MirrorMode::Off) {
     ArgBuffer buffer;
     polyrt::bindAssertError(buffer, asserts, errDev);

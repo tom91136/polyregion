@@ -4,6 +4,13 @@
 #pragma region do: {output}
 #pragma region requires: 1 63 -1 lane 7 tripped
 
+#pragma region case: assert-wide-group-lane-abi
+#pragma region offload-only
+#pragma region targets: host x86_64 aarch64 arm
+#pragma region do: POLYREGION_HOST_ABI=lane polycpp {polycpp_defaults} {polycpp_stdpar} -o {output} {input}
+#pragma region do: {output}
+#pragma region requires: 1 63 -1 lane 7 tripped
+
 #include <cstdint>
 #include <cstdio>
 

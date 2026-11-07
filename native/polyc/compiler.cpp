@@ -327,10 +327,7 @@ std::string packageEntryPipeline(const compiletime::Target target, const std::st
       return opt + fmt::format(";SubgroupLower(lowerSubgroups=false,{});StructuredExit;RegionRespace", groups);
     case compiletime::Target::Object_LLVM_AMDGCN:
       return opt + fmt::format(";SubgroupLower(lowerSubgroups=false,{});StructuredExit", groups);
-    default:
-      return opt
-             + fmt::format(";SubgroupLower(lowerSubgroups=false,{},maxGroupSize={});StructuredExit", groups,
-                           polyregion::program_meta::HostWorkgroupMaxLanes);
+    default: return opt + compiletime::hostGroupPipelineTail(groups, false);
   }
 }
 
@@ -775,6 +772,8 @@ polyast::CompileResult compiler::emit(Staged staged, const compiletime::OptLevel
   polyast::CompileResult c = mkBackend()->compileProgram(effective, opt);
   if (staged.hadEntry && !effective.entry) throw std::logic_error("pipeline removed the Program entry");
   if (effective.entry) c.entryArgs = effective.entry->decl.args ^ map([](const auto &a) { return a.named; });
+  for (const auto &entry : effective.metadata)
+    if (entry.key.starts_with(conventions::HostAbiNoteMeta)) c.messages += (c.messages.empty() ? "" : "\n") + entry.value;
   c.events ^= concat(staged.events);
   std::stable_sort(c.events.begin(), c.events.end(), [](const auto &l, const auto &r) { return l.epochMillis < r.epochMillis; });
   return c;

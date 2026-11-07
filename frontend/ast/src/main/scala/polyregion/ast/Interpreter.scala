@@ -45,6 +45,8 @@ object Interpreter {
 
     var deviceMode   = false
     var barrierCount = 0L
+    var localSize    = 1L
+    var groupIdx     = 0L
 
     def alloc(n: Long): Long = if (deviceMode) allocDevice(n)
     else {
@@ -554,10 +556,10 @@ object Interpreter {
     private def spec(op: p.Spec): V = op match {
       case _: p.Spec.GpuGlobalIdx  => V.I(globalId)
       case _: p.Spec.GpuGlobalSize => V.I(globalSize)
-      case _: p.Spec.GpuGroupIdx   => V.I(0)
-      case _: p.Spec.GpuGroupSize  => V.I(globalSize)
+      case _: p.Spec.GpuGroupIdx   => V.I(groupIdx)
+      case _: p.Spec.GpuGroupSize  => V.I(globalSize / localSize)
       case _: p.Spec.GpuLocalIdx   => V.I(0)
-      case _: p.Spec.GpuLocalSize  => V.I(1)
+      case _: p.Spec.GpuLocalSize  => V.I(localSize)
       case p.Spec.GpuBarrierGlobal | p.Spec.GpuBarrierLocal | p.Spec.GpuBarrierAll =>
         barrierCount += 1
         V.U

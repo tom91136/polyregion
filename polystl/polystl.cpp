@@ -121,7 +121,7 @@ POLYREGION_EXPORT void polystl::details::dispatchManaged(const size_t global, co
     if (asserts) polyrt::reportAssert(polyrt::readAssertBuffer(*polyrt::currentContext(), errDev), g_assert, __func__, moduleId);
   };
 
-  const auto mode = polyrt::sma::mirrorModeFor(polyrt::currentDevice->moduleFormat());
+  const auto mode = polyrt::sma::mirrorModeFor(polyrt::currentDevice->moduleFormat(), polyrt::currentPlatform->kind());
   if (mode == polyrt::sma::MirrorMode::Off) {
     auto buffer = newBuffer();
     bindError(buffer);

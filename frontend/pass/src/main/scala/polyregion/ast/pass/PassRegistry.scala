@@ -54,7 +54,8 @@ object PassRegistry {
     PassDef.singleton(SourceSelectionLegalise),
     PassDef.configured(SourceNameNormalise()),
     PassDef.configured(Mirror()),
-    PassDef.singleton(StructuredExit)
+    PassDef.singleton(StructuredExit),
+    PassDef.singleton(GroupFission)
   )
 
   private val byName = definitions.map(d => d.name -> d).toMap

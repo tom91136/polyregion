@@ -13,11 +13,14 @@
 
 #include "polyregion/conventions.h"
 #include "polyregion/env_keys.h"
+#include "polyregion/types.h"
 
 using namespace aspartame;
 using namespace polyregion;
 
 namespace {
+constexpr auto TidParameter = "__tid";
+
 // XXX inf/nan have no numeric spelling; a finite integral-reading value gets a `.0` to stay floating-point
 std::string cFloatLiteral(double v, const std::string &suffix) {
   if (std::isinf(v)) return v < 0 ? "-INFINITY" : "INFINITY";
@@ -43,6 +46,12 @@ std::string escapeCString(const std::string &s) {
 } // namespace
 using namespace polyast;
 using namespace std::string_literals;
+
+static std::string laneSpecMessage(const std::string &fn) {
+  return fmt::format("C11 function `{}` uses a work-group barrier or local id, which only the group abi can honour; GroupFission "
+                     "declined it, so it would run without synchronisation",
+                     fn);
+}
 
 static bool isLocalArr(const Type::Any &t) {
   return t.template get<Type::Arr>() ^ exists([](const auto &a) { return a.space.template is<TypeSpace::Local>(); });
@@ -154,6 +163,10 @@ void backend::CSource::bindLocalNames(const Function &fn) {
   localNames.clear();
   localNameCounter = 0;
   Set<std::string> used = fileScopeNames;
+  if (dialect == Dialect::C11) {
+    localNames.emplace(TidParameter, TidParameter);
+    used.emplace(TidParameter);
+  }
   const bool verbose = std::getenv(polyregion::env::PolycVerboseNames) != nullptr;
   const auto bind = [&](const Named &named) {
     if (localNames.contains(named.symbol)) return;
@@ -300,7 +313,8 @@ std::string backend::CSource::mkArrayDecl(const Type::Any &element, const TypeSp
     dims += fmt::format("[{}]", a->length);
     base = a->comp;
   }
-  const auto q = space.template is<TypeSpace::Local>() ? dialect == Dialect::MSL1_0 ? "threadgroup " : "local " : "";
+  const auto q =
+      space.template is<TypeSpace::Local>() && dialect != Dialect::C11 ? dialect == Dialect::MSL1_0 ? "threadgroup " : "local " : "";
   return fmt::format("{}{} {}{}", q, mkTpe(base), name, dims);
 }
 
@@ -319,7 +333,7 @@ std::string backend::CSource::mkDecl(const Type::Any &tpe, const std::string &na
                                         [&](TypeSpace::Constant) { return "constant "s; },                                          //
                                         [&](TypeSpace::Local) { return dialect == Dialect::MSL1_0 ? "threadgroup "s : "local "s; }, //
                                         [&](TypeSpace::Private) { return dialect == Dialect::MSL1_0 ? "thread "s : "private "s; });
-    return fmt::format("{}{} (*{}){}", genericPointer(p->space) ? ""s : q, mkTpe(base), name, dims);
+    return fmt::format("{}{} (*{}){}", genericPointer(p->space) || dialect == Dialect::C11 ? ""s : q, mkTpe(base), name, dims);
   }
   return fmt::format("{} {}", mkTpe(tpe), name);
 }
@@ -445,6 +459,25 @@ std::string backend::CSource::workGroupCollective(const std::string &spec, const
   return fmt::format("work_group_{}_{}({})", name, operation, mkTerm(value));
 }
 
+static std::optional<int64_t> literalValue(const Term::Any &term) {
+  if (const auto x = term.template get<Term::IntS32Const>()) return x->value;
+  if (const auto x = term.template get<Term::IntU32Const>()) return x->value;
+  if (const auto x = term.template get<Term::IntS64Const>()) return x->value;
+  if (const auto x = term.template get<Term::IntU64Const>()) return static_cast<int64_t>(x->value);
+  return std::nullopt;
+}
+
+std::string backend::CSource::hostSpec(const Term::Any &dim, const char *tableEntry, const int fallback) {
+  const auto literal = literalValue(dim);
+  if (*tableEntry == '\0') {
+    if (literal && *literal != 0) return std::to_string(fallback);
+    throw BackendException(laneSpecMessage(currentFn));
+  }
+  const auto call = fmt::format("((int32_t) {}.{}())", program_meta::HostTableSymbol, tableEntry);
+  if (literal) return *literal == 0 ? call : std::to_string(fallback);
+  return fmt::format("({} == 0 ? {} : {})", mkTerm(dim), call, fallback);
+}
+
 std::string backend::CSource::mkExpr(const Expr::Any &expr) {
   return expr.match_total(
       [&](const Expr::Alias &x) { return mkTerm(x.ref); },
@@ -454,15 +487,17 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
         };
         const auto gpuIntr = [&](const DialectAccessor &accessor) -> std::string {
           switch (dialect) {
-            case Dialect::C11: return accessor.c11;
+            case Dialect::C11:
+              if (accessor.c11.empty()) throw BackendException(laneSpecMessage(currentFn));
+              return accessor.c11;
             case Dialect::MSL1_0: return accessor.msl;
             case Dialect::OpenCL1_1:
             case Dialect::OpenCL2_0: return accessor.cl;
           }
         };
-        const auto gpuDimIntr = [&](const DialectAccessor &accessor, const Term::Any &index) -> std::string {
+        const auto gpuDimIntr = [&](const DialectAccessor &accessor, const Term::Any &index, const int c11Fallback) -> std::string {
           switch (dialect) {
-            case Dialect::C11: return accessor.c11;
+            case Dialect::C11: return hostSpec(index, accessor.c11.c_str(), c11Fallback);
             case Dialect::MSL1_0: return fmt::format("{}[{}]", accessor.msl, mkTerm(index));
             case Dialect::OpenCL1_1:
             case Dialect::OpenCL2_0: return fmt::format("{}({})", accessor.cl, mkTerm(index));
@@ -473,46 +508,50 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
               throw BackendException("assert reached codegen; the StructuredExit pass must run before the backend");
             }, //
             [&](const Spec::GpuBarrierGlobal &v) {
-              return gpuIntr({.c11 = "((void)0)",
+              return gpuIntr({.c11 = "",
                               .cl = "barrier(CLK_GLOBAL_MEM_FENCE)", //
                               .msl = "threadgroup_barrier(metal::mem_flags::mem_device)"});
             },
             [&](const Spec::GpuBarrierLocal &v) {
-              return gpuIntr({.c11 = "((void)0)",
+              return gpuIntr({.c11 = "",
                               .cl = "barrier(CLK_LOCAL_MEM_FENCE)", //
                               .msl = "threadgroup_barrier(metal::mem_flags::mem_threadgroup)"});
             },
             [&](const Spec::GpuBarrierAll &v) {
-              return gpuIntr({.c11 = "((void)0)",
+              return gpuIntr({.c11 = "",
                               .cl = "barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE)", //
                               .msl = "threadgroup_barrier(metal::mem_flags::mem_threadgroup | metal::mem_flags::mem_device)"});
             },
             [&](const Spec::GpuFenceGlobal &v) {
-              return gpuIntr({.c11 = "((void)0)",
+              return gpuIntr({.c11 = "atomic_thread_fence(memory_order_seq_cst)",
                               .cl = "mem_fence(CLK_GLOBAL_MEM_FENCE)", //
                               .msl = "threadgroup_barrier(metal::mem_flags::mem_device)"});
             },
             [&](const Spec::GpuFenceLocal &v) {
-              return gpuIntr({.c11 = "((void)0)",
+              return gpuIntr({.c11 = "atomic_thread_fence(memory_order_seq_cst)",
                               .cl = "mem_fence(CLK_LOCAL_MEM_FENCE)", //
                               .msl = "threadgroup_barrier(metal::mem_flags::mem_threadgroup)"});
             },
             [&](const Spec::GpuFenceAll &v) {
-              return gpuIntr({.c11 = "((void)0)",
+              return gpuIntr({.c11 = "atomic_thread_fence(memory_order_seq_cst)",
                               .cl = "mem_fence(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE)", //
                               .msl = "threadgroup_barrier(metal::mem_flags::mem_device)"});
             },
-            [&](const Spec::GpuGlobalIdx &v) { return gpuDimIntr({.c11 = "0", .cl = "get_global_id", .msl = "__get_global_id__"}, v.dim); },
+            [&](const Spec::GpuGlobalIdx &v) {
+              return gpuDimIntr({.c11 = "thread_global_idx", .cl = "get_global_id", .msl = "__get_global_id__"}, v.dim, 0);
+            },
             [&](const Spec::GpuGlobalSize &v) {
-              return gpuDimIntr({.c11 = "1", .cl = "get_global_size", .msl = "__get_global_size__"}, v.dim);
+              return gpuDimIntr({.c11 = "thread_global_size", .cl = "get_global_size", .msl = "__get_global_size__"}, v.dim, 1);
             },
-            [&](const Spec::GpuGroupIdx &v) { return gpuDimIntr({.c11 = "0", .cl = "get_group_id", .msl = "__get_group_id__"}, v.dim); },
+            [&](const Spec::GpuGroupIdx &v) {
+              return gpuDimIntr({.c11 = "group_idx", .cl = "get_group_id", .msl = "__get_group_id__"}, v.dim, 0);
+            },
             [&](const Spec::GpuGroupSize &v) {
-              return gpuDimIntr({.c11 = "1", .cl = "get_num_groups", .msl = "__get_num_groups__"}, v.dim);
+              return gpuDimIntr({.c11 = "group_size", .cl = "get_num_groups", .msl = "__get_num_groups__"}, v.dim, 1);
             },
-            [&](const Spec::GpuLocalIdx &v) { return gpuDimIntr({.c11 = "0", .cl = "get_local_id", .msl = "__get_local_id__"}, v.dim); },
+            [&](const Spec::GpuLocalIdx &v) { return gpuDimIntr({.c11 = "", .cl = "get_local_id", .msl = "__get_local_id__"}, v.dim, 0); },
             [&](const Spec::GpuLocalSize &v) {
-              return gpuDimIntr({.c11 = "1", .cl = "get_local_size", .msl = "__get_local_size__"}, v.dim);
+              return gpuDimIntr({.c11 = "local_size", .cl = "get_local_size", .msl = "__get_local_size__"}, v.dim, 1);
             },
             [&](const Spec::GpuLaneIdx &) -> std::string {
               if (dialect == Dialect::C11) return "0";
@@ -706,6 +745,12 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
         const auto intrFn = [&](std::string_view name) {
           return dialect == Dialect::MSL1_0 ? "metal::" + std::string(name) : std::string(name);
         };
+        const auto minMax = [&](const Term::Any &lhs, const Term::Any &rhs, const char *name, const char *cmp) {
+          if (dialect != Dialect::C11) return fmt::format("{}({}, {})", intrFn(name), mkTerm(lhs), mkTerm(rhs));
+          if (lhs.tpe().is<Type::Float32>()) return fmt::format("f{}f({}, {})", name, mkTerm(lhs), mkTerm(rhs));
+          if (lhs.tpe().is<Type::Float64>()) return fmt::format("f{}({}, {})", name, mkTerm(lhs), mkTerm(rhs));
+          return fmt::format("(({0} {2} {1}) ? {0} : {1})", mkTerm(lhs), mkTerm(rhs), cmp);
+        };
         return x.op.match_total([&](const Intr::Pos &v) { return fmt::format("(+{})", mkTerm(v.x)); },
                                 [&](const Intr::Neg &v) { return fmt::format("(-{})", mkTerm(v.x)); },
                                 [&](const Intr::BNot &v) { return fmt::format("(~{})", mkTerm(v.x)); },
@@ -715,8 +760,8 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
                                 [&](const Intr::Mul &v) { return fmt::format("({} * {})", mkTerm(v.x), mkTerm(v.y)); },
                                 [&](const Intr::Div &v) { return fmt::format("({} / {})", mkTerm(v.x), mkTerm(v.y)); },
                                 [&](const Intr::Rem &v) { return fmt::format("({} % {})", mkTerm(v.x), mkTerm(v.y)); },
-                                [&](const Intr::Min &v) { return fmt::format("{}({}, {})", intrFn("min"), mkTerm(v.x), mkTerm(v.y)); },
-                                [&](const Intr::Max &v) { return fmt::format("{}({}, {})", intrFn("max"), mkTerm(v.x), mkTerm(v.y)); },
+                                [&](const Intr::Min &v) { return minMax(v.x, v.y, "min", "<"); },
+                                [&](const Intr::Max &v) { return minMax(v.x, v.y, "max", ">"); },
                                 [&](const Intr::BAnd &v) { return fmt::format("({} & {})", mkTerm(v.x), mkTerm(v.y)); },
                                 [&](const Intr::BOr &v) { return fmt::format("({} | {})", mkTerm(v.x), mkTerm(v.y)); },
                                 [&](const Intr::BXor &v) { return fmt::format("({} ^ {})", mkTerm(v.x), mkTerm(v.y)); },
@@ -801,7 +846,10 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
       },
       [&](const Expr::Alloc &x) { return fmt::format("{{/*{}*/}}", to_string(x)); },
       [&](const Expr::ForeignCall &x) {
-        return fmt::format("{}({})", x.name, x.args ^ mk_string(", ", [&](const auto &arg) { return mkTerm(arg); }));
+        const auto callee = dialect == Dialect::C11 && x.name == conventions::HostGroupState
+                                ? fmt::format("{}.group_state", program_meta::HostTableSymbol)
+                                : x.name;
+        return fmt::format("{}({})", callee, x.args ^ mk_string(", ", [&](const auto &arg) { return mkTerm(arg); }));
       },
       [&](const Expr::OffsetOf &x) { return fmt::format("__builtin_offsetof({}, {})", mkTpe(x.structTpe), x.field); },
       [&](const Expr::SizeOf &x) { return fmt::format("sizeof({})", mkTpe(x.forTpe)); });
@@ -980,11 +1028,14 @@ std::string backend::CSource::mkFnProto(const Function &fnTree) {
                                          [&](TypeSpace::Private) { return fmt::format("{} &{} [[buffer({})]]", tpe, name, idx); })};
         return {fmt::format("device {} &{} [[buffer({})]]", tpe, name, idx)};
       }
-      default: return {};
+      case Dialect::C11:
+        if (arg.named.tpe.template is<Type::Unit0>() || arg.named.tpe.template is<Type::Nothing>()) return {};
+        return {mkDecl(arg.named.tpe, name)};
     }
   };
   auto argExprs = fnTree.decl.args | zip_with_index<size_t>() | flat_map(argDecls) | to_vector();
   kernelBoundary = false;
+  if (dialect == Dialect::C11 && entry) argExprs ^= prepend("int64_t "s + TidParameter);
 
   if (dialect == Dialect::MSL1_0) {
 
@@ -1005,7 +1056,7 @@ std::string backend::CSource::mkFnProto(const Function &fnTree) {
 
   std::string fnPrefix;
   switch (dialect) {
-    case Dialect::C11: fnPrefix = ""; break;
+    case Dialect::C11: fnPrefix = entry ? "POLYC_EXPORT " : ""; break;
     case Dialect::MSL1_0:
     case Dialect::OpenCL1_1:
     case Dialect::OpenCL2_0:
@@ -1019,34 +1070,37 @@ std::string backend::CSource::mkFnProto(const Function &fnTree) {
   return fmt::format("{}{} {}({})", fnPrefix, mkTpe(fnTree.decl.rtn), fqcn(fnTree.decl.name), argExprs ^ mk_string(", "));
 }
 
-std::string backend::CSource::mkFn(const Function &fnTree) {
-  bindLocalNames(fnTree);
+std::vector<Stmt::Var> backend::CSource::localArrays(const Function &fnTree) {
   const auto allVars = fnTree.body ^ flat_map([](const auto &s) { return s.template collect_all<Stmt::Var>(); });
   Set<std::string> seen;
   std::vector<Stmt::Var> localVars;
   localVars.reserve(allVars.size());
   for (const auto &v : allVars)
     if (isLocalArr(v.name.tpe) && seen.insert(v.name.symbol).second) localVars.emplace_back(v);
-  struct Usage {
-    uint64_t fixedBytes = 0;
-    std::vector<std::string> fixedSizeExprs;
-    const Named *dynamic = nullptr;
-  };
-  const auto usage = localVars ^ fold_left(Usage{0, {}, nullptr}, [&](Usage acc, const auto &v) {
-                       const auto extent = arrayExtent(v.name.tpe);
-                       if (!extent) throw BackendException("workgroup array extent overflow");
-                       if (extent->count == 0) {
-                         if (!acc.dynamic) acc.dynamic = &v.name;
-                       } else if (const auto bytes = scalarBytes(extent->element)) {
-                         if (extent->count > std::numeric_limits<uint64_t>::max() / *bytes)
-                           throw BackendException("workgroup array extent overflow");
-                         const auto total = extent->count * *bytes;
-                         if (acc.fixedBytes > std::numeric_limits<uint64_t>::max() - total)
-                           throw BackendException("workgroup array extent overflow");
-                         acc.fixedBytes += total;
-                       } else acc.fixedSizeExprs.push_back(fmt::format("({} * sizeof({}))", extent->count, mkTpe(extent->element)));
-                       return acc;
-                     });
+  return localVars;
+}
+
+backend::CSource::LocalUsage backend::CSource::localUsage(const std::vector<Stmt::Var> &localVars) {
+  return localVars ^ fold_left(LocalUsage{0, {}, nullptr}, [&](LocalUsage acc, const auto &v) {
+           const auto extent = arrayExtent(v.name.tpe);
+           if (!extent) throw BackendException("workgroup array extent overflow");
+           if (extent->count == 0) {
+             if (!acc.dynamic) acc.dynamic = &v.name;
+           } else if (const auto bytes = scalarBytes(extent->element)) {
+             if (extent->count > std::numeric_limits<uint64_t>::max() / *bytes) throw BackendException("workgroup array extent overflow");
+             const auto total = extent->count * *bytes;
+             if (acc.fixedBytes > std::numeric_limits<uint64_t>::max() - total) throw BackendException("workgroup array extent overflow");
+             acc.fixedBytes += total;
+           } else acc.fixedSizeExprs.push_back(fmt::format("({} * sizeof({}))", extent->count, mkTpe(extent->element)));
+           return acc;
+         });
+}
+
+std::string backend::CSource::mkFn(const Function &fnTree) {
+  bindLocalNames(fnTree);
+  currentFn = fqcn(fnTree.decl.name);
+  const auto localVars = localArrays(fnTree);
+  const auto usage = localUsage(localVars);
   if (usage.fixedBytes > workgroupMemoryBytes || (usage.dynamic && usage.fixedBytes >= workgroupMemoryBytes))
     throw BackendException(fmt::format("workgroup storage exceeds configured capacity of {} bytes", workgroupMemoryBytes));
 
@@ -1070,7 +1124,8 @@ std::string backend::CSource::mkFn(const Function &fnTree) {
   const auto condition = regionConditions ^ mk_string("", " && ", "", [](const auto &x) { return x; });
   const auto regionExtent = condition.empty() ? available : fmt::format("(({}) ? {} : -1)", condition, available);
   const auto regionDecl = [&](const Type::Any &element, const TypeSpace::Any &space, const std::string &name) {
-    return fmt::format("__attribute__((aligned(16))) {};", mkArrayDecl(element, space, name, regionExtent));
+    return fmt::format("__attribute__((aligned(16))) {}{};", mkArrayDecl(element, space, name, regionExtent),
+                       dialect == Dialect::C11 ? " = {0}" : "");
   };
 
   std::vector<std::string> regionDecls;
@@ -1096,7 +1151,10 @@ std::string backend::CSource::mkFn(const Function &fnTree) {
 
   const auto localDecls = localVars ^ map([&](const auto &v) {
                             const auto a = v.name.tpe.template get<Type::Arr>();
-                            if (!a || a->length != 0) return fmt::format("{};", mkDecl(v.name.tpe, localName(v.name.symbol)));
+                            if (!a || a->length != 0) {
+                              const auto init = dialect == Dialect::C11 ? mkZeroInit(v.name.tpe) : std::nullopt;
+                              return fmt::format("{}{};", mkDecl(v.name.tpe, localName(v.name.symbol)), init ? " = " + *init : "");
+                            }
                             const auto name = localName(v.name.symbol);
                             if (name == regionName) return regionDecl(a->comp, a->space, name);
                             const auto ptr = Type::Ptr(a->comp, a->space).widen();
@@ -1136,10 +1194,17 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
                         }) //
                         | to<Map>();
 
+#define POLYREGION_C_HOST_TABLE_FIELD(name, ret, params) "  " #ret " (*" #name ") " #params ";\n"
   const auto includes =
       dialect == Dialect::C11
-          ? std::vector<std::string>{"#include <stdint.h>\n#include <stdbool.h>\n#include <math.h>\n#include <stdatomic.h>"}
+          ? std::vector<std::string>{"#include <stdint.h>\n#include <stdbool.h>\n#include <math.h>\n#include <stdatomic.h>",
+                                     "#if defined(_WIN32)\n#define POLYC_EXPORT __declspec(dllexport)\n#else\n"
+                                     "#define POLYC_EXPORT __attribute__((visibility(\"default\")))\n#endif",
+                                     std::string("typedef struct {\n") + POLYREGION_HOST_TABLE(POLYREGION_C_HOST_TABLE_FIELD)
+                                         + "} _polyregion_host_table;\nPOLYC_EXPORT _polyregion_host_table " + program_meta::HostTableSymbol
+                                         + ";"}
           : std::vector<std::string>{};
+#undef POLYREGION_C_HOST_TABLE_FIELD
   // forward-declare every struct so pointer members (including cyclic ones) resolve
   const auto typedefs = program.defs ^ map([&](const auto &def) {
                           return fmt::format("typedef {} {} {};", def.isUnion ? "union" : "struct", fqcn(def.name), fqcn(def.name));
@@ -1297,6 +1362,20 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
     }
   }
 
+  std::vector<std::string> hostExports;
+  if (dialect == Dialect::C11)
+    for (const auto &fn : allFns) {
+      if (!fn.convention.is<CallConvention::OffloadEntry>()) continue;
+      const auto usage = localUsage(localArrays(fn));
+      const auto bytes = usage.fixedSizeExprs ^ fold_left(std::to_string(usage.fixedBytes), [](const auto &acc, const auto &expr) {
+                           return acc + " + " + expr;
+                         });
+      hostExports.push_back(fmt::format("POLYC_EXPORT const int64_t {}{} = (int64_t) ({});", fqcn(fn.decl.name),
+                                        program_meta::HostStaticLocalBytesSuffix, bytes));
+      if (const auto abi = hostAbiOf(program, fn))
+        hostExports.push_back(fmt::format("POLYC_EXPORT const int64_t {}{} = {};", fqcn(fn.decl.name), program_meta::HostAbiSuffix, *abi));
+    }
+
   const auto protos = allFns ^ mk_string("\n", [&](const auto &fn) { return fmt::format("{};", mkFnProto(fn)); });
   auto code = includes                                                       //
               | concat(typedefs)                                             //
@@ -1306,6 +1385,7 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
               | concat(atomicHelpers)                                        //
               | concat(casHelpers)                                           //
               | concat(popCountHelpers)                                      //
+              | concat(hostExports)                                          //
               | append(protos)                                               //
               | append(std::string("\n"))                                    //
               | concat(allFns ^ map([&](const auto &f) { return mkFn(f); })) //

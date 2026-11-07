@@ -3,6 +3,13 @@
 #pragma region do: {output}
 #pragma region requires: 1 -1 10 lane 0 tripped
 
+#pragma region case: assert-barrier-lane-abi
+#pragma region offload-only
+#pragma region targets: host x86_64 aarch64 arm
+#pragma region do: POLYREGION_HOST_ABI=lane polycpp {polycpp_defaults} {polycpp_stdpar} -o {output} {input}
+#pragma region do: {output}
+#pragma region requires: 1 -1 10 lane 0 tripped
+
 #include <cstdint>
 #include <cstdio>
 

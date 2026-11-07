@@ -29,6 +29,7 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/BinaryFormat/COFF.h"
+#include "llvm/BinaryFormat/Magic.h"
 #include "llvm/Config/llvm-config.h"
 #include "llvm/ExecutionEngine/JITLink/JITLinkMemoryManager.h"
 #include "llvm/ExecutionEngine/Orc/AbsoluteSymbols.h"
@@ -53,6 +54,8 @@
 #include "polyregion/env_keys.h"
 #include "polyregion/llvm_utils.hpp"
 #include "polyregion/types.h"
+
+#include "c_build.h"
 
 #ifdef _WIN32
   #define WIN32_LEAN_AND_MEAN
@@ -104,6 +107,24 @@ struct HostGroup {
 thread_local HostGroup *hostGroup = nullptr;
 thread_local std::unique_ptr<std::byte[]> hostTaskLocal;
 
+std::byte *hostTaskLocalBlock() {
+  if (!hostTaskLocal) hostTaskLocal = std::make_unique<std::byte[]>(HostGroupLocalBytes);
+  return hostTaskLocal.get();
+}
+
+constexpr size_t HostStateAlignment = 64;
+
+struct HostStateArena {
+  void *raw = nullptr;
+  size_t capacity = 0;
+  HostStateArena() = default;
+  HostStateArena(const HostStateArena &) = delete;
+  HostStateArena &operator=(const HostStateArena &) = delete;
+  ~HostStateArena() { std::free(raw); }
+};
+
+thread_local HostStateArena hostStateArena;
+
 constexpr double HostLaneStackAddressShare = 0.5;
 
 uint64_t hostStackReserveBytes() {
@@ -151,11 +172,25 @@ extern "C" POLYREGION_EXPORT void __polyregion_host_group_barrier() {
 }
 extern "C" POLYREGION_EXPORT void *__polyregion_host_group_local(const uint64_t offset) {
   if (hostGroup) return hostGroup->local + offset;
-  if (!hostTaskLocal) hostTaskLocal = std::make_unique<std::byte[]>(HostGroupLocalBytes);
-  return hostTaskLocal.get() + offset;
+  return hostTaskLocalBlock() + offset;
 }
 
 static constexpr const char *RELOBJ_PREFIX = "RelocatableObject";
+
+extern "C" POLYREGION_EXPORT void *__polyregion_host_group_state(const uint64_t bytes) {
+  if (bytes > hostStateArena.capacity) {
+    std::free(hostStateArena.raw);
+    hostStateArena.raw = nullptr;
+    hostStateArena.capacity = 0;
+    if (bytes > std::numeric_limits<size_t>::max() - HostStateAlignment)
+      POLYINVOKE_FATAL(RELOBJ_PREFIX, "work-group state of %zu bytes is too large", static_cast<size_t>(bytes));
+    hostStateArena.raw = std::malloc(bytes + HostStateAlignment);
+    if (!hostStateArena.raw) POLYINVOKE_FATAL(RELOBJ_PREFIX, "cannot allocate %zu bytes of work-group state", static_cast<size_t>(bytes));
+    hostStateArena.capacity = bytes;
+  }
+  const auto address = reinterpret_cast<uintptr_t>(hostStateArena.raw);
+  return reinterpret_cast<void *>((address + HostStateAlignment - 1) & ~static_cast<uintptr_t>(HostStateAlignment - 1));
+}
 
 static bool groupedPolicy(const Policy &policy) { return policy.local && policy.local->first.x > 1; }
 
@@ -187,6 +222,31 @@ static void groupedLaunch(const size_t groups, const size_t lanes, const MaybeCa
           });
         for (auto &worker : workers)
           worker.join();
+      }
+      if (--*pending == 0 && cb) (*cb)();
+    }).detach();
+  }
+}
+
+static void groupAbiLaunch(const size_t groups, const size_t lanes, const size_t localBytes, const MaybeCallback &cb,
+                           std::function<void(size_t)> task) {
+  if (lanes == 0 || lanes > polyregion::program_meta::HostWorkgroupMaxLanes)
+    POLYINVOKE_FATAL(RELOBJ_PREFIX, "work-group size %zu is outside [1, %zu] lanes", lanes,
+                     polyregion::program_meta::HostWorkgroupMaxLanes);
+  if (groups == 0) {
+    if (cb) (*cb)();
+    return;
+  }
+  const size_t workers = std::min(hostConcurrency(), groups);
+  auto pending = std::make_shared<std::atomic_size_t>(workers);
+  auto run = std::make_shared<std::function<void(size_t)>>(std::move(task));
+  for (size_t worker = 0; worker < workers; ++worker) {
+    std::thread([=]() {
+      hostLocalSize = lanes;
+      for (size_t group = worker; group < groups; group += workers) {
+        if (localBytes > 0) std::memset(hostTaskLocalBlock(), 0, localBytes);
+        const size_t tid = group * lanes;
+        (*run)(tid);
       }
       if (--*pending == 0 && cb) (*cb)();
     }).detach();
@@ -551,6 +611,7 @@ RelocatableDevice::RelocatableDevice() {
       {"__polyregion_host_group_size", llvm::orc::ExecutorAddr::fromPtr(&__polyregion_host_group_size)},
       {"__polyregion_host_group_barrier", llvm::orc::ExecutorAddr::fromPtr(&__polyregion_host_group_barrier)},
       {"__polyregion_host_group_local", llvm::orc::ExecutorAddr::fromPtr(&__polyregion_host_group_local)},
+      {polyregion::conventions::HostGroupState, llvm::orc::ExecutorAddr::fromPtr(&__polyregion_host_group_state)},
   };
   llvm::orc::SymbolMap absSyms;
   for (const auto &[name, addr] : runtimeSymbols)
@@ -651,12 +712,31 @@ void validatePolicyAndArgs(const char *prefix, std::vector<Type> types, const Po
     POLYINVOKE_FATAL(prefix, "Expecting first argument as index (%s), but was %s", magic_enum::enum_name(Type::IntS64).data(),
                      magic_enum::enum_name(types[0]).data());
 }
+static size_t staticLocalBytes(const uint64_t staticBytesAddr) {
+  return staticBytesAddr ? *reinterpret_cast<const uint64_t *>(staticBytesAddr) : 0;
+}
 static void validateLocalStorage(const char *prefix, const Policy &policy, const uint64_t staticBytesAddr) {
-  const size_t staticBytes = staticBytesAddr ? *reinterpret_cast<const uint64_t *>(staticBytesAddr) : 0;
+  const size_t staticBytes = staticLocalBytes(staticBytesAddr);
   const size_t dynamicBytes = policy.local ? policy.local->second : 0;
   if (staticBytes + dynamicBytes > HostGroupLocalBytes)
     POLYINVOKE_FATAL(prefix, "work-group storage of %zu static and %zu dynamic bytes exceeds the host capacity of %zu bytes", staticBytes,
                      dynamicBytes, HostGroupLocalBytes);
+}
+void ObjectDeviceQueue::launchHost(const char *prefix, const Policy &policy, const uint64_t abiAddr, const uint64_t staticLocalBytesAddr,
+                                   const MaybeCallback &cb, std::function<void(size_t)> task) {
+  const int64_t abi = abiAddr ? *reinterpret_cast<const int64_t *>(abiAddr) : polyregion::program_meta::HostAbiLane;
+  switch (abi) {
+    case polyregion::program_meta::HostAbiGroup: {
+      const size_t lanes = policy.local ? policy.local->first.x : 1;
+      const size_t localBytes = staticLocalBytes(staticLocalBytesAddr) + (policy.local ? policy.local->second : 0);
+      return groupAbiLaunch(policy.global.x, lanes, localBytes, cb, std::move(task));
+    }
+    case polyregion::program_meta::HostAbiFlat: return threadedLaunch(policyTasks(policy), cb, std::move(task));
+    case polyregion::program_meta::HostAbiLane:
+      if (groupedPolicy(policy)) return groupedLaunch(policy.global.x, policy.local->first.x, cb, std::move(task));
+      return threadedLaunch(policyTasks(policy), cb, std::move(task));
+    default: POLYINVOKE_FATAL(prefix, "unknown host abi %lld", static_cast<long long>(abi));
+  }
 }
 void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
                                                 std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) {
@@ -688,7 +768,9 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
     return address;
   };
   const auto symAddr = resolve(symbol, true);
-  validateLocalStorage(RELOBJ_PREFIX, policy, resolve(symbol + polyregion::program_meta::HostStaticLocalBytesSuffix, false));
+  const auto staticBytesAddr = resolve(symbol + polyregion::program_meta::HostStaticLocalBytesSuffix, false);
+  validateLocalStorage(RELOBJ_PREFIX, policy, staticBytesAddr);
+  const auto abiAddr = resolve(symbol + polyregion::program_meta::HostAbiSuffix, false);
   const auto done = [cb, token = latch.acquire()]() {
     if (cb) (*cb)();
   };
@@ -705,11 +787,24 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
     argPtrs[0] = &_tid;
     ffiInvoke(RELOBJ_PREFIX, symAddr, types, argPtrs);
   };
-  if (groupedPolicy(policy)) groupedLaunch(policy.global.x, policy.local->first.x, done, task);
-  else this->threadedLaunch(policyTasks(policy), done, task);
+  launchHost(RELOBJ_PREFIX, policy, abiAddr, staticBytesAddr, done, task);
 }
 
 static constexpr const char *SHOBJ_PREFIX = "SharedObject";
+
+struct HostTable {
+#define POLYREGION_HOST_TABLE_FIELD(name, ret, params) ret(*name) params;
+  POLYREGION_HOST_TABLE(POLYREGION_HOST_TABLE_FIELD)
+#undef POLYREGION_HOST_TABLE_FIELD
+};
+
+static void fillHostTable(void *handle) {
+  if (auto *table = reinterpret_cast<HostTable *>(polyregion_dl_find(handle, polyregion::program_meta::HostTableSymbol))) {
+#define POLYREGION_HOST_TABLE_FILL(name, ret, params) table->name = &__polyregion_host_##name;
+    POLYREGION_HOST_TABLE(POLYREGION_HOST_TABLE_FILL)
+#undef POLYREGION_HOST_TABLE_FILL
+  }
+}
 
 std::variant<std::string, std::unique_ptr<Platform>> SharedPlatform::create() { return std::unique_ptr<Platform>(new SharedPlatform()); }
 
@@ -733,6 +828,12 @@ std::vector<std::unique_ptr<Device>> SharedPlatform::enumerate() {
   return xs;
 }
 
+SharedDevice::SharedDevice() {
+  POLYINVOKE_TRACE();
+  auto located = locateCCompiler();
+  compiler = std::move(located.path);
+  compilerUnavailable = std::move(located.unavailable);
+}
 SharedDevice::~SharedDevice() {
   POLYINVOKE_TRACE();
   for (auto &[_, m] : modules) {
@@ -746,10 +847,29 @@ std::string SharedDevice::name() {
   POLYINVOKE_TRACE();
   return "SharedObjectDevice(dlopen/dlsym)";
 }
+ModuleFormat SharedDevice::moduleFormat() {
+  POLYINVOKE_TRACE();
+  return compiler.empty() ? ModuleFormat::Object : ModuleFormat::Source;
+}
+std::vector<Property> SharedDevice::properties() {
+  POLYINVOKE_TRACE();
+  return {{"c-compiler", compiler.empty() ? "unavailable: " + compilerUnavailable : compiler}};
+}
 void SharedDevice::loadModule(const std::string &name, const std::string &image) {
   POLYINVOKE_TRACE();
   if (auto it = modules.find(name); it != modules.end()) POLYINVOKE_FATAL(SHOBJ_PREFIX, "Module named %s was already loaded", name.c_str());
   else {
+    std::string built;
+    if (llvm::identify_magic(image) == llvm::file_magic::unknown) {
+      if (compiler.empty())
+        POLYINVOKE_FATAL(SHOBJ_PREFIX, "Cannot build C source module %s: %s", name.c_str(), compilerUnavailable.c_str());
+      try {
+        built = buildSharedObject({compiler, {}}, image);
+      } catch (const std::exception &e) {
+        POLYINVOKE_FATAL(SHOBJ_PREFIX, "Cannot build C source module %s: %s", name.c_str(), e.what());
+      }
+    }
+    const std::string &shared = built.empty() ? image : built;
 
     // TODO fileless load: Linux memfd_create, Windows MemoryModule; dlopen needs a real file for now
     llvm::SmallString<256> model;
@@ -763,7 +883,7 @@ void SharedDevice::loadModule(const std::string &name, const std::string &image)
     }
     {
       llvm::raw_fd_ostream objectFile(objectFd, /*shouldClose=*/true);
-      objectFile.write(image.data(), image.size());
+      objectFile.write(shared.data(), shared.size());
     }
 
     auto *dylib = polyregion_dl_open(tmpPath.c_str());
@@ -788,7 +908,10 @@ void SharedDevice::loadModule(const std::string &name, const std::string &image)
 
     if (!dylib) {
       POLYINVOKE_FATAL(SHOBJ_PREFIX, "Cannot load module: %s", polyregion_dl_error());
-    } else modules.emplace_hint(it, name, details::LoadedModule{image, dylib, {}});
+    } else {
+      fillHostTable(dylib);
+      modules.emplace_hint(it, name, details::LoadedModule{image, dylib, {}});
+    }
   }
 }
 bool SharedDevice::moduleLoaded(const std::string &name) {
@@ -829,6 +952,7 @@ void SharedDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
   const auto staticBytesAddr =
       sharedSymbolAddress(moduleName, moduleIt->second, symbol + polyregion::program_meta::HostStaticLocalBytesSuffix, false);
   validateLocalStorage(SHOBJ_PREFIX, policy, staticBytesAddr);
+  const auto abiAddr = sharedSymbolAddress(moduleName, moduleIt->second, symbol + polyregion::program_meta::HostAbiSuffix, false);
   const auto address = sharedSymbolAddress(moduleName, moduleIt->second, symbol, true);
 
   const auto done = [cb, token = latch.acquire()]() {
@@ -843,7 +967,6 @@ void SharedDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
     argPtrs[0] = &_tid;
     ffiInvoke(SHOBJ_PREFIX, address, types, argPtrs);
   };
-  if (groupedPolicy(policy)) groupedLaunch(policy.global.x, policy.local->first.x, done, task);
-  else this->threadedLaunch(policyTasks(policy), done, task);
+  launchHost(SHOBJ_PREFIX, policy, abiAddr, staticBytesAddr, done, task);
   POLYINVOKE_TRACE();
 }

@@ -88,6 +88,7 @@ set(POLYINVOKE_SRC
         cl_platform.cpp
         ze_platform.cpp
         object_platform.cpp
+        c_build.cpp
         ${POLYINVOKE_WRANGLER_SRCS}
         device_lock.cpp
         ${RUNTIME_SRC_FILES})

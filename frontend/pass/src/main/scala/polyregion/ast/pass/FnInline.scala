@@ -226,93 +226,28 @@ object FnInline extends ProgramPass {
     returnExprs match {
       case Nil =>
         throw AssertionError(s"no return in function ${f.signature}")
-      case expr :: Nil if directReturn.contains(expr) && !returnsNeedUnwind(sunk.body) =>
+      case expr :: Nil if directReturn.contains(expr) && !ReturnUnwind.needsUnwind(sunk.body) =>
         val noReturnBody = sunk.body.flatMap(stripReturn)
         (expr, noReturnBody, renamed.moduleCaptures)
       case _ =>
         val phiName                  = p.Named(s"_inline_phi_${ctr.incrementAndGet()}", ivk.tpe)
         val phiSelect: p.Term.Select = p.Term.Select(phiName, Nil, ivk.tpe)
         val phiDecl                  = p.Stmt.Var(phiName, None, isMutable = true)
-        if (returnsNeedUnwind(sunk.body)) {
+        if (ReturnUnwind.needsUnwind(sunk.body)) {
           val flagName                = p.Named(s"_inline_exit_${ctr.incrementAndGet()}", p.Type.Bool1)
           val flagTerm: p.Term.Select = p.Term.Select(flagName, Nil, p.Type.Bool1)
           val flagDecl = p.Stmt.Var(flagName, Some(p.Expr.Alias(p.Term.Bool1Const(false))), isMutable = true)
-          val unwound  = unwindReturn(sunk.body, phiSelect, flagTerm, inLoop = false, ctr)
+          val unwound = ReturnUnwind(
+            sunk.body,
+            flagTerm,
+            e => List(p.Stmt.Mut(phiSelect, e)),
+            () => p.Named(s"_inline_pending_${ctr.incrementAndGet()}", p.Type.Bool1)
+          )
           (p.Expr.Alias(phiSelect), phiDecl :: flagDecl :: unwound, renamed.moduleCaptures)
         } else {
           val rebound = sunk.body.map(rebindReturn(phiSelect))
           (p.Expr.Alias(phiSelect), phiDecl :: rebound, renamed.moduleCaptures)
         }
-    }
-  }
-
-  private def containsReturn(s: p.Stmt): Boolean =
-    s.collectFirst_[p.Stmt] { case r: p.Stmt.Return => r }.isDefined
-
-  private def returnsNeedUnwind(stmts: List[p.Stmt]): Boolean = stmts.exists {
-    case t: p.Stmt.Try      => t.blocks.exists(_.exists(containsReturn)) || t.blocks.exists(returnsNeedUnwind)
-    case p.Stmt.While(_, b) => b.exists(containsReturn) || returnsNeedUnwind(b)
-    case p.Stmt.ForRange(_, _, _, _, b) => b.exists(containsReturn) || returnsNeedUnwind(b)
-    case p.Stmt.Cond(_, t, f)           => returnsNeedUnwind(t) || returnsNeedUnwind(f)
-    case p.Stmt.Annotated(inner, _, _)  => returnsNeedUnwind(List(inner))
-    case _                              => false
-  }
-
-  private def unwindReturn(
-      stmts: List[p.Stmt],
-      phi: p.Term.Select,
-      flag: p.Term.Select,
-      inLoop: Boolean,
-      ctr: java.util.concurrent.atomic.AtomicLong
-  ): List[p.Stmt] = {
-    def guard(tail: List[p.Stmt]): List[p.Stmt] =
-      if (inLoop) List(p.Stmt.Cond(flag, List(p.Stmt.Break), tail))
-      else if (tail.isEmpty) Nil
-      else List(p.Stmt.Cond(flag, Nil, tail))
-
-    def finalizer(fin: List[p.Stmt]): List[p.Stmt] = {
-      val rewritten = unwindReturn(fin, phi, flag, inLoop = false, ctr)
-      if (!fin.exists(containsReturn)) rewritten
-      else {
-        val savedName            = p.Named(s"_inline_pending_${ctr.incrementAndGet()}", p.Type.Bool1)
-        val saved: p.Term.Select = p.Term.Select(savedName, Nil, p.Type.Bool1)
-        val save                 = p.Stmt.Var(savedName, Some(p.Expr.Alias(flag)), isMutable = false)
-        val clear                = p.Stmt.Mut(flag, p.Expr.Alias(p.Term.Bool1Const(false)))
-        val restore              = p.Stmt.Mut(flag, p.Expr.Alias(saved))
-        save :: clear :: rewritten ::: List(p.Stmt.Cond(flag, Nil, List(restore)))
-      }
-    }
-
-    stmts match {
-      case Nil => Nil
-      case p.Stmt.Return(e) :: _ =>
-        List(p.Stmt.Mut(phi, e), p.Stmt.Mut(flag, p.Expr.Alias(p.Term.Bool1Const(true)))) :::
-          Option.when(inLoop)(p.Stmt.Break).toList
-      case p.Stmt.Cond(c, t, f) :: rest =>
-        val head = p.Stmt.Cond(c, unwindReturn(t, phi, flag, inLoop, ctr), unwindReturn(f, phi, flag, inLoop, ctr))
-        val tail = unwindReturn(rest, phi, flag, inLoop, ctr)
-        if (t.exists(containsReturn) || f.exists(containsReturn)) head :: guard(tail) else head :: tail
-      case p.Stmt.While(c, b) :: rest =>
-        val head = p.Stmt.While(c, unwindReturn(b, phi, flag, inLoop = true, ctr))
-        val tail = unwindReturn(rest, phi, flag, inLoop, ctr)
-        if (b.exists(containsReturn)) head :: guard(tail) else head :: tail
-      case p.Stmt.ForRange(i, lb, ub, step, b) :: rest =>
-        val head = p.Stmt.ForRange(i, lb, ub, step, unwindReturn(b, phi, flag, inLoop = true, ctr))
-        val tail = unwindReturn(rest, phi, flag, inLoop, ctr)
-        if (b.exists(containsReturn)) head :: guard(tail) else head :: tail
-      case (t: p.Stmt.Try) :: rest =>
-        val head = p.Stmt.Try(
-          unwindReturn(t.body, phi, flag, inLoop = false, ctr),
-          t.handlers.map(h => h.copy(body = unwindReturn(h.body, phi, flag, inLoop = false, ctr))),
-          finalizer(t.fin)
-        )
-        val tail = unwindReturn(rest, phi, flag, inLoop, ctr)
-        if (containsReturn(t)) head :: guard(tail) else head :: tail
-      case p.Stmt.Annotated(inner, pos, comment) :: rest =>
-        val head = unwindReturn(List(inner), phi, flag, inLoop, ctr).map(p.Stmt.Annotated(_, pos, comment))
-        val tail = unwindReturn(rest, phi, flag, inLoop, ctr)
-        if (containsReturn(inner)) head ::: guard(tail) else head ::: tail
-      case other :: rest => other :: unwindReturn(rest, phi, flag, inLoop, ctr)
     }
   }
 
