@@ -201,6 +201,7 @@ constexpr static auto offloadFunctionName = "__polyregion_offload__";
 constexpr static llvm::StringLiteral interfaceAnnotation = "polyregion_interface:";
 constexpr static llvm::StringLiteral interfaceFallbackAnnotation = "polyregion_interface_fallback";
 constexpr static llvm::StringLiteral hostAlgorithmAnnotation = "polystl_host_algorithm";
+constexpr static llvm::StringLiteral hostFallbackAnnotation = "polystl_host_fallback";
 
 struct InterfaceSite {
   clang::CallExpr *call;
@@ -208,6 +209,10 @@ struct InterfaceSite {
   std::string packageName;
   std::string declaration;
   clang::SourceLocation origin;
+};
+struct InterfaceOutcome {
+  std::string text;
+  bool hostRun;
 };
 
 static std::optional<std::pair<std::string, std::string>> interfaceIdentity(const clang::FunctionDecl *decl) {
@@ -229,6 +234,21 @@ static bool hasInterfaceFallback(const clang::FunctionDecl *decl) {
          });
 }
 
+struct HostFallbackCallFinder final : clang::RecursiveASTVisitor<HostFallbackCallFinder> {
+  bool found = false;
+  bool VisitCallExpr(clang::CallExpr *call) {
+    const auto *callee = call->getDirectCallee();
+    if (callee && hasAnnotation(callee, hostFallbackAnnotation)) found = true;
+    return !found;
+  }
+};
+
+static bool callsHostFallback(const clang::FunctionDecl *decl) {
+  HostFallbackCallFinder finder;
+  if (auto *body = decl->getBody()) finder.TraverseStmt(body);
+  return finder.found;
+}
+
 static Vector<InterfaceSite> interfaceSites(clang::ASTContext &context) {
   using namespace clang::ast_matchers;
   Vector<InterfaceSite> results;
@@ -246,6 +266,13 @@ static Vector<InterfaceSite> interfaceSites(clang::ASTContext &context) {
   return results;
 }
 
+static void rejectHostRun(clang::DiagnosticsEngine &D, const clang::SourceLocation loc, const llvm::StringRef name) {
+  emit(D, loc, clang::DiagnosticsEngine::Error,
+       POLYREGION_DIAG_POLYSTL "std::%0 with a parallel execution policy would run on the host, which -fstdpar-require-offload "
+                               "rejects; link a Spectra package to offload it",
+       name);
+}
+
 static void reportHostAlgorithms(clang::ASTContext &context, clang::DiagnosticsEngine &D, const bool requireOffload) {
   using namespace clang::ast_matchers;
   runMatch(
@@ -261,11 +288,7 @@ static void reportHostAlgorithms(clang::ASTContext &context, clang::DiagnosticsE
         if (!host) return;
         const auto *policy = call->getArg(0)->getType()->getAsCXXRecordDecl();
         if (policy && policy->getName() == "sequenced_policy") return;
-        if (requireOffload)
-          emit(D, call->getExprLoc(), clang::DiagnosticsEngine::Error,
-               POLYREGION_DIAG_POLYSTL "std::%0 with a parallel execution policy would run on the host, which -fstdpar-require-offload "
-                                       "rejects; link a Spectra package to offload it",
-               callee->getName());
+        if (requireOffload) rejectHostRun(D, call->getExprLoc(), callee->getName());
         else
           emit(D, call->getExprLoc(), clang::DiagnosticsEngine::Remark,
                POLYREGION_DIAG_POLYSTL "std::%0 with a parallel execution policy runs on the host; link a Spectra package to offload it",
@@ -576,10 +599,16 @@ static void remarkInterfaceSite(clang::DiagnosticsEngine &D, const InterfaceSite
   emit(D, site.origin, clang::DiagnosticsEngine::Remark, POLYREGION_DIAG_POLYSTL "%0 %1", site.declaration, outcome);
 }
 
+static void reportInterfaceOutcome(clang::DiagnosticsEngine &D, const InterfaceSite &site, const std::string &outcome, const bool hostRun,
+                                   const bool requireOffload) {
+  if (requireOffload && hostRun) rejectHostRun(D, site.origin, site.callee->getName());
+  else remarkInterfaceSite(D, site, outcome);
+}
+
 static void compileInterfaceCalls(const polyfront::Options &opts, clang::CompilerInstance &CI, clang::ASTContext &C,
                                   const std::vector<PreparedInterfaceCall> &prepared,
                                   polystl::PackageProgramBitcodes &packageProgramBitcodes,
-                                  std::map<const clang::FunctionDecl *, std::string> &outcomes) {
+                                  std::map<const clang::FunctionDecl *, InterfaceOutcome> &outcomes) {
   if (prepared.empty()) return;
   auto &D = CI.getDiagnostics();
   const auto entryTarget = polyfront::objectTargetFor(CI.getTarget().getTriple());
@@ -731,15 +760,16 @@ static void compileInterfaceCalls(const polyfront::Options &opts, clang::Compile
         return;
       }
       const auto outcome = "uses the inline body: " + reasons;
-      remarkInterfaceSite(D, item.site, outcome);
-      outcomes.emplace(item.site.callee->getCanonicalDecl(), outcome);
+      const auto hostRun = callsHostFallback(item.site.callee);
+      reportInterfaceOutcome(D, item.site, outcome, hostRun, opts.requireOffload);
+      outcomes.emplace(item.site.callee->getCanonicalDecl(), InterfaceOutcome{outcome, hostRun});
       return;
     }
     const auto implementations = bound ^ flat_map([&](const auto group) { return results[group].value->implementations; }) ^ distinct();
     const auto outcome =
         "bound to " + item.site.packageName + (implementations.empty() ? std::string{} : " (" + (implementations ^ mk_string(", ")) + ")");
     remarkInterfaceSite(D, item.site, outcome);
-    outcomes.emplace(item.site.callee->getCanonicalDecl(), outcome);
+    outcomes.emplace(item.site.callee->getCanonicalDecl(), InterfaceOutcome{outcome, false});
     std::vector<BoundInterfaceGroup> boundGroups;
     for (const auto group : bound) {
       auto &compiled = results[group].value;
@@ -1259,9 +1289,15 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
     site.origin = specialisations->resolve(site.callee) ^ reverse() ^ head_maybe()
                   ^ fold([](const auto &, const auto *call) { return call->getExprLoc(); }, [&] { return site.origin; });
     if (hasInterfaceFallback(site.callee)) {
-      if (polyfront::package::packageFiles(site.packageName, packageRoots).empty()) continue;
+      const auto hostRun = callsHostFallback(site.callee);
+      if (polyfront::package::packageFiles(site.packageName, packageRoots).empty()) {
+        if (hostRun)
+          reportInterfaceOutcome(D, site, "uses the inline body: no " + site.packageName + " package on the library path", hostRun,
+                                 opts.requireOffload);
+        continue;
+      }
       if (!C.getLangOpts().CXXExceptions) {
-        remarkInterfaceSite(D, site, "uses the inline body: -fno-exceptions");
+        reportInterfaceOutcome(D, site, "uses the inline body: -fno-exceptions", hostRun, opts.requireOffload);
         continue;
       }
     }
@@ -1292,11 +1328,11 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
     if (auto prepared = prepareInterfaceCall(CI, C, interfaceNames, site, found->second))
       preparedInterfaces.emplace_back(std::move(*prepared));
   }
-  std::map<const clang::FunctionDecl *, std::string> interfaceOutcomes;
+  std::map<const clang::FunctionDecl *, InterfaceOutcome> interfaceOutcomes;
   compileInterfaceCalls(opts, CI, C, preparedInterfaces, *packageProgramBitcodes, interfaceOutcomes);
   for (const auto &site : repeatedInterfaces)
     if (const auto outcome = interfaceOutcomes.find(site.callee->getCanonicalDecl()); outcome != interfaceOutcomes.end())
-      remarkInterfaceSite(D, site, outcome->second);
+      reportInterfaceOutcome(D, site, outcome->second.text, outcome->second.hostRun, opts.requireOffload);
 }
 
 std::unique_ptr<clang::ASTConsumer>

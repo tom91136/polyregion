@@ -5,6 +5,25 @@
 #pragma region do: {output}
 #pragma region requires: 141
 
+#pragma region case: fallback-host-only-without-package
+#pragma region offload-only
+#pragma region do: POLYFRONT_LIBRARY_PATH= polycpp {polycpp_defaults} {polycpp_stdpar} -DHOST_ONLY -o {output} {input}
+#pragma region stderr-count: 1 uses the inline body: no foo package on the library path
+#pragma region do: {output}
+#pragma region requires: 141
+
+#pragma region case: host-only-require-offload-rejected
+#pragma region offload-only
+#pragma region compile-fails: -fstdpar-require-offload rejects
+#pragma region do: POLYFRONT_LIBRARY_PATH= polycpp {polycpp_defaults} {polycpp_stdpar} -fstdpar-require-offload -DHOST_ONLY -o {output} {input}
+
+#pragma region case: require-offload-without-package-accepted
+#pragma region offload-only
+#pragma region do: POLYFRONT_LIBRARY_PATH= polycpp {polycpp_defaults} {polycpp_stdpar} -fstdpar-require-offload -o {output} {input}
+#pragma region stderr-count: 0 uses the inline body
+#pragma region do: {output}
+#pragma region requires: 141
+
 #pragma region case: fallback-with-package
 #pragma region offload-only
 #pragma region do: {package_fixture} {output}.packages
@@ -57,6 +76,14 @@
 #pragma region do: {output}
 #pragma region requires: 5050 2525.0 15 30 45
 
+#pragma region case: fallback-with-package-require-offload
+#pragma region offload-only
+#pragma region do: {package_fixture} {output}.packages
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -fstdpar-library-path={output}.packages -fstdpar-require-offload -o {output} {input}
+#pragma region stderr-count: 1 bound to foo (bar.implementation.increment)
+#pragma region do: {output}
+#pragma region requires: 42
+
 #include <cstdio>
 #include <execution>
 #include <functional>
@@ -80,6 +107,14 @@ template <class T>
 remote_increment(T x) {
   return x + 100;
 }
+
+[[clang::annotate("polystl_host_fallback")]] inline int host_only(int x) { return x + 100; }
+
+template <class T>
+[[clang::annotate("polyregion_interface:foo:bar.host_increment")]] [[clang::annotate("polyregion_interface_fallback")]] inline T
+host_increment(T x) {
+  return host_only(x);
+}
 } // namespace foo
 
 #if defined(CORE_WIDTH)
@@ -102,6 +137,8 @@ int main() {
 int main() { std::printf("%d", foo::remote_increment(41)); }
 #elif defined(CAPABLE)
 int main() { std::printf("%d", foo::capable_increment(41)); }
+#elif defined(HOST_ONLY)
+int main() { std::printf("%d", foo::host_increment(41)); }
 #else
 int main() { std::printf("%d", foo::increment(41)); }
 #endif
