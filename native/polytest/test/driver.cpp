@@ -312,4 +312,17 @@ TEST_CASE("A compile step exiting 77 fails") {
   const Task task{Mode::Offload, "check_x.cpp", "c", {}, dir.file("out"), std::nullopt, {{dir.file("compile.sh"), {}, {}}}, {}};
   CHECK(detail::compileTask(task, testConfig(dir.path)).status == TaskStatus::Fail);
 }
+
+TEST_CASE("A failing repro compile reports its own stderr") {
+  using namespace polyregion::polytest;
+  TempDir dir;
+  script(dir, "compile.sh", R"sh(case " $* " in *" -c "*) echo 'repro diagnostic' >&2; exit 3 ;; esac
+: > "$3")sh");
+  const auto command = dir.file("compile.sh") + " -fstdpar -o " + dir.file("out") + " check_x.cpp";
+  const Task task{Mode::Offload, "check_x.cpp", "c", {}, dir.file("out"), std::nullopt, {{command, {}, {}}}, {}};
+  const auto o = detail::compileTask(task, testConfig(dir.path));
+  CHECK(o.status == TaskStatus::Fail);
+  CHECK(o.failReason.find("repro -c compile failed") != std::string::npos);
+  CHECK(o.stderrCapture == "repro diagnostic\n");
+}
 #endif

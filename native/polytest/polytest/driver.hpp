@@ -446,6 +446,7 @@ inline TaskOutcome compileTask(const Task &task, const DriverConfig &cfg) {
     std::fprintf(stderr, "[%s]\n%s\n", task.display().c_str(), r.stderrText.c_str());
   TaskOutcome o;
   std::string reproReason;
+  std::optional<StepResult> reproFailure;
   if (exit == 0 && !task.compileFailure)
     if (const char *e = std::getenv(polyregion::env::PolytestReproCheck); !(e && e[0] == '0')) {
       const auto &cmd = task.runs[0].command;
@@ -468,17 +469,19 @@ inline TaskOutcome compileTask(const Task &task, const DriverConfig &cfg) {
         constexpr const char *reproFlags = " -c";
 #endif
         const auto objCmd = (toks ^ mk_string(" ", [&](const auto &t) { return t == out ? obj : t; })) + reproFlags;
-        const auto r1 = runStep(task, cfg, objCmd);
+        auto r1 = runStep(task, cfg, objCmd);
         const auto first = r1.exitCode == 0 ? polyregion::read_string(obj) : std::string{};
-        const auto r2 = runStep(task, cfg, objCmd);
+        auto r2 = runStep(task, cfg, objCmd);
         if (r1.exitCode != 0 || r2.exitCode != 0)
-          reproReason = fmt::format("repro -c compile failed (exit {}/{})", r1.exitCode, r2.exitCode);
+          reproReason = fmt::format("repro -c compile failed (exit {}/{})", r1.exitCode, r2.exitCode),
+          reproFailure = r1.exitCode != 0 ? std::move(r1) : std::move(r2);
         else if (first != polyregion::read_string(obj))
           reproReason = "non-reproducible build: two compiles of the same source produced different objects";
         llvm::sys::fs::remove(obj);
       }
     }
-  absorbStep(o, std::move(r));
+  if (reproFailure) absorbStep(o, std::move(*reproFailure));
+  else absorbStep(o, std::move(r));
   o.secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
   if (task.compileFailure) {
     if (exit == 0) o.failReason = "compile unexpectedly succeeded", o.status = TaskStatus::Fail;
