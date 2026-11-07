@@ -1,6 +1,12 @@
 #include <cstdio>
 #include <unordered_map>
 
+#if defined(__linux__)
+  #include <pthread.h>
+
+  #include <sys/resource.h>
+#endif
+
 #include "aspartame/all.hpp"
 #include "fmt/format.h"
 #include "quickjs.h"
@@ -105,6 +111,23 @@ int32_t callExportInt(JSContext *ctx, const char *name) {
   return out;
 }
 
+void updateStackTop(JSRuntime *rt) {
+  JS_UpdateStackTop(rt);
+#if defined(__linux__)
+  rlimit limit{};
+  if (getrlimit(RLIMIT_STACK, &limit) != 0 || limit.rlim_cur == RLIM_INFINITY) return;
+  pthread_attr_t attr;
+  if (pthread_getattr_np(pthread_self(), &attr) != 0) return;
+  void *low = nullptr;
+  size_t size = 0;
+  const int status = pthread_attr_getstack(&attr, &low, &size);
+  pthread_attr_destroy(&attr);
+  if (status != 0) return;
+  const auto sp = reinterpret_cast<uintptr_t>(__builtin_frame_address(0));
+  JS_SetMaxStackSize(rt, (sp - reinterpret_cast<uintptr_t>(low)) / 2);
+#endif
+}
+
 } // namespace
 
 JsPassRunner::JsPassRunner() : impl(std::make_unique<Impl>()) {
@@ -130,7 +153,7 @@ JsPassRunner::~JsPassRunner() {
 }
 
 String JsPassRunner::load() {
-  JS_UpdateStackTop(impl->rt);
+  updateStackTop(impl->rt);
   if (impl->loaded) return {};
   if (impl->path.empty()) return "JS plugin path not set";
   const auto source = polyregion::read_string(impl->path);
@@ -142,7 +165,7 @@ String JsPassRunner::load() {
 }
 
 String JsPassRunner::loadModule(std::string_view source) {
-  JS_UpdateStackTop(impl->rt);
+  updateStackTop(impl->rt);
   if (auto err = impl->loadFromSource(source, "<inline>"); !err.empty()) return err;
   if (auto err = impl->enumeratePasses(); !err.empty()) return err;
   impl->loaded = true;
@@ -150,7 +173,7 @@ String JsPassRunner::loadModule(std::string_view source) {
 }
 
 std::optional<int32_t> JsPassRunner::intExport(const std::string_view name, String &error) const {
-  JS_UpdateStackTop(impl->rt);
+  updateStackTop(impl->rt);
   if (!impl->loaded) {
     error = "JS plugin not loaded";
     return std::nullopt;
@@ -183,7 +206,7 @@ std::optional<int32_t> JsPassRunner::intExport(const std::string_view name, Stri
 }
 
 Vector<uint8_t> JsPassRunner::bytesExport(const std::string_view name, const Vector<uint8_t> &input, String &error) {
-  JS_UpdateStackTop(impl->rt);
+  updateStackTop(impl->rt);
   if (!impl->loaded) {
     error = "JS plugin not loaded";
     return {};
@@ -365,7 +388,7 @@ const Vector<String> &JsPassRunner::passNames() const { return impl->names; }
 std::optional<String> JsPassRunner::passDescr(std::string_view name) const { return impl->descrs ^ get_maybe(String(name)); }
 
 Vector<uint8_t> JsPassRunner::runPasses(const Vector<String> &steps, const Vector<uint8_t> &programBytes, String &error) {
-  JS_UpdateStackTop(impl->rt);
+  updateStackTop(impl->rt);
   if (!impl->loaded) {
     error = "JS plugin not loaded";
     return {};
