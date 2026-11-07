@@ -706,7 +706,7 @@ if(NOT SPECTRA_VENDOR_ONLY AND SPECTRA_ENABLE_PACKAGE_TESTS)
     list(APPEND _spectra_capabilities "${_backend}=${_spectra_qualified_capabilities}")
   endforeach()
 
-  set(_spectra_suite_kinds generated closure)
+  set(_spectra_suite_kinds generated closure stdpar)
   if(_spectra_core_package)
     list(APPEND _spectra_suite_kinds core)
     if(EXISTS "${Polyregion_ROOT}/bin/polyfc${CMAKE_EXECUTABLE_SUFFIX}")
@@ -725,6 +725,7 @@ if(NOT SPECTRA_VENDOR_ONLY AND SPECTRA_ENABLE_PACKAGE_TESTS)
   file(GLOB _spectra_closure_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/test/closure/*.cpp")
   file(GLOB _spectra_core_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/test/core/*.cpp")
   file(GLOB _spectra_core_fortran_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/test/core/*.f90")
+  file(GLOB _spectra_stdpar_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/test/stdpar/*.cpp")
   set(_spectra_package_stdpar
       "-fstdpar-library-path=${SPECTRA_PACKAGE_ROOT} -fstdpar-library-capabilities={spectra_capability} "
       "-I${CMAKE_CURRENT_SOURCE_DIR}/generated/cpp/include -I${CMAKE_CURRENT_SOURCE_DIR}/include "
@@ -747,6 +748,11 @@ if(NOT SPECTRA_VENDOR_ONLY AND SPECTRA_ENABLE_PACKAGE_TESTS)
     elseif(_spectra_suite_kind STREQUAL "closure")
       string(APPEND _spectra_suite_stdpar " ${_spectra_package_stdpar}")
       set(_spectra_suite_tests ${_spectra_closure_tests})
+    elseif(_spectra_suite_kind STREQUAL "stdpar")
+      string(APPEND _spectra_suite_stdpar
+             " -I${CMAKE_CURRENT_SOURCE_DIR}/generated/cpp/include -I${CMAKE_CURRENT_SOURCE_DIR}/include")
+      set(_spectra_suite_extra "POLYTEST_VAR+=:spectra_packages=${SPECTRA_PACKAGE_ROOT}\n")
+      set(_spectra_suite_tests ${_spectra_stdpar_tests})
     else()
       set(_spectra_suite_extra "POLYTEST_VAR+=:spectra_packages=${SPECTRA_PACKAGE_ROOT}\n")
       set(_spectra_suite_tests ${_spectra_core_tests})

@@ -29,10 +29,11 @@ int main() {
   std::vector<int> xs(1000);
   std::iota(xs.rbegin(), xs.rend(), 0);
 #if CHECK_KIND == 0
-  std::sort(std::execution::par_unseq, xs.begin(), xs.end());
-  const auto evens = std::count_if(std::execution::par_unseq, xs.begin(), xs.end(), [](int x) { return x % 2 == 0; });
-  const auto sum = std::reduce(std::execution::par_unseq, xs.begin(), xs.end(), 0);
-  std::printf("%d %ld %d", xs.front(), static_cast<long>(evens), sum);
+  std::nth_element(std::execution::par_unseq, xs.begin(), xs.begin() + 500, xs.end());
+  const auto median = xs[500];
+  std::partial_sort(std::execution::par_unseq, xs.begin(), xs.begin() + 1, xs.end());
+  const auto sum = std::accumulate(xs.begin(), xs.end(), 0);
+  std::printf("%d %d %d", xs.front(), median, sum);
 #elif CHECK_KIND == 1
   std::sort(std::execution::seq, xs.begin(), xs.end());
   std::for_each(std::execution::par_unseq, xs.begin(), xs.end(), [](int &x) { x = 2; });
