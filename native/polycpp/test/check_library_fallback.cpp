@@ -84,11 +84,34 @@
 #pragma region do: {output}
 #pragma region requires: 42
 
+#pragma region case: package-include-visible-with-library-path
+#pragma region offload-only
+#pragma region do: {package_fixture} {output}.packages
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DPACKAGE_INCLUDE -fstdpar-library-path={output}.packages -o {output} {input}
+#pragma region do: {output}
+#pragma region requires: 42
+
+#pragma region case: package-include-follows-selected-root
+#pragma region offload-only
+#pragma region do: {package_fixture} {output}.packages
+#pragma region compile-fails: package include directory follows the selected library path
+#pragma region do: POLYFRONT_LIBRARY_PATH={output}.packages polycpp {polycpp_defaults} {polycpp_stdpar} -DPACKAGE_INCLUDE -fstdpar-library-path={output}.none -o {output} {input}
+
+#pragma region case: package-include-hidden-without-library-path
+#pragma region offload-only
+#pragma region do: {package_fixture} {output}.packages
+#pragma region compile-fails: package include directory is not searched without the library path
+#pragma region do: POLYFRONT_LIBRARY_PATH= polycpp {polycpp_defaults} {polycpp_stdpar} -DPACKAGE_INCLUDE -o {output} {input}
+
 #include <cstdio>
 #include <execution>
 #include <functional>
 #include <numeric>
 #include <vector>
+
+#if defined(PACKAGE_INCLUDE)
+  #include <foo/package_include.hpp>
+#endif
 
 namespace foo {
 template <class T>
@@ -139,6 +162,8 @@ int main() { std::printf("%d", foo::remote_increment(41)); }
 int main() { std::printf("%d", foo::capable_increment(41)); }
 #elif defined(HOST_ONLY)
 int main() { std::printf("%d", foo::host_increment(41)); }
+#elif defined(PACKAGE_INCLUDE)
+int main() { std::printf("%d", FOO_PACKAGE_INCLUDE); }
 #else
 int main() { std::printf("%d", foo::increment(41)); }
 #endif

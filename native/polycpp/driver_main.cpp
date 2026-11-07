@@ -135,6 +135,10 @@ int main(int argc, const char *argv[]) {
                  const auto polyreflectPlugin = joinPath(polycppLibPath, fmt::format("polyreflect-plugin.{}", dynamicLibSuffix()));
                  const auto polycppClangPlugin = joinPath(polycppLibPath, fmt::format("polycpp-clang-plugin.{}", dynamicLibSuffix()));
                  append({"-isystem", polycppIncludePath});
+                 const auto includeRoots =
+                     opts->libraryPath.empty() ? package::packageRoots() : package::splitPackageRoots(opts->libraryPath);
+                 for (const auto &include : package::packageIncludeDirs(includeRoots))
+                   append({"-isystem", include});
                  if (opts->emitLibrary.empty()) append({"-include", "polystl/polystl.h"});
 
                  const auto debug = opts->verbose == StdParOptions::VerboseLevel::Debug;

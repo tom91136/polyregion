@@ -361,6 +361,20 @@ inline std::vector<std::string> packageFiles(const std::string &packageName, con
          });
 }
 
+inline std::vector<std::string> packageIncludeDirs(const std::vector<std::string> &roots) {
+  return roots ^ flat_map([](const auto &root) {
+           std::error_code ec;
+           std::vector<std::string> dirs;
+           for (llvm::sys::fs::directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec)) {
+             llvm::SmallString<256> include(it->path());
+             llvm::sys::path::append(include, "include");
+             if (llvm::sys::fs::is_directory(include)) dirs.push_back(include.str().str());
+           }
+           return dirs ^ sort();
+         })
+         ^ distinct() ^ to_vector();
+}
+
 inline Checked<Archive> loadPackage(const std::string &packageName, const std::vector<std::string> &roots = packageRoots()) {
   if (!safePathComponent(packageName)) return {{}, {"invalid package identity `" + packageName + "`"}};
   auto found = packageFiles(packageName, roots);

@@ -288,6 +288,10 @@ constexpr bool is_policy_v =
     || std::is_same_v<T, std::execution::parallel_unsequenced_policy> || std::is_same_v<T, std::execution::unsequenced_policy>;
 } // namespace polyregion::polystl::details
 
+#if __has_include(<polyregion/spectra/stdpar.hpp>)
+  #include <polyregion/spectra/stdpar.hpp>
+#endif
+
 namespace std { // NOLINT(*-dcl58-cpp)
 
 #if !(defined(_HAS_CXX17) && _HAS_CXX17) && !defined(__cpp_lib_execution)

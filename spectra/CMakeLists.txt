@@ -683,6 +683,13 @@ if(NOT SPECTRA_VENDOR_ONLY AND SPECTRA_ENABLE_PACKAGE)
   if(_spectra_core_package)
     install(FILES "${_spectra_core_package}" DESTINATION "${CMAKE_INSTALL_LIBDIR}/polyregion/packages/polyregion.core")
   endif()
+  install(
+    DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/polyregion/spectra"
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/polyregion/packages/spectra/include/polyregion"
+    FILES_MATCHING
+    PATTERN "*.hpp"
+    PATTERN "implementation" EXCLUDE
+  )
 endif()
 
 if(NOT SPECTRA_VENDOR_ONLY AND SPECTRA_ENABLE_PACKAGE_TESTS)

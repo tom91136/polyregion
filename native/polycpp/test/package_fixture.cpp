@@ -891,5 +891,15 @@ int main(int argc, char **argv) {
     return llvm::sys::ExecuteAndWait(executable, args);
   };
   if (const int result = link("interface.polyast", "program.polyast"); result != 0) return result;
+  llvm::SmallString<256> include(packageRoot);
+  llvm::sys::path::append(include, "foo", "include", "foo");
+  if (llvm::sys::fs::create_directories(include)) return 15;
+  llvm::sys::path::append(include, "package_include.hpp");
+  std::error_code error;
+  llvm::raw_fd_ostream header(include, error, llvm::sys::fs::OF_None);
+  if (error) return 15;
+  header << "#define FOO_PACKAGE_INCLUDE 42\n";
+  header.close();
+  if (header.has_error()) return 15;
   return link("core.interface.polyast", "core.program.polyast");
 }
