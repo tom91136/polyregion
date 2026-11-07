@@ -2222,9 +2222,9 @@ struct HeapArena {
     return value;
   }
 
-  template <typename T> T slot(const size_t offset) {
-    T value{};
-    std::memcpy(&value, image(offset), sizeof(T));
+  uintptr_t slot(const size_t offset) {
+    uintptr_t value{};
+    std::memcpy(&value, image(offset), sizeof(value));
     return value;
   }
 
@@ -2269,8 +2269,8 @@ TEST_CASE("arena binds a one-past-end remote pointer that lives in the device he
   remoteAlloc(&a.f.context, 100 * sizeof(int32_t));
   Span span{reinterpret_cast<int32_t *>(begin), reinterpret_cast<int32_t *>(begin + 100 * sizeof(int32_t))};
   REQUIRE(a.launch(&span, *spanLayout));
-  CHECK(a.slot<uint64_t>(offsetof(Span, begin)) == begin - a.heap());
-  CHECK(a.slot<uint64_t>(offsetof(Span, end)) - a.slot<uint64_t>(offsetof(Span, begin)) == 100 * sizeof(int32_t));
+  CHECK(a.slot(offsetof(Span, begin)) == begin - a.heap());
+  CHECK(a.slot(offsetof(Span, end)) - a.slot(offsetof(Span, begin)) == 100 * sizeof(int32_t));
 }
 
 TEST_CASE("arena launches with two bound heap blocks copy no device bytes and wait once") {
@@ -2288,9 +2288,9 @@ TEST_CASE("arena launches with two bound heap blocks copy no device bytes and wa
   const auto before = a.f.stats();
   for (uint64_t i = 0; i < launches; ++i) {
     REQUIRE(a.launch(&grid, *gridLayout));
-    CHECK(a.slot<uint64_t>(offsetof(Grid, first)) == first - a.heap());
-    CHECK(a.slot<uint64_t>(offsetof(Grid, second)) == second - a.heap());
-    CHECK(std::memcmp(a.at(a.slot<uint64_t>(offsetof(Grid, host))), host, 16 * sizeof(int32_t)) == 0);
+    CHECK(a.slot(offsetof(Grid, first)) == first - a.heap());
+    CHECK(a.slot(offsetof(Grid, second)) == second - a.heap());
+    CHECK(std::memcmp(a.at(a.slot(offsetof(Grid, host))), host, 16 * sizeof(int32_t)) == 0);
   }
   const auto after = a.f.stats();
   INFO("waits per launch: " << static_cast<double>(after.waits - before.waits) / launches);
@@ -2316,7 +2316,7 @@ TEST_CASE("growing the heap and the window keeps package handles and bytes") {
   REQUIRE(a.launch(&grid, *gridLayout));
 
   const auto heap = a.heap();
-  const auto firstSlot = a.slot<uint64_t>(offsetof(Grid, first)), secondSlot = a.slot<uint64_t>(offsetof(Grid, second));
+  const auto firstSlot = a.slot(offsetof(Grid, first)), secondSlot = a.slot(offsetof(Grid, second));
   const auto before = a.f.stats();
 
   for (size_t i = 0; i < 64; ++i)
@@ -2331,11 +2331,11 @@ TEST_CASE("growing the heap and the window keeps package handles and bytes") {
   REQUIRE(a.launch(&grid, *gridLayout));
 
   CHECK(a.heap() == heap);
-  CHECK(a.slot<uint64_t>(offsetof(Grid, first)) == firstSlot);
-  CHECK(a.slot<uint64_t>(offsetof(Grid, second)) == secondSlot);
+  CHECK(a.slot(offsetof(Grid, first)) == firstSlot);
+  CHECK(a.slot(offsetof(Grid, second)) == secondSlot);
   CHECK(std::memcmp(a.at(firstSlot), pattern.data(), pattern.size() * sizeof(int32_t)) == 0);
   CHECK(std::memcmp(a.at(secondSlot), pattern.data(), pattern.size() * sizeof(int32_t)) == 0);
-  CHECK(std::memcmp(a.at(a.slot<uint64_t>(offsetof(Grid, host))), big, bigCount * sizeof(int32_t)) == 0);
+  CHECK(std::memcmp(a.at(a.slot(offsetof(Grid, host))), big, bigCount * sizeof(int32_t)) == 0);
   CHECK(a.f.stats().arenaWindowMoves == 1);
   CHECK(a.f.stats().d2dCopies == 1);
 }
@@ -2357,7 +2357,7 @@ TEST_CASE("a window that cannot grow in place moves with its resident leaf and g
   std::iota(small, small + 16, 1);
   Rec rec{xs, count, small};
 
-  const auto leaf = [&] { return reinterpret_cast<int32_t *>(const_cast<char *>(a.at(a.slot<uint64_t>(offsetof(Rec, xs))))); };
+  const auto leaf = [&] { return reinterpret_cast<int32_t *>(const_cast<char *>(a.at(a.slot(offsetof(Rec, xs))))); };
 
   a.f.queue.onInvoke = [&] { std::fill(leaf(), leaf() + count, 2); };
   REQUIRE(a.launch(&rec, *recLayout));
@@ -2384,7 +2384,7 @@ TEST_CASE("a window that cannot grow in place moves with its resident leaf and g
   CHECK(a.f.stats().arenaWindowMoves == 1);
   CHECK(a.f.stats().d2dCopies == 1);
   CHECK(leafIntact);
-  CHECK(std::memcmp(a.at(a.slot<uint64_t>(offsetof(Rec, extra))), big, bigCount * sizeof(int32_t)) == 0);
+  CHECK(std::memcmp(a.at(a.slot(offsetof(Rec, extra))), big, bigCount * sizeof(int32_t)) == 0);
   CHECK(xs[0] == 7);
   CHECK(xs[count / 2] == 3);
   CHECK(xs[count - 1] == 9);
@@ -2406,7 +2406,7 @@ TEST_CASE("a union of pointers is rebased by the window offset once") {
   Either either{};
   either.a = host;
   REQUIRE(a.launch(&either, *layout));
-  const auto value = a.slot<uint64_t>(0);
+  const auto value = a.slot(0);
   CHECK(value >= a.window());
   CHECK(value - a.window() < 4 * a.fixture.allocation.genArenaDevCapacity);
   CHECK(std::memcmp(a.at(value), host, 16 * sizeof(int32_t)) == 0);
@@ -2431,8 +2431,8 @@ TEST_CASE("read-back translates package, interior and cleared pointers through a
   Rec rec{reinterpret_cast<int32_t *>(first), hostB, hostC, hostC};
   a.f.queue.onInvoke = [&] {
     CHECK(a.window() != 0);
-    const uint64_t otherSlot = a.slot<uint64_t>(offsetof(Rec, other));
-    const uint64_t package = second + 8 - a.heap(), interior = otherSlot + 4, cleared = 0;
+    const uintptr_t otherSlot = a.slot(offsetof(Rec, other));
+    const uintptr_t package = second + 8 - a.heap(), interior = otherSlot + 4, cleared = 0;
     auto *image = const_cast<char *>(a.image());
     std::memcpy(image + offsetof(Rec, package), &package, sizeof(package));
     std::memcpy(image + offsetof(Rec, interior), &interior, sizeof(interior));
@@ -2459,7 +2459,7 @@ TEST_CASE("an untouched resident leaf is carried across a window move") {
   auto *small = a.fixture.mallocLocal<int32_t>(16);
   Rec rec{xs, small};
   a.f.queue.onInvoke = [&] {
-    auto *leaf = reinterpret_cast<int32_t *>(const_cast<char *>(a.at(a.slot<uint64_t>(offsetof(Rec, xs)))));
+    auto *leaf = reinterpret_cast<int32_t *>(const_cast<char *>(a.at(a.slot(offsetof(Rec, xs)))));
     std::iota(leaf, leaf + count, 10);
   };
   REQUIRE(a.launch(&rec, *layout));
@@ -2491,7 +2491,7 @@ TEST_CASE("a guard fault during a window move waits for the move and reads the m
   auto *small = a.fixture.mallocLocal<int32_t>(16);
   Rec rec{xs, small};
   a.f.queue.onInvoke = [&] {
-    auto *leaf = reinterpret_cast<int32_t *>(const_cast<char *>(a.at(a.slot<uint64_t>(offsetof(Rec, xs)))));
+    auto *leaf = reinterpret_cast<int32_t *>(const_cast<char *>(a.at(a.slot(offsetof(Rec, xs)))));
     std::fill(leaf, leaf + count, 5);
   };
   REQUIRE(a.launch(&rec, *layout));
@@ -2573,7 +2573,7 @@ TEST_CASE("a host pointer that falls in a free span of the device heap is mirror
   a.fixture.localAllocations.emplace(address, 64);
   holder.pointer = reinterpret_cast<int32_t *>(address);
   REQUIRE(a.launch(&holder, *layout));
-  const auto value = a.slot<uint64_t>(0);
+  const auto value = a.slot(0);
   CHECK(value != address - a.heap());
   CHECK(value >= a.window());
   a.fixture.localAllocations.erase(address);
@@ -2591,7 +2591,7 @@ TEST_CASE("destroying the context releases guarded arena leaves before the heap 
   std::fill(xs, xs + count, 1);
   Rec rec{xs};
   a.f.queue.onInvoke = [&] {
-    auto *leaf = reinterpret_cast<int32_t *>(const_cast<char *>(a.at(a.slot<uint64_t>(offsetof(Rec, xs)))));
+    auto *leaf = reinterpret_cast<int32_t *>(const_cast<char *>(a.at(a.slot(offsetof(Rec, xs)))));
     std::fill(leaf, leaf + count, 4);
   };
   REQUIRE(a.launch(&rec, *layout));
@@ -2614,7 +2614,7 @@ TEST_CASE("a leaf uploaded into reused heap memory brings its zeroed over-read s
   const auto committed = a.f.stats().heapBytesCommitted;
   std::memset(const_cast<char *>(a.image()), 0xFF, committed - a.window());
   REQUIRE(a.launch(&span, *layout));
-  const auto leaf = a.slot<uint64_t>(offsetof(Span, begin));
+  const auto leaf = a.slot(offsetof(Span, begin));
   const auto *after = a.at(leaf) + 16 * sizeof(int32_t);
   for (size_t i = 0; i < 4096; ++i)
     REQUIRE(after[i] == 0);
@@ -2645,7 +2645,7 @@ TEST_CASE("heap memcpy moves a multi-megabyte span in both directions and into a
   std::fill(xs, xs + count, 1);
   Rec rec{xs};
   a.f.queue.onInvoke = [&] {
-    auto *leaf = reinterpret_cast<int32_t *>(const_cast<char *>(a.at(a.slot<uint64_t>(offsetof(Rec, xs)))));
+    auto *leaf = reinterpret_cast<int32_t *>(const_cast<char *>(a.at(a.slot(offsetof(Rec, xs)))));
     std::fill(leaf, leaf + count, 6);
   };
   REQUIRE(a.launch(&rec, *layout));
@@ -2680,7 +2680,7 @@ TEST_CASE("a window next to free space grows in place") {
   CHECK(a.window() == window);
   CHECK(a.f.stats().arenaWindowMoves == 0);
   CHECK(a.f.stats().d2dCopies == 0);
-  CHECK(std::memcmp(a.at(a.slot<uint64_t>(offsetof(Grid, host))), big, bigCount * sizeof(int32_t)) == 0);
+  CHECK(std::memcmp(a.at(a.slot(offsetof(Grid, host))), big, bigCount * sizeof(int32_t)) == 0);
 }
 
 TEST_CASE("stats are unavailable without a context") {
