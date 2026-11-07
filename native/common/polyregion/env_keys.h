@@ -31,7 +31,6 @@ inline constexpr auto PolyfrontImageManifest = "POLYFRONT_IMAGE_MANIFEST";
 
 inline constexpr auto PolycppDriver = "POLYCPP_DRIVER";
 inline constexpr auto PolycppLinkThreads = "POLYCPP_LINK_THREADS";
-inline constexpr auto PolycppPackageJobs = "POLYCPP_PACKAGE_JOBS";
 inline constexpr auto PolycppNoRewrite = "POLYCPP_NO_REWRITE";
 inline constexpr auto PolystlInclude = "POLYSTL_INCLUDE";
 inline constexpr auto PolystlLib = "POLYSTL_LIB";

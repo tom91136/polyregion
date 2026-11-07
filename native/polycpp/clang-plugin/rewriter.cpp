@@ -1,7 +1,6 @@
 #include "rewriter.h"
 
 #include <algorithm>
-#include <cstdlib>
 #include <deque>
 #include <future>
 #include <map>
@@ -41,6 +40,7 @@
 #include "polyfront/package_program.hpp"
 #include "polyfront/polyc_client.hpp"
 #include "polyregion/conventions.h"
+#include "polyregion/env.h"
 #include "polyregion/env_keys.h"
 #include "polyregion/program_import.hpp"
 
@@ -600,12 +600,6 @@ static void compileInterfaceCalls(const polyfront::Options &opts, clang::Compile
   const auto groups = polyfront::package::capabilityGroups(declaredCapabilities, opts.targets);
   const auto &targetCPU = CI.getTarget().getTargetOpts().CPU;
   auto *translationUnit = C.getTranslationUnitDecl();
-  size_t jobs = 1;
-  if (const char *value = std::getenv(env::PolycppPackageJobs); value && *value) {
-    char *end = nullptr;
-    const auto parsed = std::strtoul(value, &end, 10);
-    if (end != value && *end == '\0' && parsed > 0) jobs = std::min<size_t>(parsed, groups.size());
-  }
   // a bundle with unfit reasons keeps the call, so the interface's inline fallback body runs
   using CompileResult = polyfront::package::Checked<CompileBundle>;
   using GroupResults = std::vector<CompileResult>;
@@ -712,18 +706,13 @@ static void compileInterfaceCalls(const polyfront::Options &opts, clang::Compile
     for (size_t at = 0; at < task.members.size(); ++at)
       results[task.members[at]][task.group] = std::move(batch[at]);
   };
-  if (jobs == 1) {
-    for (const auto &task : tasks)
-      assign(task, compileMembers(task.group, task.members));
-  } else {
-    llvm::StdThreadPool pool(llvm::hardware_concurrency(jobs));
-    std::vector<std::shared_future<std::unique_ptr<std::vector<CompileResult>>>> futures;
-    for (const auto &task : tasks)
-      futures.emplace_back(pool.async(
-          [&compileMembers, &task] { return std::make_unique<std::vector<CompileResult>>(compileMembers(task.group, task.members)); }));
-    for (size_t at = 0; at < tasks.size(); ++at)
-      assign(tasks[at], std::move(*futures[at].get()));
-  }
+  llvm::StdThreadPool pool(llvm::hardware_concurrency(env::jobs(env::PolycJobs)));
+  std::vector<std::shared_future<std::unique_ptr<std::vector<CompileResult>>>> futures;
+  for (const auto &task : tasks)
+    futures.emplace_back(pool.async(
+        [&compileMembers, &task] { return std::make_unique<std::vector<CompileResult>>(compileMembers(task.group, task.members)); }));
+  for (size_t at = 0; at < tasks.size(); ++at)
+    assign(tasks[at], std::move(*futures[at].get()));
   const auto consume = [&](const PreparedInterfaceCall &item, GroupResults results) {
     const auto location = item.site.call->getExprLoc();
     if (const auto failed = std::find_if(results.begin(), results.end(), [](const auto &result) { return !result; });
