@@ -3984,6 +3984,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           return Expr::Invoke(receiverType->widen(), {}, receiver, arguments, handleType(expr->getCallReturnType(context), r));
         }
         if (!calleeFn) raise(fmt::format("Operator call with no resolvable callee: {}", pretty_string(expr, context)));
+        if (const auto lowered = lowerSpecialCall(*expr, *calleeFn, r)) return *lowered;
         const auto operatorMethod = llvm::dyn_cast<clang::CXXMethodDecl>(calleeFn);
         if (expr->getOperator() == clang::OO_Equal && expr->getNumArgs() == 2 && operatorMethod)
           if (const auto lowered =

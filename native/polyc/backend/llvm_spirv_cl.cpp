@@ -110,6 +110,7 @@ const OclBuiltin GET_NUM_GROUPS{"_Z14get_num_groupsj", i64, {i32}};
 const OclBuiltin GET_LOCAL_ID{"_Z12get_local_idj", i64, {i32}};
 const OclBuiltin GET_LOCAL_SIZE{"_Z14get_local_sizej", i64, {i32}};
 const OclBuiltin GET_SUB_GROUP_SIZE{"_Z18get_sub_group_sizev", i32, {}};
+const OclBuiltin GET_MAX_SUB_GROUP_SIZE{"_Z22get_max_sub_group_sizev", i32, {}};
 const OclBuiltin GET_SUB_GROUP_LOCAL_ID{"_Z22get_sub_group_local_idv", i32, {}};
 // XXX Use the `__spirv_*` form: OpenCL `barrier(flags)` routes through SPIRVBuiltins.cpp::
 // buildBarrierInst which ORs SequentiallyConsistent into the semantics; OpenCL drivers reject
@@ -438,7 +439,7 @@ ValPtr SPIRVOpenCLTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
       [&](const Spec::GpuFenceLocal &v) -> ValPtr { return fence(v.tpe, SpvMemSem::WorkgroupMemory); },
       [&](const Spec::GpuFenceAll &v) -> ValPtr { return fence(v.tpe, SpvMemSem::WorkgroupMemory | SpvMemSem::CrossWorkgroupMemory); },
       [&](const Spec::GpuLaneIdx &) -> ValPtr { return callOcl(cg, GET_SUB_GROUP_LOCAL_ID, Type::IntU32(), {}); },
-      [&](const Spec::GpuSubgroupSize &) -> ValPtr { return callOcl(cg, GET_SUB_GROUP_SIZE, Type::IntU32(), {}); },
+      [&](const Spec::GpuSubgroupSize &) -> ValPtr { return callOcl(cg, GET_MAX_SUB_GROUP_SIZE, Type::IntU32(), {}); },
       [&](const Spec::GpuShuffleDown &v) -> ValPtr {
         return emitClampedSubgroupShuffle(cg, 'd', v.value, v.delta, v.width, v.mask, v.rtn);
       },

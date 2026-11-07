@@ -774,11 +774,6 @@ __parallel_stable_sort]=]
     "__item\\.get_local_range\\(\\)\\.size\\(\\)"
     "__item.get_local_range(0)"
     2)
-  copy_and_replace(
-    "oneapi/dpl/pstl/hetero/dpcpp/parallel_backend_sycl_reduce_then_scan.h"
-    "__sub_group\\.get_max_local_range\\(\\)\\[0\\]"
-    "__sub_group.get_local_linear_range()"
-    3)
   # Package generation cannot ask the eventual import device which
   # optional fixed subgroup widths it advertises. Select oneDPL's portable
   # non-required-subgroup path; subgroup collectives themselves remain

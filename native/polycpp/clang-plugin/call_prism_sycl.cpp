@@ -486,6 +486,25 @@ static Opt<MatchedCall> syclGroupOperation(const clang::CallExpr &call, const cl
       false};
 }
 
+static Term::Any linearLocalId(Remapper::RemapContext &r) {
+  auto local = r.newVar(Expr::SpecOp(Spec::GpuLocalIdx(Term::IntU32Const(0))));
+  for (unsigned i = 1; i < 3; ++i) {
+    const auto size = r.newVar(Expr::SpecOp(Spec::GpuLocalSize(Term::IntU32Const(i))));
+    const auto index = r.newVar(Expr::SpecOp(Spec::GpuLocalIdx(Term::IntU32Const(i))));
+    local = r.newVar(Expr::IntrOp(Intr::Add(r.newVar(Expr::IntrOp(Intr::Mul(local, size, Type::IntU32()))), index, Type::IntU32())));
+  }
+  return local;
+}
+
+static Term::Any linearLocalCount(Remapper::RemapContext &r) {
+  auto count = r.newVar(Expr::SpecOp(Spec::GpuLocalSize(Term::IntU32Const(0))));
+  for (unsigned i = 1; i < 3; ++i) {
+    const auto size = r.newVar(Expr::SpecOp(Spec::GpuLocalSize(Term::IntU32Const(i))));
+    count = r.newVar(Expr::IntrOp(Intr::Mul(count, size, Type::IntU32())));
+  }
+  return count;
+}
+
 static Opt<MatchedCall> syclItemAccess(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
   const auto *method = llvm::dyn_cast<clang::CXXMethodDecl>(&decl);
   const auto *member = llvm::dyn_cast<clang::CXXMemberCallExpr>(&call);
@@ -526,18 +545,17 @@ static Opt<MatchedCall> syclItemAccess(const clang::CallExpr &call, const clang:
         if (ownerName == "sub_group") {
           if (memberName == "get_local_linear_id" || memberName == "get_local_id")
             return self.conform(r, Expr::SpecOp(Spec::GpuLaneIdx()), result);
-          if (memberName == "get_local_linear_range" || memberName == "get_max_local_range")
-            return self.conform(r, Expr::SpecOp(Spec::GpuSubgroupSize()), result);
-          if (memberName == "get_group_linear_id" || memberName == "get_group_id") {
-            auto local = r.newVar(Expr::SpecOp(Spec::GpuLocalIdx(Term::IntU32Const(0))));
-            for (unsigned i = 1; i < 3; ++i) {
-              const auto size = r.newVar(Expr::SpecOp(Spec::GpuLocalSize(Term::IntU32Const(i))));
-              const auto index = r.newVar(Expr::SpecOp(Spec::GpuLocalIdx(Term::IntU32Const(i))));
-              local =
-                  r.newVar(Expr::IntrOp(Intr::Add(r.newVar(Expr::IntrOp(Intr::Mul(local, size, Type::IntU32()))), index, Type::IntU32())));
-            }
+          if (memberName == "get_max_local_range") return self.conform(r, Expr::SpecOp(Spec::GpuSubgroupSize()), result);
+          if (memberName == "get_local_linear_range") {
+            const auto lane = r.newVar(Expr::SpecOp(Spec::GpuLaneIdx()));
+            const auto base = r.newVar(Expr::IntrOp(Intr::Sub(linearLocalId(r), lane, Type::IntU32())));
+            const auto remaining = r.newVar(Expr::IntrOp(Intr::Sub(linearLocalCount(r), base, Type::IntU32())));
             const auto subgroupSize = r.newVar(Expr::SpecOp(Spec::GpuSubgroupSize()));
-            return self.conform(r, Expr::IntrOp(Intr::Div(local, subgroupSize, Type::IntU32())), result);
+            return self.conform(r, Expr::IntrOp(Intr::Min(subgroupSize, remaining, Type::IntU32())), result);
+          }
+          if (memberName == "get_group_linear_id" || memberName == "get_group_id") {
+            const auto subgroupSize = r.newVar(Expr::SpecOp(Spec::GpuSubgroupSize()));
+            return self.conform(r, Expr::IntrOp(Intr::Div(linearLocalId(r), subgroupSize, Type::IntU32())), result);
           }
         }
         if (memberName == "barrier" && ownerName == "nd_item") {
@@ -626,6 +644,26 @@ static Opt<MatchedCall> syclItemSubscript(const clang::CallExpr &call, const cla
                        (void)r.newVar(self.handleExpr(expression->getArg(0), r));
                        const auto dimension = r.newVar(self.conform(r, self.handleExpr(expression->getArg(1), r), Type::IntU32()));
                        return self.conform(r, Expr::SpecOp(Spec::GpuGlobalIdx(dimension)), self.handleType(expression->getType(), r));
+                     }},
+                     false};
+}
+
+static Opt<MatchedCall> syclSubGroupRangeSubscript(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
+  const auto *method = llvm::dyn_cast<clang::CXXMethodDecl>(&decl);
+  const auto *operation = llvm::dyn_cast<clang::CXXOperatorCallExpr>(&call);
+  if (!method || !operation || method->getOverloadedOperator() != clang::OO_Subscript
+      || !syclNameIs(method->getParent()->getQualifiedNameAsString(), "sycl::range") || call.getNumArgs() != 2
+      || !call.getType().getNonReferenceType()->isIntegralOrEnumerationType())
+    return {};
+  const auto *query = llvm::dyn_cast<clang::CXXMemberCallExpr>(operation->getArg(0)->IgnoreImplicit()->IgnoreParens());
+  const auto *queryMethod = query ? query->getMethodDecl() : nullptr;
+  if (!queryMethod || queryMethod->getName() != "get_max_local_range"
+      || !syclNameIs(queryMethod->getParent()->getQualifiedNameAsString(), "sycl::sub_group"))
+    return {};
+  const auto *expression = operation;
+  return MatchedCall{Lowering{[expression](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+                       return self.conform(r, Expr::SpecOp(Spec::GpuSubgroupSize()),
+                                           self.handleType(expression->getType().getNonReferenceType(), r));
                      }},
                      false};
 }
@@ -1062,7 +1100,8 @@ static Opt<MatchedCall> syclQueue(const clang::CallExpr &call, const clang::Func
 }
 
 Vector<CallPrism> syclPrisms() {
-  return {syclUsm, syclCollective, syclVote, syclGroupOperation, syclItemAccess, syclItemSubscript, syclDevice, syclQueue};
+  return {syclUsm,    syclCollective, syclVote, syclGroupOperation, syclItemAccess, syclItemSubscript, syclSubGroupRangeSubscript,
+          syclDevice, syclQueue};
 }
 
 } // namespace polyregion::polystl::call_prism
