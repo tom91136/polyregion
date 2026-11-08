@@ -2078,7 +2078,8 @@ TEST_CASE("a record smaller than its pointee is mirrored at the pointee size") {
   auto captureMeta = Struct_(Capture, StructMember_(Capture, wide, &*wideMeta));
 
   Fixture fixture;
-  auto slot = fixture.mallocLocal<int32_t>();
+  auto *slot = static_cast<int32_t *>(std::malloc(sizeof(Wide)));
+  fixture.localAllocations.emplace(reinterpret_cast<uintptr_t>(slot), sizeof(int32_t));
   *slot = 7;
   const Capture actual = fixture.localToRemote(Capture{reinterpret_cast<Wide *>(slot)}, *captureMeta);
   CHECK(fixture.remoteLive(actual.wide));
