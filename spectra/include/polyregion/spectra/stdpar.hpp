@@ -598,6 +598,60 @@ typename std::iterator_traits<It>::difference_type count_if(execution::parallel_
   return std::count_if(first, last, pred);
 }
 
+template <class It, class Op = std::less<>> It min_element(execution::parallel_unsequenced_policy, It first, It last, Op op = {}) {
+  using V = ::spectra::stdpar::details::value_t<It>;
+  if constexpr (::spectra::stdpar::details::element_v<It> && ::spectra::stdpar::details::callable_v<bool, Op, const V &, const V &>) {
+    const auto n = last - first;
+    if (::spectra::stdpar::details::contiguous(first, n))
+      return first + ::spectra::min_element(std::addressof(*first), static_cast<std::int32_t>(n), [op](V x, V y) { return op(x, y); });
+  }
+  return std::min_element(first, last, op);
+}
+
+template <class It, class Op = std::less<>> It max_element(execution::parallel_unsequenced_policy, It first, It last, Op op = {}) {
+  using V = ::spectra::stdpar::details::value_t<It>;
+  if constexpr (::spectra::stdpar::details::element_v<It> && ::spectra::stdpar::details::callable_v<bool, Op, const V &, const V &>) {
+    const auto n = last - first;
+    if (::spectra::stdpar::details::contiguous(first, n))
+      return first + ::spectra::max_element(std::addressof(*first), static_cast<std::int32_t>(n), [op](V x, V y) { return op(x, y); });
+  }
+  return std::max_element(first, last, op);
+}
+
+template <class It, class Op = std::less<>>
+std::pair<It, It> minmax_element(execution::parallel_unsequenced_policy, It first, It last, Op op = {}) {
+  using V = ::spectra::stdpar::details::value_t<It>;
+  if constexpr (::spectra::stdpar::details::element_v<It> && ::spectra::stdpar::details::callable_v<bool, Op, const V &, const V &>) {
+    const auto n = last - first;
+    if (::spectra::stdpar::details::contiguous(first, n)) {
+      std::int32_t lo = 0, hi = 0;
+      ::spectra::minmax_element(std::addressof(*first), static_cast<std::int32_t>(n), &lo, &hi, [op](V x, V y) { return op(x, y); });
+      return {first + lo, first + hi};
+    }
+  }
+  return std::minmax_element(first, last, op);
+}
+
+template <class It, class Pred> It partition(execution::parallel_unsequenced_policy, It first, It last, Pred pred) {
+  using V = ::spectra::stdpar::details::value_t<It>;
+  if constexpr (::spectra::stdpar::details::element_v<It> && ::spectra::stdpar::details::callable_v<bool, Pred, const V &>) {
+    const auto n = last - first;
+    if (::spectra::stdpar::details::contiguous(first, n))
+      return first + ::spectra::partition(std::addressof(*first), static_cast<std::int32_t>(n), [pred](V x) { return pred(x); });
+  }
+  return std::partition(first, last, pred);
+}
+
+template <class It, class Pred> It stable_partition(execution::parallel_unsequenced_policy, It first, It last, Pred pred) {
+  using V = ::spectra::stdpar::details::value_t<It>;
+  if constexpr (::spectra::stdpar::details::element_v<It> && ::spectra::stdpar::details::callable_v<bool, Pred, const V &>) {
+    const auto n = last - first;
+    if (::spectra::stdpar::details::contiguous(first, n))
+      return first + ::spectra::stable_partition(std::addressof(*first), static_cast<std::int32_t>(n), [pred](V x) { return pred(x); });
+  }
+  return std::stable_partition(first, last, pred);
+}
+
 template <class It, class OutIt, class Pred>
 OutIt copy_if(execution::parallel_unsequenced_policy, It first, It last, OutIt result, Pred pred) {
   using V = ::spectra::stdpar::details::value_t<It>;
