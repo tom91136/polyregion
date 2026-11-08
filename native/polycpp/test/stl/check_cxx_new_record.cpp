@@ -17,7 +17,8 @@ struct alignas(64) OverAligned {
 
 template <typename T> bool tracked(const T *p) {
   const auto meta = polyregion::rt_reflect::_rt_reflect_p(p);
-  return meta.offset == 0 && meta.type == polyregion::rt_reflect::Type::HeapCXXNew;
+  return meta.offset == 0
+         && (meta.type == polyregion::rt_reflect::Type::HeapCXXNew || meta.type == polyregion::rt_reflect::Type::HeapSanitizer);
 }
 
 int main() {
