@@ -1607,6 +1607,16 @@ static void releaseCXXNew(void *ptr) {
   __RT_ALTERNATIVE(free)(ptr);
 }
 
+static void releaseAlignedCXXNew(void *ptr) {
+#if defined(__linux__) || defined(__APPLE__)
+  releaseCXXNew(ptr);
+#else
+  if (!ptr) return;
+  polyregion::rt_reflect::_rt_release(ptr, polyregion::rt_reflect::Type::HeapCXXDelete);
+  __interposed_aligned_free(ptr);
+#endif
+}
+
 POLYREGION_EXPORT void *polyrt_record_operator_new(const size_t size) {
   return throwingCXXNew(__RT_ALTERNATIVE(malloc)(tailPadded(size)), size);
 }
@@ -1630,12 +1640,12 @@ POLYREGION_EXPORT extern "C" void polyrt_record_operator_delete_sized(void *ptr,
 
 POLYREGION_EXPORT extern "C" void polyrt_record_operator_delete_nothrow(void *ptr, const void * /*tag*/) { releaseCXXNew(ptr); }
 
-POLYREGION_EXPORT extern "C" void polyrt_record_operator_delete_aligned(void *ptr, size_t /*alignment*/) { releaseCXXNew(ptr); }
+POLYREGION_EXPORT extern "C" void polyrt_record_operator_delete_aligned(void *ptr, size_t /*alignment*/) { releaseAlignedCXXNew(ptr); }
 
 POLYREGION_EXPORT extern "C" void polyrt_record_operator_delete_aligned_sized(void *ptr, size_t /*size*/, size_t /*alignment*/) {
-  releaseCXXNew(ptr);
+  releaseAlignedCXXNew(ptr);
 }
 
 POLYREGION_EXPORT extern "C" void polyrt_record_operator_delete_aligned_nothrow(void *ptr, size_t /*alignment*/, const void * /*tag*/) {
-  releaseCXXNew(ptr);
+  releaseAlignedCXXNew(ptr);
 }

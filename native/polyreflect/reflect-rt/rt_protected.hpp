@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 
 // XXX _POSIX_C_SOURCE (set by polyinvoke's compile defs) hides RTLD_NEXT on macOS; expose it via
@@ -79,7 +80,17 @@ extern "C" inline void *__interposed_realloc(void *ptr, const size_t size) {
   if (!ptr) return ::HeapAlloc(::GetProcessHeap(), 0, size);
   return ::HeapReAlloc(::GetProcessHeap(), 0, ptr, size);
 }
-extern "C" inline void *__interposed_memalign(size_t, const size_t size) { return ::HeapAlloc(::GetProcessHeap(), 0, size); }
+extern "C" inline void *__interposed_memalign(const size_t alignment, const size_t size) {
+  const size_t align = alignment < sizeof(void *) ? sizeof(void *) : alignment;
+  auto *raw = static_cast<char *>(::HeapAlloc(::GetProcessHeap(), 0, size + align + sizeof(void *)));
+  if (!raw) return nullptr;
+  const auto aligned = (reinterpret_cast<uintptr_t>(raw) + sizeof(void *) + align - 1) & ~(static_cast<uintptr_t>(align) - 1);
+  reinterpret_cast<void **>(aligned)[-1] = raw;
+  return reinterpret_cast<void *>(aligned);
+}
+extern "C" inline void __interposed_aligned_free(void *ptr) {
+  if (ptr) ::HeapFree(::GetProcessHeap(), 0, static_cast<void **>(ptr)[-1]);
+}
 extern "C" inline void __interposed_free(void *ptr) {
   if (ptr) ::HeapFree(::GetProcessHeap(), 0, ptr);
 }
