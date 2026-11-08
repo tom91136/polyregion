@@ -1,7 +1,7 @@
 !CHECK case: microbude
 !CHECK using: ppwi=1,2,64,128
 !CHECK do: polyfc {polyfc_defaults} {polyfc_stdpar} -DCHECK_SUMMARY_ONLY -DCHECK_PPWI={ppwi} -o {output} {input}
-!CHECK do: {output} 938 20 128 3
+!CHECK do: {output} 938 20 128 {mini_app_iters}
 !CHECK requires: Energies OK
 
 #ifndef CHECK_PPWI

@@ -27,7 +27,7 @@ int main(int argc, const char **argv) {
           .defaultsVar = "polyfc_defaults",
           .defaultsLabelVar = "opt",
           .defaultsVariants = {{"O0", POLYTEST_APPLE_TARGET_FLAG "-O0 -g -cpp"}, {"O3", POLYTEST_APPLE_TARGET_FLAG "-O3 -g -cpp"}},
-          .extraVars = {{"package_fixture", packageFixture}},
+          .extraVars = {{"package_fixture", packageFixture}, {"mini_app_iters", "3"}},
           .stdpar = {"polyfc_stdpar",
 #ifdef _WIN32
                      // XXX Windows CUDA/HIP have no HMM, so plain heap pointers can't reach

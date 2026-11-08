@@ -36,14 +36,20 @@ using namespace aspartame;
 struct ProfileEnvironment {
   std::vector<std::string> assignments;
   std::vector<std::string> forwardedNames;
+  std::vector<std::pair<std::string, std::string>> testVars;
 };
 
 inline ProfileEnvironment parseProfileEnvironment(const std::vector<std::string> &values) {
-  const auto isForwardingDirective = [](const auto &value) {
-    return value ^ split_once('=') ^ exists([](const auto &key, const auto &) { return key == env::PolytestForwardEnv; });
+  const auto keyOf = [](const auto &value) {
+    return value ^ split_once('=') ^ map([](const auto &key, const auto &) { return key; }) ^ get_or_else(std::string{});
   };
-  auto [directives, assignments] = values ^ partition(isForwardingDirective);
-  auto forwardedNames = directives                                                              //
+  const auto isDirective = [&](const auto &value) {
+    const auto key = keyOf(value);
+    return key == env::PolytestForwardEnv || key == env::PolytestVar;
+  };
+  auto [directives, assignments] = values ^ partition(isDirective);
+  auto forwardedNames = directives //
+                        ^ filter([&](const auto &directive) { return keyOf(directive) == env::PolytestForwardEnv; })
                         ^ flat_map([](const auto &directive) {                                  //
                             return directive ^ split_once('=')                                  //
                                    ^ map([](const auto &, const auto &value) { return value; }) //
@@ -56,7 +62,14 @@ inline ProfileEnvironment parseProfileEnvironment(const std::vector<std::string>
                           })                                                                    //
                         ^ filter([](const auto &name) { return !name.empty(); })                //
                         ^ distinct();
-  return {std::move(assignments), std::move(forwardedNames)};
+  auto testVars = directives //
+                  ^ filter([&](const auto &directive) { return keyOf(directive) == env::PolytestVar; })
+                  ^ collect([](const auto &directive) {
+                      return directive ^ split_once('=') ^ flat_map([](const auto &, const auto &value) {
+                               return (value ^ starts_with(":") ? value ^ drop(1) : value) ^ split_once('=');
+                             });
+                    });
+  return {std::move(assignments), std::move(forwardedNames), std::move(testVars)};
 }
 
 inline std::vector<std::string> materialiseProfileEnvironment(const std::vector<std::string> &values) {

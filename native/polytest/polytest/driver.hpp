@@ -543,6 +543,11 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
   if (offload) modes.emplace_back(Mode::Offload);
   if (passthrough) modes.emplace_back(Mode::Passthrough);
   const auto targets = loadTestTargets(cfg.profileDir);
+  const auto profileVars = parseProfileEnvironment(loadProfileEnv(cfg.profileDir)).testVars;
+  const auto profileOverrides = [&](const std::string &key) {
+    return profileVars ^ exists([&](const auto &pv) { return pv.first == key; });
+  };
+  const auto extraVars = cfg.extraVars ^ filter([&](const auto &kv) { return !profileOverrides(kv.first); }) ^ concat(profileVars);
   const auto targetValueFor = [&](const std::string &arch) -> std::optional<std::string> {
     const auto spec = compiletime::TargetSpec::findByName(arch.substr(0, arch.find('@')));
     if (!spec) return {};
@@ -574,7 +579,7 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
       targetVars.emplace_back(cfg.targetVar, *targetValue);
     }
     const auto augmented = varsWithLabel //
-                           ^ concat(cfg.extraVars) ^ concat(targetVars)
+                           ^ concat(extraVars) ^ concat(targetVars)
                            ^ concat(std::vector<std::pair<std::string, std::string>>{
                                {cfg.defaultsVar, value},
                                {cfg.stdpar.first, fmt::vformat(cfg.stdpar.second, mkArgStore(varsWithLabel ^ concat(targetVars)))},

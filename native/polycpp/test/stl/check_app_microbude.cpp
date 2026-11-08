@@ -1,7 +1,7 @@
 #pragma region case: microbude
 #pragma region using: ppwi=1,2,64 layout=,-DCHECK_STD_ARRAY
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_SUMMARY_ONLY -DCHECK_PPWI={ppwi} {layout} -o {output} {input} {libm}
-#pragma region do: {output} 938 20 64 2
+#pragma region do: {output} 938 20 64 {mini_app_iters}
 #pragma region requires: Energies OK
 
 #include <algorithm>

@@ -81,5 +81,6 @@ inline constexpr auto PolytestMemLimitMb = "POLYTEST_MEM_LIMIT_MB";
 inline constexpr auto PolytestReproCheck = "POLYTEST_REPRO_CHECK";
 inline constexpr auto PolytestSeed = "POLYTEST_SEED";
 inline constexpr auto PolytestSuite = "POLYTEST_SUITE";
+inline constexpr auto PolytestVar = "POLYTEST_VAR";
 
 } // namespace polyregion::env
