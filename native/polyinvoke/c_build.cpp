@@ -118,6 +118,7 @@ std::string buildSharedObject(const CCompiler &compiler, const std::string &sour
   std::vector<std::string> flags = {"--target=" + triple, "-shared", "-fPIC", "-O2", "-w", "-nostdlib", "-fuse-ld=lld"};
 #ifdef __APPLE__
   flags.emplace_back("-Wl,-undefined,dynamic_lookup");
+  flags.emplace_back("-lSystem");
 #endif
 
   const auto cached =
