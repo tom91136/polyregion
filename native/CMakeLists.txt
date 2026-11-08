@@ -459,6 +459,12 @@ find_package(LLVM REQUIRED PATHS ${LLVM_DIR} NO_DEFAULT_PATH)
 find_package(Clang REQUIRED PATHS ${Clang_DIR} NO_DEFAULT_PATH)
 find_package(LLD REQUIRED PATHS ${LLVM_DIR} NO_DEFAULT_PATH)
 
+if (WIN32)
+    add_library(polyregion-rpmalloc INTERFACE)
+    target_link_libraries(polyregion-rpmalloc INTERFACE "${LLVM_DIST_DIR}/lib/LLVMRpmalloc.lib")
+    target_link_options(polyregion-rpmalloc INTERFACE "LINKER:-INCLUDE:malloc")
+endif ()
+
 # XXX LLVM_DEFINITIONS is space-joined; split for target_compile_definitions/options
 separate_arguments(LLVM_DEFINITIONS NATIVE_COMMAND "${LLVM_DEFINITIONS}")
 

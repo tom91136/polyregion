@@ -1,5 +1,5 @@
 function(polyregion_apply_common_options target)
-  cmake_parse_arguments(PARSE_ARGV 1 ARG "DYNAMIC_CXX_RUNTIME" "" "EXTRA_LINK")
+  cmake_parse_arguments(PARSE_ARGV 1 ARG "DYNAMIC_CXX_RUNTIME;RPMALLOC" "" "EXTRA_LINK")
   set(_link_options ${LINK_OPTIONS})
   if (ARG_DYNAMIC_CXX_RUNTIME AND UNIX AND NOT APPLE)
     # A DSO loaded into an arbitrary C++ process must use that process's C++ and
@@ -12,6 +12,9 @@ function(polyregion_apply_common_options target)
   endif ()
   target_compile_options(${target} PRIVATE ${COMPILE_OPTIONS})
   target_link_options(${target} PRIVATE ${_link_options} ${ARG_EXTRA_LINK})
+  if (ARG_RPMALLOC AND TARGET polyregion-rpmalloc)
+    target_link_libraries(${target} PRIVATE polyregion-rpmalloc)
+  endif ()
 endfunction()
 
 # XXX macOS asan cannot be dlopen'd ("interceptors loaded too late"), so code loaded into the

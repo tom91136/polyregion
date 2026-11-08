@@ -170,6 +170,7 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STR
 # export limit, so plugin sources are folded into polycpp/polyfc instead (POLYREGION_FUSED_DRIVER).
 if (WIN32)
     set(LLVM_ENABLE_PLUGINS OFF CACHE BOOL "")
+    set(LLVM_ENABLE_RPMALLOC ON CACHE BOOL "")
 else ()
     set(LLVM_ENABLE_PLUGINS ON CACHE BOOL "")
 endif ()

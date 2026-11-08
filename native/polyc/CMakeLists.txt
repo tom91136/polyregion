@@ -143,7 +143,7 @@ target_link_libraries(polyc-bin PRIVATE polyc polyc-driver)
 polyregion_apply_common_options(polyc-tests EXTRA_LINK ${POLYC_LINK_HERMES_OPTS})
 polyregion_apply_common_options(polyc-benchmarks EXTRA_LINK ${POLYC_LINK_HERMES_OPTS})
 polyregion_apply_common_options(polyc-driver)
-polyregion_apply_common_options(polyc-bin EXTRA_LINK ${POLYC_LINK_HERMES_OPTS})
+polyregion_apply_common_options(polyc-bin RPMALLOC EXTRA_LINK ${POLYC_LINK_HERMES_OPTS})
 polyregion_apply_common_options(polyc EXTRA_LINK ${POLYC_LINK_HERMES_OPTS})
 
 # JIT compiler DSO; reuse shared LLVM to avoid multiple LLVM instances.

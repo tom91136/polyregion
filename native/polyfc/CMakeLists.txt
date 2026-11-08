@@ -152,7 +152,7 @@ target_link_libraries(polyfc PRIVATE
 target_link_libraries(polyfc-tests PRIVATE polytest)
 
 
-polyregion_apply_common_options(polyfc)
+polyregion_apply_common_options(polyfc RPMALLOC)
 
 polyregion_apply_common_options(polyfc-tests)
 

@@ -187,7 +187,7 @@ target_link_libraries(polycpp-tests PRIVATE
 )
 
 
-polyregion_apply_common_options(polycpp EXTRA_LINK ${POLYC_LINK_HERMES_OPTS})
+polyregion_apply_common_options(polycpp RPMALLOC EXTRA_LINK ${POLYC_LINK_HERMES_OPTS})
 polyregion_apply_common_options(polycpp-tests EXTRA_LINK ${POLYC_LINK_HERMES_OPTS})
 
 polytest_configure_suite(polycpp-tests
