@@ -6,6 +6,13 @@
 #pragma region do: {output}
 #pragma region requires: pass
 
+#pragma region case: mutate-cxx17
+#pragma region offload-only
+#pragma region do: polycpp {spectra_stdpar} -std=c++17 -O3 -fstdpar-library-path={spectra_packages} -fstdpar-library-capabilities={spectra_capability} -o {output} {input}
+#pragma region stderr-count: 10 bound to spectra
+#pragma region do: {output}
+#pragma region requires: pass
+
 #pragma region case: mutate-baseline
 #pragma region using: opt=O0,O3
 #pragma region offload-only

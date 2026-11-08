@@ -55,6 +55,31 @@ template <class In, class Out> bool contiguous_disjoint(In first, Out result, st
          || out + static_cast<std::uintptr_t>(n) * sizeof(value_t<Out>) <= in;
 }
 
+template <class It>
+inline constexpr bool contiguous_output_v = element_v<It>
+                                            && (std::is_pointer_v<It>
+#if defined(__cpp_lib_concepts) && defined(__cpp_lib_to_address)
+                                                || std::contiguous_iterator<It>
+#endif
+                                            );
+
+template <class In, class Out> inline constexpr bool same_output_v = same_element_v<In, Out> && contiguous_output_v<Out>;
+
+template <class Out> auto output_address(Out result) {
+  if constexpr (std::is_pointer_v<Out>) return result;
+#if defined(__cpp_lib_to_address)
+  else return std::to_address(result);
+#endif
+}
+
+template <class In, class Out> bool disjoint_output(In first, std::ptrdiff_t n, Out result, std::ptrdiff_t m) {
+  if (!contiguous(first, n) || m <= 0 || m > std::numeric_limits<std::int32_t>::max()) return false;
+  const auto in = reinterpret_cast<std::uintptr_t>(std::addressof(*first));
+  const auto out = reinterpret_cast<std::uintptr_t>(output_address(result));
+  return in + static_cast<std::uintptr_t>(n) * sizeof(value_t<In>) <= out
+         || out + static_cast<std::uintptr_t>(m) * sizeof(value_t<Out>) <= in;
+}
+
 }
 
 namespace std { // NOLINT(*-dcl58-cpp)
@@ -573,4 +598,141 @@ typename std::iterator_traits<It>::difference_type count_if(execution::parallel_
   return std::count_if(first, last, pred);
 }
 
+template <class It, class OutIt, class Pred>
+OutIt copy_if(execution::parallel_unsequenced_policy, It first, It last, OutIt result, Pred pred) {
+  using V = ::spectra::stdpar::details::value_t<It>;
+  if constexpr (::spectra::stdpar::details::same_output_v<It, OutIt> && ::spectra::stdpar::details::callable_v<bool, Pred, const V &>) {
+    const auto n = last - first;
+    if (::spectra::stdpar::details::disjoint_output(first, n, result, n))
+      return result
+             + ::spectra::copy_if(std::addressof(*first), static_cast<std::int32_t>(n), ::spectra::stdpar::details::output_address(result),
+                                  [pred](V x) { return pred(x); });
+  }
+  return std::copy_if(first, last, result, pred);
 }
+
+template <class It, class OutIt, class T>
+OutIt remove_copy(execution::parallel_unsequenced_policy, It first, It last, OutIt result, T value) {
+  using V = ::spectra::stdpar::details::value_t<It>;
+  if constexpr (::spectra::stdpar::details::same_output_v<It, OutIt> && std::is_same_v<T, V>) {
+    const auto n = last - first;
+    if (::spectra::stdpar::details::disjoint_output(first, n, result, n))
+      return result
+             + ::spectra::remove_copy(std::addressof(*first), static_cast<std::int32_t>(n),
+                                      ::spectra::stdpar::details::output_address(result), value, [](V x, V y) -> bool { return x == y; });
+  }
+  return std::remove_copy(first, last, result, value);
+}
+
+template <class It, class OutIt, class Pred>
+OutIt remove_copy_if(execution::parallel_unsequenced_policy, It first, It last, OutIt result, Pred pred) {
+  using V = ::spectra::stdpar::details::value_t<It>;
+  if constexpr (::spectra::stdpar::details::same_output_v<It, OutIt> && ::spectra::stdpar::details::callable_v<bool, Pred, const V &>) {
+    const auto n = last - first;
+    if (::spectra::stdpar::details::disjoint_output(first, n, result, n))
+      return result
+             + ::spectra::remove_copy_if(std::addressof(*first), static_cast<std::int32_t>(n),
+                                         ::spectra::stdpar::details::output_address(result), [pred](V x) { return pred(x); });
+  }
+  return std::remove_copy_if(first, last, result, pred);
+}
+
+template <class It, class T> It remove(execution::parallel_unsequenced_policy, It first, It last, T value) {
+  using V = ::spectra::stdpar::details::value_t<It>;
+  if constexpr (::spectra::stdpar::details::element_v<It> && std::is_same_v<T, V>) {
+    const auto n = last - first;
+    if (::spectra::stdpar::details::contiguous(first, n))
+      return first
+             + ::spectra::remove(std::addressof(*first), static_cast<std::int32_t>(n), value, [](V x, V y) -> bool { return x == y; });
+  }
+  return std::remove(first, last, value);
+}
+
+template <class It, class Pred> It remove_if(execution::parallel_unsequenced_policy, It first, It last, Pred pred) {
+  using V = ::spectra::stdpar::details::value_t<It>;
+  if constexpr (::spectra::stdpar::details::element_v<It> && ::spectra::stdpar::details::callable_v<bool, Pred, const V &>) {
+    const auto n = last - first;
+    if (::spectra::stdpar::details::contiguous(first, n))
+      return first + ::spectra::remove_if(std::addressof(*first), static_cast<std::int32_t>(n), [pred](V x) { return pred(x); });
+  }
+  return std::remove_if(first, last, pred);
+}
+
+template <class It, class Op = std::equal_to<>> It unique(execution::parallel_unsequenced_policy, It first, It last, Op op = {}) {
+  using V = ::spectra::stdpar::details::value_t<It>;
+  if constexpr (::spectra::stdpar::details::element_v<It> && ::spectra::stdpar::details::callable_v<bool, Op, const V &, const V &>) {
+    const auto n = last - first;
+    if (::spectra::stdpar::details::contiguous(first, n))
+      return first + ::spectra::unique(std::addressof(*first), static_cast<std::int32_t>(n), [op](V x, V y) { return op(x, y); });
+  }
+  return std::unique(first, last, op);
+}
+
+template <class It, class OutIt, class Op = std::equal_to<>>
+OutIt unique_copy(execution::parallel_unsequenced_policy, It first, It last, OutIt result, Op op = {}) {
+  using V = ::spectra::stdpar::details::value_t<It>;
+  if constexpr (::spectra::stdpar::details::same_output_v<It, OutIt>
+                && ::spectra::stdpar::details::callable_v<bool, Op, const V &, const V &>) {
+    const auto n = last - first;
+    if (::spectra::stdpar::details::disjoint_output(first, n, result, n))
+      return result
+             + ::spectra::unique_copy(std::addressof(*first), static_cast<std::int32_t>(n),
+                                      ::spectra::stdpar::details::output_address(result), [op](V x, V y) { return op(x, y); });
+  }
+  return std::unique_copy(first, last, result, op);
+}
+
+template <class It1, class It2, class OutIt, class Op = std::less<>>
+OutIt set_difference(execution::parallel_unsequenced_policy, It1 first1, It1 last1, It2 first2, It2 last2, OutIt result, Op op = {}) {
+  using V = ::spectra::stdpar::details::value_t<It1>;
+  if constexpr (::spectra::stdpar::details::same_element_v<It1, It2> && ::spectra::stdpar::details::same_output_v<It1, OutIt>
+                && ::spectra::stdpar::details::callable_v<bool, Op, const V &, const V &>) {
+    const auto n1 = last1 - first1;
+    const auto n2 = last2 - first2;
+    if (::spectra::stdpar::details::disjoint_output(first1, n1, result, n1)
+        && ::spectra::stdpar::details::disjoint_output(first2, n2, result, n1))
+      return result
+             + ::spectra::set_difference(std::addressof(*first1), static_cast<std::int32_t>(n1), std::addressof(*first2),
+                                         static_cast<std::int32_t>(n2), ::spectra::stdpar::details::output_address(result),
+                                         [op](V x, V y) { return op(x, y); });
+  }
+  return std::set_difference(first1, last1, first2, last2, result, op);
+}
+
+template <class It1, class It2, class OutIt, class Op = std::less<>>
+OutIt set_intersection(execution::parallel_unsequenced_policy, It1 first1, It1 last1, It2 first2, It2 last2, OutIt result, Op op = {}) {
+  using V = ::spectra::stdpar::details::value_t<It1>;
+  if constexpr (::spectra::stdpar::details::same_element_v<It1, It2> && ::spectra::stdpar::details::same_output_v<It1, OutIt>
+                && ::spectra::stdpar::details::callable_v<bool, Op, const V &, const V &>) {
+    const auto n1 = last1 - first1;
+    const auto n2 = last2 - first2;
+    const auto m = std::min<std::ptrdiff_t>(n1, n2);
+    if (::spectra::stdpar::details::disjoint_output(first1, n1, result, m)
+        && ::spectra::stdpar::details::disjoint_output(first2, n2, result, m))
+      return result
+             + ::spectra::set_intersection(std::addressof(*first1), static_cast<std::int32_t>(n1), std::addressof(*first2),
+                                           static_cast<std::int32_t>(n2), ::spectra::stdpar::details::output_address(result),
+                                           [op](V x, V y) { return op(x, y); });
+  }
+  return std::set_intersection(first1, last1, first2, last2, result, op);
+}
+
+template <class It1, class It2, class OutIt, class Op = std::less<>>
+OutIt set_union(execution::parallel_unsequenced_policy, It1 first1, It1 last1, It2 first2, It2 last2, OutIt result, Op op = {}) {
+  using V = ::spectra::stdpar::details::value_t<It1>;
+  if constexpr (::spectra::stdpar::details::same_element_v<It1, It2> && ::spectra::stdpar::details::same_output_v<It1, OutIt>
+                && ::spectra::stdpar::details::callable_v<bool, Op, const V &, const V &>) {
+    const auto n1 = last1 - first1;
+    const auto n2 = last2 - first2;
+    const auto m = n1 + n2;
+    if (::spectra::stdpar::details::disjoint_output(first1, n1, result, m)
+        && ::spectra::stdpar::details::disjoint_output(first2, n2, result, m))
+      return result
+             + ::spectra::set_union(std::addressof(*first1), static_cast<std::int32_t>(n1), std::addressof(*first2),
+                                    static_cast<std::int32_t>(n2), ::spectra::stdpar::details::output_address(result),
+                                    [op](V x, V y) { return op(x, y); });
+  }
+  return std::set_union(first1, last1, first2, last2, result, op);
+}
+
+} // namespace std

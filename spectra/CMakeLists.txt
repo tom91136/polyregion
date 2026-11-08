@@ -777,6 +777,8 @@ if(NOT SPECTRA_VENDOR_ONLY AND SPECTRA_ENABLE_PACKAGE_TESTS)
       set(_spectra_suite_tests ${_spectra_closure_tests})
     elseif(_spectra_suite_kind STREQUAL "stdpar")
       set(_spectra_suite_extra "POLYTEST_VAR+=:spectra_packages=${SPECTRA_PACKAGE_ROOT}\n")
+      set(_spectra_suite_stdpar
+          "{apple_target}-std=c++20 -fstdpar -fstdpar-mem=reflect -fstdpar-rt={stdpar_rt} -fstdpar-arch={spectra_arch}")
       set(_spectra_suite_tests ${_spectra_stdpar_tests})
     else()
       set(_spectra_suite_extra "POLYTEST_VAR+=:spectra_packages=${SPECTRA_PACKAGE_ROOT}\n")
