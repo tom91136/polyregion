@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cinttypes>
 #include <cstring>
+#include <iterator>
 #include <memory>
 #include <numeric>
 #include <string>
@@ -286,6 +287,9 @@ template <typename T>
 constexpr bool is_policy_v =
     std::is_same_v<T, std::execution::sequenced_policy> || std::is_same_v<T, std::execution::parallel_policy>
     || std::is_same_v<T, std::execution::parallel_unsequenced_policy> || std::is_same_v<T, std::execution::unsequenced_policy>;
+template <typename It>
+using random_access_t =
+    std::enable_if_t<std::is_base_of_v<std::random_access_iterator_tag, typename std::iterator_traits<It>::iterator_category>, int>;
 } // namespace polyregion::polystl::details
 
 #if __has_include(<polyregion/spectra/stdpar.hpp>)
@@ -374,6 +378,24 @@ T transform_reduce(execution::parallel_unsequenced_policy, ForwardIt first, Forw
   return polyregion::core::transform_reduce<T>(
       last - first, init, [transform, first](int64_t idx) -> T { return transform(*(first + idx)); },
       [reduce](T l, T r) -> T { return reduce(l, r); });
+}
+
+template <class ForwardIt, class T, polyregion::polystl::details::random_access_t<ForwardIt> = 0>
+T reduce(execution::parallel_unsequenced_policy, ForwardIt first, ForwardIt last, T init) {
+  return polyregion::core::transform_reduce<T>(
+      last - first, init, [first](int64_t idx) -> T { return *(first + idx); }, [](T l, T r) -> T { return l + r; });
+}
+
+template <class ForwardIt, polyregion::polystl::details::random_access_t<ForwardIt> = 0>
+typename std::iterator_traits<ForwardIt>::value_type reduce(execution::parallel_unsequenced_policy policy, ForwardIt first,
+                                                            ForwardIt last) {
+  return reduce(policy, first, last, typename std::iterator_traits<ForwardIt>::value_type{});
+}
+
+template <class ForwardIt, class T, class BinaryOp, polyregion::polystl::details::random_access_t<ForwardIt> = 0>
+T reduce(execution::parallel_unsequenced_policy, ForwardIt first, ForwardIt last, T init, BinaryOp op) {
+  return polyregion::core::transform_reduce<T>(
+      last - first, init, [first](int64_t idx) -> T { return *(first + idx); }, [op](T l, T r) -> T { return op(l, r); });
 }
 
 // Sequential fallbacks for par/seq/unseq when no stdlib <execution> is available.

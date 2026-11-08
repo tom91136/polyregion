@@ -125,10 +125,35 @@
 #pragma region do: {output}
 #pragma region requires: 8 5050
 
+#pragma region case: core-package-reduce
+#pragma region offload-only
+#pragma region do: {package_fixture} {output}.packages
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DREDUCE -fstdpar-library-path={output}.packages -o {output} {input}
+#pragma region stderr-count: 3 bound to polyregion.core
+#pragma region stderr-count: 0 uses the inline body
+#pragma region do: {output}
+#pragma region requires: 5050 5050 5050
+
+#pragma region case: core-package-reduce-list
+#pragma region offload-only
+#pragma region do: {package_fixture} {output}.packages
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DREDUCE_LIST -fstdpar-library-path={output}.packages -o {output} {input}
+#pragma region stderr-count: 0 bound to polyregion.core
+#pragma region do: {output}
+#pragma region requires: 5050
+
+#pragma region case: core-fallback-reduce
+#pragma region offload-only
+#pragma region do: POLYFRONT_LIBRARY_PATH= polycpp {polycpp_defaults} {polycpp_stdpar} -DREDUCE -o {output} {input}
+#pragma region stderr-count: 0 bound to polyregion.core
+#pragma region do: {output}
+#pragma region requires: 5050 5050 5050
+
 #include <algorithm>
 #include <array>
 #include <cstdio>
 #include <execution>
+#include <list>
 #include <numeric>
 #include <string>
 #include <vector>
@@ -317,6 +342,23 @@ int main() {
   const double total =
       std::transform_reduce(std::execution::par_unseq, ys.begin(), ys.end(), 0.0, std::plus<>(), [](double y) { return y * 2; });
   std::printf("%d %d %.1f", xs[7], sum, total);
+  return 0;
+}
+#elif defined(REDUCE_LIST)
+int main() {
+  std::list<int> xs(100);
+  std::iota(xs.begin(), xs.end(), 1);
+  std::printf("%d", std::reduce(std::execution::par_unseq, xs.begin(), xs.end()));
+  return 0;
+}
+#elif defined(REDUCE)
+int main() {
+  std::vector<int> xs(100);
+  std::iota(xs.begin(), xs.end(), 1);
+  const long a = std::reduce(std::execution::par_unseq, xs.begin(), xs.end(), 0L);
+  const int b = std::reduce(std::execution::par_unseq, xs.begin(), xs.end());
+  const int c = std::reduce(std::execution::par_unseq, xs.begin(), xs.end(), 0, std::plus<>());
+  std::printf("%ld %d %d", a, b, c);
   return 0;
 }
 #else
