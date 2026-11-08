@@ -7,6 +7,9 @@ defaults:
   run:
     shell: bash
 
+env:
+  APT_OPTIONS: -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
+
 jobs:
   pass-js:
     runs-on: ubuntu-24.04
@@ -25,9 +28,7 @@ jobs:
 
       - &setup-just
         name: Setup just
-        uses: taiki-e/install-action@v2
-        with:
-          tool: just
+        uses: ./.github/actions/setup-just
 
       - name: Build pass bundle (js)
         run: just build-pass-js
@@ -102,11 +103,11 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build qemu-user-static binfmt-support wget lsb-release software-properties-common gnupg
+          sudo apt-get ${{ env.APT_OPTIONS }} update
+          sudo apt-get ${{ env.APT_OPTIONS }} install -y cmake ninja-build qemu-user-static binfmt-support wget lsb-release software-properties-common gnupg
           # XXX stock clang 18 can't build LLVM 22's own libc++/libcxxabi (needs 19+); force-select
           # 20 via --set, the runner's pre-installed alternatives otherwise outrank a fresh --install.
-          wget -q https://apt.llvm.org/llvm.sh
+          curl -fsSL --retry 5 --retry-delay 30 --connect-timeout 30 --retry-all-errors -o llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
           sudo ./llvm.sh 20 all
           sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-20 100
@@ -220,10 +221,10 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build qemu-user-static binfmt-support wget lsb-release software-properties-common gnupg
+          sudo apt-get ${{ env.APT_OPTIONS }} update
+          sudo apt-get ${{ env.APT_OPTIONS }} install -y cmake ninja-build qemu-user-static binfmt-support wget lsb-release software-properties-common gnupg
           # XXX see build-llvm's Install dependencies step
-          wget -q https://apt.llvm.org/llvm.sh
+          curl -fsSL --retry 5 --retry-delay 30 --connect-timeout 30 --retry-all-errors -o llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
           sudo ./llvm.sh 20 all
           sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-20 100

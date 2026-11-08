@@ -14,9 +14,9 @@ ARG SWIFTSHADER_COMMIT=2843cbcc714fe111e1083127c048a18002bc10ed
 FROM almalinux:8 AS base
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-RUN dnf -y install epel-release dnf-plugins-core \
+RUN dnf -y --setopt=retries=5 --setopt=timeout=30 install epel-release dnf-plugins-core \
  && dnf config-manager --set-enabled powertools \
- && dnf -y install gcc-toolset-13 git make cmake ninja-build pkgconfig \
+ && dnf -y --setopt=retries=5 --setopt=timeout=30 install gcc-toolset-13 git make cmake ninja-build pkgconfig \
       python3.11 python3.11-pip flex bison wget xz tar which file patch \
       zlib-devel expat-devel libzstd-devel libffi-devel ncurses-devel \
       libxml2-devel libdrm-devel elfutils-libelf-devel \
@@ -75,7 +75,7 @@ ENV PKG_CONFIG_PATH=/opt/spirv/lib/pkgconfig:/opt/llvm/share/pkgconfig:/opt/llvm
 ARG BOOST_VERSION
 # XXX EL8's boost-static is non-PIC and cannot go into a DSO
 RUN BV_U=${BOOST_VERSION//./_} \
- && wget -q -O /tmp/boost.tar.gz https://archives.boost.io/release/${BOOST_VERSION}/source/boost_${BV_U}.tar.gz \
+ && curl -fsSL --retry 5 --retry-delay 30 --connect-timeout 30 --retry-connrefused -o /tmp/boost.tar.gz https://archives.boost.io/release/${BOOST_VERSION}/source/boost_${BV_U}.tar.gz \
  && tar -C /tmp -xf /tmp/boost.tar.gz && cd /tmp/boost_${BV_U} \
  && ./bootstrap.sh --prefix=/opt/boost --with-libraries=thread,filesystem,system,chrono,atomic,date_time \
  && ./b2 -j"$(nproc)" cxxflags=-fPIC cflags=-fPIC link=static runtime-link=shared threading=multi variant=release install \
@@ -83,7 +83,7 @@ RUN BV_U=${BOOST_VERSION//./_} \
 
 # Mesa = lavapipe (vk) + llvmpipe + rusticl
 FROM base AS mesa
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+RUN curl --proto '=https' --tlsv1.2 -sSfL --retry 5 --retry-delay 30 --connect-timeout 30 --retry-connrefused https://sh.rustup.rs \
       | sh -s -- -y --default-toolchain stable --profile minimal \
  && source "$HOME/.cargo/env" && rustup component add rustfmt \
  && cargo install --locked bindgen-cli
@@ -133,7 +133,7 @@ RUN git clone -b ${VULKAN_REF} --depth 1 https://github.com/KhronosGroup/Vulkan-
 FROM base AS icdloader
 ARG OPENCL_HEADERS_REF
 ARG OCL_ICD_REF
-RUN dnf install -y -q ruby autoconf automake libtool && dnf clean all
+RUN dnf --setopt=retries=5 --setopt=timeout=30 install -y -q ruby autoconf automake libtool && dnf clean all
 RUN git clone -b ${OPENCL_HEADERS_REF} --depth 1 https://github.com/KhronosGroup/OpenCL-Headers /src/ocl-h \
  && cmake -S /src/ocl-h -B /src/ocl-h/b -DCMAKE_INSTALL_PREFIX=/opt/ocl && cmake --install /src/ocl-h/b \
  && git clone -b ${OCL_ICD_REF} --depth 1 https://github.com/OCL-dev/ocl-icd /src/ocl-icd \
@@ -196,7 +196,7 @@ COPY --from=pocl     /opt/pocl     /opt/pocl
 COPY --from=ocelot   /src/gpuocelot/ocelot/build/libgpuocelot.so /opt/ocelot/libgpuocelot.so
 COPY --from=swiftshader /opt/swiftshader /opt/swiftshader
 COPY collect.sh /src/collect.sh
-RUN dnf install -y -q patchelf && bash /src/collect.sh
+RUN dnf --setopt=retries=5 --setopt=timeout=30 install -y -q patchelf && bash /src/collect.sh
 
 FROM export AS check
 COPY vecadd.cu vecadd.cl.cpp vecadd.vk.cpp run.sh /src/

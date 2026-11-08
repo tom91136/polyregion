@@ -6,6 +6,9 @@ on:
       shards:
         value: ${{ jobs.discover-shards.outputs.shards }}
 
+env:
+  HOMEBREW_CURL_RETRIES: 5
+
 jobs:
   build-llvm:
     strategy:
@@ -60,9 +63,7 @@ jobs:
 
       - &setup-just
         name: Setup just
-        uses: taiki-e/install-action@v2
-        with:
-          tool: just
+        uses: ./.github/actions/setup-just
 
       - name: Restore LLVM cache
         if: ${{ !env.ACT }}

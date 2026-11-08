@@ -7,6 +7,9 @@ defaults:
   run:
     shell: bash
 
+env:
+  APT_OPTIONS: -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
+
 jobs:
   test-native-misc:
     if: ${{ !cancelled() }}
@@ -41,15 +44,13 @@ jobs:
       - uses: &checkout actions/checkout@v6
       - &setup-just
         name: Setup just
-        uses: taiki-e/install-action@v2
-        with:
-          tool: just
+        uses: ./.github/actions/setup-just
 
       - &apt-qemu
         name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake qemu-user-static binfmt-support
+          sudo apt-get ${{ env.APT_OPTIONS }} update
+          sudo apt-get ${{ env.APT_OPTIONS }} install -y cmake qemu-user-static binfmt-support
 
       - &binfmt-register
         name: Register binfmt-misc for ${{ matrix.qemu_arch }}

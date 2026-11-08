@@ -16,9 +16,7 @@ jobs:
 
       - &setup-just
         name: Setup just
-        uses: taiki-e/install-action@v2
-        with:
-          tool: just
+        uses: ./.github/actions/setup-just
 
       - name: Test atomic vendor staging
         run: just test-vendor-staging

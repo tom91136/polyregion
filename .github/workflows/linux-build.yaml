@@ -13,6 +13,7 @@ defaults:
 env:
   # AL8 = glibc 2.28, gcc-toolset-12 libstdc++. Cross-only archs (riscv64, arm) live in cross-build.yaml.
   SYSROOT_VARIANT: al8
+  APT_OPTIONS: -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
 
 jobs:
   build-llvm:
@@ -61,8 +62,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build clang clang-tools lld llvm g++ gfortran libcrypt-dev libltdl-dev zlib1g-dev python3-requests
+          sudo apt-get ${{ env.APT_OPTIONS }} update
+          sudo apt-get ${{ env.APT_OPTIONS }} install -y cmake ninja-build clang clang-tools lld llvm g++ gfortran libcrypt-dev libltdl-dev zlib1g-dev python3-requests
 
       - name: Dotenv
         id: dotenv
@@ -77,9 +78,7 @@ jobs:
 
       - &setup-just
         name: Setup just
-        uses: taiki-e/install-action@v2
-        with:
-          tool: just
+        uses: ./.github/actions/setup-just
 
       - name: Restore sysroot cache
         if: ${{ !env.ACT }}
@@ -177,8 +176,8 @@ jobs:
       - name: Install dependencies
         # clang-tools provides clang-scan-deps (cmake >= 3.28 uses it for C++20 module deps).
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build clang clang-tools lld llvm g++ gfortran libcrypt-dev libltdl-dev zlib1g-dev python3-requests
+          sudo apt-get ${{ env.APT_OPTIONS }} update
+          sudo apt-get ${{ env.APT_OPTIONS }} install -y cmake ninja-build clang clang-tools lld llvm g++ gfortran libcrypt-dev libltdl-dev zlib1g-dev python3-requests
 
       - name: Setup JDK
         uses: actions/setup-java@v5

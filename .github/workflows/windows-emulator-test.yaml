@@ -69,9 +69,7 @@ jobs:
           }
       - &setup-just
         name: Setup just
-        uses: taiki-e/install-action@v2
-        with:
-          tool: just
+        uses: ./.github/actions/setup-just
       - name: Enable crash dumps (WER)
         shell: pwsh
         run: |

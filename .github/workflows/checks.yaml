@@ -3,6 +3,9 @@ name: Checks
 on:
   workflow_call:
 
+env:
+  APT_OPTIONS: -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
+
 jobs:
   check-codegen:
     runs-on: ubuntu-24.04
@@ -14,8 +17,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build gfortran
+          sudo apt-get ${{ env.APT_OPTIONS }} update
+          sudo apt-get ${{ env.APT_OPTIONS }} install -y cmake ninja-build gfortran
 
       - &setup-java
         name: Setup JDK + sbt cache
@@ -31,9 +34,7 @@ jobs:
 
       - &setup-just
         name: Setup just
-        uses: taiki-e/install-action@v2
-        with:
-          tool: just
+        uses: ./.github/actions/setup-just
 
       - name: Regenerate Scala-derived sources
         run: just _codegen-sbt

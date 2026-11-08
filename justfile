@@ -229,7 +229,7 @@ _actionlint:
         case "{{ arch() }}" in x86_64|amd64) a=amd64 ;; aarch64|arm64) a=arm64 ;; *) echo "unsupported arch: {{ arch() }}" >&2; exit 1 ;; esac
         url="https://github.com/rhysd/actionlint/releases/download/v{{ actionlint_version }}/actionlint_{{ actionlint_version }}_${os_token}_${a}.${ext}"
         echo "Fetching actionlint {{ actionlint_version }} from $url" >&2
-        curl -fsSL "$url" -o "$DIR/actionlint.$ext"
+        curl -fsSL --retry 5 --retry-delay 30 --connect-timeout 30 --retry-all-errors "$url" -o "$DIR/actionlint.$ext"
         (cd "$DIR" && tar xf "actionlint.$ext")
     fi
     echo "$BIN"
@@ -252,7 +252,7 @@ _clang-format:
         esac
         url="https://github.com/muttleyxd/clang-tools-static-binaries/releases/download/{{ clang_format_release }}/${asset}"
         echo "Fetching clang-format {{ clang_format_version }} from $url" >&2
-        curl -fsSL "$url" -o "$BIN"
+        curl -fsSL --retry 5 --retry-delay 30 --connect-timeout 30 --retry-all-errors "$url" -o "$BIN"
         chmod +x "$BIN"
     fi
     echo "$BIN"

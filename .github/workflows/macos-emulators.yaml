@@ -17,9 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Setup just
-        uses: taiki-e/install-action@v2
-        with:
-          tool: just
+        uses: ./.github/actions/setup-just
       - name: Pin the SDK to the selected Xcode
         run: echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
       - name: Restore emulators cache

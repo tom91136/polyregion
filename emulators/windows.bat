@@ -70,7 +70,7 @@ rem deps
 "%PY%" -m pip install -q --upgrade pip || exit /b 1
 "%PY%" -m pip install -q meson mako pyyaml packaging || exit /b 1
 if not exist "%WORK%\winflexbison\win_flex.exe" (
-  curl -fL -o "%WORK%\wfb.zip" "%WFB_URL%" || (echo WFB-DL-FAIL & exit /b 1)
+  curl -fL --retry 5 --retry-delay 30 --connect-timeout 30 --retry-all-errors -o "%WORK%\wfb.zip" "%WFB_URL%" || (echo WFB-DL-FAIL & exit /b 1)
   if not exist "%WORK%\winflexbison" mkdir "%WORK%\winflexbison"
   powershell -NoProfile -Command "Expand-Archive -Force -Path '%WORK%\wfb.zip' -DestinationPath '%WORK%\winflexbison'" || (echo WFB-EXTRACT-FAIL & exit /b 1)
 )
@@ -142,7 +142,7 @@ rem === gpuocelot -> nvcuda.dll (CUDA/PTX emulator; emulated device, LLVM link-t
 rem nasm: res_embed embeds configure.ocelot via incbin, which MSVC's assembler can't emit (x64 only)
 if "%ARM%"=="1" goto :nasm_done
 if exist "%WORK%\%NASM_DIR%\nasm.exe" goto :nasm_done
-curl -fL -o "%WORK%\nasm.zip" "%NASM_URL%" || (echo NASM-DL-FAIL & exit /b 1)
+curl -fL --retry 5 --retry-delay 30 --connect-timeout 30 --retry-all-errors -o "%WORK%\nasm.zip" "%NASM_URL%" || (echo NASM-DL-FAIL & exit /b 1)
 powershell -NoProfile -Command "Expand-Archive -Force -Path '%WORK%\nasm.zip' -DestinationPath '%WORK%'" || (echo NASM-EXTRACT-FAIL & exit /b 1)
 :nasm_done
 set "PATH=%WORK%\%NASM_DIR%;%PATH%"
@@ -150,7 +150,7 @@ set "PATH=%WORK%\%NASM_DIR%;%PATH%"
 rem boost (static MT) via clang-win: VS18 is too new for boost's msvc bootstrap toolset detection
 if exist "%WORK%\boost-prefix\lib\cmake" goto :boost_done
 if exist "%WORK%\boost-src\bootstrap.bat" goto :boost_have_src
-curl -fL -o "%WORK%\boost.tar.gz" "%BOOST_URL%" || (echo BOOST-DL-FAIL & exit /b 1)
+curl -fL --retry 5 --retry-delay 30 --connect-timeout 30 --retry-all-errors -o "%WORK%\boost.tar.gz" "%BOOST_URL%" || (echo BOOST-DL-FAIL & exit /b 1)
 pushd "%WORK%" & tar -xf boost.tar.gz || (popd & echo BOOST-UNTAR-FAIL & exit /b 1)
 ren "boost_%BOOST_U%" boost-src & popd
 :boost_have_src

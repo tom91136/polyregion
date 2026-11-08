@@ -6,7 +6,7 @@ target=$((ram * 4))
 
 zram_ready() {
   modprobe zram 2>/dev/null && return 0
-  apt-get install -y "linux-modules-extra-$(uname -r)" || return 1
+  apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y "linux-modules-extra-$(uname -r)" || return 1
   modprobe zram
 }
 

@@ -75,7 +75,7 @@ _clang-format:
         esac
         url="https://github.com/muttleyxd/clang-tools-static-binaries/releases/download/{{ clang_format_release }}/${asset}"
         echo "Fetching clang-format {{ clang_format_version }} from $url" >&2
-        curl -fsSL "$url" -o "$BIN"
+        curl -fsSL --retry 5 --retry-delay 30 --connect-timeout 30 --retry-all-errors "$url" -o "$BIN"
         chmod +x "$BIN"
     fi
     echo "$BIN"

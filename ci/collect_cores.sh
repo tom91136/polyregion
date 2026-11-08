@@ -23,7 +23,7 @@ mapfile -t cores < <(
 if [ ${#cores[@]} -eq 0 ]; then
   echo "no cores in $cores_dir"
 else
-  command -v gdb >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq gdb || true; }
+  command -v gdb >/dev/null || { sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -qq && sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y -qq gdb || true; }
   for c in "${cores[@]}"; do
     exe=${c#core.}
     exe=${exe%.*}

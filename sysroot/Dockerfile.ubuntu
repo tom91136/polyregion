@@ -3,7 +3,7 @@ FROM ${SYSBASE} AS staging
 ARG GCC_MAJOR=10
 ARG EXTRA_PKGS
 
-RUN apt-get -qq update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+RUN apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -qq update && DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends \
         libc6-dev libstdc++-${GCC_MAJOR}-dev libatomic1 libgfortran-${GCC_MAJOR}-dev \
         linux-libc-dev gcc-${GCC_MAJOR} g++-${GCC_MAJOR} gfortran-${GCC_MAJOR} \
         symlinks \

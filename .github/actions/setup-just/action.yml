@@ -1,0 +1,20 @@
+name: Setup just
+description: Install just, retrying once after a delay when the first attempt fails.
+
+runs:
+  using: composite
+  steps:
+    - id: first
+      continue-on-error: true
+      uses: taiki-e/install-action@v2
+      with:
+        tool: just
+
+    - if: steps.first.outcome == 'failure'
+      shell: bash
+      run: sleep 60
+
+    - if: steps.first.outcome == 'failure'
+      uses: taiki-e/install-action@v2
+      with:
+        tool: just

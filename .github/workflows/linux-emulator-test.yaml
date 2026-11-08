@@ -11,6 +11,9 @@ defaults:
   run:
     shell: bash
 
+env:
+  APT_OPTIONS: -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
+
 jobs:
   test-native-misc:
     if: ${{ !cancelled() }}
@@ -30,15 +33,13 @@ jobs:
 
       - &setup-just
         name: Setup just
-        uses: taiki-e/install-action@v2
-        with:
-          tool: just
+        uses: ./.github/actions/setup-just
 
       - &apt-cmake
         name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake
+          sudo apt-get ${{ env.APT_OPTIONS }} update
+          sudo apt-get ${{ env.APT_OPTIONS }} install -y cmake
 
       - name: Download dist
         if: ${{ !env.ACT }}
@@ -207,8 +208,8 @@ jobs:
       - *setup-just
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake git g++ libtbb-dev
+          sudo apt-get ${{ env.APT_OPTIONS }} update
+          sudo apt-get ${{ env.APT_OPTIONS }} install -y cmake git g++ libtbb-dev
 
       - name: Download dist
         if: ${{ !env.ACT }}
