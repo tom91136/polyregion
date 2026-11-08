@@ -1438,7 +1438,7 @@ void polyfc::rewriteFIR(clang::DiagnosticsEngine &diag, ModuleOp &m, std::vector
     return std::pair{std::move(moduleId), std::move(diagLoc)};
   };
 
-  llvm::StdThreadPool pool(llvm::hardware_concurrency(env::jobs(env::PolycJobs)));
+  llvm::StdThreadPool pool(llvm::hardware_concurrency(env::jobs(env::PolycJobs, 1)));
   std::unordered_map<Operation *, Rewriter::CoreSite> coreSites;
   if (core)
     m.walk([&](fir::DoLoopOp doLoop) {

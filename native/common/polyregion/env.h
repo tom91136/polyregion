@@ -7,13 +7,13 @@
 
 namespace polyregion::env {
 
-inline unsigned jobs(const char *name) {
+inline unsigned jobs(const char *name, const unsigned fallback = 0) {
   if (const char *value = std::getenv(name); value && *value) {
     char *end = nullptr;
     const auto parsed = std::strtoul(value, &end, 10);
     if (end != value && *end == '\0') return static_cast<unsigned>(parsed);
   }
-  return 0;
+  return fallback;
 }
 
 inline void put(const char *name, const char *value, bool replace) {

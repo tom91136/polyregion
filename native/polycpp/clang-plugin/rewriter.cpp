@@ -694,7 +694,7 @@ static void compileInterfaceCalls(const polyfront::Options &opts, clang::Compile
   for (size_t group = 0; group < groups.size(); ++group)
     for (const auto index : pending[group])
       tasks.push_back({group, index});
-  llvm::StdThreadPool pool(llvm::hardware_concurrency(env::jobs(env::PolycJobs)));
+  llvm::StdThreadPool pool(llvm::hardware_concurrency(env::jobs(env::PolycJobs, 1)));
   std::vector<std::shared_future<std::unique_ptr<CompileResult>>> futures;
   for (const auto &task : tasks)
     futures.emplace_back(
