@@ -159,6 +159,8 @@ jobs:
           echo '/var/lib/polyregion-cores/core.%E.%p' | sudo tee /proc/sys/kernel/core_pattern || true
 
       - name: Run emulator tests (${{ matrix.shard }})
+        env:
+          POLYTEST_REPRO_CHECK: ${{ matrix.arch == 'x86_64' && (startsWith(matrix.shard, 'host_') || startsWith(matrix.shard, 'cuda_')) && '1' || '0' }}
         run: |
           ulimit -c unlimited || true
           just test-native-dist emulators emulator-test-results-${{ matrix.shard }} -L "^${{ matrix.shard }}$" --no-tests=error

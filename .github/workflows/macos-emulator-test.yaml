@@ -145,6 +145,8 @@ jobs:
         run: just restore-exec-bits native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist
 
       - name: Run emulator tests (${{ matrix.shard }}, ${{ matrix.part }})
+        env:
+          POLYTEST_REPRO_CHECK: "0"
         run: |
           repeat=()
           if [[ "${{ matrix.arch }}" == "x86_64" ]]; then

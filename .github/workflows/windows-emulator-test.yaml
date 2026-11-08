@@ -163,6 +163,8 @@ jobs:
           } catch { Write-Host "WER setup skipped: $_" }
       - name: Run emulator tests (${{ matrix.shard }}, ${{ matrix.part }})
         shell: bash
+        env:
+          POLYTEST_REPRO_CHECK: ${{ matrix.arch == 'amd64' && startsWith(matrix.shard, 'host_') && '1' || '0' }}
         run: |
           just test-native-dist emulators emulator-test-results-${{ matrix.shard }}-${{ matrix.part }} -L "^${{ matrix.shard }}$" \
             ${{ matrix.part == 'rest' && '-E' || '-R' }} polycpp-offload- --no-tests=error
