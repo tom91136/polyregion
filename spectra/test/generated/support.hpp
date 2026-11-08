@@ -121,3 +121,8 @@ template <class A, class B> static bool sameSeq(const A &a, const B &b, int n) {
     if (a[i] != b[i]) return false;
   return true;
 }
+template <class A, class T> static bool tailIs(const A &a, int from, const T &value) {
+  for (int i = from; i < (int)a.size(); ++i)
+    if (a[i] != value) return false;
+  return true;
+}

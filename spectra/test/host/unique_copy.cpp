@@ -21,7 +21,7 @@ template <class T> static bool run(const char *scenario, int n) {
     if (ref.empty() || ref.back() != in[i]) ref.push_back(in[i]);
   const auto eq = [] SPECTRA_TEST_FN(T a, T b) { return bool(a == b); };
   const int __r = spectra::host::unique_copy<T>(in.data(), n, out.data(), eq);
-  const bool ok = __r == (int)ref.size() && sameSeq(out, ref, __r);
+  const bool ok = __r == (int)ref.size() && sameSeq(out, ref, __r) && tailIs(out, __r, T(-1));
   std::fprintf(stderr, "  %-24s<%-18s> %s\n", "unique_copy", scenario, ok ? "OK" : "MISMATCH");
   return ok;
 }
@@ -35,7 +35,21 @@ template <class T> static bool run_captured(const char *scenario, int n) {
   const bool live = n >= 0;
   const auto eq = [live] SPECTRA_TEST_FN(T a, T b) { return live ? bool(a == b) : bool(a == b); };
   const int __r = spectra::host::unique_copy<T>(in.data(), n, out.data(), eq);
-  const bool ok = __r == (int)ref.size() && sameSeq(out, ref, __r);
+  const bool ok = __r == (int)ref.size() && sameSeq(out, ref, __r) && tailIs(out, __r, T(-1));
+  std::fprintf(stderr, "  %-24s<%-18s> %s\n", "unique_copy", scenario, ok ? "OK" : "MISMATCH");
+  return ok;
+}
+
+template <class T> static bool run_exact(const char *scenario, int n) {
+  spectra_test_vector<T> in(n), out(n, T(-1)), ref;
+  for (int i = 0; i < n; ++i)
+    in[i] = T(i / 4);
+  for (int i = 0; i < n; ++i)
+    if (ref.empty() || ref.back() != in[i]) ref.push_back(in[i]);
+  out = spectra_test_vector<T>(ref.size(), T(-1));
+  const auto eq = [] SPECTRA_TEST_FN(T a, T b) { return bool(a == b); };
+  const int __r = spectra::host::unique_copy<T>(in.data(), n, out.data(), eq);
+  const bool ok = __r == (int)ref.size() && sameSeq(out, ref, __r) && tailIs(out, __r, T(-1));
   std::fprintf(stderr, "  %-24s<%-18s> %s\n", "unique_copy", scenario, ok ? "OK" : "MISMATCH");
   return ok;
 }
@@ -46,6 +60,7 @@ int main() {
   ok &= run<spectra_test_value8>("w8/n200", 200);
   ok &= run<spectra_test_value12>("w12/n200", 200);
   ok &= run_captured<spectra_test_value4>("w4/n200/captured", 200);
+  ok &= run_exact<spectra_test_value4>("w4/n200/exact", 200);
   std::printf("%s", ok ? "pass" : "fail");
   return ok ? 0 : 1;
 }

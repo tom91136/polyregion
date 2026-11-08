@@ -4433,6 +4433,24 @@ POLYREGION_EXPORT bool ArgSizeExpr::Min::operator<(const Base &rhs_) const { ret
 ArgSizeExpr::Min::operator ArgSizeExpr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Min>(*this)); }
 ArgSizeExpr::Any ArgSizeExpr::Min::widen() const { return Any(*this); };
 
+ArgSizeExpr::Result::Result(ArgSizeExpr::Any bound) noexcept : ArgSizeExpr::Base(), bound(std::move(bound)) {}
+uint32_t ArgSizeExpr::Result::id() const { return variant_id; };
+size_t ArgSizeExpr::Result::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(bound)>()(bound) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+ArgSizeExpr::Result ArgSizeExpr::Result::withBound(const ArgSizeExpr::Any &v_) const { return ArgSizeExpr::Result(v_); }
+POLYREGION_EXPORT bool ArgSizeExpr::Result::operator==(const ArgSizeExpr::Result &rhs) const { return (this->bound == rhs.bound); }
+POLYREGION_EXPORT bool ArgSizeExpr::Result::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const ArgSizeExpr::Result &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+POLYREGION_EXPORT bool ArgSizeExpr::Result::operator<(const ArgSizeExpr::Result &rhs) const { return false; }
+POLYREGION_EXPORT bool ArgSizeExpr::Result::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+ArgSizeExpr::Result::operator ArgSizeExpr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Result>(*this)); }
+ArgSizeExpr::Any ArgSizeExpr::Result::widen() const { return Any(*this); };
+
 ArgExtent::Base::Base() = default;
 uint32_t ArgExtent::Any::id() const { return _v->id(); }
 size_t ArgExtent::Any::hash_code() const { return _v->hash_code(); }
@@ -5846,6 +5864,10 @@ std::size_t std::hash<polyregion::polyast::ArgSizeExpr::Mul>::operator()(const p
   return x.hash_code();
 }
 std::size_t std::hash<polyregion::polyast::ArgSizeExpr::Min>::operator()(const polyregion::polyast::ArgSizeExpr::Min &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t
+std::hash<polyregion::polyast::ArgSizeExpr::Result>::operator()(const polyregion::polyast::ArgSizeExpr::Result &x) const noexcept {
   return x.hash_code();
 }
 std::size_t std::hash<polyregion::polyast::ArgExtent::Any>::operator()(const polyregion::polyast::ArgExtent::Any &x) const noexcept {

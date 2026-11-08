@@ -232,6 +232,75 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
     )
   }
 
+  test("result-bounded extents validate against access, return type, and position") {
+    val pointer = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global)
+    def declaration(access: p.Arg.Access, size: p.Arg.SizeExpr, rtn: p.Type) = p.FunctionDecl(
+      p.Sym("library.filter"),
+      Nil,
+      None,
+      List(
+        p.Arg(
+          p.Named("out", pointer),
+          boundary = Some(p.Arg.Boundary(access, p.Arg.Extent.Elements(size)))
+        ),
+        p.Arg(p.Named("n", p.Type.IntS32))
+      ),
+      Nil,
+      Nil,
+      rtn,
+      p.Function.Affinity.Host
+    )
+    val result = p.Arg.SizeExpr.Result(p.Arg.SizeExpr.Param(1))
+
+    assertEquals(declaration(p.Arg.Access.Write, result, p.Type.IntS32).validate, Nil)
+    assert(declaration(p.Arg.Access.ReadWrite, result, p.Type.IntS32).validate.exists(_.contains("not write-only")))
+    assert(declaration(p.Arg.Access.Read, result, p.Type.IntS32).validate.exists(_.contains("not write-only")))
+    assert(declaration(p.Arg.Access.Write, result, p.Type.Unit0).validate.exists(_.contains("integral return type")))
+    assert(declaration(p.Arg.Access.Write, result, p.Type.Bool1).validate.exists(_.contains("integral return type")))
+    assert(
+      declaration(p.Arg.Access.Write, p.Arg.SizeExpr.Min(result, p.Arg.SizeExpr.Const(8)), p.Type.IntS32).validate
+        .exists(_.contains("not the outermost"))
+    )
+    assert(
+      declaration(p.Arg.Access.Write, p.Arg.SizeExpr.Result(result), p.Type.IntS32).validate
+        .exists(_.contains("not the outermost"))
+    )
+    assert(
+      declaration(p.Arg.Access.Write, p.Arg.SizeExpr.Result(p.Arg.SizeExpr.Param(7)), p.Type.IntS32).validate
+        .exists(_.contains("out of range"))
+    )
+  }
+
+  test("remapping arguments rewrites the bound of a result-bounded extent") {
+    val pointer = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global)
+    val dropped = p.Arg(p.Named("unused", p.Type.IntS32))
+    val count   = p.Arg(p.Named("n", p.Type.IntS32))
+    val out = p.Arg(
+      p.Named("out", pointer),
+      boundary = Some(
+        p.Arg.Boundary(
+          p.Arg.Access.Write,
+          p.Arg.Extent.Elements(p.Arg.SizeExpr.Result(p.Arg.SizeExpr.Param(2)))
+        )
+      )
+    )
+    val decl = p.FunctionDecl(
+      p.Sym("library.filter"),
+      Nil,
+      None,
+      List(dropped, out, count),
+      Nil,
+      Nil,
+      p.Type.IntS32,
+      p.Function.Affinity.Host
+    )
+    val remapped = decl.remapArgs(List(out, count))
+    assertEquals(
+      remapped.args.head.boundary.map(_.extent),
+      Some(p.Arg.Extent.Elements(p.Arg.SizeExpr.Result(p.Arg.SizeExpr.Param(1))))
+    )
+  }
+
   test("declaration validation rejects non-pointer boundaries and invalid extents") {
     val decl            = transformDecl
     val invalidBoundary = decl.copy(args = decl.args.updated(2, decl.args(2).copy(boundary = decl.args.head.boundary)))

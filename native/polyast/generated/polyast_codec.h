@@ -491,6 +491,8 @@ namespace ArgSizeExpr {
 [[nodiscard]] POLYREGION_EXPORT json mul_to_json(const ArgSizeExpr::Mul &);
 [[nodiscard]] POLYREGION_EXPORT ArgSizeExpr::Min min_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json min_to_json(const ArgSizeExpr::Min &);
+[[nodiscard]] POLYREGION_EXPORT ArgSizeExpr::Result result_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json result_to_json(const ArgSizeExpr::Result &);
 [[nodiscard]] POLYREGION_EXPORT ArgSizeExpr::Any any_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json any_to_json(const ArgSizeExpr::Any &);
 } // namespace ArgSizeExpr

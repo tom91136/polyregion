@@ -261,7 +261,7 @@ extension (decl: p.FunctionDecl) {
     )
     errors ++= validateCallableBinders(decl.rtn, "return")
 
-    def validateSize(expr: p.Arg.SizeExpr, owner: String): Unit = expr match {
+    def validateSize(expr: p.Arg.SizeExpr, owner: String, top: Boolean = false): Unit = expr match {
       case p.Arg.SizeExpr.Param(index) if index < 0 || index >= decl.args.size =>
         errors += s"$owner extent parameter $index is out of range for ${decl.args.size} arguments"
       case p.Arg.SizeExpr.Param(index) =>
@@ -280,6 +280,11 @@ extension (decl: p.FunctionDecl) {
       case p.Arg.SizeExpr.Min(lhs, rhs) =>
         validateSize(lhs, owner)
         validateSize(rhs, owner)
+      case p.Arg.SizeExpr.Result(bound) =>
+        if (!top) errors += s"$owner result-bounded extent is not the outermost size expression"
+        if (decl.rtn.kind != p.Type.Kind.Integral || decl.rtn == p.Type.Bool1)
+          errors += s"$owner result-bounded extent needs an integral return type, got ${decl.rtn.repr}"
+        validateSize(bound, owner)
     }
 
     def validateBoundary(arg: p.Arg): Unit = arg.boundary.foreach { boundary =>
@@ -289,10 +294,13 @@ extension (decl: p.FunctionDecl) {
         case p.Type.Ptr(_, _) => ()
         case other            => errors += s"argument `${arg.named.symbol}` has a boundary but is not a pointer: $other"
       }
-      boundary.extent match {
-        case p.Arg.Extent.Elements(size) => validateSize(size, s"argument `${arg.named.symbol}`")
-        case p.Arg.Extent.Bytes(size)    => validateSize(size, s"argument `${arg.named.symbol}`")
+      val size = boundary.extent match {
+        case p.Arg.Extent.Elements(size) => size
+        case p.Arg.Extent.Bytes(size)    => size
       }
+      validateSize(size, s"argument `${arg.named.symbol}`", top = true)
+      if (size.isInstanceOf[p.Arg.SizeExpr.Result] && boundary.access != p.Arg.Access.Write)
+        errors += s"argument `${arg.named.symbol}` has a result-bounded extent but is not write-only"
     }
 
     decl.receiver.foreach(validateBoundary)
@@ -341,6 +349,7 @@ extension (decl: p.FunctionDecl) {
       case p.Arg.SizeExpr.Add(lhs, rhs) => p.Arg.SizeExpr.Add(remapSize(lhs), remapSize(rhs))
       case p.Arg.SizeExpr.Mul(lhs, rhs) => p.Arg.SizeExpr.Mul(remapSize(lhs), remapSize(rhs))
       case p.Arg.SizeExpr.Min(lhs, rhs) => p.Arg.SizeExpr.Min(remapSize(lhs), remapSize(rhs))
+      case p.Arg.SizeExpr.Result(bound) => p.Arg.SizeExpr.Result(remapSize(bound))
     }
 
     def remapArg(arg: p.Arg): p.Arg = arg.copy(boundary = arg.boundary.map { boundary =>

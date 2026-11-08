@@ -116,6 +116,20 @@ TEST_CASE("Type::FnRef survives a msgpack round trip") {
   CHECK(!calleeSym(Expr::Invoke(Type::Var("F"), {}, {}, {}, Type::IntS32())));
 }
 
+TEST_CASE("Result-bounded extents survive a msgpack round trip") {
+  const auto extent = ArgExtent::Elements(ArgSizeExpr::Result(ArgSizeExpr::Add(ArgSizeExpr::Param(1), ArgSizeExpr::Const(2))));
+  const auto declaration =
+      FunctionDecl(Sym({"vendor", "filter"}), {Type::Var("T")}, {},
+                   {Arg(Named("out", Type::Ptr(Type::Var("T"), TypeSpace::Global())), {}, ArgBoundary(ArgAccess::Write(), extent)),
+                    Arg(Named("size", Type::IntS32()), {})},
+                   {}, {}, Type::IntS32(), FunctionAffinity::Host());
+  const auto package = Package(Interface(Sym({"vendor"}), {declaration}, {}), Program({}, {}, {}, PassPhase::Initial(), {}));
+
+  const auto decoded = package_from_msgpack(package_to_msgpack(package));
+  CHECK(decoded == package);
+  CHECK(decoded.interface.declarations.front().args.front().boundary->extent == extent);
+}
+
 TEST_CASE("Interface packages and GPU operations survive a msgpack round trip") {
   const auto element = Type::Var("Element", 4);
   const auto pointer = Type::Ptr(element, TypeSpace::Global()).widen();

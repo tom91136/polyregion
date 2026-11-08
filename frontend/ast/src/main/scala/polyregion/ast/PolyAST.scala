@@ -429,6 +429,7 @@ object PolyAST {
       case Add(lhs: SizeExpr, rhs: SizeExpr)
       case Mul(lhs: SizeExpr, rhs: SizeExpr)
       case Min(lhs: SizeExpr, rhs: SizeExpr)
+      case Result(bound: SizeExpr)
     }
 
     enum Extent derives MsgPack.Codec {
@@ -1239,6 +1240,7 @@ object PolyAST {
       case Arg.SizeExpr.Add(lhs, rhs) => s"(${lhs.repr} + ${rhs.repr})"
       case Arg.SizeExpr.Mul(lhs, rhs) => s"(${lhs.repr} * ${rhs.repr})"
       case Arg.SizeExpr.Min(lhs, rhs) => s"min(${lhs.repr}, ${rhs.repr})"
+      case Arg.SizeExpr.Result(bound) => s"min(result, ${bound.repr})"
     }
   }
 

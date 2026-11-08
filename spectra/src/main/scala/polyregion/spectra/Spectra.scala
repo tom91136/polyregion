@@ -12,6 +12,7 @@ object Spectra {
   private def param(index: Int): p.Arg.SizeExpr            = p.Arg.SizeExpr.Param(index)
   private def sum(lhs: Int, rhs: Int): p.Arg.SizeExpr      = p.Arg.SizeExpr.Add(param(lhs), param(rhs))
   private def min(lhs: Int, rhs: Int): p.Arg.SizeExpr      = p.Arg.SizeExpr.Min(param(lhs), param(rhs))
+  private def result(size: p.Arg.SizeExpr): p.Arg.SizeExpr = p.Arg.SizeExpr.Result(size)
   private def elements(size: p.Arg.SizeExpr): p.Arg.Extent = p.Arg.Extent.Elements(size)
 
   private def buffer(
@@ -146,7 +147,7 @@ object Spectra {
         count("na"),
         read("b", size = param(3)),
         count("nb"),
-        write("out", size = param(1)),
+        write("out", size = result(param(1))),
         callable("op", List(t, t), p.Type.Bool1)
       ),
       p.Type.IntS32
@@ -159,7 +160,7 @@ object Spectra {
         count("na"),
         read("b", size = param(3)),
         count("nb"),
-        write("out", size = min(1, 3)),
+        write("out", size = result(min(1, 3))),
         callable("op", List(t, t), p.Type.Bool1)
       ),
       p.Type.IntS32
@@ -172,7 +173,7 @@ object Spectra {
         count("na"),
         read("b", size = param(3)),
         count("nb"),
-        write("out", size = sum(1, 3)),
+        write("out", size = result(sum(1, 3))),
         callable("op", List(t, t), p.Type.Bool1)
       ),
       p.Type.IntS32
@@ -195,7 +196,7 @@ object Spectra {
       List(
         read("in", size = param(1)),
         count("n"),
-        write("out", size = param(1)),
+        write("out", size = result(param(1))),
         callable("op", List(t), p.Type.Bool1)
       ),
       p.Type.IntS32
@@ -206,7 +207,7 @@ object Spectra {
       List(
         read("in", size = param(1)),
         count("n"),
-        write("out", size = param(1)),
+        write("out", size = result(param(1))),
         callable("op", List(t), p.Type.Bool1)
       ),
       p.Type.IntS32
@@ -217,7 +218,7 @@ object Spectra {
       List(
         read("in", size = param(1)),
         count("n"),
-        write("out", size = param(1)),
+        write("out", size = result(param(1))),
         callable("eq", List(t, t), p.Type.Bool1)
       ),
       p.Type.IntS32
@@ -574,7 +575,7 @@ object Spectra {
       List(
         read("in", size = param(1)),
         count("n"),
-        write("out", size = param(1)),
+        write("out", size = result(param(1))),
         scalar("value"),
         callable("eq", List(t, t), p.Type.Bool1)
       ),

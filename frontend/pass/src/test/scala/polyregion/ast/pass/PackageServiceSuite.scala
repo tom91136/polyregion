@@ -556,6 +556,107 @@ class PackageServiceSuite extends munit.FunSuite {
     assertEquals(freedBy(inner), List("remote1"))
   }
 
+  test("result-bounded outputs download exactly the returned count and upload nothing") {
+    val name    = p.Sym("library.filter")
+    val pointer = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global)
+    val public = p.FunctionDecl(
+      name,
+      Nil,
+      None,
+      List(
+        p.Arg(
+          p.Named("in", pointer),
+          boundary = Some(p.Arg.Boundary(p.Arg.Access.Read, p.Arg.Extent.Elements(p.Arg.SizeExpr.Param(2))))
+        ),
+        p.Arg(
+          p.Named("out", pointer),
+          boundary = Some(
+            p.Arg.Boundary(
+              p.Arg.Access.Write,
+              p.Arg.Extent.Elements(p.Arg.SizeExpr.Result(p.Arg.SizeExpr.Param(2)))
+            )
+          )
+        ),
+        p.Arg(p.Named("n", p.Type.IntS32))
+      ),
+      Nil,
+      Nil,
+      p.Type.IntS32,
+      p.Function.Affinity.Host
+    )
+    val implementation = function(
+      public.copy(
+        name = p.Sym("implementation.filter"),
+        args = p.Arg(p.Named("#context", p.Spec.ContextType)) :: public.args.map(arg =>
+          arg.copy(boundary = arg.boundary.map { boundary =>
+            boundary.copy(extent = boundary.extent match {
+              case p.Arg.Extent.Elements(p.Arg.SizeExpr.Result(_)) =>
+                p.Arg.Extent.Elements(p.Arg.SizeExpr.Result(p.Arg.SizeExpr.Param(3)))
+              case _ => p.Arg.Extent.Elements(p.Arg.SizeExpr.Param(3))
+            })
+          })
+        )
+      ),
+      implements = Some(name),
+      visibility = p.Function.Visibility.Exported
+    )
+    val root = function(
+      public.copy(name = p.Sym("consumer.filter")),
+      body = Nil,
+      implements = Some(name),
+      visibility = p.Function.Visibility.Exported
+    )
+    val linked = ProgramLinker.link(
+      p.Program.LinkRequest(
+        List(p.Package(p.Interface(p.Sym("library"), List(public)), p.Program(None, List(implementation), Nil))),
+        p.Program(None, List(root), Nil),
+        typeSizes = List(p.Program.TypeSize(p.Type.IntS32, 4))
+      )
+    )
+
+    assert(linked.isRight, linked)
+    val entry = (linked.toOption.get.entry.toList ::: linked.toOption.get.functions).find(_.name == root.name).get
+    val copies = entry.body.flatMap(_.collectAll[p.Expr]).collect {
+      case p.Expr.SpecOp(p.Spec.RemoteMemcpy(_, _, _, count, direction)) => (direction, count)
+    }
+    val uploads   = copies.collect { case (p.Direction.LocalToRemote, count) => count }
+    val downloads = copies.collect { case (p.Direction.RemoteToLocal, count) => count }
+    assertEquals(uploads.size, 1)
+    assertEquals(downloads.size, 1)
+    val definitions = entry.body
+      .flatMap(_.collectAll[p.Stmt])
+      .collect { case p.Stmt.Var(named, Some(expr), _) =>
+        named.symbol -> expr
+      }
+      .toMap
+    val downloadCount = downloads.head match {
+      case p.Term.Select(named, Nil, _) => named.symbol
+      case other                        => fail(s"unexpected download count $other")
+    }
+    assert(downloadCount.startsWith("downloadBytes"), downloadCount)
+    val clamped = definitions(downloadCount) match {
+      case p.Expr.IntrOp(p.Intr.Mul(p.Term.Select(named, Nil, _), p.Term.IntU64Const(4), _)) => named.symbol
+      case other => fail(s"unexpected download scaling $other")
+    }
+    assert(clamped.startsWith("returnedBound"), clamped)
+    assert(definitions(clamped) match {
+      case p.Expr.IntrOp(p.Intr.Min(_, _, p.Type.IntU64)) => true
+      case _                                              => false
+    })
+    assert(definitions.exists { (symbol, expr) =>
+      symbol.startsWith("returned") && (expr match {
+        case p.Expr.Index(p.Term.Select(p.Named("result", _, _), Nil, _), _, _) => true
+        case _                                                                  => false
+      })
+    })
+    assertNotEquals(uploads.head, downloads.head)
+    val allocationCounts = entry.body.flatMap(_.collectAll[p.Expr]).collect {
+      case p.Expr.SpecOp(p.Spec.RemoteTempAlloc(_, count)) => count
+    }
+    assertEquals(allocationCounts.size, 2)
+    assert(!allocationCounts.contains(downloads.head))
+  }
+
   test("program linking uses the canonical result-address ABI for an erased frontend result") {
     val name = p.Sym("library.increment")
     val public = p.FunctionDecl(

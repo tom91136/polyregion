@@ -661,6 +661,9 @@ std::string repr(const ArgSizeExpr::Any &s) {
     if (auto _x = s.get<ArgSizeExpr::Min>()) {
       return fmt::format("min({}, {})", repr(_x->lhs), repr(_x->rhs));
     }
+    if (auto _x = s.get<ArgSizeExpr::Result>()) {
+      return fmt::format("min(result, {})", repr(_x->bound));
+    }
 
     throw std::logic_error(fmt::format("Unhandled match case for s (of type ArgSizeExpr::Any) at {}:{})", __FILE__, __LINE__));
   }();

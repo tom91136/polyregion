@@ -50,6 +50,15 @@ private[spectra] object SpectraTestCodeGen {
     "adjacent_difference"
   )
   private val emptySizeAlgorithms = Set("min_element", "max_element", "minmax_element")
+  private val resultBoundedAlgorithms = Set(
+    "copy_if",
+    "remove_copy",
+    "remove_copy_if",
+    "unique_copy",
+    "set_difference",
+    "set_intersection",
+    "set_union"
+  )
   private val multiGroupAlgorithms =
     Set("find", "inclusive_scan", "exclusive_scan", "transform_inclusive_scan", "transform_exclusive_scan")
 
@@ -192,6 +201,11 @@ private[spectra] object SpectraTestCodeGen {
       #  for (int i = 0; i < n; ++i)
       #    if (a[i] != b[i]) return false;
       #  return true;
+      #}
+      #template <class A, class T> static bool tailIs(const A &a, int from, const T &value) {
+      #  for (int i = from; i < (int)a.size(); ++i)
+      #    if (a[i] != value) return false;
+      #  return true;
       #}""".stripMargin('#')
 
   private def cppTestHeader: String =
@@ -286,7 +300,7 @@ private[spectra] object SpectraTestCodeGen {
   private def callableArgs(decl: p.FunctionDecl): List[p.Arg] =
     decl.args.collect { case arg @ p.Arg(p.Named(_, _: p.Type.Exec, _), _, _) => arg }
 
-  private def cppTestRun(decl: p.FunctionDecl, captured: Boolean, api: String): String = {
+  private def cppTestRun(decl: p.FunctionDecl, captured: Boolean, exact: Boolean, api: String): String = {
     val name = decl.name.last
     val sem  = oracles.getOrElse(name, sys.error(s"no test oracle for algo '$name'"))
     val fns  = callableArgs(decl)
@@ -304,9 +318,12 @@ private[spectra] object SpectraTestCodeGen {
         )
       )
       .mkString("\n")
-    val (runName, live) = if (captured) ("run_captured", "\n  const bool live = n >= 0;") else ("run", "")
-    val templateParams  = decl.tpeVars.map(variable => s"class ${variable.name}").mkString(", ")
-    val templateArgs    = decl.tpeVars.map(_.name).mkString(", ")
+    val (runName, live) =
+      if (captured) ("run_captured", "\n  const bool live = n >= 0;")
+      else if (exact) ("run_exact", "\n  out = spectra_test_vector<T>(ref.size(), T(-1));")
+      else ("run", "")
+    val templateParams = decl.tpeVars.map(variable => s"class ${variable.name}").mkString(", ")
+    val templateArgs   = decl.tpeVars.map(_.name).mkString(", ")
     val call =
       s"  ${cppTestRetCap(decl.rtn)}$api::$name<$templateArgs>(${decl.args.map(cppTestCallArg).mkString(", ")});"
     s"""template <$templateParams> static bool $runName(const char *scenario, int n) {
@@ -349,10 +366,16 @@ private[spectra] object SpectraTestCodeGen {
         (sem.n :: testSizes(name, sem.n).maxOption.toList).map(n =>
           s"  ok &= run_captured<${baseline.types.mkString(", ")}>(\"${baseline.label}/n$n/captured\", $n);"
         )
-    val runs =
-      if (callableArgs(decl).isEmpty) cppTestRun(decl, captured = false, kind.api)
-      else s"${cppTestRun(decl, captured = false, kind.api)}\n\n${cppTestRun(decl, captured = true, kind.api)}"
-    val calls = (typeCalls ++ sizeCalls ++ capturedCalls).mkString("\n")
+    val exactCalls =
+      if (resultBoundedAlgorithms(name))
+        List(s"  ok &= run_exact<${baseline.types.mkString(", ")}>(\"${baseline.label}/n${sem.n}/exact\", ${sem.n});")
+      else Nil
+    val runs = List(
+      Some(cppTestRun(decl, captured = false, exact = false, kind.api)),
+      Option.when(callableArgs(decl).nonEmpty)(cppTestRun(decl, captured = true, exact = false, kind.api)),
+      Option.when(resultBoundedAlgorithms(name))(cppTestRun(decl, captured = false, exact = true, kind.api))
+    ).flatten.mkString("\n\n")
+    val calls = (typeCalls ++ sizeCalls ++ capturedCalls ++ exactCalls).mkString("\n")
     val directives = List(s"case: $name") ++ Option.when(kind == CaseKind.Offload)("offload-only") ++ List(
       "do: polycpp {spectra_stdpar} -o {output} {input}",
       "do: {output}",
@@ -582,10 +605,10 @@ private[spectra] object SpectraTestCodeGen {
   }
 
   private def cppSurfaceCall(decl: p.FunctionDecl): String = {
-    val mapping   = surfaceMapping(decl)
-    val profile   = surfaceProfile(decl, mapping)
-    val comment   = Option.when(profile.nonEmpty)(s"  // ${decl.name.last}: $profile\n").getOrElse("")
-    val templates = decl.tpeVars.map(variable => mapping(variable.name).cppType).mkString(", ")
+    val mapping                    = surfaceMapping(decl)
+    val profile                    = surfaceProfile(decl, mapping)
+    val comment                    = Option.when(profile.nonEmpty)(s"  // ${decl.name.last}: $profile\n").getOrElse("")
+    val templates                  = decl.tpeVars.map(variable => mapping(variable.name).cppType).mkString(", ")
     def buffer(arg: p.Arg): String = s"${decl.name.last}_${arg.named.symbol}"
     // merge-like outputs need room for both inputs, and no two arguments may alias
     val buffers = decl.args.flatMap { arg =>
@@ -982,7 +1005,7 @@ private[spectra] object SpectraTestCodeGen {
       ),
       Map("op" -> "(long long)(x) % 2 == 0"),
       CppBlock(
-        """const bool ok = __r == (int)ref.size() && __r >= 0 && __r <= n && sameSeq(out, ref, __r);
+        """const bool ok = __r == (int)ref.size() && __r >= 0 && __r <= n && sameSeq(out, ref, __r) && tailIs(out, __r, T(-1));
           |if (!ok) {
           |  std::printf(" result=%d expected=%d out:", __r, (int)ref.size());
           |  for (int i = 0; i < 8 && i < n; ++i)
@@ -1004,7 +1027,7 @@ private[spectra] object SpectraTestCodeGen {
           |  if (!((long long)(in[i]) % 2 == 0)) ref.push_back(in[i]);""".stripMargin
       ),
       Map("op" -> "(long long)(x) % 2 == 0"),
-      CppBlock("const bool ok = __r == (int)ref.size() && sameSeq(out, ref, __r);")
+      CppBlock("const bool ok = __r == (int)ref.size() && sameSeq(out, ref, __r) && tailIs(out, __r, T(-1));")
     ),
     "remove_if" -> SemanticCase(
       200,
@@ -1040,7 +1063,7 @@ private[spectra] object SpectraTestCodeGen {
           |  if (ref.empty() || ref.back() != in[i]) ref.push_back(in[i]);""".stripMargin
       ),
       Map("eq" -> "a == b"),
-      CppBlock("const bool ok = __r == (int)ref.size() && sameSeq(out, ref, __r);")
+      CppBlock("const bool ok = __r == (int)ref.size() && sameSeq(out, ref, __r) && tailIs(out, __r, T(-1));")
     ),
     "merge" -> SemanticCase(
       200,
@@ -1068,7 +1091,7 @@ private[spectra] object SpectraTestCodeGen {
           |std::set_difference(a.begin(), a.end(), b.begin(), b.end(), std::back_inserter(ref));""".stripMargin
       ),
       Map("op" -> "a < b"),
-      CppBlock("const bool ok = __r == (int)ref.size() && sameSeq(out, ref, __r);")
+      CppBlock("const bool ok = __r == (int)ref.size() && sameSeq(out, ref, __r) && tailIs(out, __r, T(-1));")
     ),
     "set_intersection" -> SemanticCase(
       200,
@@ -1082,7 +1105,7 @@ private[spectra] object SpectraTestCodeGen {
           |std::set_intersection(a.begin(), a.end(), b.begin(), b.end(), std::back_inserter(ref));""".stripMargin
       ),
       Map("op" -> "a < b"),
-      CppBlock("const bool ok = __r == (int)ref.size() && sameSeq(out, ref, __r);")
+      CppBlock("const bool ok = __r == (int)ref.size() && sameSeq(out, ref, __r) && tailIs(out, __r, T(-1));")
     ),
     "set_union" -> SemanticCase(
       200,
@@ -1096,7 +1119,7 @@ private[spectra] object SpectraTestCodeGen {
           |std::set_union(a.begin(), a.end(), b.begin(), b.end(), std::back_inserter(ref));""".stripMargin
       ),
       Map("op" -> "a < b"),
-      CppBlock("const bool ok = __r == (int)ref.size() && sameSeq(out, ref, __r);")
+      CppBlock("const bool ok = __r == (int)ref.size() && sameSeq(out, ref, __r) && tailIs(out, __r, T(-1));")
     ),
     // --- query: predicates / extrema / order (n=300) ---
     "count_if" -> SemanticCase(
@@ -1556,7 +1579,7 @@ private[spectra] object SpectraTestCodeGen {
           |  if (!(in[i] == value)) ref.push_back(in[i]);""".stripMargin
       ),
       Map("eq" -> "a == b"),
-      CppBlock("const bool ok = __r == (int)ref.size() && sameSeq(out, ref, __r);")
+      CppBlock("const bool ok = __r == (int)ref.size() && sameSeq(out, ref, __r) && tailIs(out, __r, T(-1));")
     ),
     "replace" -> SemanticCase(
       256,

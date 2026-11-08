@@ -8,10 +8,10 @@ template <class... Ts> struct overloaded : Ts... {
 template <class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 
 namespace polyregion::polyast {
-constexpr auto AdtHash = "32ac18ad861f5f2faa3c9c983062be14";
-constexpr auto ProgramHash = "de2de5f725108f6b01538c5ef974ec9a";
-constexpr auto PackageHash = "944c2b087ebac646c9d8a15c5fb76323";
-constexpr auto PackageWireHash = "956e868514bb0e0e4190efc14c8bfe8d";
+constexpr auto AdtHash = "2ed29ea38d8b2713f746993b52e0949c";
+constexpr auto ProgramHash = "f62204b887e77b014700a7b3a718f079";
+constexpr auto PackageHash = "cea6ab38193bdb45ffe1d89f3bb37215";
+constexpr auto PackageWireHash = "51add37508362a9652dd5fee3f607e4e";
 constexpr auto CompileWireHash = "761bad2d8b6004abf355f5063d0116a9";
 using msgpack::decodeMaybeInterned;
 using msgpack::encodeInterned;
@@ -2807,6 +2807,16 @@ json ArgSizeExpr::min_to_json(const ArgSizeExpr::Min &x_) {
   return json::array({lhs, rhs});
 }
 
+ArgSizeExpr::Result ArgSizeExpr::result_from_json(const json &j_) {
+  auto bound = ArgSizeExpr::any_from_json(j_.at(0));
+  return ArgSizeExpr::Result(bound);
+}
+
+json ArgSizeExpr::result_to_json(const ArgSizeExpr::Result &x_) {
+  auto bound = ArgSizeExpr::any_to_json(x_.bound);
+  return json::array({bound});
+}
+
 ArgSizeExpr::Any ArgSizeExpr::any_from_json(const json &j_) {
   size_t ord_ = j_.at(0).get<size_t>();
   const auto &t_ = j_.at(1);
@@ -2816,6 +2826,7 @@ ArgSizeExpr::Any ArgSizeExpr::any_from_json(const json &j_) {
     case 2: return ArgSizeExpr::add_from_json(t_);
     case 3: return ArgSizeExpr::mul_from_json(t_);
     case 4: return ArgSizeExpr::min_from_json(t_);
+    case 5: return ArgSizeExpr::result_from_json(t_);
     default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
@@ -2825,7 +2836,8 @@ json ArgSizeExpr::any_to_json(const ArgSizeExpr::Any &x_) {
                         [](const ArgSizeExpr::Const &y_) -> json { return {1, ArgSizeExpr::const_to_json(y_)}; },
                         [](const ArgSizeExpr::Add &y_) -> json { return {2, ArgSizeExpr::add_to_json(y_)}; },
                         [](const ArgSizeExpr::Mul &y_) -> json { return {3, ArgSizeExpr::mul_to_json(y_)}; },
-                        [](const ArgSizeExpr::Min &y_) -> json { return {4, ArgSizeExpr::min_to_json(y_)}; });
+                        [](const ArgSizeExpr::Min &y_) -> json { return {4, ArgSizeExpr::min_to_json(y_)}; },
+                        [](const ArgSizeExpr::Result &y_) -> json { return {5, ArgSizeExpr::result_to_json(y_)}; });
 }
 
 ArgExtent::Elements ArgExtent::elements_from_json(const json &j_) {
@@ -4366,6 +4378,10 @@ ArgSizeExpr::Min min_fields_from_msgpack(MsgpackReader &, size_t);
 void min_fields_to_msgpack(MsgpackWriter &, const ArgSizeExpr::Min &);
 ArgSizeExpr::Min min_from_msgpack(MsgpackReader &);
 void min_to_msgpack(MsgpackWriter &, const ArgSizeExpr::Min &);
+ArgSizeExpr::Result result_fields_from_msgpack(MsgpackReader &, size_t);
+void result_fields_to_msgpack(MsgpackWriter &, const ArgSizeExpr::Result &);
+ArgSizeExpr::Result result_from_msgpack(MsgpackReader &);
+void result_to_msgpack(MsgpackWriter &, const ArgSizeExpr::Result &);
 ArgSizeExpr::Any any_from_msgpack(MsgpackReader &);
 void any_to_msgpack(MsgpackWriter &, const ArgSizeExpr::Any &);
 } // namespace ArgSizeExpr
@@ -10587,6 +10603,24 @@ void ArgSizeExpr::min_to_msgpack(MsgpackWriter &w_, const ArgSizeExpr::Min &x_) 
   ArgSizeExpr::min_fields_to_msgpack(w_, x_);
 }
 
+ArgSizeExpr::Result ArgSizeExpr::result_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 1) throw std::runtime_error("Expected ArgSizeExpr::Result with 1 field(s)");
+  auto bound = ArgSizeExpr::any_from_msgpack(r_);
+  return ArgSizeExpr::Result(bound);
+}
+
+void ArgSizeExpr::result_fields_to_msgpack(MsgpackWriter &w_, const ArgSizeExpr::Result &x_) { ArgSizeExpr::any_to_msgpack(w_, x_.bound); }
+
+ArgSizeExpr::Result ArgSizeExpr::result_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return ArgSizeExpr::result_fields_from_msgpack(r_, n_);
+}
+
+void ArgSizeExpr::result_to_msgpack(MsgpackWriter &w_, const ArgSizeExpr::Result &x_) {
+  w_.writeArrayHeader(1);
+  ArgSizeExpr::result_fields_to_msgpack(w_, x_);
+}
+
 ArgSizeExpr::Any ArgSizeExpr::any_from_msgpack(MsgpackReader &r_) {
   if (r_.nextIsArray()) {
     auto n_ = r_.readArrayHeader();
@@ -10598,6 +10632,7 @@ ArgSizeExpr::Any ArgSizeExpr::any_from_msgpack(MsgpackReader &r_) {
       case 2: return ArgSizeExpr::add_fields_from_msgpack(r_, n_ - 1);
       case 3: return ArgSizeExpr::mul_fields_from_msgpack(r_, n_ - 1);
       case 4: return ArgSizeExpr::min_fields_from_msgpack(r_, n_ - 1);
+      case 5: return ArgSizeExpr::result_fields_from_msgpack(r_, n_ - 1);
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   } else {
@@ -10608,6 +10643,7 @@ ArgSizeExpr::Any ArgSizeExpr::any_from_msgpack(MsgpackReader &r_) {
       case 2: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       case 3: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       case 4: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 5: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   }
@@ -10639,6 +10675,11 @@ void ArgSizeExpr::any_to_msgpack(MsgpackWriter &w_, const ArgSizeExpr::Any &x_) 
         w_.writeArrayHeader(3);
         w_.writeInt32(4);
         ArgSizeExpr::min_fields_to_msgpack(w_, y_);
+      },
+      [&](const ArgSizeExpr::Result &y_) -> void {
+        w_.writeArrayHeader(2);
+        w_.writeInt32(5);
+        ArgSizeExpr::result_fields_to_msgpack(w_, y_);
       });
 }
 

@@ -49,6 +49,7 @@ private[polyregion] object ProgramLinker {
     case p.Arg.SizeExpr.Add(lhs, rhs) => p.Arg.SizeExpr.Add(shiftSize(lhs, by), shiftSize(rhs, by))
     case p.Arg.SizeExpr.Mul(lhs, rhs) => p.Arg.SizeExpr.Mul(shiftSize(lhs, by), shiftSize(rhs, by))
     case p.Arg.SizeExpr.Min(lhs, rhs) => p.Arg.SizeExpr.Min(shiftSize(lhs, by), shiftSize(rhs, by))
+    case p.Arg.SizeExpr.Result(bound) => p.Arg.SizeExpr.Result(shiftSize(bound, by))
   }
 
   private[ast] def shiftBoundary(boundary: Option[p.Arg.Boundary], by: Int): Option[p.Arg.Boundary] =
@@ -805,6 +806,10 @@ private[polyregion] object ProgramLinker {
     def immutable(named: p.Named, expr: p.Expr): Unit   = body += p.Stmt.Var(named, Some(expr), isMutable = false)
     def temporary(prefix: String, tpe: p.Type): p.Named = p.Named(s"$prefix${body.size}", tpe)
 
+    val concreteResult = substitute(publicDecl.rtn, resolution.call.types)
+    val returnsValue   = concreteResult != p.Type.Unit0
+    val result         = Option.when(returnsValue)(p.Named("result", p.Type.Ptr(concreteResult, p.Type.Space.Global)))
+
     val contextType = p.Spec.ContextType
     val context     = p.Named("#context", contextType)
     entryArgs += p.Arg(context)
@@ -861,6 +866,7 @@ private[polyregion] object ProgramLinker {
         val named    = temporary("extent", p.Type.IntU64)
         immutable(named, intr(p.Intr.Min(lhsValue, rhsValue, p.Type.IntU64)))
         select(named)
+      case p.Arg.SizeExpr.Result(bound) => extent(bound)
     }
 
     publicDecl.args.indices.foreach { index =>
@@ -870,22 +876,57 @@ private[polyregion] object ProgramLinker {
             publicDecl.args(index).boundary match {
               case None => errors += s"pointer argument `${publicDecl.args(index).named.symbol}` has no boundary"
               case Some(boundary) =>
-                val count = boundary.extent match {
-                  case p.Arg.Extent.Bytes(size) => extent(size)
-                  case p.Arg.Extent.Elements(size) =>
-                    val elements = extent(size)
+                val size = boundary.extent match {
+                  case p.Arg.Extent.Bytes(size)    => size
+                  case p.Arg.Extent.Elements(size) => size
+                }
+                val width = boundary.extent match {
+                  case _: p.Arg.Extent.Bytes => None
+                  case _: p.Arg.Extent.Elements =>
                     typeSizes.get(pointer.comp) match {
                       case None =>
                         errors += s"has no layout for `${pointer.comp.repr}`"
-                        p.Term.IntU64Const(0)
-                      case Some(width) =>
-                        val named = temporary(s"bytes$index", p.Type.IntU64)
-                        immutable(
-                          named,
-                          intr(p.Intr.Mul(elements, p.Term.IntU64Const(width.toLong), p.Type.IntU64))
-                        )
-                        select(named)
+                        Some(0L)
+                      case Some(width) => Some(width.toLong)
                     }
+                }
+                def scaled(name: String, term: p.Term, sink: p.Stmt => Unit): p.Term = width match {
+                  case None => term
+                  case Some(width) =>
+                    val named = p.Named(name, p.Type.IntU64)
+                    sink(
+                      p.Stmt.Var(
+                        named,
+                        Some(intr(p.Intr.Mul(term, p.Term.IntU64Const(width), p.Type.IntU64))),
+                        isMutable = false
+                      )
+                    )
+                    select(named)
+                }
+                val bound = extent(size)
+                val count = scaled(s"bytes$index", bound, body += _)
+                val downloadCount = size match {
+                  case _: p.Arg.SizeExpr.Result =>
+                    val returned = p.Named(s"returned$index", concreteResult)
+                    val widened  = p.Named(s"returnedExtent$index", p.Type.IntU64)
+                    val clamped  = p.Named(s"returnedBound$index", p.Type.IntU64)
+                    downloads += p.Stmt.Var(
+                      returned,
+                      Some(p.Expr.Index(select(result.get), p.Term.IntS32Const(0), concreteResult)),
+                      isMutable = false
+                    )
+                    downloads += p.Stmt.Var(
+                      widened,
+                      Some(p.Expr.Cast(select(returned), p.Type.IntU64)),
+                      isMutable = false
+                    )
+                    downloads += p.Stmt.Var(
+                      clamped,
+                      Some(intr(p.Intr.Min(select(widened), bound, p.Type.IntU64))),
+                      isMutable = false
+                    )
+                    scaled(s"downloadBytes$index", select(clamped), downloads += _)
+                  case _ => count
                 }
                 val remote = p.Named(s"remote$index", p.Type.Ptr(p.Type.IntU8, p.Type.Space.Global))
                 val typed  = p.Named(s"p$index", pointer)
@@ -919,7 +960,7 @@ private[polyregion] object ProgramLinker {
                           select(context),
                           select(sourceArgs(index)),
                           select(remote),
-                          count,
+                          downloadCount,
                           p.Direction.RemoteToLocal
                         )
                       )
@@ -961,9 +1002,6 @@ private[polyregion] object ProgramLinker {
           }
       }
     }
-    val concreteResult = substitute(publicDecl.rtn, resolution.call.types)
-    val returnsValue   = concreteResult != p.Type.Unit0
-    val result         = Option.when(returnsValue)(p.Named("result", p.Type.Ptr(concreteResult, p.Type.Space.Global)))
     result.foreach(named => entryArgs += p.Arg(named))
     resolution.abi.result match {
       case ImplementationResult.TrailingOutput(_) => result.foreach(named => invokeArgs += select(named))

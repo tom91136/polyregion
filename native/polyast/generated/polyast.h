@@ -9430,6 +9430,45 @@ struct POLYREGION_EXPORT Min : ArgSizeExpr::Base {
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
+
+struct POLYREGION_EXPORT Result : ArgSizeExpr::Base {
+  ArgSizeExpr::Any bound;
+  constexpr static uint32_t variant_id = 5;
+  [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
+  [[nodiscard]] POLYREGION_EXPORT ArgSizeExpr::Result withBound(const ArgSizeExpr::Any &v_) const;
+  template <typename T, typename U>
+  POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, Result>) {
+      if (auto x_ = f(*this)) {
+        results_.emplace_back(*x_);
+      }
+    }
+    bound.collect_where<T, U>(results_, f);
+  }
+  template <typename T, typename U>
+  [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT Result modify_all(const std::function<T(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, Result>) {
+      return f(*this);
+    }
+    return ArgSizeExpr::Result(bound.modify_all<T>(f));
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const ArgSizeExpr::Result &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const ArgSizeExpr::Result &) const;
+  explicit Result(ArgSizeExpr::Any bound) noexcept;
+  POLYREGION_EXPORT operator Any() const;
+  [[nodiscard]] POLYREGION_EXPORT Any widen() const;
+};
 } // namespace ArgSizeExpr
 namespace ArgExtent {
 
@@ -12574,7 +12613,7 @@ polyregion::polyast::ArgAccess::Any::modify_all(const std::function<T(const T &)
   return *result_;
 }
 namespace polyregion::polyast::ArgSizeExpr {
-using All = alternatives<Param, Const, Add, Mul, Min>;
+using All = alternatives<Param, Const, Add, Mul, Min, Result>;
 }
 template <typename T> constexpr POLYREGION_EXPORT bool polyregion::polyast::ArgSizeExpr::Any::is() const {
   static_assert((polyregion::polyast::ArgSizeExpr::All::contains<T>), "type not part of the variant");
@@ -13627,6 +13666,9 @@ template <> struct hash<polyregion::polyast::ArgSizeExpr::Mul> {
 };
 template <> struct hash<polyregion::polyast::ArgSizeExpr::Min> {
   std::size_t operator()(const polyregion::polyast::ArgSizeExpr::Min &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::ArgSizeExpr::Result> {
+  std::size_t operator()(const polyregion::polyast::ArgSizeExpr::Result &) const noexcept;
 };
 template <> struct hash<polyregion::polyast::ArgExtent::Any> {
   std::size_t operator()(const polyregion::polyast::ArgExtent::Any &) const noexcept;
