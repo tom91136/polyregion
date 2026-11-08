@@ -127,8 +127,15 @@ thread_local HostStateArena hostStateArena;
 
 constexpr double HostLaneStackAddressShare = 0.5;
 
+#if defined(__linux__) && UINTPTR_MAX == UINT32_MAX
+  #define POLYINVOKE_EXPLICIT_LANE_STACK
+constexpr size_t HostLaneStackBytes = 2 * 1024 * 1024;
+#endif
+
 uint64_t hostStackReserveBytes() {
-#ifdef _WIN32
+#if defined(POLYINVOKE_EXPLICIT_LANE_STACK)
+  return HostLaneStackBytes;
+#elif defined(_WIN32)
   const auto *dos = reinterpret_cast<const IMAGE_DOS_HEADER *>(GetModuleHandleW(nullptr));
   const auto *nt = reinterpret_cast<const IMAGE_NT_HEADERS *>(reinterpret_cast<const char *>(dos) + dos->e_lfanew);
   return nt->OptionalHeader.SizeOfStackReserve;
@@ -194,6 +201,34 @@ extern "C" POLYREGION_EXPORT void *__polyregion_host_group_state(const uint64_t 
 
 static bool groupedPolicy(const Policy &policy) { return policy.local && policy.local->first.x > 1; }
 
+#ifdef POLYINVOKE_EXPLICIT_LANE_STACK
+class LaneThread {
+  pthread_t handle{};
+
+public:
+  template <typename F> explicit LaneThread(F body) {
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, HostLaneStackBytes);
+    auto owned = std::make_unique<std::function<void()>>(std::move(body));
+    const int status = pthread_create(
+        &handle, &attr,
+        [](void *raw) -> void * {
+          const std::unique_ptr<std::function<void()>> run(static_cast<std::function<void()> *>(raw));
+          (*run)();
+          return nullptr;
+        },
+        owned.get());
+    pthread_attr_destroy(&attr);
+    if (status != 0) POLYINVOKE_FATAL(RELOBJ_PREFIX, "cannot start a lane thread: %s", std::strerror(status));
+    owned.release();
+  }
+  void join() { pthread_join(handle, nullptr); }
+};
+#else
+using LaneThread = std::thread;
+#endif
+
 static void groupedLaunch(const size_t groups, const size_t lanes, const MaybeCallback &cb, std::function<void(size_t)> task) {
   if (lanes > hostMaxLanes())
     POLYINVOKE_FATAL(RELOBJ_PREFIX, "work-group size %zu exceeds host capacity of %zu lanes", lanes, hostMaxLanes());
@@ -208,7 +243,7 @@ static void groupedLaunch(const size_t groups, const size_t lanes, const MaybeCa
     std::thread([=]() {
       for (size_t group = slot; group < groups; group += slots) {
         HostGroup state(lanes);
-        std::vector<std::thread> workers;
+        std::vector<LaneThread> workers;
         workers.reserve(lanes);
         for (size_t lane = 0; lane < lanes; ++lane)
           workers.emplace_back([&state, run, lanes, tid = group * lanes + lane]() {
