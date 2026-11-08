@@ -2088,6 +2088,83 @@ TEST_CASE("a record smaller than its pointee is mirrored at the pointee size") {
   }));
 }
 
+TEST_CASE("aliases of an undersized record with different pointee widths share one mirror") {
+  struct Wide {
+    int64_t lane[8];
+  };
+  struct NarrowFirst {
+    int32_t *narrow;
+    Wide *wide;
+  };
+  struct WideFirst {
+    Wide *wide;
+    int32_t *narrow;
+  };
+  auto wideMeta = Struct_(Wide, StructMember_(Wide, lane, &int64Type));
+  auto narrowFirstMeta = Struct_(NarrowFirst,                                    //
+                                 StructMember_(NarrowFirst, narrow, &int32Type), //
+                                 StructMember_(NarrowFirst, wide, &*wideMeta));
+  auto wideFirstMeta = Struct_(WideFirst,                                  //
+                               StructMember_(WideFirst, wide, &*wideMeta), //
+                               StructMember_(WideFirst, narrow, &int32Type));
+
+  const auto run = [&](const auto &meta, const auto &capture, Fixture &fixture, const auto *slot) {
+    const auto actual = fixture.localToRemote(capture, *meta);
+    REQUIRE(fixture.remoteLive(actual.narrow));
+    REQUIRE(fixture.remoteLive(actual.wide));
+    CHECK(static_cast<const void *>(actual.narrow) == static_cast<const void *>(actual.wide));
+    CHECK(std::memcmp(actual.wide, slot, sizeof(Wide)) == 0);
+    CHECK(*actual.narrow == *reinterpret_cast<const int32_t *>(slot));
+  };
+  const auto slotOf = [](Fixture &fixture) {
+    auto slot = fixture.mallocLocal<Wide>();
+    for (size_t i = 0; i < 8; ++i)
+      slot->lane[i] = 0x0101010101010101LL * static_cast<int64_t>(i + 1);
+    fixture.localAllocations[reinterpret_cast<uintptr_t>(slot)] = sizeof(int32_t);
+    return slot;
+  };
+
+  SECTION("narrow first") {
+    Fixture fixture;
+    auto slot = slotOf(fixture);
+    run(narrowFirstMeta, NarrowFirst{reinterpret_cast<int32_t *>(slot), slot}, fixture, slot);
+  }
+  SECTION("wide first") {
+    Fixture fixture;
+    auto slot = slotOf(fixture);
+    run(wideFirstMeta, WideFirst{slot, reinterpret_cast<int32_t *>(slot)}, fixture, slot);
+  }
+}
+
+TEST_CASE("a generated mirror grown after a pointer was patched keeps that pointer live") {
+  struct Capture {
+    int32_t *narrow;
+    char *wide;
+  };
+  constexpr size_t WideBytes = 64;
+  Fixture fixture;
+  auto slot = fixture.mallocLocal<char>(WideBytes);
+  for (size_t i = 0; i < WideBytes; ++i)
+    slot[i] = static_cast<char>(i + 1);
+  fixture.localAllocations[reinterpret_cast<uintptr_t>(slot)] = sizeof(int32_t);
+
+  Capture capture{reinterpret_cast<int32_t *>(slot), slot};
+  const uintptr_t remote = fixture.allocation.mirrorAlloc(&capture, sizeof(capture), false);
+  const uintptr_t narrow = fixture.allocation.mirrorEnsure(slot, sizeof(int32_t), true);
+  fixture.allocation.mirrorPatch(remote, offsetof(Capture, narrow), narrow);
+  const uintptr_t wide = fixture.allocation.mirrorEnsure(slot, WideBytes, true);
+  fixture.allocation.mirrorPatch(remote, offsetof(Capture, wide), wide);
+
+  const auto *actual = reinterpret_cast<const Capture *>(remote);
+  REQUIRE(fixture.remoteLive(actual->narrow));
+  REQUIRE(fixture.remoteLive(actual->wide));
+  CHECK(static_cast<const void *>(actual->narrow) == static_cast<const void *>(actual->wide));
+  CHECK(std::memcmp(actual->wide, slot, WideBytes) == 0);
+
+  fixture.allocation.mirrorPatch(narrow, sizeof(uintptr_t), remote);
+  CHECK(reinterpret_cast<const uintptr_t *>(actual->wide)[1] == remote);
+}
+
 TEST_CASE("resident arena leaves keep kernel output on the device until the host touches it") {
   if (!polyregion::polyrt::guard::AtomicPublish) SKIP("no whole-page publish on this platform");
   Fixture f;

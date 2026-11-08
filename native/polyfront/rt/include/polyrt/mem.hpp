@@ -172,7 +172,7 @@ class SynchronisedMemAllocation {
                      (void *)resolvePtrSizeInBytes, static_cast<void *>(memberLocalPtr), sizeInBytes);
       const uintptr_t memberRemotePtr =
           mirrorToRemote(memberLocalPtr, indirection, effectiveSizeToCount(sizeInBytes), tl, sizeInBytes, readOnly);
-      remoteWrite(&memberRemotePtr, devicePtr, memberOffsetInBytes, sizeof(uintptr_t));
+      writePointer(devicePtr, memberOffsetInBytes, memberRemotePtr);
     } else if (const PtrQuery meta = localReflect(memberLocalPtr); meta.sizeInBytes != 0) {
       if (debug)
         std::fprintf(stderr, "[SMA]   localReflect(%p) = {size=%zu, offset=%zu}\n", static_cast<void *>(memberLocalPtr), meta.sizeInBytes,
@@ -183,7 +183,7 @@ class SynchronisedMemAllocation {
       const uintptr_t baseRemotePtr = mirrorToRemote(baseLocalPtr, indirection, effectiveSizeToCount(effectiveSize - typedBegin), tl,
                                                      effectiveSize, readOnly || meta.hostReadOnly, typedBegin);
       const uintptr_t memberRemotePtr = baseRemotePtr + meta.offsetInBytes;
-      remoteWrite(&memberRemotePtr, devicePtr, memberOffsetInBytes, sizeof(uintptr_t));
+      writePointer(devicePtr, memberOffsetInBytes, memberRemotePtr);
     } else {
       static std::atomic<bool> warnedOnce{false};
       bool expected = false;
@@ -287,6 +287,7 @@ class SynchronisedMemAllocation {
                    "[SMA] mirrorToRemote(hostData=%p, ptrIndirections=%zu, count=%zu, t=@%s, hostAllocSize=%zu, typedBegin=%zu)\n", //
                    static_cast<const void *>(hostData), ptrIndirections, count, l.name, hostAllocSizeInBytes, typedBegin);
     const size_t unit = typedUnit(ptrIndirections, &l);
+    std::optional<RangedAllocation> superseded;
     if (const auto query = queryLocal(hostData)) {
       const auto [alloc, offsetInBytes] = *query;
       const bool eligible = ptrIndirections == 1 && offsetInBytes == 0;
@@ -297,7 +298,8 @@ class SynchronisedMemAllocation {
       if (!stale) adoptLayout(*alloc, l, ptrIndirections, offsetInBytes + typedBegin);
       if (stale) {
         reclaim(hostData, /*forWrite*/ true);
-        disassociate(hostData);
+        if (localSyncVisited.count(alloc->remote.ptr)) superseded = alloc->remote;
+        disassociate(hostData, !superseded);
         if (debug) std::fprintf(stderr, "[SMA]   stale base hit (cached %zu < required %zu), re-mirroring\n", cachedSize, requiredSize);
       } else {
         const bool visited = !localSyncVisited.insert(alloc->remote.ptr).second;
@@ -308,12 +310,13 @@ class SynchronisedMemAllocation {
           if (debug)
             std::fprintf(stderr, "[SMA]   hit (0x%" PRIxPTR " = %4zu + %4zu)\n", alloc->remote.ptr, alloc->remote.sizeInBytes,
                          offsetInBytes);
+          const uintptr_t remotePtr = alloc->remote.ptr;
           if (const size_t begin = alloc->typedBegin; begin < previousBegin) {
             const size_t extra = (previousBegin - begin) / unit;
-            if (ptrIndirections > 1) writeIndirect(baseLocalPtr + begin, alloc->remote.ptr + begin, ptrIndirections, extra, effLayout, ro);
-            else writeStruct(baseLocalPtr, begin, alloc->remote.ptr, extra, effLayout, true, ro);
+            if (ptrIndirections > 1) writeIndirect(baseLocalPtr + begin, remotePtr + begin, ptrIndirections, extra, effLayout, ro);
+            else writeStruct(baseLocalPtr, begin, remotePtr, extra, effLayout, true, ro);
           }
-          return alloc->remote.ptr + offsetInBytes;
+          return successor(remotePtr + offsetInBytes, 1);
         }
         alloc->localModified = false;
         // Optimisation can reuse an interior stack slot for a new object. Refresh the cached allocation from its
@@ -323,16 +326,18 @@ class SynchronisedMemAllocation {
           return alloc->remote.ptr + offsetInBytes;
         }
         const size_t begin = std::min(alloc->typedBegin, cachedSize);
-        writeAllocation(baseLocalPtr, alloc->remote.ptr, cachedSize, begin, ptrIndirections,
+        const uintptr_t remotePtr = alloc->remote.ptr;
+        writeAllocation(baseLocalPtr, remotePtr, cachedSize, begin, ptrIndirections,
                         (cachedSize - begin) / typedUnit(ptrIndirections, &effLayout), effLayout, ro);
-        return alloc->remote.ptr + offsetInBytes;
+        return successor(remotePtr + offsetInBytes, 1);
       }
     }
     const size_t allocSize = std::max(typedBegin + unit * count, hostAllocSizeInBytes);
     const auto devicePtr = createDeviceAllocation(hostData, allocSize, ptrIndirections > 1 ? nullptr : &l, hostReadOnly, typedBegin);
     localSyncVisited.insert(devicePtr);
     writeAllocation(hostData, devicePtr, allocSize, typedBegin, ptrIndirections, count, l, hostReadOnly);
-    return devicePtr;
+    if (superseded) supersede(*superseded, devicePtr, false);
+    return successor(devicePtr, 1);
   }
 
   // orig = host bytes snapshotted before the read-back clobber, to restore a slot left foreign
@@ -402,6 +407,64 @@ public:
 
   std::map<uintptr_t, RemoteAllocation> localToRemoteAlloc{};
   std::unordered_map<uintptr_t, RangedAllocation> remoteToLocalPtr{};
+
+  struct HandedOut {
+    uintptr_t parent;
+    size_t offsetInBytes;
+    uintptr_t value;
+  };
+  std::vector<HandedOut> handedOut{};
+  std::map<uintptr_t, RangedAllocation> supersededBy{};
+
+  void beginSync() {
+    localSyncVisited.clear();
+    handedOut.clear();
+    for (const auto &entry : supersededBy)
+      remoteRelease(entry.first);
+    supersededBy.clear();
+  }
+
+  uintptr_t successor(uintptr_t remote, const size_t slack) const {
+    while (!supersededBy.empty()) {
+      auto it = supersededBy.upper_bound(remote);
+      if (it == supersededBy.begin()) break;
+      --it;
+      if (remote >= it->first + it->second.sizeInBytes + slack) break;
+      remote = it->second.ptr + (remote - it->first);
+    }
+    return remote;
+  }
+
+  void markDevicePtrs(const uintptr_t remote) {
+    if (const auto rl = remoteToLocalPtr.find(remote); rl != remoteToLocalPtr.end())
+      if (const auto la = localToRemoteAlloc.find(rl->second.ptr); la != localToRemoteAlloc.end()) la->second.hasDevicePtrs = true;
+  }
+
+  void writePointer(uintptr_t parent, const size_t offsetInBytes, uintptr_t value) {
+    parent = successor(parent, 0);
+    value = successor(value, 1);
+    remoteWrite(&value, parent, offsetInBytes, sizeof(uintptr_t));
+    handedOut.push_back({parent, offsetInBytes, value});
+  }
+
+  void supersede(const RangedAllocation from, const uintptr_t to, const bool carryContents) {
+    const auto inside = [&](const uintptr_t address, const size_t slack) {
+      return address >= from.ptr && address < from.ptr + from.sizeInBytes + slack;
+    };
+    supersededBy.emplace(from.ptr, RangedAllocation{to, from.sizeInBytes});
+    if (!carryContents) std::erase_if(handedOut, [&](const HandedOut &h) { return inside(h.parent, 0); });
+    bool carried = false;
+    for (auto &h : handedOut) {
+      const bool moved = carryContents && inside(h.parent, 0);
+      const bool retargeted = inside(h.value, 1);
+      if (!moved && !retargeted) continue;
+      if (moved) h.parent = to + (h.parent - from.ptr);
+      if (retargeted) h.value = to + (h.value - from.ptr);
+      remoteWrite(&h.value, h.parent, h.offsetInBytes, sizeof(uintptr_t));
+      carried = carried || moved;
+    }
+    if (carried) markDevicePtrs(to);
+  }
 
   // Resident heap blocks keep their device copy across launches. Whole pages of the block are guarded so the first
   // host access after a launch faults and pulls the device copy back, and the first host write after that marks the
@@ -695,7 +758,7 @@ public:
         debug(debug) {}
 
   [[nodiscard]] uintptr_t syncLocalToRemote(const void *p, const runtime::TypeLayout &s) {
-    localSyncVisited.clear();
+    beginSync();
     return mirrorToRemote(static_cast<const char *>(p), 1, 1, s);
   }
 
@@ -857,7 +920,7 @@ public:
   }
 
   uintptr_t mirrorAlloc(const void *local, const size_t sizeInBytes, const bool hostReadOnly) {
-    localSyncVisited.clear();
+    beginSync();
     const uintptr_t remote = createDeviceAllocation(static_cast<const char *>(local), sizeInBytes, nullptr, hostReadOnly);
     localSyncVisited.insert(remote);
     remoteWrite(local, remote, 0, sizeInBytes);
@@ -870,13 +933,13 @@ public:
     return false;
   }
 
-  void mirrorPatch(const uintptr_t remote, const size_t offsetInBytes, const uintptr_t value) {
+  void mirrorPatch(uintptr_t remote, const size_t offsetInBytes, const uintptr_t value) {
     // value==0 is a foreign pointee already at a valid device address; leave the copied original
     if (value == 0) return;
+    remote = successor(remote, 0);
     if (deviceWriteInBounds(remote, offsetInBytes, sizeof(uintptr_t))) {
-      remoteWrite(&value, remote, offsetInBytes, sizeof(uintptr_t));
-      if (const auto rl = remoteToLocalPtr.find(remote); rl != remoteToLocalPtr.end())
-        if (const auto la = localToRemoteAlloc.find(rl->second.ptr); la != localToRemoteAlloc.end()) la->second.hasDevicePtrs = true;
+      writePointer(remote, offsetInBytes, value);
+      markDevicePtrs(remote);
     }
   }
 
@@ -893,6 +956,7 @@ public:
     if (meta.deviceAccessible) return std::nullopt;
     const auto query = queryLocal(local, /*allowPastEnd*/ true);
     const bool cacheHit = query && !pastEndAliasOfDistinct(local, query);
+    std::optional<RangedAllocation> superseded;
     const size_t sz = meta.sizeInBytes == 0 ? 0 : staleFloor(meta.sizeInBytes, minSize);
     if (cacheHit) {
       if (sz <= query->first->remote.sizeInBytes) {
@@ -906,7 +970,8 @@ public:
         return std::pair{alloc->remote.ptr, query->second};
       }
       reclaim(local, /*forWrite*/ true);
-      disassociate(local);
+      if (localSyncVisited.count(query->first->remote.ptr)) superseded = query->first->remote;
+      disassociate(local, !superseded);
     }
     if (sz == 0) return std::nullopt;
     const size_t off = meta.sizeInBytes == 0 ? 0 : meta.offsetInBytes;
@@ -914,6 +979,7 @@ public:
     const uintptr_t baseRemote = createDeviceAllocation(base, sz, scalarPointee ? &plainLayout : nullptr, meta.hostReadOnly);
     localSyncVisited.insert(baseRemote);
     remoteWrite(base, baseRemote, 0, sz);
+    if (superseded) supersede(*superseded, baseRemote, true);
     return std::pair{baseRemote, off};
   }
 
@@ -1011,7 +1077,7 @@ public:
 
   void unmirrorVisitClear() {
     syncVisited.clear();
-    localSyncVisited.clear();
+    beginSync();
   }
 
   struct MirroredGraph {
