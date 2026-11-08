@@ -533,53 +533,6 @@ inline std::vector<polyast::Package> mergeSelections(const std::vector<const pol
   return merged;
 }
 
-struct ConsumerUnit {
-  const std::vector<polyast::Function> *functions;
-  const std::vector<polyast::StructDef> *definitions;
-  const std::vector<polyast::ProgramTypeSize> *typeSizes;
-};
-
-inline std::vector<std::vector<size_t>> compatibleBatches(const std::vector<ConsumerUnit> &units) {
-  struct Batch {
-    std::vector<size_t> members;
-    std::unordered_map<polyast::Sym, const polyast::Function *> functions;
-    std::unordered_map<polyast::Sym, const polyast::StructDef *> definitions;
-    std::unordered_map<polyast::Type::Any, int32_t> sizes;
-  };
-  std::vector<Batch> batches;
-  for (size_t index = 0; index < units.size(); ++index) {
-    const auto &unit = units[index];
-    auto batch = std::find_if(batches.begin(), batches.end(), [&](const Batch &candidate) {
-      return std::all_of(unit.functions->begin(), unit.functions->end(),
-                         [&](const auto &function) {
-                           const auto found = candidate.functions.find(function.decl.name);
-                           return found == candidate.functions.end() || *found->second == function;
-                         })
-             && std::all_of(unit.definitions->begin(), unit.definitions->end(),
-                            [&](const auto &definition) {
-                              const auto found = candidate.definitions.find(definition.name);
-                              return found == candidate.definitions.end() || *found->second == definition;
-                            })
-             && std::all_of(unit.typeSizes->begin(), unit.typeSizes->end(), [&](const auto &size) {
-                  const auto found = candidate.sizes.find(size.tpe);
-                  return found == candidate.sizes.end() || found->second == size.sizeInBytes;
-                });
-    });
-    if (batch == batches.end()) batch = batches.insert(batches.end(), Batch{});
-    batch->members.emplace_back(index);
-    for (const auto &function : *unit.functions)
-      batch->functions.try_emplace(function.decl.name, &function);
-    for (const auto &definition : *unit.definitions)
-      batch->definitions.try_emplace(definition.name, &definition);
-    for (const auto &size : *unit.typeSizes)
-      batch->sizes.try_emplace(size.tpe, size.sizeInBytes);
-  }
-  std::vector<std::vector<size_t>> members;
-  for (auto &batch : batches)
-    members.emplace_back(std::move(batch.members));
-  return members;
-}
-
 inline Checked<polyast::CompileBundle> sliceBundle(const polyast::CompileBundle &bundle, const std::string &root,
                                                    std::vector<int8_t> hostObject) {
   const auto found = std::find_if(bundle.roots.begin(), bundle.roots.end(), [&](const auto &candidate) { return candidate.name == root; });
