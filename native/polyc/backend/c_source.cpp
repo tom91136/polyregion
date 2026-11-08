@@ -1206,8 +1206,9 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
           : std::vector<std::string>{};
 #undef POLYREGION_C_HOST_TABLE_FIELD
   // forward-declare every struct so pointer members (including cyclic ones) resolve
+  const auto tagOf = [&](const Sym &name) { return dialect == Dialect::C11 ? fmt::format("polyregion_tag_{}", fqcn(name)) : fqcn(name); };
   const auto typedefs = program.defs ^ map([&](const auto &def) {
-                          return fmt::format("typedef {} {} {};", def.isUnion ? "union" : "struct", fqcn(def.name), fqcn(def.name));
+                          return fmt::format("typedef {} {} {};", def.isUnion ? "union" : "struct", tagOf(def.name), fqcn(def.name));
                         });
 
   // emit struct bodies in by-value dependency order; a recursive cycle bails with a note
@@ -1225,7 +1226,7 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
       break;
     }
     structBodies ^= concat(noDeps ^ map([&](const auto &s) {
-                             return fmt::format("{} {} {};\n", s.isUnion ? "union" : "struct", fqcn(s.name),
+                             return fmt::format("{} {} {};\n", s.isUnion ? "union" : "struct", tagOf(s.name),
                                                 s.members | mk_string("{\n", "\n", "\n}", renderStorageMember));
                            }));
     resolved ^= concat(noDeps ^ map([](const auto &s) { return s.name; }));
