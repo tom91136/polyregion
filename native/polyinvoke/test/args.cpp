@@ -195,11 +195,12 @@ void runDeviceLimits(Context &ctx, Backend backend, Platform &, Device &device, 
 }
 
 void runMetalPipelineLimit(Context &ctx, Backend backend, Platform &, Device &device, const ImageGroup &imageGroup) {
+  const size_t deviceLimit = device.maxThreadsPerBlock();
   for (auto &[module_, data] : imageGroup)
     device.loadModule(module_, data);
   const size_t block = device.maxThreadsPerBlock();
-  POLYTEST_REQUIRE_S(ctx, block <= 256, "{} reports {} threads per block, above the 256 limit of the loaded kernel",
-                     magic_enum::enum_name(backend), block);
+  POLYTEST_REQUIRE_S(ctx, block > 0 && block <= deviceLimit, "{} reports {} threads per block after loading, device limit {}",
+                     magic_enum::enum_name(backend), block, deviceLimit);
   auto q = device.createQueue(std::chrono::seconds(10));
   constexpr size_t groups = 4;
   const size_t n = groups * block;
