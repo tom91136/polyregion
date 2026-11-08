@@ -27,6 +27,7 @@
 #include <thrust/inner_product.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/discard_iterator.h>
+#include <thrust/iterator/reverse_iterator.h>
 #include <thrust/logical.h>
 #include <thrust/merge.h>
 #include <thrust/mismatch.h>
@@ -265,10 +266,9 @@ POLYREGION_SPECTRA_EXPORT(lower_bound) //
 
 template <class T, class Op>           //
 POLYREGION_SPECTRA_EXPORT(max_element) //
-    T max_element(const T *in, std::int32_t n, Op op) {
-  if (n <= 0) return T{};
-  const auto result = thrust::max_element(thrust::device, in, in + n, op);
-  return thrust::device_pointer_cast(result)[0];
+    std::int32_t max_element(const T *in, std::int32_t n, Op op) {
+  if (n <= 0) return 0;
+  return static_cast<std::int32_t>(thrust::max_element(thrust::device, in, in + n, op) - in);
 }
 
 template <class T, class Op>     //
@@ -279,25 +279,24 @@ POLYREGION_SPECTRA_EXPORT(merge) //
 
 template <class T, class Op>           //
 POLYREGION_SPECTRA_EXPORT(min_element) //
-    T min_element(const T *in, std::int32_t n, Op op) {
-  if (n <= 0) return T{};
-  const auto result = thrust::min_element(thrust::device, in, in + n, op);
-  return thrust::device_pointer_cast(result)[0];
+    std::int32_t min_element(const T *in, std::int32_t n, Op op) {
+  if (n <= 0) return 0;
+  return static_cast<std::int32_t>(thrust::min_element(thrust::device, in, in + n, op) - in);
 }
 
 template <class T, class Op>              //
 POLYREGION_SPECTRA_EXPORT(minmax_element) //
-    void minmax_element(const T *in, std::int32_t n, T *min_out, T *max_out, Op op) {
+    void minmax_element(const T *in, std::int32_t n, std::int32_t *min_out, std::int32_t *max_out, Op op) {
   if (n <= 0) {
-    thrust::fill_n(thrust::device, min_out, 1, T{});
-    thrust::fill_n(thrust::device, max_out, 1, T{});
+    thrust::fill_n(thrust::device, min_out, 1, std::int32_t{0});
+    thrust::fill_n(thrust::device, max_out, 1, std::int32_t{0});
     return;
   }
-  // Keep both the fused extrema operation and its result transfer on the device: offload pointers denote remote
-  // storage, whereas vendor-native validation uses managed allocations that also tolerate host access.
-  const auto result = thrust::minmax_element(thrust::device, in, in + n, op);
-  thrust::copy_n(thrust::device, result.first, 1, min_out);
-  thrust::copy_n(thrust::device, result.second, 1, max_out);
+  const auto last = thrust::make_reverse_iterator(in + n);
+  const auto lo = thrust::min_element(thrust::device, in, in + n, op) - in;
+  const auto hi = n - 1 - (thrust::max_element(thrust::device, last, last + n, op) - last);
+  thrust::fill_n(thrust::device, min_out, 1, static_cast<std::int32_t>(lo));
+  thrust::fill_n(thrust::device, max_out, 1, static_cast<std::int32_t>(hi));
 }
 
 template <class T, class Op>        //
@@ -317,8 +316,9 @@ POLYREGION_SPECTRA_EXPORT(none_of) //
 
 template <class T, class Op>         //
 POLYREGION_SPECTRA_EXPORT(partition) //
-    void partition(T *data, std::int32_t n, Op op) {
+    std::int32_t partition(T *data, std::int32_t n, Op op) {
   thrust::stable_sort(thrust::device, data, data + n, [=] __host__ __device__(const T &a, const T &b) { return op(a) && !op(b); });
+  return static_cast<std::int32_t>(thrust::partition_point(thrust::device, data, data + n, op) - data);
 }
 
 template <class T, class Op>               //
@@ -482,8 +482,9 @@ POLYREGION_SPECTRA_EXPORT(sort_by_key) //
 
 template <class T, class Op>                //
 POLYREGION_SPECTRA_EXPORT(stable_partition) //
-    void stable_partition(T *data, std::int32_t n, Op op) {
+    std::int32_t stable_partition(T *data, std::int32_t n, Op op) {
   thrust::stable_sort(thrust::device, data, data + n, [=] __host__ __device__(const T &a, const T &b) { return op(a) && !op(b); });
+  return static_cast<std::int32_t>(thrust::partition_point(thrust::device, data, data + n, op) - data);
 }
 
 template <class T, class Op>           //

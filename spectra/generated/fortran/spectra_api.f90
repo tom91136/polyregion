@@ -378,14 +378,15 @@ contains
     error stop 'compiler did not replace'
   end function polyregion_lower_bound
 
-  subroutine polyregion_max_element(in, n, op, polyregion_result)
+  function polyregion_max_element(in, n, op) result(r)
     type(*), dimension(*), intent(in) :: in
     integer(c_int32_t), intent(in), value :: n
     procedure() :: op
-    type(*), intent(inout) :: polyregion_result
+    integer(c_int32_t) :: r
+    r = 0
     call polyregion_interface("polyregion_interface:spectra:spectra.max_element")
     error stop 'compiler did not replace'
-  end subroutine polyregion_max_element
+  end function polyregion_max_element
 
   subroutine polyregion_merge(a, na, b, nb, out, op)
     type(*), dimension(*), intent(in) :: a
@@ -398,20 +399,21 @@ contains
     error stop 'compiler did not replace'
   end subroutine polyregion_merge
 
-  subroutine polyregion_min_element(in, n, op, polyregion_result)
+  function polyregion_min_element(in, n, op) result(r)
     type(*), dimension(*), intent(in) :: in
     integer(c_int32_t), intent(in), value :: n
     procedure() :: op
-    type(*), intent(inout) :: polyregion_result
+    integer(c_int32_t) :: r
+    r = 0
     call polyregion_interface("polyregion_interface:spectra:spectra.min_element")
     error stop 'compiler did not replace'
-  end subroutine polyregion_min_element
+  end function polyregion_min_element
 
   subroutine polyregion_minmax_element(in, n, min_out, max_out, op)
     type(*), dimension(*), intent(in) :: in
     integer(c_int32_t), intent(in), value :: n
-    type(*), dimension(*), intent(inout) :: min_out
-    type(*), dimension(*), intent(inout) :: max_out
+    integer(c_int32_t), intent(out) :: min_out(*)
+    integer(c_int32_t), intent(out) :: max_out(*)
     procedure() :: op
     call polyregion_interface("polyregion_interface:spectra:spectra.minmax_element")
     error stop 'compiler did not replace'
@@ -438,13 +440,15 @@ contains
     error stop 'compiler did not replace'
   end function polyregion_none_of
 
-  subroutine polyregion_partition(data, n, op)
+  function polyregion_partition(data, n, op) result(r)
     type(*), dimension(*), intent(inout) :: data
     integer(c_int32_t), intent(in), value :: n
     procedure() :: op
+    integer(c_int32_t) :: r
+    r = 0
     call polyregion_interface("polyregion_interface:spectra:spectra.partition")
     error stop 'compiler did not replace'
-  end subroutine polyregion_partition
+  end function polyregion_partition
 
   function polyregion_partition_point(in, n, op) result(r)
     type(*), dimension(*), intent(in) :: in
@@ -679,13 +683,15 @@ contains
     error stop 'compiler did not replace'
   end subroutine polyregion_sort_by_key
 
-  subroutine polyregion_stable_partition(data, n, op)
+  function polyregion_stable_partition(data, n, op) result(r)
     type(*), dimension(*), intent(inout) :: data
     integer(c_int32_t), intent(in), value :: n
     procedure() :: op
+    integer(c_int32_t) :: r
+    r = 0
     call polyregion_interface("polyregion_interface:spectra:spectra.stable_partition")
     error stop 'compiler did not replace'
-  end subroutine polyregion_stable_partition
+  end function polyregion_stable_partition
 
   subroutine polyregion_stable_sort(data, n, op)
     type(*), dimension(*), intent(inout) :: data

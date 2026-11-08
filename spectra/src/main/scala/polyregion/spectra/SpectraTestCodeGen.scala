@@ -920,7 +920,7 @@ private[spectra] object SpectraTestCodeGen {
         """int split = 0;
           |while (split < n && op(data[split]))
           |  ++split;
-          |bool ok = true;
+          |bool ok = __r == split;
           |for (int i = split; i < n; ++i)
           |  if (op(data[i])) ok = false;
           |spectra_test_vector<T> a = data;
@@ -935,10 +935,10 @@ private[spectra] object SpectraTestCodeGen {
           |for (int i = 0; i < n; ++i)
           |  data[i] = T((i * 37 + 11) % n);
           |ref = data;
-          |std::stable_partition(ref.begin(), ref.end(), [](T x) { return x < T(100); });""".stripMargin
+          |const int pivot = int(std::stable_partition(ref.begin(), ref.end(), [](T x) { return x < T(100); }) - ref.begin());""".stripMargin
       ),
       Map("op" -> "x < T(100)"),
-      CppBlock("const bool ok = sameSeq(data, ref, n);")
+      CppBlock("const bool ok = __r == pivot && sameSeq(data, ref, n);")
     ),
     "for_each" -> SemanticCase(
       200,
@@ -1222,30 +1222,36 @@ private[spectra] object SpectraTestCodeGen {
       CppBlock(
         """spectra_test_vector<T> in(n);
           |for (int i = 0; i < n; ++i)
-          |  in[i] = T(i % 11);""".stripMargin
+          |  in[i] = T((i + 3) % 11);
+          |const int ref = int(std::min_element(in.begin(), in.end()) - in.begin());""".stripMargin
       ),
       Map("op" -> "a < b"),
-      CppBlock("const bool ok = near_(__r, n == 0 ? T{} : T(0));")
+      CppBlock("const bool ok = __r == ref;")
     ),
     "max_element" -> SemanticCase(
       300,
       CppBlock(
         """spectra_test_vector<T> in(n);
           |for (int i = 0; i < n; ++i)
-          |  in[i] = T(i % 11);""".stripMargin
+          |  in[i] = T((i + 3) % 11);
+          |const int ref = int(std::max_element(in.begin(), in.end()) - in.begin());""".stripMargin
       ),
       Map("op" -> "a < b"),
-      CppBlock("const bool ok = near_(__r, n == 0 ? T{} : T(10));")
+      CppBlock("const bool ok = __r == ref;")
     ),
     "minmax_element" -> SemanticCase(
       300,
       CppBlock(
-        """spectra_test_vector<T> in(n), min_out(1, T(-1)), max_out(1, T(-1));
+        """spectra_test_vector<T> in(n);
+          |spectra_test_vector<std::int32_t> min_out(1, -1), max_out(1, -1);
           |for (int i = 0; i < n; ++i)
-          |  in[i] = T(i % 11);""".stripMargin
+          |  in[i] = T((i + 3) % 11);
+          |const auto extrema = std::minmax_element(in.begin(), in.end());
+          |const int min_ref = int(extrema.first - in.begin());
+          |const int max_ref = int(extrema.second - in.begin());""".stripMargin
       ),
       Map("op" -> "a < b"),
-      CppBlock("const bool ok = near_(min_out[0], n == 0 ? T{} : T(0)) && near_(max_out[0], n == 0 ? T{} : T(10));")
+      CppBlock("const bool ok = min_out[0] == min_ref && max_out[0] == max_ref;")
     ),
     "is_sorted" -> SemanticCase(
       300,

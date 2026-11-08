@@ -147,7 +147,7 @@ object spectra {
     throw UnsupportedOperationException("compiler did not replace spectra.lower_bound")
 
   @compileTimeOnly("polyregion_interface:spectra:spectra.max_element")
-  def max_element[T](in: Array[T], n: Int, op: (T, T) => Boolean): T =
+  def max_element[T](in: Array[T], n: Int, op: (T, T) => Boolean): Int =
     throw UnsupportedOperationException("compiler did not replace spectra.max_element")
 
   @compileTimeOnly("polyregion_interface:spectra:spectra.merge")
@@ -155,11 +155,11 @@ object spectra {
     throw UnsupportedOperationException("compiler did not replace spectra.merge")
 
   @compileTimeOnly("polyregion_interface:spectra:spectra.min_element")
-  def min_element[T](in: Array[T], n: Int, op: (T, T) => Boolean): T =
+  def min_element[T](in: Array[T], n: Int, op: (T, T) => Boolean): Int =
     throw UnsupportedOperationException("compiler did not replace spectra.min_element")
 
   @compileTimeOnly("polyregion_interface:spectra:spectra.minmax_element")
-  def minmax_element[T](in: Array[T], n: Int, min_out: Array[T], max_out: Array[T], op: (T, T) => Boolean): Unit =
+  def minmax_element[T](in: Array[T], n: Int, min_out: Array[Int], max_out: Array[Int], op: (T, T) => Boolean): Unit =
     throw UnsupportedOperationException("compiler did not replace spectra.minmax_element")
 
   @compileTimeOnly("polyregion_interface:spectra:spectra.mismatch")
@@ -171,7 +171,7 @@ object spectra {
     throw UnsupportedOperationException("compiler did not replace spectra.none_of")
 
   @compileTimeOnly("polyregion_interface:spectra:spectra.partition")
-  def partition[T](data: Array[T], n: Int, op: T => Boolean): Unit =
+  def partition[T](data: Array[T], n: Int, op: T => Boolean): Int =
     throw UnsupportedOperationException("compiler did not replace spectra.partition")
 
   @compileTimeOnly("polyregion_interface:spectra:spectra.partition_point")
@@ -271,7 +271,7 @@ object spectra {
     throw UnsupportedOperationException("compiler did not replace spectra.sort_by_key")
 
   @compileTimeOnly("polyregion_interface:spectra:spectra.stable_partition")
-  def stable_partition[T](data: Array[T], n: Int, op: T => Boolean): Unit =
+  def stable_partition[T](data: Array[T], n: Int, op: T => Boolean): Int =
     throw UnsupportedOperationException("compiler did not replace spectra.stable_partition")
 
   @compileTimeOnly("polyregion_interface:spectra:spectra.stable_sort")

@@ -106,13 +106,13 @@ object Spectra {
       "min_element",
       T,
       List(read("in", size = param(1)), count("n"), callable("op", List(t, t), p.Type.Bool1)),
-      t
+      p.Type.IntS32
     ),
     declaration(
       "max_element",
       T,
       List(read("in", size = param(1)), count("n"), callable("op", List(t, t), p.Type.Bool1)),
-      t
+      p.Type.IntS32
     ),
     declaration(
       "find_if",
@@ -482,13 +482,13 @@ object Spectra {
       "partition",
       T,
       List(readWrite("data", size = param(1)), count("n"), callable("op", List(t), p.Type.Bool1)),
-      p.Type.Unit0
+      p.Type.IntS32
     ),
     declaration(
       "stable_partition",
       T,
       List(readWrite("data", size = param(1)), count("n"), callable("op", List(t), p.Type.Bool1)),
-      p.Type.Unit0
+      p.Type.IntS32
     ),
     declaration(
       "partition_point",
@@ -526,8 +526,8 @@ object Spectra {
       List(
         read("in", size = param(1)),
         count("n"),
-        write("min_out", size = p.Arg.SizeExpr.Const(1)),
-        write("max_out", size = p.Arg.SizeExpr.Const(1)),
+        write("min_out", p.Type.IntS32, size = p.Arg.SizeExpr.Const(1)),
+        write("max_out", p.Type.IntS32, size = p.Arg.SizeExpr.Const(1)),
         callable("op", List(t, t), p.Type.Bool1)
       ),
       p.Type.Unit0

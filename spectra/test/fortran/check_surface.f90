@@ -522,18 +522,16 @@ program check
     spectra_surface_count_if_op)
 
   ! min_element: T=w8
-  call polyregion_min_element( &
+  integer_result = polyregion_min_element( &
     values8, &
     n, &
-    spectra_surface_min_element_op, &
-    value8)
+    spectra_surface_min_element_op)
 
   ! max_element: T=w12
-  call polyregion_max_element( &
+  integer_result = polyregion_max_element( &
     values12, &
     n, &
-    spectra_surface_max_element_op, &
-    value12)
+    spectra_surface_max_element_op)
 
   ! find_if: T=w8
   integer_result = polyregion_find_if( &
@@ -837,13 +835,13 @@ program check
     spectra_surface_binary_search_op)
 
   ! partition: T=w12
-  call polyregion_partition( &
+  integer_result = polyregion_partition( &
     values12, &
     n, &
     spectra_surface_partition_op)
 
   ! stable_partition: T=w8
-  call polyregion_stable_partition( &
+  integer_result = polyregion_stable_partition( &
     values8, &
     n, &
     spectra_surface_stable_partition_op)
@@ -882,8 +880,8 @@ program check
   call polyregion_minmax_element( &
     values12, &
     n, &
-    values12, &
-    values12, &
+    values4, &
+    values4, &
     spectra_surface_minmax_element_op)
 
   ! copy_n: T=w12

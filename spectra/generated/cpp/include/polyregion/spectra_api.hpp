@@ -233,7 +233,7 @@ inline std::int32_t lower_bound(const T *in, std::int32_t n, T value, Op op) {
 
 template <class T, class Op> //
 POLYREGION_SPECTRA_ANNOTATE("polyregion_interface:spectra:spectra.max_element") POLYREGION_SPECTRA_FALLBACK //
-inline T max_element(const T *in, std::int32_t n, Op op) {
+inline std::int32_t max_element(const T *in, std::int32_t n, Op op) {
   static_assert(std::is_same_v<std::invoke_result_t<Op &, const T &, const T &>, bool>, "callable signature mismatch");
   POLYREGION_SPECTRA_IMPLEMENT(max_element, in, n, op);
 }
@@ -247,14 +247,14 @@ inline void merge(const T *a, std::int32_t na, const T *b, std::int32_t nb, T *o
 
 template <class T, class Op> //
 POLYREGION_SPECTRA_ANNOTATE("polyregion_interface:spectra:spectra.min_element") POLYREGION_SPECTRA_FALLBACK //
-inline T min_element(const T *in, std::int32_t n, Op op) {
+inline std::int32_t min_element(const T *in, std::int32_t n, Op op) {
   static_assert(std::is_same_v<std::invoke_result_t<Op &, const T &, const T &>, bool>, "callable signature mismatch");
   POLYREGION_SPECTRA_IMPLEMENT(min_element, in, n, op);
 }
 
 template <class T, class Op> //
 POLYREGION_SPECTRA_ANNOTATE("polyregion_interface:spectra:spectra.minmax_element") POLYREGION_SPECTRA_FALLBACK //
-inline void minmax_element(const T *in, std::int32_t n, T *min_out, T *max_out, Op op) {
+inline void minmax_element(const T *in, std::int32_t n, std::int32_t *min_out, std::int32_t *max_out, Op op) {
   static_assert(std::is_same_v<std::invoke_result_t<Op &, const T &, const T &>, bool>, "callable signature mismatch");
   POLYREGION_SPECTRA_IMPLEMENT(minmax_element, in, n, min_out, max_out, op);
 }
@@ -275,7 +275,7 @@ inline bool none_of(const T *in, std::int32_t n, Op op) {
 
 template <class T, class Op> //
 POLYREGION_SPECTRA_ANNOTATE("polyregion_interface:spectra:spectra.partition") POLYREGION_SPECTRA_FALLBACK //
-inline void partition(T *data, std::int32_t n, Op op) {
+inline std::int32_t partition(T *data, std::int32_t n, Op op) {
   static_assert(std::is_same_v<std::invoke_result_t<Op &, const T &>, bool>, "callable signature mismatch");
   POLYREGION_SPECTRA_IMPLEMENT(partition, data, n, op);
 }
@@ -434,7 +434,7 @@ inline void sort_by_key(K *keys, V *values, std::int32_t n, Op op) {
 
 template <class T, class Op> //
 POLYREGION_SPECTRA_ANNOTATE("polyregion_interface:spectra:spectra.stable_partition") POLYREGION_SPECTRA_FALLBACK //
-inline void stable_partition(T *data, std::int32_t n, Op op) {
+inline std::int32_t stable_partition(T *data, std::int32_t n, Op op) {
   static_assert(std::is_same_v<std::invoke_result_t<Op &, const T &>, bool>, "callable signature mismatch");
   POLYREGION_SPECTRA_IMPLEMENT(stable_partition, data, n, op);
 }

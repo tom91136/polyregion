@@ -15,24 +15,32 @@
 #include "support.hpp"
 
 template <class T> static bool run(const char *scenario, int n) {
-  spectra_test_vector<T> in(n), min_out(1, T(-1)), max_out(1, T(-1));
+  spectra_test_vector<T> in(n);
+  spectra_test_vector<std::int32_t> min_out(1, -1), max_out(1, -1);
   for (int i = 0; i < n; ++i)
-    in[i] = T(i % 11);
+    in[i] = T((i + 3) % 11);
+  const auto extrema = std::minmax_element(in.begin(), in.end());
+  const int min_ref = int(extrema.first - in.begin());
+  const int max_ref = int(extrema.second - in.begin());
   const auto op = [] SPECTRA_TEST_FN(T a, T b) { return bool(a < b); };
   spectra::minmax_element<T>(in.data(), n, min_out.data(), max_out.data(), op);
-  const bool ok = near_(min_out[0], n == 0 ? T{} : T(0)) && near_(max_out[0], n == 0 ? T{} : T(10));
+  const bool ok = min_out[0] == min_ref && max_out[0] == max_ref;
   std::fprintf(stderr, "  %-24s<%-18s> %s\n", "minmax_element", scenario, ok ? "OK" : "MISMATCH");
   return ok;
 }
 
 template <class T> static bool run_captured(const char *scenario, int n) {
-  spectra_test_vector<T> in(n), min_out(1, T(-1)), max_out(1, T(-1));
+  spectra_test_vector<T> in(n);
+  spectra_test_vector<std::int32_t> min_out(1, -1), max_out(1, -1);
   for (int i = 0; i < n; ++i)
-    in[i] = T(i % 11);
+    in[i] = T((i + 3) % 11);
+  const auto extrema = std::minmax_element(in.begin(), in.end());
+  const int min_ref = int(extrema.first - in.begin());
+  const int max_ref = int(extrema.second - in.begin());
   const bool live = n >= 0;
   const auto op = [live] SPECTRA_TEST_FN(T a, T b) { return live ? bool(a < b) : bool(a < b); };
   spectra::minmax_element<T>(in.data(), n, min_out.data(), max_out.data(), op);
-  const bool ok = near_(min_out[0], n == 0 ? T{} : T(0)) && near_(max_out[0], n == 0 ? T{} : T(10));
+  const bool ok = min_out[0] == min_ref && max_out[0] == max_ref;
   std::fprintf(stderr, "  %-24s<%-18s> %s\n", "minmax_element", scenario, ok ? "OK" : "MISMATCH");
   return ok;
 }

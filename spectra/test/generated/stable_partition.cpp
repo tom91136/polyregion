@@ -19,10 +19,10 @@ template <class T> static bool run(const char *scenario, int n) {
   for (int i = 0; i < n; ++i)
     data[i] = T((i * 37 + 11) % n);
   ref = data;
-  std::stable_partition(ref.begin(), ref.end(), [](T x) { return x < T(100); });
+  const int pivot = int(std::stable_partition(ref.begin(), ref.end(), [](T x) { return x < T(100); }) - ref.begin());
   const auto op = [] SPECTRA_TEST_FN(T x) { return bool(x < T(100)); };
-  spectra::stable_partition<T>(data.data(), n, op);
-  const bool ok = sameSeq(data, ref, n);
+  const int __r = spectra::stable_partition<T>(data.data(), n, op);
+  const bool ok = __r == pivot && sameSeq(data, ref, n);
   std::fprintf(stderr, "  %-24s<%-18s> %s\n", "stable_partition", scenario, ok ? "OK" : "MISMATCH");
   return ok;
 }
@@ -32,11 +32,11 @@ template <class T> static bool run_captured(const char *scenario, int n) {
   for (int i = 0; i < n; ++i)
     data[i] = T((i * 37 + 11) % n);
   ref = data;
-  std::stable_partition(ref.begin(), ref.end(), [](T x) { return x < T(100); });
+  const int pivot = int(std::stable_partition(ref.begin(), ref.end(), [](T x) { return x < T(100); }) - ref.begin());
   const bool live = n >= 0;
   const auto op = [live] SPECTRA_TEST_FN(T x) { return live ? bool(x < T(100)) : bool(x < T(100)); };
-  spectra::stable_partition<T>(data.data(), n, op);
-  const bool ok = sameSeq(data, ref, n);
+  const int __r = spectra::stable_partition<T>(data.data(), n, op);
+  const bool ok = __r == pivot && sameSeq(data, ref, n);
   std::fprintf(stderr, "  %-24s<%-18s> %s\n", "stable_partition", scenario, ok ? "OK" : "MISMATCH");
   return ok;
 }

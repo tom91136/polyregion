@@ -243,8 +243,8 @@ object check_surface {
     spectra.minmax_element(
       values12,
       n,
-      values12,
-      values12,
+      values4,
+      values4,
       (arg0: SpectraSurfaceValue12, arg1: SpectraSurfaceValue12) => false
     )
 

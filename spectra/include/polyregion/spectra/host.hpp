@@ -176,8 +176,8 @@ POLYREGION_SPECTRA_HOST_FALLBACK inline std::int32_t lower_bound(const T *in, st
 }
 
 template <class T, class Op>
-POLYREGION_SPECTRA_HOST_FALLBACK inline T max_element(const T *in, std::int32_t n, Op op) {
-  return n == 0 ? T{} : *std::max_element(in, in + n, op);
+POLYREGION_SPECTRA_HOST_FALLBACK inline std::int32_t max_element(const T *in, std::int32_t n, Op op) {
+  return static_cast<std::int32_t>(std::max_element(in, in + n, op) - in);
 }
 
 template <class T, class Op>
@@ -186,20 +186,15 @@ POLYREGION_SPECTRA_HOST_FALLBACK inline void merge(const T *a, std::int32_t na, 
 }
 
 template <class T, class Op>
-POLYREGION_SPECTRA_HOST_FALLBACK inline T min_element(const T *in, std::int32_t n, Op op) {
-  return n == 0 ? T{} : *std::min_element(in, in + n, op);
+POLYREGION_SPECTRA_HOST_FALLBACK inline std::int32_t min_element(const T *in, std::int32_t n, Op op) {
+  return static_cast<std::int32_t>(std::min_element(in, in + n, op) - in);
 }
 
 template <class T, class Op>
-POLYREGION_SPECTRA_HOST_FALLBACK inline void minmax_element(const T *in, std::int32_t n, T *min_out, T *max_out, Op op) {
-  if (n == 0) {
-    *min_out = T{};
-    *max_out = T{};
-    return;
-  }
+POLYREGION_SPECTRA_HOST_FALLBACK inline void minmax_element(const T *in, std::int32_t n, std::int32_t *min_out, std::int32_t *max_out, Op op) {
   const auto [lo, hi] = std::minmax_element(in, in + n, op);
-  *min_out = *lo;
-  *max_out = *hi;
+  *min_out = static_cast<std::int32_t>(lo - in);
+  *max_out = static_cast<std::int32_t>(hi - in);
 }
 
 template <class T, class Op>
@@ -213,8 +208,8 @@ POLYREGION_SPECTRA_HOST_FALLBACK inline bool none_of(const T *in, std::int32_t n
 }
 
 template <class T, class Op>
-POLYREGION_SPECTRA_HOST_FALLBACK inline void partition(T *data, std::int32_t n, Op op) {
-  std::partition(data, data + n, op);
+POLYREGION_SPECTRA_HOST_FALLBACK inline std::int32_t partition(T *data, std::int32_t n, Op op) {
+  return static_cast<std::int32_t>(std::partition(data, data + n, op) - data);
 }
 
 template <class T, class Op>
@@ -352,8 +347,8 @@ POLYREGION_SPECTRA_HOST_FALLBACK inline void sort_by_key(K *keys, V *values, std
 }
 
 template <class T, class Op>
-POLYREGION_SPECTRA_HOST_FALLBACK inline void stable_partition(T *data, std::int32_t n, Op op) {
-  std::stable_partition(data, data + n, op);
+POLYREGION_SPECTRA_HOST_FALLBACK inline std::int32_t stable_partition(T *data, std::int32_t n, Op op) {
+  return static_cast<std::int32_t>(std::stable_partition(data, data + n, op) - data);
 }
 
 template <class T, class Op>

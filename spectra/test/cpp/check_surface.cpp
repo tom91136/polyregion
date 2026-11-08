@@ -476,8 +476,8 @@ void check_surface() {
 
   // minmax_element: T=w12
   SpectraSurfaceValue12 minmax_element_in[2 * n]{};
-  SpectraSurfaceValue12 minmax_element_min_out[2 * n]{};
-  SpectraSurfaceValue12 minmax_element_max_out[2 * n]{};
+  std::int32_t minmax_element_min_out[2 * n]{};
+  std::int32_t minmax_element_max_out[2 * n]{};
   spectra::host::minmax_element<SpectraSurfaceValue12>(
       minmax_element_in,
       n,

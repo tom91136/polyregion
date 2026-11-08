@@ -21,11 +21,11 @@ template <class T> static bool run(const char *scenario, int n) {
   orig = data;
   std::sort(orig.begin(), orig.end());
   const auto op = [] SPECTRA_TEST_FN(T x) { return bool(x < T(100)); };
-  spectra::partition<T>(data.data(), n, op);
+  const int __r = spectra::partition<T>(data.data(), n, op);
   int split = 0;
   while (split < n && op(data[split]))
     ++split;
-  bool ok = true;
+  bool ok = __r == split;
   for (int i = split; i < n; ++i)
     if (op(data[i])) ok = false;
   spectra_test_vector<T> a = data;
@@ -43,11 +43,11 @@ template <class T> static bool run_captured(const char *scenario, int n) {
   std::sort(orig.begin(), orig.end());
   const bool live = n >= 0;
   const auto op = [live] SPECTRA_TEST_FN(T x) { return live ? bool(x < T(100)) : bool(x < T(100)); };
-  spectra::partition<T>(data.data(), n, op);
+  const int __r = spectra::partition<T>(data.data(), n, op);
   int split = 0;
   while (split < n && op(data[split]))
     ++split;
-  bool ok = true;
+  bool ok = __r == split;
   for (int i = split; i < n; ++i)
     if (op(data[i])) ok = false;
   spectra_test_vector<T> a = data;

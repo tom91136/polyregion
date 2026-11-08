@@ -269,14 +269,9 @@ POLYREGION_SPECTRA_EXPORT(lower_bound) //
 
 template <class T, class Op>           //
 POLYREGION_SPECTRA_EXPORT(max_element) //
-    T max_element(const T *in, std::int32_t n, Op op) {
-  if (n <= 0) return T{};
-  auto policy = oneapi::dpl::execution::device_policy<>{};
-  auto queue = policy.queue();
-  const auto *device_result = oneapi::dpl::max_element(policy, in, in + n, op);
-  T result{};
-  queue.memcpy(&result, device_result, sizeof(result)).wait();
-  return result;
+    std::int32_t max_element(const T *in, std::int32_t n, Op op) {
+  if (n <= 0) return 0;
+  return static_cast<std::int32_t>(oneapi::dpl::max_element(oneapi::dpl::execution::device_policy<>{}, in, in + n, op) - in);
 }
 
 template <class T, class Op>     //
@@ -287,29 +282,23 @@ POLYREGION_SPECTRA_EXPORT(merge) //
 
 template <class T, class Op>           //
 POLYREGION_SPECTRA_EXPORT(min_element) //
-    T min_element(const T *in, std::int32_t n, Op op) {
-  if (n <= 0) return T{};
-  auto policy = oneapi::dpl::execution::device_policy<>{};
-  auto queue = policy.queue();
-  const auto *device_result = oneapi::dpl::min_element(policy, in, in + n, op);
-  T result{};
-  queue.memcpy(&result, device_result, sizeof(result)).wait();
-  return result;
+    std::int32_t min_element(const T *in, std::int32_t n, Op op) {
+  if (n <= 0) return 0;
+  return static_cast<std::int32_t>(oneapi::dpl::min_element(oneapi::dpl::execution::device_policy<>{}, in, in + n, op) - in);
 }
 
 template <class T, class Op>              //
 POLYREGION_SPECTRA_EXPORT(minmax_element) //
-    void minmax_element(const T *in, std::int32_t n, T *min_out, T *max_out, Op op) {
+    void minmax_element(const T *in, std::int32_t n, std::int32_t *min_out, std::int32_t *max_out, Op op) {
   auto policy = oneapi::dpl::execution::device_policy<>{};
   if (n <= 0) {
-    oneapi::dpl::fill_n(policy, min_out, 1, T{});
-    oneapi::dpl::fill_n(policy, max_out, 1, T{});
+    oneapi::dpl::fill_n(policy, min_out, 1, std::int32_t{0});
+    oneapi::dpl::fill_n(policy, max_out, 1, std::int32_t{0});
     return;
   }
-  auto queue = policy.queue();
   const auto result = oneapi::dpl::minmax_element(policy, in, in + n, op);
-  oneapi::dpl::copy_n(policy, result.first, 1, min_out);
-  oneapi::dpl::copy_n(policy, result.second, 1, max_out);
+  oneapi::dpl::fill_n(policy, min_out, 1, static_cast<std::int32_t>(result.first - in));
+  oneapi::dpl::fill_n(policy, max_out, 1, static_cast<std::int32_t>(result.second - in));
 }
 
 template <class T, class Op>        //
@@ -326,8 +315,8 @@ POLYREGION_SPECTRA_EXPORT(none_of) //
 
 template <class T, class Op>         //
 POLYREGION_SPECTRA_EXPORT(partition) //
-    void partition(T *data, std::int32_t n, Op op) {
-  oneapi::dpl::partition(oneapi::dpl::execution::device_policy<>{}, data, data + n, op);
+    std::int32_t partition(T *data, std::int32_t n, Op op) {
+  return static_cast<std::int32_t>(oneapi::dpl::partition(oneapi::dpl::execution::device_policy<>{}, data, data + n, op) - data);
 }
 
 template <class T, class Op>               //
@@ -483,8 +472,8 @@ POLYREGION_SPECTRA_EXPORT(sort_by_key) //
 
 template <class T, class Op>                //
 POLYREGION_SPECTRA_EXPORT(stable_partition) //
-    void stable_partition(T *data, std::int32_t n, Op op) {
-  oneapi::dpl::stable_partition(oneapi::dpl::execution::device_policy<>{}, data, data + n, op);
+    std::int32_t stable_partition(T *data, std::int32_t n, Op op) {
+  return static_cast<std::int32_t>(oneapi::dpl::stable_partition(oneapi::dpl::execution::device_policy<>{}, data, data + n, op) - data);
 }
 
 template <class T, class Op>           //
