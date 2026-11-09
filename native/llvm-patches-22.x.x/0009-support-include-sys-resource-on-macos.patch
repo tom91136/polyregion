@@ -15,16 +15,16 @@ Add back sys/resource.h to define them locally.
  1 file changed, 3 insertions(+)
 
 diff --git a/llvm/lib/Support/CrashRecoveryContext.cpp b/llvm/lib/Support/CrashRecoveryContext.cpp
-index fb9f2ec333a7b..493ba951fd3e1 100644
+index 1ba0c23..58f95d1 100644
 --- a/llvm/lib/Support/CrashRecoveryContext.cpp
 +++ b/llvm/lib/Support/CrashRecoveryContext.cpp
-@@ -15,5 +15,8 @@
+@@ -15,6 +15,9 @@
  #include <cassert>
  #include <mutex>
  #include <setjmp.h>
--
 +#ifdef __APPLE__
 +#include <sys/resource.h>
 +#endif
-+
+ 
  using namespace llvm;
+ 

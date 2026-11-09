@@ -337,7 +337,7 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
                 }
               }
             }
-            if (const auto pointer = arg.tpe().template get<Type::Ptr>(); pointer && mirrorKind->isZeroValue()) {
+            if (const auto pointer = arg.tpe().template get<Type::Ptr>(); pointer && mirrorKind->isZero()) {
               mirrorSize = llvm::ConstantInt::get(sizeTy, primitiveSize(pointer->comp).value_or(0));
               mirrorKind = llvm::ConstantInt::get(i8, 3);
             }

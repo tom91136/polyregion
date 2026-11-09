@@ -1,0 +1,64 @@
+From 0000000000000000000000000000000000000008 Mon Sep 17 00:00:00 2001
+From: polyregion <noreply@polyregion>
+Date: Tue, 01 Sep 2026 00:00:00 +0000
+Subject: [PATCH] [SPIRV] legalize boolean stack-slot ptrcasts
+
+SPIRVLegalizePointerCast already handles aggregate and vector type mismatches,
+but the stack-slot representation used for i1 values leaves a ptrcast between
+the i1 value and its i8 backing slot. Translate the access as an integer
+extension/truncation while preserving the pointer's deduced type. Without
+this, logical SPIR-V translation aborts on stores through the cast; loads hit
+the corresponding unimplemented path next.
+---
+diff --git a/llvm/lib/Target/SPIRV/SPIRVLegalizePointerCast.cpp b/llvm/lib/Target/SPIRV/SPIRVLegalizePointerCast.cpp
+index dd4bdb8..0aa855e 100644
+--- a/llvm/lib/Target/SPIRV/SPIRVLegalizePointerCast.cpp
++++ b/llvm/lib/Target/SPIRV/SPIRVLegalizePointerCast.cpp
+@@ -145,10 +145,17 @@ class SPIRVLegalizePointerCastImpl {
+     return Output;
+   }
+ 
++  // i1 values are spilled to i8 stack slots, leaving an i1 <-> i8 ptrcast that
++  // is legalized as an integer extension/truncation.
++  static bool isBoolByteCast(Type *A, Type *B) {
++    return (A->isIntegerTy(1) && B->isIntegerTy(8)) ||
++           (A->isIntegerTy(8) && B->isIntegerTy(1));
++  }
++
+   // Returns true if |FromTy| has a memory layout compatible with loading or
+   // storing |ToTy|.
+   bool isCompatibleMemoryLayout(Type *ToTy, Type *FromTy) {
+-    if (ToTy == FromTy)
++    if (ToTy == FromTy || isBoolByteCast(ToTy, FromTy))
+       return true;
+     auto *SVT = dyn_cast<FixedVectorType>(FromTy);
+     auto *DVT = dyn_cast<FixedVectorType>(ToTy);
+@@ -231,6 +238,14 @@ class SPIRVLegalizePointerCastImpl {
+       return loadVectorFromArray(B, DVT, GEP);
+     if (MAT && DVT && MAT->getElementType() == DVT->getElementType())
+       return loadVectorFromMatrixArray(B, DVT, GEP, MAT);
++    if (isBoolByteCast(ElementType, CurrentTy)) {
++      LoadInst *LI = B.CreateLoad(CurrentTy, GEP);
++      LI->setAlignment(BadLoad->getAlign());
++      buildAssignType(B, CurrentTy, LI);
++      Value *Output = B.CreateZExtOrTrunc(LI, ElementType);
++      buildAssignType(B, ElementType, Output);
++      return Output;
++    }
+ 
+     llvm_unreachable("Failed to load from aggregate.");
+   }
+@@ -496,6 +511,13 @@ class SPIRVLegalizePointerCastImpl {
+       storeMatrixArrayFromVector(B, Src, GEP, DAT, Alignment);
+       return;
+     }
++    if (isBoolByteCast(Src->getType(), CurrentTy)) {
++      Value *Converted = B.CreateZExtOrTrunc(Src, CurrentTy);
++      buildAssignType(B, CurrentTy, Converted);
++      StoreInst *SI = B.CreateStore(Converted, GEP);
++      SI->setAlignment(Alignment);
++      return;
++    }
+ 
+     llvm_unreachable("Failed to store to aggregate.");
+   }

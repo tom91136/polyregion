@@ -133,6 +133,8 @@ int flang_main(int argc, const char **argv) {
     }
   }
 
+#if LLVM_VERSION_MAJOR < 23
   diags.getClient()->finish();
+#endif
   return res;
 }

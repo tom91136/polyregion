@@ -129,7 +129,11 @@ static backend::LLVMBackend::Options toLLVMBackendOptions(const compiler::Option
         validate(llvm::Triple::ArchType::nvptx64);
         return {.target = backend::LLVMBackend::Target::NVPTX64, .arch = options.arch};
       case compiletime::Target::Object_LLVM_AMDGCN:
+#if LLVM_VERSION_MAJOR >= 23
+        validate(llvm::Triple::ArchType::amdgpu);
+#else
         validate(llvm::Triple::ArchType::amdgcn);
+#endif
         return {.target = backend::LLVMBackend::Target::AMDGCN, .arch = options.arch};
       case compiletime::Target::Object_LLVM_SPIRV32_Kernel:
         return {.target = backend::LLVMBackend::Target::SPIRV32_Kernel, .arch = options.arch};

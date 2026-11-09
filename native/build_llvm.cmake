@@ -53,14 +53,23 @@ if (DOWNLOAD_LLVM)
     )
 endif ()
 
-set(LLVM_PATCHES)
+# Order by file name (patch number) across all matching dirs, not by dir.
+set(_KEYED_PATCHES)
 foreach (DIR ${LLVM_PATCH_DIRS})
     if (IS_DIRECTORY ${DIR})
         file(GLOB _PATCHES_IN_DIR "${DIR}/*.patch")
-        list(APPEND LLVM_PATCHES ${_PATCHES_IN_DIR})
+        foreach (_PATCH ${_PATCHES_IN_DIR})
+            get_filename_component(_NAME ${_PATCH} NAME)
+            list(APPEND _KEYED_PATCHES "${_NAME}|${_PATCH}")
+        endforeach ()
     endif ()
 endforeach ()
-list(SORT LLVM_PATCHES)
+list(SORT _KEYED_PATCHES)
+set(LLVM_PATCHES)
+foreach (_KEYED ${_KEYED_PATCHES})
+    string(REGEX REPLACE "^[^|]*\\|" "" _PATCH "${_KEYED}")
+    list(APPEND LLVM_PATCHES ${_PATCH})
+endforeach ()
 
 set(_patch_inputs "${LLVM_SOURCE_SHA256}")
 foreach (PATCH ${LLVM_PATCHES})
@@ -95,6 +104,24 @@ if (EXTRACT_LLVM)
         find_program(POLYREGION_PATCH_CMD patch)
         find_program(POLYREGION_GIT_CMD git)
         foreach (PATCH ${LLVM_PATCHES})
+            # A major-wide patch may already be upstream in a later point release; skip it if so.
+            if (POLYREGION_PATCH_CMD)
+                execute_process(
+                        COMMAND ${POLYREGION_PATCH_CMD} -p1 -R --dry-run --batch --force --fuzz=0 -s -i ${PATCH}
+                        WORKING_DIRECTORY ${LLVM_BUILD_DIR}/${LLVM_SRC_DIRNAME}
+                        RESULT_VARIABLE REVERSE_RC OUTPUT_QUIET ERROR_QUIET)
+            elseif (POLYREGION_GIT_CMD)
+                execute_process(
+                        COMMAND ${POLYREGION_GIT_CMD} apply --reverse --check -p1 ${PATCH}
+                        WORKING_DIRECTORY ${LLVM_BUILD_DIR}/${LLVM_SRC_DIRNAME}
+                        RESULT_VARIABLE REVERSE_RC OUTPUT_QUIET ERROR_QUIET)
+            else ()
+                set(REVERSE_RC 1)
+            endif ()
+            if (REVERSE_RC EQUAL 0)
+                message(STATUS "Skipping ${PATCH} (already applied upstream)")
+                continue ()
+            endif ()
             message(STATUS "Applying ${PATCH}")
             if (POLYREGION_PATCH_CMD)
                 execute_process(
@@ -205,7 +232,9 @@ if (POLYREGION_CROSS_CLANG)
     endforeach ()
 
     if (POLYREGION_LLVM_HAS_FLANG)
-        list(APPEND BUILD_OPTIONS -DFLANG_BUILD_INTRINSIC_MODULES_CROSS=ON)
+        if (LLVM_MAJOR LESS 23)
+            list(APPEND BUILD_OPTIONS -DFLANG_BUILD_INTRINSIC_MODULES_CROSS=ON)
+        endif ()
         if (POLYREGION_CROSS_FLANG_NEW)
             # Host-native flang: shim injects --target= (or -triple under -fc1, which bypasses driver)
             set(_cross_shim_dir "${LLVM_BUILD_DIR}/cross-shims")
@@ -221,7 +250,7 @@ if (POLYREGION_CROSS_CLANG)
             # XXX x86_64 flang lacks REAL(16); skip R16 or intrinsic modules trip the host front-end
             list(APPEND BUILD_OPTIONS -DHAVE_LDBL_MANT_DIG_113=OFF)
         else ()
-            # QEMU-user path: target-arch flang via binfmt (module_files only); bulk C/C++ stays host
+            # QEMU-user path: target-arch flang via binfmt (intrinsic modules only); bulk C/C++ stays host
             set(ENV{PATH} "${LLVM_BUILD_DIR}/bin:$ENV{PATH}")
             list(APPEND _RT_ARGS "-DCMAKE_Fortran_COMPILER=${LLVM_BUILD_DIR}/bin/flang")
         endif ()
@@ -255,10 +284,20 @@ else ()
     message(STATUS "LLVM configuration complete, starting build...")
 endif ()
 
+# XXX LLVM 23 moved the intrinsic .mod files from flang's module_files into flang-rt, installed
+# under the resource dir (lib/clang/<major>/finclude/flang/<triple>) as their own component.
+if (LLVM_MAJOR GREATER_EQUAL 23)
+    set(FLANG_MODULE_TARGET flang-rt-mod)
+    set(FLANG_MODULE_INSTALL_TARGET install-flang-rt-mod)
+else ()
+    set(FLANG_MODULE_TARGET module_files)
+    set(FLANG_MODULE_INSTALL_TARGET tools/flang/tools/f18/install)
+endif ()
+
 if (POLYREGION_LLVM_HAS_FLANG)
     set(FLANG_BUILD_TARGETS
-            module_files
-            tools/flang/tools/f18/install
+            ${FLANG_MODULE_TARGET}
+            ${FLANG_MODULE_INSTALL_TARGET}
             install-flang-cmake-exports
             install-flang-libraries
             install-flang-headers)
@@ -275,13 +314,13 @@ if (POLYREGION_LLVM_HAS_FLANG)
 endif ()
 
 if (POLYREGION_CROSS_CLANG AND POLYREGION_LLVM_HAS_FLANG)
-    # XXX openmp's omp_lib.F90 needs iso_c_binding.mod from module_files; force it first.
+    # XXX openmp's omp_lib.F90 needs iso_c_binding.mod from the intrinsic modules; force it first.
     execute_process(
-            COMMAND ${CMAKE_COMMAND} --build ${LLVM_BUILD_DIR} --target module_files
+            COMMAND ${CMAKE_COMMAND} --build ${LLVM_BUILD_DIR} --target ${FLANG_MODULE_TARGET}
             WORKING_DIRECTORY ${LLVM_BUILD_DIR}
             RESULT_VARIABLE SUCCESS)
     if (NOT SUCCESS EQUAL "0")
-        message(FATAL_ERROR "module_files prebuild failed")
+        message(FATAL_ERROR "${FLANG_MODULE_TARGET} prebuild failed")
     endif ()
     # XXX runtimes hard-codes LIBOMP_FORTRAN_MODULES_COMPILER=bin/flang; swap shim, restore before install
     if (POLYREGION_CROSS_FLANG_NEW AND EXISTS "${LLVM_BUILD_DIR}/bin/flang-${LLVM_MAJOR}" AND EXISTS "${_cross_shim_dir}/flang")
@@ -293,7 +332,7 @@ endif ()
 # XXX install-flang-headers has no build deps; pre-build distribution so tablegen .inc files exist before install
 set(_distribution_prebuild_targets distribution)
 if (POLYREGION_LLVM_HAS_FLANG)
-    list(APPEND _distribution_prebuild_targets module_files)
+    list(APPEND _distribution_prebuild_targets ${FLANG_MODULE_TARGET})
 endif ()
 execute_process(
         COMMAND

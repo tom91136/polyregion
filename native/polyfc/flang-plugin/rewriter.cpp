@@ -141,7 +141,11 @@ class Binder {
       if (const auto refElemTy = refTy.getEleTy(); refElemTy.isIntOrIndexOrFloat()) { //  fir.ref<X>
         return getRefPtr(B, val);
       } else if (const auto boxTy = dyn_cast<fir::BoxType>(refElemTy)) { // fir.ref<fir.box<X>>
+#if LLVM_VERSION_MAJOR >= 23
+        if (!boxTy.unwrapInnerType().isSignlessIntOrIndexOrFloat())
+#else
         if (!fir::unwrapInnerType(boxTy.getEleTy()).isSignlessIntOrIndexOrFloat())
+#endif
           raise(fmt::format("Binder value is not a boxed scalar type: {}", show(val)));
         // Load the box pointer first as it's the field zero pointer-to-scalar's value we want
         return LLVM::LoadOp::create(B, uLoc(B), ptrTy(B), getBoxPtr(B, val));

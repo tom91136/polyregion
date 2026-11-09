@@ -489,8 +489,8 @@ void insertMapCalls(llvm::Module &M, //
           emplaceNonSCEV("SCEV");
           continue;
         }
-        const auto *const scLB = AddRec->getStart();
-        const auto *const scStride = AddRec->getStepRecurrence(SE);
+        const auto scLB = AddRec->getStart();
+        const auto scStride = AddRec->getStepRecurrence(SE);
         const auto *const scExitCount = SE.getExitCount(AddRec->getLoop(), AddRec->getLoop()->getExitingBlock());
         if (llvm::isa<llvm::SCEVCouldNotCompute>(scExitCount)) {
           emplaceNonSCEV("SCEVNoExit");

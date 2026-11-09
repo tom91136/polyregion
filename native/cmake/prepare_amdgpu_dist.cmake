@@ -70,7 +70,7 @@ endif()
 # is the non-obvious bit; everything else is verbatim upstream.
 set(CLANG_OCL_FLAGS
   -fcolor-diagnostics
-  -Werror -Wno-error=atomic-alignment
+  -Werror -Wno-error=atomic-alignment -Wno-error=deprecated-builtins
   -x cl
   -Xclang -cl-std=CL2.0
   -target amdgcn-amd-amdhsa

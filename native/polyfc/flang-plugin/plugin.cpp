@@ -103,7 +103,9 @@ public:
       return ci.executeAction(action);
     } else {
       MutableCodeGenAction action(Fortran::frontend::BackendActionTy::Backend_EmitHLFIR);
+#if LLVM_VERSION_MAJOR < 23 // HLFIR lowering is unconditional from 23
       ci.getInvocation().getLoweringOpts().setLowerToHighLevelFIR(true);
+#endif
       ci.executeAction(action);
 
       if (auto m = action.getMLIRModule()) witnessHLFIR(ci.getDiagnostics(), m);

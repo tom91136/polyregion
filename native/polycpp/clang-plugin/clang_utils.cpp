@@ -83,7 +83,11 @@ clang::ImplicitCastExpr *mkArrayToPtrDecay(const clang::ASTContext &C, clang::Qu
 }
 
 clang::InitListExpr *mkInitList(const clang::ASTContext &C, clang::QualType ty, const std::vector<clang::Expr *> &initExprs) {
+#if LLVM_VERSION_MAJOR >= 23
+  auto *init = new (C) clang::InitListExpr(C, {}, initExprs, {}, /*isExplicit=*/false);
+#else
   auto *init = new (C) clang::InitListExpr(C, {}, initExprs, {});
+#endif
   init->setType(ty);
   return init;
 }

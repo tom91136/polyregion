@@ -1383,10 +1383,12 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
   options.AllowFPOpFusion = useUnsafeMath ? llvm::FPOpFusion::Fast : llvm::FPOpFusion::Standard;
   // LLVM 22 removed `TargetOptions::UnsafeFPMath` (was a meta-flag combining the granular ones
   // below). Setting all four granular flags reproduces the same fast-math semantics.
+  options.NoTrappingFPMath = useUnsafeMath;
+#if LLVM_VERSION_MAJOR < 23
   options.NoInfsFPMath = useUnsafeMath;
   options.NoNaNsFPMath = useUnsafeMath;
-  options.NoTrappingFPMath = useUnsafeMath;
   options.NoSignedZerosFPMath = useUnsafeMath;
+#endif
 
   const auto [genOpt, optLevel] = [](compiletime::OptLevel o) -> std::pair<llvm::CodeGenOptLevel, llvm::OptimizationLevel> {
     switch (o) {
@@ -1467,6 +1469,17 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
         for (llvm::Function &F : m->functions())
           setFunctionAttributes(TM.getTargetCPU(), TM.getTargetFeatureString(), F, useUnsafeMath);
         optimise(TM, *m, optLevel);
+#if LLVM_VERSION_MAJOR >= 23
+        // XXX codegen reads fast-math per instruction from LLVM 23; set after optimise so the middle-end input is unchanged
+        if (useUnsafeMath)
+          for (llvm::Function &F : m->functions())
+            for (llvm::Instruction &I : llvm::instructions(F))
+              if (llvm::isa<llvm::FPMathOperator>(I)) {
+                I.setHasNoNaNs(true);
+                I.setHasNoInfs(true);
+                I.setHasNoSignedZeros(true);
+              }
+#endif
       }
       verifyKernelSymbols(*m, TM.getTargetTriple());
 

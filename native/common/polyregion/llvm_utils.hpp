@@ -9,7 +9,11 @@
   #undef NO_ERROR
 #endif
 
+#include "llvm/Config/llvm-config.h"
 #include "llvm/TargetParser/AArch64TargetParser.h"
+#if LLVM_VERSION_MAJOR >= 23
+  #include "llvm/TargetParser/AMDGPUTargetParser.h"
+#endif
 #include "llvm/TargetParser/ARMTargetParser.h"
 #include "llvm/TargetParser/Host.h"
 #include "llvm/TargetParser/PPCTargetParser.h"
@@ -33,7 +37,12 @@ static bool isCPUTargetSupported(const std::string &CPU, //
     case Triple::riscv64: return CPU == "native" || llvm::RISCV::parseCPU(CPU, /*IsRV64=*/true);
     case Triple::ppc64le:
     case Triple::ppc64: return CPU == "native" || llvm::PPC::isValidCPU(CPU);
-    case Triple::amdgcn: return llvm::AMDGPU::parseArchAMDGCN(CPU) != llvm::AMDGPU::GPUKind::GK_NONE;
+#if LLVM_VERSION_MAJOR >= 23 // amdgcn was renamed to amdgpu
+    case Triple::amdgpu:
+#else
+    case Triple::amdgcn:
+#endif
+      return llvm::AMDGPU::parseArchAMDGCN(CPU) != llvm::AMDGPU::GPUKind::GK_NONE;
     case Triple::nvptx64: return CPU.starts_with("sm_");
 
     default: throw std::logic_error("Unexpected arch from triple:" + Triple::getArchTypeName(arch).str());

@@ -582,7 +582,12 @@ ValPtr SPIRVVulkanTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
     return emitVulkanSubgroupShuffleValue(cg, valueV, safeSrcLane);
   };
   auto ballotWord = [&](ValPtr predicate) -> ValPtr {
-    auto *bits = B.CreateIntrinsic(llvm::FixedVectorType::get(i32t, 4), llvm::Intrinsic::spv_wave_ballot, {predicate});
+#if LLVM_VERSION_MAJOR >= 23
+    constexpr auto ballot = llvm::Intrinsic::spv_subgroup_ballot;
+#else
+    constexpr auto ballot = llvm::Intrinsic::spv_wave_ballot;
+#endif
+    auto *bits = B.CreateIntrinsic(llvm::FixedVectorType::get(i32t, 4), ballot, {predicate});
     auto *word = B.CreateAnd(B.CreateLShr(laneIdx(), llvm::ConstantInt::get(i32t, 5)), llvm::ConstantInt::get(i32t, 3));
     return B.CreateExtractElement(bits, word);
   };

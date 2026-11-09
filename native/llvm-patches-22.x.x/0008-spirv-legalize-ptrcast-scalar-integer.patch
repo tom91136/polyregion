@@ -14,11 +14,14 @@ the corresponding unimplemented path next.
  1 file changed, 15 insertions(+), 2 deletions(-)
 
 diff --git a/llvm/lib/Target/SPIRV/SPIRVLegalizePointerCast.cpp b/llvm/lib/Target/SPIRV/SPIRVLegalizePointerCast.cpp
+index fc754f0..52c4c9f 100644
 --- a/llvm/lib/Target/SPIRV/SPIRVLegalizePointerCast.cpp
 +++ b/llvm/lib/Target/SPIRV/SPIRVLegalizePointerCast.cpp
-@@ -225,4 +225,11 @@ class SPIRVLegalizePointerCast : public FunctionPass {
+@@ -225,7 +225,14 @@ class SPIRVLegalizePointerCast : public FunctionPass {
+       Output = loadVectorFromVector(B, SVT, DVT, OriginalOperand);
      else if (SAT && DVT && SAT->getElementType() == DVT->getElementType())
        Output = loadVectorFromArray(B, DVT, OriginalOperand);
+-    else
 +    else if ((FromTy->isIntegerTy(1) && ToTy->isIntegerTy(8)) ||
 +             (FromTy->isIntegerTy(8) && ToTy->isIntegerTy(1))) {
 +      LoadInst *NewLoad = B.CreateLoad(FromTy, OriginalOperand);
@@ -27,11 +30,14 @@ diff --git a/llvm/lib/Target/SPIRV/SPIRVLegalizePointerCast.cpp b/llvm/lib/Targe
 +      Output = B.CreateZExtOrTrunc(NewLoad, ToTy);
 +      buildAssignType(B, ToTy, Output);
 +    } else
--    else
        llvm_unreachable("Unimplemented implicit down-cast from load.");
-@@ -374,4 +381,10 @@ class SPIRVLegalizePointerCast : public FunctionPass {
+ 
+     GR->replaceAllUsesWith(LI, Output, /* DeleteOld= */ true);
+@@ -372,7 +379,13 @@ class SPIRVLegalizePointerCast : public FunctionPass {
+       storeArrayFromVector(B, Src, Dst, D_AT, Alignment);
      else if (D_AT && !S_VT && isTypeFirstElementAggregate(FromTy, D_AT))
        storeToFirstValueAggregate(B, Src, Dst, D_AT, Alignment);
+-    else
 +    else if ((FromTy->isIntegerTy(1) && ToTy->isIntegerTy(8)) ||
 +             (FromTy->isIntegerTy(8) && ToTy->isIntegerTy(1))) {
 +      Value *Converted = B.CreateZExtOrTrunc(Src, ToTy);
@@ -39,8 +45,6 @@ diff --git a/llvm/lib/Target/SPIRV/SPIRVLegalizePointerCast.cpp b/llvm/lib/Targe
 +      StoreInst *SI = B.CreateStore(Converted, Dst);
 +      SI->setAlignment(Alignment);
 +    } else
--    else
        llvm_unreachable("Unsupported ptrcast use in store. Please fix.");
-
---
-2.43.0
+ 
+     DeadInstructions.push_back(BadStore);

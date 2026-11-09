@@ -474,7 +474,11 @@ llvmc::TargetInfo LLVMBackend::Options::targetInfo() const {
     case Target::RISCV64: return bindCpuArch(Triple::ArchType::riscv64);
     case Target::PPC64LE: return bindCpuArch(Triple::ArchType::ppc64le);
     case Target::NVPTX64: return bindGpuArch(Triple::ArchType::nvptx64, Triple::VendorType::NVIDIA, Triple::OSType::CUDA);
+#if LLVM_VERSION_MAJOR >= 23
+    case Target::AMDGCN: return bindGpuArch(Triple::ArchType::amdgpu, Triple::VendorType::AMD, Triple::OSType::AMDHSA);
+#else
     case Target::AMDGCN: return bindGpuArch(Triple::ArchType::amdgcn, Triple::VendorType::AMD, Triple::OSType::AMDHSA);
+#endif
     case Target::SPIRV32_Kernel: return bindSpirv(Spirv32KernelTriple);
     case Target::SPIRV64_Kernel: return bindSpirv(Spirv64KernelTriple);
     case Target::SPIRV_GLCompute: return bindSpirv(SpirvVulkanComputeTriple);

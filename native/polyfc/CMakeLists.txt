@@ -72,11 +72,16 @@ if (POLYREGION_FUSED_DRIVER)
         add_custom_command(TARGET polyfc POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:polyfc>" "$<TARGET_FILE_DIR:polyfc>/polyfc.exe")
     endif ()
-    # XXX flang's getIntrinsicDir() resolves <exec_dir>/../include/flang; mirror that layout
-    # in the build tree at configure time so tests find the intrinsic modules.
+    # XXX flang's getIntrinsicDir() resolves <exec_dir>/../include/flang (LLVM < 23), the driver
+    # <exec_dir>/../lib/clang/<major>/finclude (LLVM >= 23); mirror that layout in the build tree at
+    # configure time so tests find the intrinsic modules.
     if (EXISTS "${LLVM_DIST_DIR}/include/flang")
         file(COPY "${LLVM_DIST_DIR}/include/flang"
                 DESTINATION "${CMAKE_BINARY_DIR}/include")
+    endif ()
+    if (EXISTS "${LLVM_DIST_DIR}/lib/clang/${LLVM_VERSION_MAJOR}/finclude")
+        file(COPY "${LLVM_DIST_DIR}/lib/clang/${LLVM_VERSION_MAJOR}/finclude"
+                DESTINATION "${CMAKE_BINARY_DIR}/lib/clang/${LLVM_VERSION_MAJOR}")
     endif ()
     target_include_directories(polyfc PRIVATE
             flang-plugin

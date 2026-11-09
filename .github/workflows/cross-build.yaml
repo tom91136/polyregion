@@ -189,7 +189,7 @@ jobs:
       - name: Verify LLVM dist
         run: |
           just check-dist-deps native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
-          file native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist/bin/flang-22
+          file native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist/bin/flang-[0-9]*
 
       - name: Pack LLVM dist
         run: tar cf llvm-dist.tar -C native/out polyregion-Release-${{ matrix.arch }}-dylib-dist

@@ -1,0 +1,79 @@
+Subject: [LTO] add static-plugin registration hook for downstream linkers
+
+Adds an opt-in function-pointer hook so a downstream linker can register
+statically-linked pass plugins with the LTO PassBuilder without needing
+dlopen-able .so/.dll files, plus a static OptPipeline fallback so a linker
+with no --lto-newpm-passes (lld-link) can still force a pass pipeline.
+When unset (default), behaviour is identical to upstream.
+
+diff --git a/llvm/include/llvm/LTO/LTOBackend.h b/llvm/include/llvm/LTO/LTOBackend.h
+index 4bb3852..7e954d0 100644
+--- a/llvm/include/llvm/LTO/LTOBackend.h
++++ b/llvm/include/llvm/LTO/LTOBackend.h
+@@ -30,6 +30,7 @@ namespace llvm {
+ class BitcodeModule;
+ class Error;
+ class Module;
++class PassBuilder;
+ class Target;
+ 
+ namespace lto {
+@@ -81,6 +82,12 @@ LLVM_ABI Expected<BitcodeModule> findThinLTOModule(MemoryBufferRef MBRef);
+ LLVM_ABI bool initImportList(const Module &M,
+                              const ModuleSummaryIndex &CombinedIndex,
+                              FunctionImporter::ImportMapTy &ImportList);
++
++using StaticPluginRegisterFn = void(*)(llvm::PassBuilder &);
++LLVM_ABI void setStaticPluginRegister(StaticPluginRegisterFn cb);
++LLVM_ABI StaticPluginRegisterFn getStaticPluginRegister();
++LLVM_ABI void setStaticOptPipeline(StringRef pipeline);
++LLVM_ABI StringRef getStaticOptPipeline();
+ }
+ }
+ 
+diff --git a/llvm/lib/LTO/LTOBackend.cpp b/llvm/lib/LTO/LTOBackend.cpp
+index 73697a9..8bc68f0 100644
+--- a/llvm/lib/LTO/LTOBackend.cpp
++++ b/llvm/lib/LTO/LTOBackend.cpp
+@@ -52,6 +52,17 @@ using namespace lto;
+ 
+ #define DEBUG_TYPE "lto-backend"
+ 
++namespace {
++StaticPluginRegisterFn PolyregionStaticPluginRegister = nullptr;
++std::string PolyregionStaticOptPipeline;
++}
++namespace llvm::lto {
++void setStaticPluginRegister(StaticPluginRegisterFn cb) { PolyregionStaticPluginRegister = cb; }
++StaticPluginRegisterFn getStaticPluginRegister() { return PolyregionStaticPluginRegister; }
++void setStaticOptPipeline(StringRef p) { PolyregionStaticOptPipeline = p.str(); }
++StringRef getStaticOptPipeline() { return PolyregionStaticOptPipeline; }
++} // namespace llvm::lto
++
+ enum class LTOBitcodeEmbedding {
+   DoNotEmbed = 0,
+   EmbedOptimized = 1,
+@@ -216,6 +227,8 @@ static void RegisterPassPlugins(const Config &Conf, PassBuilder &PB) {
+   // Register already loaded plugins
+   for (auto *LoadedPlugin : Conf.LoadedPassPlugins)
+     LoadedPlugin->registerPassBuilderCallbacks(PB);
++  if (auto cb = getStaticPluginRegister())
++    cb(PB);
+ }
+ 
+ static std::unique_ptr<TargetMachine>
+@@ -361,10 +374,11 @@ static void runNewPMPasses(const Config &Conf, Module &Mod, TargetMachine *TM,
+   }
+ 
+   // Parse a custom pipeline if asked to.
+-  if (!Conf.OptPipeline.empty()) {
+-    if (auto Err = PB.parsePassPipeline(MPM, Conf.OptPipeline)) {
++  StringRef PolyOptPipeline = Conf.OptPipeline.empty() ? getStaticOptPipeline() : StringRef(Conf.OptPipeline);
++  if (!PolyOptPipeline.empty()) {
++    if (auto Err = PB.parsePassPipeline(MPM, PolyOptPipeline)) {
+       report_fatal_error(Twine("unable to parse pass pipeline description '") +
+-                         Conf.OptPipeline + "': " + toString(std::move(Err)));
++                         PolyOptPipeline + "': " + toString(std::move(Err)));
+     }
+   } else if (IsThinLTO) {
+     MPM.addPass(PB.buildThinLTODefaultPipeline(OL, ImportSummary));

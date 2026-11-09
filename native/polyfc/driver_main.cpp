@@ -211,9 +211,18 @@ int main(int argc, const char *argv[]) {
                    if (llvm::sys::fs::exists(joinPath(root, sentinel))) return root;
                  return {};
                };
-               if (auto modDir = firstWith("iso_fortran_env.mod", {joinPath(execParentPath, "..", "include", "flang"),
-                                                                   std::string(POLYFC_FUSED_LLVM_BUILD_DIR "/include/flang")});
-                   !modDir.empty()) {
+  #if LLVM_VERSION_MAJOR >= 23
+               // flang-rt emits intrinsic modules under <resource>/finclude/flang/<triple>.
+               const auto modDirRel =
+                   joinPath(fmt::format("clang/{}", LLVM_VERSION_MAJOR), "finclude", "flang", llvm::sys::getDefaultTargetTriple());
+               const auto modDirRoots = {joinPath(execParentPath, "..", "lib", modDirRel),
+                                         joinPath(POLYFC_FUSED_LLVM_BUILD_DIR, "lib", modDirRel),
+                                         joinPath(POLYFC_FUSED_DIST_DIR, "lib", modDirRel)};
+  #else
+               const auto modDirRoots = {joinPath(execParentPath, "..", "include", "flang"),
+                                         std::string(POLYFC_FUSED_LLVM_BUILD_DIR "/include/flang")};
+  #endif
+               if (auto modDir = firstWith("iso_fortran_env.mod", modDirRoots); !modDir.empty()) {
                  remaining.push_back("-fintrinsic-modules-path=" + modDir);
                }
   #if defined(_WIN32)
