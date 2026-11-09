@@ -561,6 +561,9 @@ object ArenaView extends ProgramPass {
     val reassigned = AddressRefinement.reassignedIn(entry)
     val stmts      = entry.collectAll[p.Stmt].map(core)
     val inits = stmts.collect { case p.Stmt.Var(name, init, _) => name -> init }.groupMapReduce(_._1)(_._2)((a, _) => a)
+    val storesByRoot = stmts
+      .collect { case p.Stmt.Mut(p.Term.Select(root, prefix, _), expr) => root -> (prefix -> expr) }
+      .groupMap(_._1)(_._2)
     val candidates  = localPointerSlots(entry, members)
     val overwritten = overwrittenOnDefinition(entry, members)
     def slot(root: p.Named, path: List[p.PathStep]): Option[Either[Value, Key]] =
@@ -578,8 +581,8 @@ object ArenaView extends ProgramPass {
           List(Some(Left(Value.Reference(target, path))))
         case _ => List(None)
       }
-      val fromStores = stmts.collect {
-        case p.Stmt.Mut(p.Term.Select(`root`, prefix, _), expr) if leaf.startsWith(prefix) =>
+      val fromStores = storesByRoot.getOrElse(root, Nil).collect {
+        case (prefix, expr) if leaf.startsWith(prefix) =>
           expr match {
             case p.Expr.Alias(p.Term.Select(source, steps, _)) => slot(source, steps ++ leaf.drop(prefix.length))
             case _                                             => None
