@@ -61,7 +61,7 @@ llvm::Value *VulkanLowering::uniformBlockHandle(llvm::Type *blockTy, unsigned bi
 llvm::Value *VulkanLowering::bufferElementPtr(const AnyType &ptrTpe, llvm::Value *handle, llvm::Value *index) {
   auto *elemPtrTy = cg.B.getPtrTy(VkStorageBufferAS);
   auto *idx32 = cg.B.CreateIntCast(index, cg.B.getInt32Ty(), /*isSigned*/ true);
-  auto *ptr = cg.B.CreateIntrinsic(llvm::Intrinsic::spv_resource_getpointer, {elemPtrTy, handle->getType()}, {handle, idx32});
+  auto *ptr = cg.B.CreateIntrinsic(elemPtrTy, llvm::Intrinsic::spv_resource_getpointer, {handle, idx32});
   // bridge the StorageBuffer pointer into the body's flat AS; InferAddressSpaces hoists it back
   return cg.B.CreateAddrSpaceCast(ptr, cg.B.getPtrTy(cg.C.GlobalAS));
 }
@@ -145,8 +145,8 @@ llvm::Value *VulkanLowering::scalarValueOf(const Term::Select &select) {
   if (!slot) return nullptr;
   const auto &[memberIdx, tpe] = *slot;
   auto *ty = cg.resolveType(tpe);
-  auto *ptr = cg.B.CreateIntrinsic(llvm::Intrinsic::spv_resource_getpointer, {cg.B.getPtrTy(VkUniformAS), scalarBlock->getType()},
-                                   {scalarBlock, cg.B.getInt32(memberIdx)});
+  auto *ptr =
+      cg.B.CreateIntrinsic(cg.B.getPtrTy(VkUniformAS), llvm::Intrinsic::spv_resource_getpointer, {scalarBlock, cg.B.getInt32(memberIdx)});
   if (tpe.is<Type::Bool1>())
     return cg.B.CreateICmpNE(cg.B.CreateLoad(ty, ptr), llvm::ConstantInt::get(llvm::Type::getInt1Ty(cg.C.actual), 0, true));
   return cg.B.CreateLoad(ty, ptr);

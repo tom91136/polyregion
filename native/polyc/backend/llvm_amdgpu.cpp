@@ -86,7 +86,7 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &e
     return cg.B.CreateCall(llvm::Intrinsic::getOrInsertDeclaration(&cg.M, id, {}), args);
   };
   auto laneId = [&]() -> ValPtr {
-    auto *negOne = llvm::ConstantInt::get(cg.C.i32Ty(), -1);
+    auto *negOne = llvm::ConstantInt::get(cg.C.i32Ty(), 0xFFFFFFFFU);
     return callIntr(llvm::Intrinsic::amdgcn_mbcnt_hi,
                     {negOne, callIntr(llvm::Intrinsic::amdgcn_mbcnt_lo, {negOne, llvm::ConstantInt::get(cg.C.i32Ty(), 0)})});
   };

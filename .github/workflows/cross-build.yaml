@@ -105,17 +105,16 @@ jobs:
         run: |
           sudo apt-get ${{ env.APT_OPTIONS }} update
           sudo apt-get ${{ env.APT_OPTIONS }} install -y cmake ninja-build qemu-user-static binfmt-support wget lsb-release software-properties-common gnupg
-          # XXX stock clang 18 can't build LLVM 22's own libc++/libcxxabi (needs 19+); force-select
-          # 20 via --set, the runner's pre-installed alternatives otherwise outrank a fresh --install.
+          # XXX libc++ 23 needs clang 21+ (compiler.h); --set overrides the runner's alternatives
           curl -fsSL --retry 5 --retry-delay 30 --connect-timeout 30 --retry-all-errors -o llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
-          sudo ./llvm.sh 20 all
-          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-20 100
-          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-20 100
-          sudo update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-20 100
-          sudo update-alternatives --set clang /usr/bin/clang-20
-          sudo update-alternatives --set clang++ /usr/bin/clang++-20
-          sudo update-alternatives --set ld.lld /usr/bin/ld.lld-20
+          sudo ./llvm.sh 22 all
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-22 100
+          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-22 100
+          sudo update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-22 100
+          sudo update-alternatives --set clang /usr/bin/clang-22
+          sudo update-alternatives --set clang++ /usr/bin/clang++-22
+          sudo update-alternatives --set ld.lld /usr/bin/ld.lld-22
           clang --version
           clang++ --version
 
@@ -174,8 +173,8 @@ jobs:
         id: build-llvm
         if: steps.restore-llvm.outputs.cache-hit != 'true'
         env:
-          POLYREGION_CROSS_CLANG: /usr/bin/clang-20
-          POLYREGION_CROSS_CLANGXX: /usr/bin/clang++-20
+          POLYREGION_CROSS_CLANG: /usr/bin/clang-22
+          POLYREGION_CROSS_CLANGXX: /usr/bin/clang++-22
         run: just build-llvm
 
       - name: Save LLVM cache
@@ -226,13 +225,13 @@ jobs:
           # XXX see build-llvm's Install dependencies step
           curl -fsSL --retry 5 --retry-delay 30 --connect-timeout 30 --retry-all-errors -o llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
-          sudo ./llvm.sh 20 all
-          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-20 100
-          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-20 100
-          sudo update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-20 100
-          sudo update-alternatives --set clang /usr/bin/clang-20
-          sudo update-alternatives --set clang++ /usr/bin/clang++-20
-          sudo update-alternatives --set ld.lld /usr/bin/ld.lld-20
+          sudo ./llvm.sh 22 all
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-22 100
+          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-22 100
+          sudo update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-22 100
+          sudo update-alternatives --set clang /usr/bin/clang-22
+          sudo update-alternatives --set clang++ /usr/bin/clang++-22
+          sudo update-alternatives --set ld.lld /usr/bin/ld.lld-22
 
       - name: Register binfmt-misc for ${{ matrix.qemu_arch }}
         run: docker run --privileged --rm tonistiigi/binfmt --install ${{ matrix.qemu_arch }}

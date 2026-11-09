@@ -101,6 +101,11 @@ if(BACKEND STREQUAL "cuda")
     "k<<<grid, block, shared_mem, 0>>>"
     17)
   copy_and_replace(
+    "thrust/system/cuda/detail/core/triple_chevron_launch.h"
+    "#if __THRUST_HAS_CUDART__\n      return cudaLaunchDevice"
+    "#if __THRUST_HAS_CUDART__ && defined(__CUDA_ARCH__)\n      return cudaLaunchDevice"
+    1)
+  copy_and_replace(
     "thrust/system/cuda/detail/util.h"
     "cudaStreamSynchronize\\(stream\\(policy\\)\\)"
     "cudaDeviceSynchronize()"

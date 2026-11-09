@@ -706,14 +706,16 @@ ValPtr CodeGen::mkTermVal(const Term::Any &term, const std::string &key) {
       [&](const Term::Float32Const &x) -> ValPtr { return ConstantFP::get(llvm::Type::getFloatTy(C.actual), x.value); },
       [&](const Term::Float64Const &x) -> ValPtr { return ConstantFP::get(llvm::Type::getDoubleTy(C.actual), x.value); },
 
-      [&](const Term::IntU8Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt8Ty(C.actual), x.value); },
+      [&](const Term::IntU8Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt8Ty(C.actual), static_cast<uint8_t>(x.value)); },
       [&](const Term::IntU16Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt16Ty(C.actual), x.value); },
-      [&](const Term::IntU32Const &x) -> ValPtr { return ConstantInt::get(C.i32Ty(), x.value); },
+      [&](const Term::IntU32Const &x) -> ValPtr { return ConstantInt::get(C.i32Ty(), static_cast<uint32_t>(x.value)); },
       [&](const Term::IntU64Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt64Ty(C.actual), x.value); },
 
-      [&](const Term::IntS8Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt8Ty(C.actual), x.value); },
-      [&](const Term::IntS16Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt16Ty(C.actual), x.value); },
-      [&](const Term::IntS32Const &x) -> ValPtr { return ConstantInt::get(C.i32Ty(), x.value); },
+      [&](const Term::IntS8Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt8Ty(C.actual), static_cast<uint8_t>(x.value)); },
+      [&](const Term::IntS16Const &x) -> ValPtr {
+        return ConstantInt::get(llvm::Type::getInt16Ty(C.actual), static_cast<uint16_t>(x.value));
+      },
+      [&](const Term::IntS32Const &x) -> ValPtr { return ConstantInt::get(C.i32Ty(), static_cast<uint32_t>(x.value)); },
       [&](const Term::IntS64Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt64Ty(C.actual), x.value); },
 
       [&](const Term::Unit0Const &) -> ValPtr { return ConstantInt::get(llvm::Type::getInt1Ty(C.actual), 0); },
@@ -1001,8 +1003,8 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
           auto *toTpeMaxInFp = llvm::ConstantFP::get(fromTpe, double(nIntMax(min32BitIntBits)));
           auto *toTpeMinInFp = llvm::ConstantFP::get(fromTpe, double(nIntMin(min32BitIntBits)));
           auto *min32BitIntTy = llvm::Type::getIntNTy(C.actual, min32BitIntBits);
-          auto *toTpeMaxInInt = llvm::ConstantInt::get(min32BitIntTy, nIntMax(min32BitIntBits));
-          auto *toTpeMinInInt = llvm::ConstantInt::get(min32BitIntTy, nIntMin(min32BitIntBits));
+          auto *toTpeMaxInInt = llvm::ConstantInt::getSigned(min32BitIntTy, nIntMax(min32BitIntBits));
+          auto *toTpeMinInInt = llvm::ConstantInt::getSigned(min32BitIntTy, nIntMin(min32BitIntBits));
 
           ValPtr c = B.CreateSelect(B.CreateFCmpOGE(from, toTpeMaxInFp), toTpeMaxInInt,                //
                                     B.CreateSelect(B.CreateFCmpOLE(from, toTpeMinInFp), toTpeMinInInt, //

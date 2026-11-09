@@ -35,6 +35,7 @@
 #include "clang/Sema/Sema.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/IOSandbox.h"
 #include "llvm/Support/MD5.h"
 #include "llvm/Support/ThreadPool.h"
 
@@ -1211,6 +1212,9 @@ static std::optional<uint64_t> cudaArchList(clang::Preprocessor &pp) {
 }
 
 void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
+#if LLVM_VERSION_MAJOR >= 23
+  auto bypassSandbox = llvm::sys::sandbox::scopedDisable();
+#endif
   auto &D = CI.getDiagnostics();
   if (!opts.emitLibraryPath.empty()) {
     ExportCollector collector(C, D);
