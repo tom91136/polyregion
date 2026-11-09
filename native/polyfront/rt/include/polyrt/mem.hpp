@@ -89,11 +89,14 @@ class SynchronisedMemAllocation {
     return v;
   }
   static void copyInArena(char *dst, const char *hostData, const size_t count, const size_t indirection, const size_t slot,
-                          const size_t bytes) {
+                          const size_t bytes, const size_t hostBytes) {
     if (indirection > 1)
       for (size_t i = 0; i < count; ++i)
         writeSlot(dst + i * slot, readAt<uintptr_t>(hostData + i * sizeof(uintptr_t)), slot);
-    else std::memcpy(dst, hostData, bytes);
+    else {
+      std::memcpy(dst, hostData, hostBytes);
+      std::memset(dst + hostBytes, 0, bytes - hostBytes);
+    }
   }
 
   // XXX `allowPastEnd` matches `localPtr == base + size` (one-past-end). off by default: a forward lookup in
@@ -1114,7 +1117,7 @@ public:
   struct GenArenaRec {
     const char *host;
     uint64_t off;
-    size_t count, indirection, slot, size;
+    size_t count, indirection, slot, size, hostBytes;
     const runtime::TypeLayout *l;
     bool readOnly;         // a const input the device cannot have written; never copy it back (would corrupt it)
     bool resident = false; // kept at a stable offset across launches, page-guarded; others are re-laid every launch
@@ -1180,7 +1183,7 @@ public:
       // interior pointer into an already-mirrored object (e.g. an SSO string's `_M_p` -> its own
       // `_M_local_buf`): point at that object's interior, don't re-mirror or fall to arenaNull
       for (size_t i = 0; i < genArenaRecs.size(); ++i)
-        if (const auto &r = genArenaRecs[i]; target >= r.host && target < r.host + r.size) {
+        if (const auto &r = genArenaRecs[i]; target >= r.host && target < r.host + r.hostBytes) {
           const size_t within = target - r.host;
           childOff = r.off + within;
           genArenaExtend(i, tl, indirection, within, readOnly);
@@ -1236,7 +1239,7 @@ public:
     } else {
       if (pointerFree(&tl) || (r.typedBegin - begin) % tl.sizeInBytes != 0) return;
       const size_t extra = (r.typedBegin - begin) / tl.sizeInBytes;
-      genArenaWalk(r.host, r.off + begin, begin, extra, *r.l, readOnly);
+      genArenaWalk(r.host, r.off + begin, begin, extra, *r.l, readOnly, r.hostBytes);
       genArenaRecs[index].count += extra;
     }
     genArenaRecs[index].typedBegin = begin;
@@ -1245,7 +1248,7 @@ public:
   // recurse the typed prefix copied at arena `arenaOff` (mirror of host `hostBase+hostOff`); a const link
   // anywhere on the path makes the pointee read-only (the device cannot write through it)
   void genArenaWalk(const char *hostBase, const uint64_t arenaOff, const size_t hostOff, const size_t count, const runtime::TypeLayout &l,
-                    const bool readOnly) {
+                    const bool readOnly, const size_t hostBytes) {
     for (size_t idx = 0; idx < count; ++idx)
       for (size_t m = 0; m < l.memberCount; ++m) {
         const auto member = l.members[m];
@@ -1254,19 +1257,19 @@ public:
         const uint64_t aOff = arenaOff + idx * l.sizeInBytes + member.offsetInBytes;
         const bool memberRO = readOnly || member.readOnly != 0;
         if (member.ptrIndirection > 0) {
+          if (hOff + member.sizeInBytes > hostBytes) continue;
           const size_t comp = member.ptrIndirection == 1 ? member.componentSize : sizeof(uintptr_t);
           const size_t minB = member.ptrIndirection == 1 ? member.componentSize : 0;
           genArenaPatch(hostBase, hOff, aOff, member.sizeInBytes, member.ptrIndirection, comp, minB, *member.type,
                         member.resolvePtrSizeInBytes, memberRO);
-        } else if (member.type && member.type->memberCount > 0) genArenaWalk(hostBase, aOff, hOff, 1, *member.type, memberRO);
+        } else if (member.type && member.type->memberCount > 0) genArenaWalk(hostBase, aOff, hOff, 1, *member.type, memberRO, hostBytes);
       }
   }
 
   // append `count` elements of `hostData` to the arena and patch their pointers; dedup by host ptr.
   // indirection>1: the elements are themselves pointers (an array of pointers)
   uint64_t genArenaMirror(const char *hostData, const size_t count, const size_t indirection, const runtime::TypeLayout &l,
-                          const size_t slot, const size_t hostAllocSizeInBytes = 0, const bool readOnly = false,
-                          const size_t typedBegin = 0) {
+                          const size_t slot, const size_t hostAllocSizeInBytes, const bool readOnly = false, const size_t typedBegin = 0) {
     if (!hostData) return arenaNull;
     const size_t unit = indirection > 1 ? slot : l.sizeInBytes;
     const size_t allocSize = std::max(indirection > 1 ? unit * count : typedBegin + unit * count, hostAllocSizeInBytes);
@@ -1284,15 +1287,15 @@ public:
           genArenaResidentEnd = 0;
           genArenaDevValid = 0; // layout changed: the resident device image is stale, force a full re-upload
         } else if (genArenaStaging.size() < genArenaCaptureCap) genArenaStaging.assign(genArenaCaptureCap, 0);
-        copyInArena(genArenaStaging.data(), hostData, count, indirection, slot, allocSize);
+        copyInArena(genArenaStaging.data(), hostData, count, indirection, slot, allocSize, hostAllocSizeInBytes);
         std::memset(genArenaStaging.data() + allocSize, 0, genArenaCaptureCap - allocSize); // zero slack for over-reads
-        genArenaRecs.push_back({hostData, 0, count, indirection, slot, allocSize, &l, readOnly});
+        genArenaRecs.push_back({hostData, 0, count, indirection, slot, allocSize, hostAllocSizeInBytes, &l, readOnly});
         genArenaUploads.emplace_back(0, genArenaCaptureCap);
         if (indirection > 1)
           for (size_t i = 0; i < count; ++i)
             genArenaPatch(hostData, i * sizeof(uintptr_t), i * slot, slot, indirection - 1,
                           indirection - 1 == 1 ? l.sizeInBytes : sizeof(uintptr_t), 0, l, nullptr, readOnly);
-        else genArenaWalk(hostData, 0, 0, count, l, readOnly);
+        else genArenaWalk(hostData, 0, 0, count, l, readOnly, hostAllocSizeInBytes);
         return 0;
       }
       // seen before: a resident leaf from an earlier launch, or this launch's own copy of a transient one
@@ -1312,10 +1315,10 @@ public:
     const uint64_t off = genArenaStaging.size();
     mutateTables([&] { genArenaOffsetOf[reinterpret_cast<uintptr_t>(hostData)] = off; });
     const bool resident = genArenaPersist && indirection == 1 && pointerFree(&l) && arenaGuardable(hostData, allocSize);
-    genArenaRecs.push_back({hostData, off, count, indirection, slot, allocSize, &l, readOnly, resident, typedBegin});
+    genArenaRecs.push_back({hostData, off, count, indirection, slot, allocSize, hostAllocSizeInBytes, &l, readOnly, resident, typedBegin});
     const size_t at = genArenaStaging.size();
     genArenaStaging.resize(at + allocSize);
-    copyInArena(genArenaStaging.data() + at, hostData, count, indirection, slot, allocSize);
+    copyInArena(genArenaStaging.data() + at, hostData, count, indirection, slot, allocSize, hostAllocSizeInBytes);
     // pad before any child object is appended, so this object's over-read lands in its own zeroed slack
     if (genArenaObjectSlack) genArenaStaging.resize(genArenaStaging.size() + genArenaObjectSlack);
     if (resident) genArenaResidentEnd = genArenaStaging.size();
@@ -1327,7 +1330,7 @@ public:
       for (size_t i = firstSlot; i < count; ++i)
         genArenaPatch(hostData, i * sizeof(uintptr_t), off + i * slot, slot, indirection - 1,
                       indirection - 1 == 1 ? l.sizeInBytes : sizeof(uintptr_t), 0, l, nullptr, readOnly);
-    else genArenaWalk(hostData, off + typedBegin, typedBegin, count, l, readOnly);
+    else genArenaWalk(hostData, off + typedBegin, typedBegin, count, l, readOnly, hostAllocSizeInBytes);
     return off;
   }
 
@@ -1431,12 +1434,12 @@ public:
     const std::lock_guard lock(guardMutex);
     const Guard *g = guardAt(reinterpret_cast<uintptr_t>(r.host));
     if (!g) {
-      genArenaHostUploads.emplace_back(r.host, r.off, r.size);
+      genArenaHostUploads.emplace_back(r.host, r.off, r.hostBytes);
       return;
     }
     const size_t head = g->bodyBegin - g->local, tailOffset = g->bodyEnd - g->local;
     if (head) genArenaHostUploads.emplace_back(r.host, r.off, head);
-    if (r.size > tailOffset) genArenaHostUploads.emplace_back(r.host + tailOffset, r.off + tailOffset, r.size - tailOffset);
+    if (r.hostBytes > tailOffset) genArenaHostUploads.emplace_back(r.host + tailOffset, r.off + tailOffset, r.hostBytes - tailOffset);
     if (g->state == Guard::State::Open)
       genArenaHostUploads.emplace_back(reinterpret_cast<const char *>(g->bodyBegin), r.off + head, g->bodyEnd - g->bodyBegin);
   }
@@ -1477,7 +1480,7 @@ public:
     }
     const auto off = devOff - genArenaWindow;
     for (const auto &r : genArenaRecs)
-      if (off >= r.off && off < r.off + r.size) return r.host + (off - r.off);
+      if (off >= r.off && off < r.off + r.hostBytes) return r.host + (off - r.off);
     return std::nullopt;
   }
 
@@ -1512,16 +1515,7 @@ public:
       }
   }
 
-  // scatter one downloaded rec back to its host, translating pointer slots; `buf` must be indexable at r.off
-  void genArenaScatterRec(const ArenaView &buf, const GenArenaRec &r) {
-    if (r.readOnly) return; // const input: never copy back
-    char *host = const_cast<char *>(r.host);
-    if (r.indirection > 1) {
-      // an array of `count` pointers (each an arena offset); translate the ones the kernel changed
-      for (size_t i = 0; i < r.count; ++i)
-        genArenaReadbackPtr(buf, host + i * sizeof(uintptr_t), r.off + i * r.slot, r.slot);
-      return;
-    }
+  void genArenaScatterLeaf(const ArenaView &buf, const GenArenaRec &r, char *host) {
     if (r.l->memberCount == 0) {
       std::memcpy(host, buf.at(r.off), std::min(r.size, r.typedBegin + r.count * r.l->sizeInBytes));
     } else {
@@ -1532,6 +1526,26 @@ public:
     // `_List_node<int>` tail beyond the prefix); copy the remainder wholesale, it holds no pointer slot
     if (const size_t typed = r.typedBegin + r.count * r.l->sizeInBytes; r.size > typed)
       std::memcpy(host + typed, buf.at(r.off + typed), r.size - typed);
+  }
+
+  // scatter one downloaded rec back to its host, translating pointer slots; `buf` must be indexable at r.off
+  void genArenaScatterRec(const ArenaView &buf, const GenArenaRec &r) {
+    if (r.readOnly) return; // const input: never copy back
+    char *host = const_cast<char *>(r.host);
+    if (r.indirection > 1) {
+      // an array of `count` pointers (each an arena offset); translate the ones the kernel changed
+      for (size_t i = 0; i < r.count; ++i)
+        genArenaReadbackPtr(buf, host + i * sizeof(uintptr_t), r.off + i * r.slot, r.slot);
+      return;
+    }
+    if (r.hostBytes == r.size) {
+      genArenaScatterLeaf(buf, r, host);
+      return;
+    }
+    std::vector<char> scratch(r.size);
+    std::memcpy(scratch.data(), host, r.hostBytes);
+    genArenaScatterLeaf(buf, r, scratch.data());
+    std::memcpy(host, scratch.data(), r.hostBytes);
   }
 
   void genArenaReadback() {

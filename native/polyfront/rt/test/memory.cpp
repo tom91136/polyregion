@@ -2241,6 +2241,55 @@ TEST_CASE("gen-arena-mirror") {
   CHECK(*reinterpret_cast<const uint64_t *>(f.allocation.genArenaStaging.data() + offsetof(Rec, p)) == 0);
 }
 
+TEST_CASE("an arena pointee starting inside its allocation copies only the host bytes") {
+  struct Wide {
+    int64_t value;
+  };
+  struct Capture {
+    Wide *wide;
+  };
+  auto wideMeta = Struct_(Wide, StructMember_(Wide, value, &int64Type));
+  auto captureMeta = Struct_(Capture, StructMember_(Capture, wide, &*wideMeta));
+
+  Fixture f;
+  f.allocation.genArenaPersist = false;
+  auto *block = f.mallocLocal<char>(8);
+  std::memset(block, 0xab, 8);
+  auto *capture = f.mallocLocal<Capture>(1);
+  capture->wide = reinterpret_cast<Wide *>(block + 4);
+  f.allocation.genArenaMirror(reinterpret_cast<const char *>(capture), 1, 1, *captureMeta, sizeof(uintptr_t), sizeof(Capture));
+  const auto &staging = f.allocation.genArenaStaging;
+  CHECK(staging.size() == sizeof(Capture) + 12);
+  CHECK(*reinterpret_cast<const uint64_t *>(staging.data() + offsetof(Capture, wide)) == sizeof(Capture) + 4);
+  CHECK(std::memcmp(staging.data() + sizeof(Capture), block, 8) == 0);
+  CHECK(std::all_of(staging.begin() + sizeof(Capture) + 8, staging.end(), [](const char c) { return c == 0; }));
+}
+
+TEST_CASE("a straddling arena pointee reads back only the host bytes") {
+  struct Wide {
+    int64_t value;
+  };
+  struct Capture {
+    Wide *wide;
+  };
+  auto wideMeta = Struct_(Wide, StructMember_(Wide, value, &int64Type));
+  auto captureMeta = Struct_(Capture, StructMember_(Capture, wide, &*wideMeta));
+
+  Fixture f;
+  f.allocation.genArenaPersist = false;
+  auto *block = f.mallocLocal<char>(8);
+  auto *capture = f.mallocLocal<Capture>(1);
+  capture->wide = reinterpret_cast<Wide *>(block + 4);
+
+  f.allocation.genArenaReset();
+  f.allocation.genArenaMirror(reinterpret_cast<const char *>(capture), 1, 1, *captureMeta, sizeof(uintptr_t), sizeof(Capture));
+  auto *base = reinterpret_cast<char *>(f.allocation.genArenaFinish());
+  auto *wide = reinterpret_cast<Wide *>(base + *reinterpret_cast<const uint64_t *>(base + offsetof(Capture, wide)));
+  wide->value = 42;
+  f.allocation.genArenaReadback();
+  CHECK(*reinterpret_cast<const int32_t *>(block + 4) == 42);
+}
+
 TEST_CASE("a capture that references package memory is rejected when the device has no heap") {
   struct Grid {
     int32_t *begin;
