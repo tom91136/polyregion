@@ -77,16 +77,18 @@ object Verify {
     }
 
   def validateRegions(program: p.Program): List[String] =
-    locally {
-      val analysis = AddressRefinement.session(program)
-      (program.entry.toList ::: program.functions).flatMap { f =>
-        analysis.solve(f).diagnostics.map(diagnostic => s"${f.name.repr}: $diagnostic")
-      }
+    validateRegions(program, AddressRefinement.session(program))
+
+  private[pass] def validateRegions(program: p.Program, analysis: AddressRefinement.Session): List[String] =
+    (program.entry.toList ::: program.functions).flatMap { f =>
+      analysis.solve(f).diagnostics.map(diagnostic => s"${f.name.repr}: $diagnostic")
     }
 
   def validateRegionSpaces(program: p.Program): List[String] =
+    validateRegionSpaces(program, AddressRefinement.session(program))
+
+  private[pass] def validateRegionSpaces(program: p.Program, refinement: AddressRefinement.Session): List[String] =
     locally {
-      val refinement = AddressRefinement.session(program)
       (program.entry.toList ::: program.functions).flatMap { f =>
         val analysis = refinement.solve(f)
         val declared = (

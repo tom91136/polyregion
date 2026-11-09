@@ -13,14 +13,15 @@ case class VerifyAnchors(strict: Boolean = false) extends ProgramPass derives Pa
     val poison = Verify.validatePoison(program)
     if (poison.nonEmpty)
       log.info(s"poison reaches backend: ${poison.size} unlowered value(s):\n  ${poison.mkString("\n  ")}")
-    val errs = Verify.validateRegions(program)
+    val session = AddressRefinement.session(program)
+    val errs    = Verify.validateRegions(program, session)
     if (errs.nonEmpty) {
       val msg =
         s"address refinement check: ${errs.size} error(s):\n  ${errs.mkString("\n  ")}"
       if (strict) throw RuntimeException(msg) else log.info(msg)
     }
     // space drift stays observational even under strict
-    val drift = Verify.validateRegionSpaces(program)
+    val drift = Verify.validateRegionSpaces(program, session)
     if (drift.nonEmpty)
       log.info(
         s"region-space drift: ${drift.size} pointer(s) declared in a different space to their inferred address:\n  ${drift
