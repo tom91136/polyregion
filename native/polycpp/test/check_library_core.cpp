@@ -142,6 +142,19 @@
 #pragma region do: {output}
 #pragma region requires: 5050
 
+#pragma region case: core-list-algorithms
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DLIST_ALGORITHMS -o {output} {input}
+#pragma region do: {output}
+#pragma region requires: 1343300 10000 10000 399
+
+#pragma region case: core-package-list-algorithms
+#pragma region offload-only
+#pragma region do: {package_fixture} {output}.packages
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DLIST_ALGORITHMS -fstdpar-library-path={output}.packages -o {output} {input}
+#pragma region stderr-count: 0 bound to polyregion.core
+#pragma region do: {output}
+#pragma region requires: 1343300 10000 10000 399
+
 #pragma region case: core-fallback-reduce
 #pragma region offload-only
 #pragma region do: POLYFRONT_LIBRARY_PATH= polycpp {polycpp_defaults} {polycpp_stdpar} -DREDUCE -o {output} {input}
@@ -342,6 +355,25 @@ int main() {
   const double total =
       std::transform_reduce(std::execution::par_unseq, ys.begin(), ys.end(), 0.0, std::plus<>(), [](double y) { return y * 2; });
   std::printf("%d %d %.1f", xs[7], sum, total);
+  return 0;
+}
+#elif defined(LIST_ALGORITHMS)
+int main() {
+  std::list<int> xs(100);
+  std::iota(xs.begin(), xs.end(), 0);
+  std::list<int> ys(100);
+  std::list<int> zs(100);
+  std::for_each(std::execution::par_unseq, xs.begin(), xs.end(), [](int &x) { x *= 2; });
+  std::for_each_n(std::execution::par_unseq, xs.begin(), 100, [](int &x) { x += 1; });
+  std::fill(std::execution::par_unseq, ys.begin(), ys.end(), 7);
+  std::fill_n(std::execution::par_unseq, ys.begin(), 100, 9);
+  std::copy(std::execution::par_unseq, xs.begin(), xs.end(), zs.begin());
+  std::transform(std::execution::par_unseq, xs.begin(), xs.end(), ys.begin(), [](int x) { return x + 1; });
+  std::transform(std::execution::par_unseq, xs.begin(), xs.end(), ys.begin(), zs.begin(), [](int a, int b) { return a + b; });
+  const int dot = std::transform_reduce(std::execution::par_unseq, xs.begin(), xs.end(), ys.begin(), 0);
+  const int red = std::reduce(std::execution::par_unseq, xs.begin(), xs.end(), 0);
+  const int tr = std::transform_reduce(std::execution::par_unseq, xs.begin(), xs.end(), 0, std::plus<>(), [](int x) { return x; });
+  std::printf("%d %d %d %d", dot, red, tr, zs.back());
   return 0;
 }
 #elif defined(REDUCE_LIST)

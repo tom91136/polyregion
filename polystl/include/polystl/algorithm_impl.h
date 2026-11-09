@@ -287,9 +287,11 @@ template <typename T>
 constexpr bool is_policy_v =
     std::is_same_v<T, std::execution::sequenced_policy> || std::is_same_v<T, std::execution::parallel_policy>
     || std::is_same_v<T, std::execution::parallel_unsequenced_policy> || std::is_same_v<T, std::execution::unsequenced_policy>;
-template <typename It>
-using random_access_t =
-    std::enable_if_t<std::is_base_of_v<std::random_access_iterator_tag, typename std::iterator_traits<It>::iterator_category>, int>;
+template <typename... Its>
+constexpr bool all_random_access_v =
+    (std::is_base_of_v<std::random_access_iterator_tag, typename std::iterator_traits<Its>::iterator_category> && ...);
+template <typename... Its> using random_access_t = std::enable_if_t<all_random_access_v<Its...>, int>;
+template <typename... Its> using non_random_access_t = std::enable_if_t<!all_random_access_v<Its...>, int>;
 } // namespace polyregion::polystl::details
 
 #if __has_include(<polyregion/spectra/stdpar.hpp>)
@@ -310,43 +312,71 @@ template <typename T> constexpr bool is_execution_policy_v = is_execution_policy
 // XXX par_unseq overloads use the concrete policy type so partial ordering routes them here;
 // other policies defer to the stdlib or the polyfill below.
 
-template <class ForwardIt, class UnaryFunction>
+template <class ForwardIt, class UnaryFunction, polyregion::polystl::details::random_access_t<ForwardIt> = 0>
 void for_each(execution::parallel_unsequenced_policy, ForwardIt first, ForwardIt last, UnaryFunction f) {
   polyregion::core::for_each(last - first, [f, first](int64_t idx) { f(*(first + idx)); });
 }
 
-template <class ForwardIt, class T> void fill(execution::parallel_unsequenced_policy, ForwardIt first, ForwardIt last, const T &value) {
+template <class ForwardIt, class UnaryFunction, polyregion::polystl::details::non_random_access_t<ForwardIt> = 0>
+[[clang::annotate("polystl_host_algorithm")]] void for_each(execution::parallel_unsequenced_policy, ForwardIt first, ForwardIt last,
+                                                            UnaryFunction f) {
+  std::for_each(first, last, f);
+}
+
+template <class ForwardIt, class T, polyregion::polystl::details::random_access_t<ForwardIt> = 0>
+void fill(execution::parallel_unsequenced_policy, ForwardIt first, ForwardIt last, const T &value) {
   // XXX `value = value` strips the T& so the capture is by value.
   polyregion::core::for_each(last - first, [value = value, first](int64_t idx) { (*(first + idx)) = value; });
 }
 
-template <class ForwardIt, class Size, class UnaryFunction>
+template <class ForwardIt, class Size, class UnaryFunction, polyregion::polystl::details::random_access_t<ForwardIt> = 0>
 ForwardIt for_each_n(execution::parallel_unsequenced_policy, ForwardIt first, Size n, UnaryFunction f) {
   polyregion::core::for_each(static_cast<int64_t>(n), [f, first](int64_t idx) { f(*(first + idx)); });
   return first + n;
 }
 
-template <class ForwardIt, class Size, class T>
+template <class ForwardIt, class Size, class UnaryFunction, polyregion::polystl::details::non_random_access_t<ForwardIt> = 0>
+[[clang::annotate("polystl_host_algorithm")]] ForwardIt for_each_n(execution::parallel_unsequenced_policy, ForwardIt first, Size n,
+                                                                   UnaryFunction f) {
+  return std::for_each_n(first, n, f);
+}
+
+template <class ForwardIt, class Size, class T, polyregion::polystl::details::random_access_t<ForwardIt> = 0>
 ForwardIt fill_n(execution::parallel_unsequenced_policy, ForwardIt first, Size n, const T &value) {
   // XXX `value = value` strips the T& so the capture is by value.
   polyregion::core::for_each(static_cast<int64_t>(n), [value = value, first](int64_t idx) { (*(first + idx)) = value; });
   return first + n;
 }
 
-template <class ForwardIt1, class ForwardIt2>
+template <class ForwardIt1, class ForwardIt2, polyregion::polystl::details::random_access_t<ForwardIt1, ForwardIt2> = 0>
 ForwardIt2 copy(execution::parallel_unsequenced_policy, ForwardIt1 first, ForwardIt1 last, ForwardIt2 d_first) {
   polyregion::core::for_each(last - first, [d_first, first](int64_t idx) { (*(d_first + idx)) = (*(first + idx)); });
   return d_first;
 }
 
-template <class ForwardIt1, class ForwardIt2, class UnaryOperation>
+template <class ForwardIt1, class ForwardIt2, polyregion::polystl::details::non_random_access_t<ForwardIt1, ForwardIt2> = 0>
+[[clang::annotate("polystl_host_algorithm")]] ForwardIt2 copy(execution::parallel_unsequenced_policy, ForwardIt1 first, ForwardIt1 last,
+                                                              ForwardIt2 d_first) {
+  return std::copy(first, last, d_first);
+}
+
+template <class ForwardIt1, class ForwardIt2, class UnaryOperation,
+          polyregion::polystl::details::random_access_t<ForwardIt1, ForwardIt2> = 0>
 ForwardIt2 transform(execution::parallel_unsequenced_policy, ForwardIt1 first1, ForwardIt1 last1, ForwardIt2 d_first,
                      UnaryOperation unary_op) {
   polyregion::core::for_each(last1 - first1, [d_first, first1, unary_op](int64_t idx) { *(d_first + idx) = unary_op(*(first1 + idx)); });
   return d_first;
 }
 
-template <class ForwardIt1, class ForwardIt2, class ForwardIt3, class BinaryOperation>
+template <class ForwardIt1, class ForwardIt2, class UnaryOperation,
+          polyregion::polystl::details::non_random_access_t<ForwardIt1, ForwardIt2> = 0>
+[[clang::annotate("polystl_host_algorithm")]] ForwardIt2 transform(execution::parallel_unsequenced_policy, ForwardIt1 first1,
+                                                                   ForwardIt1 last1, ForwardIt2 d_first, UnaryOperation unary_op) {
+  return std::transform(first1, last1, d_first, unary_op);
+}
+
+template <class ForwardIt1, class ForwardIt2, class ForwardIt3, class BinaryOperation,
+          polyregion::polystl::details::random_access_t<ForwardIt1, ForwardIt2, ForwardIt3> = 0>
 ForwardIt3 transform(execution::parallel_unsequenced_policy, ForwardIt1 first1, ForwardIt1 last1, ForwardIt2 first2, ForwardIt3 d_first,
                      BinaryOperation binary_op) {
   polyregion::core::for_each(last1 - first1, [d_first, first1, first2, binary_op](int64_t idx) {
@@ -355,14 +385,29 @@ ForwardIt3 transform(execution::parallel_unsequenced_policy, ForwardIt1 first1, 
   return d_first;
 }
 
-template <class ForwardIt1, class ForwardIt2, class T>
+template <class ForwardIt1, class ForwardIt2, class ForwardIt3, class BinaryOperation,
+          polyregion::polystl::details::non_random_access_t<ForwardIt1, ForwardIt2, ForwardIt3> = 0>
+[[clang::annotate("polystl_host_algorithm")]] ForwardIt3 transform(execution::parallel_unsequenced_policy, ForwardIt1 first1,
+                                                                   ForwardIt1 last1, ForwardIt2 first2, ForwardIt3 d_first,
+                                                                   BinaryOperation binary_op) {
+  return std::transform(first1, last1, first2, d_first, binary_op);
+}
+
+template <class ForwardIt1, class ForwardIt2, class T, polyregion::polystl::details::random_access_t<ForwardIt1, ForwardIt2> = 0>
 T transform_reduce(execution::parallel_unsequenced_policy, ForwardIt1 first1, ForwardIt1 last1, ForwardIt2 first2, T init) {
   return polyregion::core::transform_reduce<T>(
       last1 - first1, init, //
       [first1, first2](int64_t idx) -> T { return *(first1 + idx) * *(first2 + idx); }, [](T l, T r) -> T { return l + r; });
 }
 
-template <class ForwardIt1, class ForwardIt2, class T, class BinaryReductionOp, class BinaryTransformOp>
+template <class ForwardIt1, class ForwardIt2, class T, polyregion::polystl::details::non_random_access_t<ForwardIt1, ForwardIt2> = 0>
+[[clang::annotate("polystl_host_algorithm")]] T transform_reduce(execution::parallel_unsequenced_policy, ForwardIt1 first1,
+                                                                 ForwardIt1 last1, ForwardIt2 first2, T init) {
+  return std::transform_reduce(first1, last1, first2, init);
+}
+
+template <class ForwardIt1, class ForwardIt2, class T, class BinaryReductionOp, class BinaryTransformOp,
+          polyregion::polystl::details::random_access_t<ForwardIt1, ForwardIt2> = 0>
 T transform_reduce(execution::parallel_unsequenced_policy, ForwardIt1 first1, ForwardIt1 last1, ForwardIt2 first2, T init,
                    BinaryReductionOp reduce, BinaryTransformOp transform) {
   // XXX Wrap `reduce` in a by-value lambda; perfect-forwarded references confuse SPIR-V
@@ -372,12 +417,28 @@ T transform_reduce(execution::parallel_unsequenced_policy, ForwardIt1 first1, Fo
       [reduce](T l, T r) -> T { return reduce(l, r); });
 }
 
-template <class ForwardIt, class T, class BinaryReductionOp, class UnaryTransformOp>
+template <class ForwardIt1, class ForwardIt2, class T, class BinaryReductionOp, class BinaryTransformOp,
+          polyregion::polystl::details::non_random_access_t<ForwardIt1, ForwardIt2> = 0>
+[[clang::annotate("polystl_host_algorithm")]] T transform_reduce(execution::parallel_unsequenced_policy, ForwardIt1 first1,
+                                                                 ForwardIt1 last1, ForwardIt2 first2, T init, BinaryReductionOp reduce,
+                                                                 BinaryTransformOp transform) {
+  return std::transform_reduce(first1, last1, first2, init, reduce, transform);
+}
+
+template <class ForwardIt, class T, class BinaryReductionOp, class UnaryTransformOp,
+          polyregion::polystl::details::random_access_t<ForwardIt> = 0>
 T transform_reduce(execution::parallel_unsequenced_policy, ForwardIt first, ForwardIt last, T init, BinaryReductionOp reduce,
                    UnaryTransformOp transform) {
   return polyregion::core::transform_reduce<T>(
       last - first, init, [transform, first](int64_t idx) -> T { return transform(*(first + idx)); },
       [reduce](T l, T r) -> T { return reduce(l, r); });
+}
+
+template <class ForwardIt, class T, class BinaryReductionOp, class UnaryTransformOp,
+          polyregion::polystl::details::non_random_access_t<ForwardIt> = 0>
+[[clang::annotate("polystl_host_algorithm")]] T transform_reduce(execution::parallel_unsequenced_policy, ForwardIt first, ForwardIt last,
+                                                                 T init, BinaryReductionOp reduce, UnaryTransformOp transform) {
+  return std::transform_reduce(first, last, init, reduce, transform);
 }
 
 template <class ForwardIt, class T, polyregion::polystl::details::random_access_t<ForwardIt> = 0>
@@ -481,6 +542,8 @@ POLYSTL_HOST_ALGORITHM(count_if)
 POLYSTL_HOST_ALGORITHM(destroy)
 POLYSTL_HOST_ALGORITHM(destroy_n)
 POLYSTL_HOST_ALGORITHM(equal)
+POLYSTL_HOST_ALGORITHM(fill)
+POLYSTL_HOST_ALGORITHM(fill_n)
 POLYSTL_HOST_ALGORITHM(find)
 POLYSTL_HOST_ALGORITHM(find_end)
 POLYSTL_HOST_ALGORITHM(find_first_of)
