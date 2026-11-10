@@ -1525,6 +1525,9 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
         auto *MMIWP = new llvm::MachineModuleInfoWrapperPass(&TM); // pass manager takes owner of this
         PM.add(MMIWP);
         PM.add(llvm::createTargetTransformInfoWrapperPass(TM.getTargetIRAnalysis()));
+        const auto &TOpts = TM.Options;
+        PM.add(new llvm::RuntimeLibraryInfoWrapper(TM.getTargetTriple(), TOpts.ExceptionModel, TOpts.FloatABIType, TOpts.EABIVersion,
+                                                   TOpts.MCOptions.ABIName, TOpts.VecLib));
         llvm::TargetPassConfig *PassConfig = TM.createPassConfig(PM);
         PassConfig->setDisableVerify(true);
         PM.add(PassConfig);
