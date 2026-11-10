@@ -195,13 +195,18 @@ jobs:
           just prepare-sysroot
           echo "SYSROOT_PATH=$PWD/sysroot/out/${{ matrix.arch }}" >> "$GITHUB_ENV"
 
-      - name: Restore LLVM cache
+      - name: Download LLVM
         if: ${{ !env.ACT }}
-        uses: ./.github/actions/restore-compressed-cache
+        uses: *download
         with:
-          path: native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
-          archive: native/out/llvm-${{ matrix.arch }}-dist.tar.zst
-          key: llvm-${{ env.SYSROOT_VARIANT }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/build.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './sysroot/Dockerfile', './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
+          name: polyregion-llvm-linux-${{ matrix.arch }}
+          path: .
+
+      - name: Unpack LLVM
+        if: ${{ !env.ACT }}
+        run: |
+          mkdir -p native/out
+          tar xzf llvm-dist.tar.gz -C native/out
 
       - name: Restore device libs cache
         if: ${{ !env.ACT }}

@@ -147,12 +147,16 @@ jobs:
 
       - *setup-just
 
-      - name: Restore LLVM cache
-        uses: ./.github/actions/restore-compressed-cache
+      - name: Download LLVM
+        uses: *download
         with:
-          path: native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
-          archive: native/out/llvm-${{ matrix.arch }}-dist.tar.zst
-          key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/build.cmake', './native/toolchains/*.cmake', './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
+          name: polyregion-llvm-darwin-${{ matrix.arch }}
+          path: .
+
+      - name: Unpack LLVM
+        run: |
+          mkdir -p native/out
+          tar xzf llvm-dist.tar.gz -C native/out
 
       - name: Restore device libs cache
         uses: &cache-restore actions/cache/restore@v5
