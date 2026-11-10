@@ -80,6 +80,14 @@ static Stmt::Any update0(const Expr::Any &expr, const Term::Any &rhsT) {
   return Stmt::Mut(asSelectF(expr), Expr::Alias(rhsT)).widen();
 }
 
+static Stmt::Any assertStmt(const Term::Any &message) {
+  static size_t fcAssertId = 0;
+  return Stmt::Var(Named(fmt::format("fc_assert{}", fcAssertId++), Type::Unit0()),
+                   Expr::SpecOp(Spec::Assert(Term::IntU32Const(static_cast<int32_t>(invoke::AssertCode::Assert)), message)),
+                   /*isMutable*/ false)
+      .widen();
+}
+
 static Expr::Any index0(const Expr::Any &rhs) {
   return rhs.tpe().get<Type::Ptr>() ^ map([&](const auto &ptr) {
            const auto base =
@@ -1067,15 +1075,11 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
             const auto i2 = newVar(Expr::Cast(b2, Type::IntS32()).widen());
             witness(a.getResult(0), Expr::IntrOp(Intr::Sub(i1, i2, Type::IntS32())).widen());
           } else if (name == "__polyregion_fc_assert" || name == "__polyregion_fc_assert_msg") {
-            static size_t fcAssertId = 0;
             const Term::Any message =
                 args.empty()
                     ? Term::StringConst("fortran assert").widen()
                     : newVar(Expr::Cast(newVar(handleValueAs(args[0])), Type::Ptr(Type::IntS8(), TypeSpace::Global())).widen()).widen();
-            push(Stmt::Var(Named(fmt::format("fc_assert{}", fcAssertId++), Type::Unit0()),
-                           Expr::SpecOp(Spec::Assert(Term::IntU32Const(static_cast<int32_t>(invoke::AssertCode::Assert)), message)),
-                           /*isMutable*/ false)
-                     .widen());
+            push(assertStmt(message));
           } else if (auto funcOp = M.lookupSymbol<mlir::func::FuncOp>(name); funcOp && !funcOp.isExternal()) {
             // a recursive user call the rewriter left un-inlined -> translate + Invoke, args by value
             handleFunc(funcOp);
@@ -1297,8 +1301,21 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
           stmts = std::move(savedStmts);
           return branchStmts;
         };
+        const auto isReallocBranch = [](mlir::Region &region) {
+          if (region.empty()) return false;
+          bool allocates = false;
+          for (auto &op : region.front().without_terminator()) {
+            if (llvm::isa<fir::AllocMemOp>(op)) allocates = true;
+            else if (!llvm::isa<fir::EmboxOp, fir::StoreOp>(op)) return false;
+          }
+          return allocates;
+        };
         const auto thenStmts = lowerBranch(x.getThenRegion());
-        const auto elseStmts = lowerBranch(x.getElseRegion());
+        const auto elseStmts =
+            isReallocBranch(x.getElseRegion())
+                ? std::vector<Stmt::Any>{assertStmt(
+                      Term::StringConst("assignment to an unallocated allocatable is not supported in an offloaded region").widen())}
+                : lowerBranch(x.getElseRegion());
         const auto condV = newVar(condE);
         const Term::Any oneT = dsl::integral(condV.tpe, 1);
         const auto eqT = newVar(Expr::IntrOp(Intr::LogicEq(condV.widen(), oneT).widen()).widen());
