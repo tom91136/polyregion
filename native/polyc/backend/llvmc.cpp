@@ -1205,6 +1205,35 @@ static bool foldResourceByteOffsets(llvm::Function &F) {
   return folded;
 }
 
+static bool isZeroIndex(const llvm::Value *v) {
+  auto *constant = llvm::dyn_cast<llvm::ConstantInt>(v);
+  return constant && constant->isZero();
+}
+
+static void normaliseByteGeps(llvm::Function &F) {
+  auto *i64 = llvm::Type::getInt64Ty(F.getContext());
+  for (llvm::Instruction &I : llvm::make_early_inc_range(llvm::instructions(F))) {
+    auto *gep = llvm::dyn_cast<llvm::GetElementPtrInst>(&I);
+    if (!gep) continue;
+    auto *array = llvm::dyn_cast<llvm::ArrayType>(gep->getSourceElementType());
+    const bool byteArray = array && array->getElementType()->isIntegerTy(8) && gep->getNumIndices() == 2;
+    if (!byteArray && !(isByteGep(gep) && isZeroIndex(gep->getOperand(1)))) continue;
+
+    llvm::IRBuilder<> B(gep);
+    llvm::Value *offset = B.CreateSExtOrTrunc(gep->getOperand(gep->getNumOperands() - 1), i64);
+    if (byteArray && !isZeroIndex(gep->getOperand(1))) {
+      llvm::Value *row = B.CreateSExtOrTrunc(gep->getOperand(1), i64);
+      offset = B.CreateAdd(B.CreateMul(row, llvm::ConstantInt::get(i64, array->getNumElements())), offset);
+    }
+    llvm::Value *replacement = gep->getPointerOperand();
+    if (!isZeroIndex(offset))
+      replacement =
+          gep->isInBounds() ? B.CreateInBoundsGEP(B.getInt8Ty(), replacement, offset) : B.CreateGEP(B.getInt8Ty(), replacement, offset);
+    gep->replaceAllUsesWith(replacement);
+    gep->eraseFromParent();
+  }
+}
+
 // LLVM's SPIR-V backend retypes an aggregate alloca as its leading scalar when that scalar is loaded or stored without a
 // GEP, shrinking the variable below the aggregate copies that fill it
 void llvmc::restoreLeafGeps(llvm::Function &F) {
@@ -1326,7 +1355,10 @@ static void scalariseForSpirv(llvm::TargetMachine &TM, llvm::Module &M, const bo
         restoreSubobjectGeps(F);
       }
       llvmc::restoreLeafGeps(F);
-      if (logical) bypassWideDivision(F);
+      if (logical) {
+        normaliseByteGeps(F);
+        bypassWideDivision(F);
+      }
     }
 }
 
