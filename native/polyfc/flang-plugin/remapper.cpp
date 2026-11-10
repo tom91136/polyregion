@@ -63,6 +63,8 @@ static Term::Select asSelectF(const Expr::Any &expr) {
   return Term::Select(Named("_invalid_select", expr.tpe()), {}, expr.tpe());
 }
 
+static void poison0(const std::string &reason) { llvm::errs() << "[PolyFC] remapper poison: " << reason << "\n"; }
+
 static mlir::Value rootOf(mlir::Value v) {
   while (auto *op = v.getDefiningOp()) {
     if (op->getNumOperands() == 0) break;
@@ -299,6 +301,7 @@ Expr::Any polyfc::Remapper::handleValueAsScalar(const mlir::Value val) {
                           return Expr::Index(unwrap(x.array), unwrap(x.offset), x.comp).widen();
                         }) //
          ^ fold([&] {      //
+             poison0("no scalar view of value");
              return Expr::Alias(Term::Poison(handleType(val.getType()))).widen();
            });
 }
@@ -393,6 +396,7 @@ polyfc::FExpr polyfc::Remapper::handleValue(const mlir::Value val, const std::op
       handleOp(defOp);
       if (const auto it = valuesLUT.find(val); it != valuesLUT.end()) return it->second;
       else {
+        poison0(fmt::format("{} result not lowered", defOp->getName().getStringRef().str()));
         return Expr::Alias(Term::Poison(handleType(val.getType())));
       }
     }
@@ -468,6 +472,8 @@ polyfc::FExpr polyfc::Remapper::handleValue(const mlir::Value val, const std::op
                  });
     }
   }
+  const auto origin = val.getDefiningOp() ? val.getDefiningOp()->getName().getStringRef().str() : std::string("block argument");
+  poison0(fmt::format("value from {} not lowered", origin));
   return Expr::Alias(Term::Poison(handleType(val.getType())));
 }
 
@@ -542,7 +548,6 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
     const auto r = newVar(handleValueAsScalar(x.getRhs()));
     witness(x.getResult(), Expr::MathOp(ap(l, r, handleType(x.getType())).widen()));
   };
-  const auto poison0 = [&](const std::string &reason) { llvm::errs() << "[PolyFC] remapper poison: " << reason << "\n"; };
   const auto poison = [&](auto x, const std::string &reason) -> void {
     poison0(reason);
     witness(x, Expr::Alias(Term::Poison(handleType(x.getType()))));
@@ -775,6 +780,12 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
       [&](const mlir::arith::AndIOp x) { intr2r(x, Bind<Intr::BAnd>()); }, //
       [&](const mlir::arith::OrIOp x) { intr2r(x, Bind<Intr::BOr>()); },   //
       [&](const mlir::arith::XOrIOp x) { intr2r(x, Bind<Intr::BXor>()); }, //
+#if LLVM_VERSION_MAJOR >= 23
+      [&](const fir::LogicalAndOp x) { intr2r(x, Bind<Intr::BAnd>()); }, //
+      [&](const fir::LogicalOrOp x) { intr2r(x, Bind<Intr::BOr>()); },   //
+      [&](const fir::EqvOp x) { intr2(x, Bind<Intr::LogicEq>()); },      //
+      [&](const fir::NeqvOp x) { intr2(x, Bind<Intr::LogicNeq>()); },    //
+#endif
       [&](mlir::arith::NegFOp x) {
         const auto v = newVar(handleValueAsScalar(x.getOperand()));
         witness(x.getResult(), Expr::IntrOp(Intr::Neg(v.widen(), handleType(x.getType())).widen()));
@@ -1045,11 +1056,17 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
               return;
             }
 
-            const auto rhs0 = *rhs //
-                              ^ fold_total([&](const Expr::Any &x) -> Expr::Any { return Expr::Alias(Term::Poison(rhsTye)).widen(); },
-                                           [&](const FVar &x) -> Expr::Any { return Expr::Alias(x.value).widen(); },
-                                           [&](const FBoxed &x) -> Expr::Any { return Expr::Alias(Term::Poison(rhsTye)).widen(); },
-                                           [&](const FBoxedNone &x) -> Expr::Any { return Expr::Alias(Term::Poison(rhsTye)).widen(); });
+            const auto rhsPoison = [&](const std::string &reason) -> Expr::Any {
+              poison0(reason);
+              return Expr::Alias(Term::Poison(rhsTye)).widen();
+            };
+            const auto rhs0 =
+                *rhs //
+                ^ fold_total(
+                    [&](const Expr::Any &x) -> Expr::Any { return rhsPoison("_FortranAAssign rhs folded to poison: Expr"); },
+                    [&](const FVar &x) -> Expr::Any { return Expr::Alias(x.value).widen(); },
+                    [&](const FBoxed &x) -> Expr::Any { return rhsPoison("_FortranAAssign rhs folded to poison: FBoxed"); },
+                    [&](const FBoxedNone &x) -> Expr::Any { return rhsPoison("_FortranAAssign rhs folded to poison: FBoxedNone"); });
 
             *lhs //
                 ^ foreach_total(
@@ -1059,7 +1076,7 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
                     },                                                               //
                     [&](const FVar &x) { push(Stmt::Mut(x.value, rhs0)); },          //
                     [&](const FBoxed &x) { push(update0(x.addr(), newVar(rhs0))); }, //
-                    [&](const FBoxedNone &x) { poison0("IMPL"); });
+                    [&](const FBoxedNone &x) { poison0("_FortranAAssign lhs FBoxedNone not implemented"); });
           } else if (name == "_FortranACharacterCompareScalar1") {
             // lexicographic compare of two length-1 char substrings (s(i:i) == t(j:j)); the result is
             // checked against 0, so a signed byte difference carries the right sign
@@ -1370,9 +1387,7 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
       [&](const fir::ResultOp r) {
         // (no-op result, formerly emitted Stmt::Comment)
       });
-  if (!handled) {
-    // (no-op for unhandled ops)
-  }
+  if (!handled && op->getNumResults() > 0) poison0(fmt::format("unhandled op {}", op->getName().getStringRef().str()));
 }
 
 static polydco::FReduction::Kind mapReductionKind(const fir::ReduceOperationEnum &k) {
