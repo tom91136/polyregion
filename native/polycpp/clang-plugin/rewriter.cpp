@@ -35,7 +35,9 @@
 #include "clang/Sema/Sema.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/Support/Casting.h"
+#pragma GCC visibility push(default)
 #include "llvm/Support/IOSandbox.h"
+#pragma GCC visibility pop
 #include "llvm/Support/MD5.h"
 #include "llvm/Support/ThreadPool.h"
 
