@@ -13,6 +13,7 @@ defaults:
 env:
   # AL8 = glibc 2.28, gcc-toolset-12 libstdc++. Cross-only archs (riscv64, arm) live in cross-build.yaml.
   SYSROOT_VARIANT: al8
+  POLYREGION_LLVM_PGO_BOLT: "ON"
   APT_OPTIONS: -o Acquire::Retries=10 -o Acquire::Retries::Delay::Maximum=60 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
 
 jobs:
@@ -114,7 +115,7 @@ jobs:
         with:
           path: &llvm-path native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
           archive: &llvm-archive native/out/llvm-${{ matrix.arch }}-dist.tar.zst
-          key: &llvm-key llvm-${{ env.SYSROOT_VARIANT }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/build.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './sysroot/Dockerfile', './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
+          key: &llvm-key llvm-pgobolt${{ env.POLYREGION_LLVM_PGO_BOLT }}-${{ env.SYSROOT_VARIANT }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/build.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './sysroot/Dockerfile', './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
 
       - name: Enable swap
         if: ${{ !env.ACT && steps.restore-llvm.outputs.cache-hit != 'true' }}

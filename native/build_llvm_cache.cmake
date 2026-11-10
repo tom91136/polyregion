@@ -61,6 +61,9 @@ if (UNIX)
     # cmake try-compile (which doesn't use rt) skips it cleanly so its pthread@GLIBC_PRIVATE back-refs don't trip the link.
     if (NOT APPLE)
         set(_polyregion_rt "-Wl,--push-state,--as-needed,-lrt,--pop-state")
+        if ("$ENV{POLYREGION_LLVM_PGO_BOLT}" STREQUAL "ON" AND NOT LLVM_BUILD_INSTRUMENTED)
+            string(APPEND _polyregion_rt " -Wl,--emit-relocs,-znow")
+        endif ()
         set(CMAKE_SHARED_LINKER_FLAGS "${_polyregion_rt}" CACHE STRING "")
         set(CMAKE_EXE_LINKER_FLAGS    "${_polyregion_rt}" CACHE STRING "")
         set(CMAKE_MODULE_LINKER_FLAGS "${_polyregion_rt}" CACHE STRING "")
@@ -119,6 +122,11 @@ endif ()
 set(_polyregion_llvm_projects clang lld)
 if (POLYREGION_LLVM_HAS_FLANG)
     list(APPEND _polyregion_llvm_projects flang)
+endif ()
+set(_polyregion_bolt_components "")
+if (UNIX AND NOT APPLE AND (NOT _polyregion_cpu_target OR _polyregion_cpu_target MATCHES "^(X86|AArch64|RISCV)$"))
+    list(APPEND _polyregion_llvm_projects bolt)
+    set(_polyregion_bolt_components bolt)
 endif ()
 set(LLVM_ENABLE_PROJECTS ${_polyregion_llvm_projects} CACHE STRING "")
 set(LLVM_ENABLE_RUNTIMES ${RUNTIME_COMPONENTS} CACHE STRING "")
@@ -372,4 +380,5 @@ set(LLVM_DISTRIBUTION_COMPONENTS
         ${LLVM_DISTRIBUTION_COMPONENTS_BASE}
         ${_polyregion_flang_components}
         ${_polyregion_mlir_components}
+        ${_polyregion_bolt_components}
         CACHE STRING "")

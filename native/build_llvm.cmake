@@ -265,6 +265,64 @@ if (POLYREGION_CROSS_CLANG)
     list(APPEND BUILD_OPTIONS "-DRUNTIMES_CMAKE_ARGS=${_RT_ARGS_ESCAPED}")
 endif ()
 
+function(polyregion_train_clang clang include_dir work_dir)
+    set(_src "${LLVM_BUILD_DIR}/${LLVM_SRC_DIRNAME}/llvm")
+    file(GLOB _sources "${_src}/lib/Support/*.cpp")
+    set(_ninja "rule cxx\n  command = ${clang} --driver-mode=g++ -std=c++17 -fno-rtti -fno-exceptions -I${_src}/include -I${_src}/../third-party/siphash/include -I${include_dir} -$opt -c $in -o $out\n")
+    foreach (_source ${_sources})
+        get_filename_component(_name ${_source} NAME_WE)
+        foreach (_opt O0 O3)
+            string(APPEND _ninja "build ${_name}.${_opt}.o: cxx ${_source}\n  opt = ${_opt}\n")
+        endforeach ()
+    endforeach ()
+    file(REMOVE_RECURSE ${work_dir})
+    file(WRITE ${work_dir}/build.ninja "${_ninja}")
+    set(_jobs "")
+    if (NOT "$ENV{POLYREGION_LLVM_PARALLEL_COMPILE_JOBS}" STREQUAL "")
+        set(_jobs -j "$ENV{POLYREGION_LLVM_PARALLEL_COMPILE_JOBS}")
+    endif ()
+    execute_process(COMMAND ninja ${_jobs} WORKING_DIRECTORY ${work_dir} COMMAND_ERROR_IS_FATAL ANY)
+    file(REMOVE_RECURSE ${work_dir})
+endfunction()
+
+set(POLYREGION_LLVM_PGO_BOLT OFF)
+if ("$ENV{POLYREGION_LLVM_PGO_BOLT}" STREQUAL "ON")
+    if (NOT CMAKE_BUILD_TYPE STREQUAL "Release" OR NOT CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux" OR POLYREGION_CROSS_CLANG)
+        message(FATAL_ERROR "POLYREGION_LLVM_PGO_BOLT needs a native Linux Release build")
+    endif ()
+    set(POLYREGION_LLVM_PGO_BOLT ON)
+
+    set(_pgo_dir ${LLVM_BUILD_DIR}-pgo)
+    set(_profdata ${LLVM_BUILD_DIR}/clang.profdata)
+    file(REMOVE_RECURSE ${_pgo_dir})
+    execute_process(
+            COMMAND ${CMAKE_COMMAND}
+            -S ${LLVM_BUILD_DIR}/${LLVM_SRC_DIRNAME}/llvm
+            -B ${_pgo_dir}
+            -DLLVM_BUILD_INSTRUMENTED=IR
+            -DLLVM_TARGETS_TO_BUILD=Native
+            -DLLVM_ENABLE_PROJECTS=clang
+            -DLLVM_ENABLE_RUNTIMES=
+            -DLLVM_DISTRIBUTION_COMPONENTS=
+            -C ${CMAKE_CURRENT_BINARY_DIR}/build_llvm_cache.cmake
+            ${BUILD_OPTIONS}
+            -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+            -GNinja
+            COMMAND_ECHO STDERR
+            COMMAND_ERROR_IS_FATAL ANY)
+    execute_process(COMMAND ${CMAKE_COMMAND} --build ${_pgo_dir} --target clang COMMAND_ERROR_IS_FATAL ANY)
+
+    file(REMOVE_RECURSE ${_pgo_dir}/profiles)
+    polyregion_train_clang(${_pgo_dir}/bin/clang ${_pgo_dir}/include ${_pgo_dir}/train)
+    execute_process(
+            COMMAND ${CMAKE_CXX_COMPILER} --print-prog-name=llvm-profdata
+            OUTPUT_VARIABLE _llvm_profdata OUTPUT_STRIP_TRAILING_WHITESPACE
+            COMMAND_ERROR_IS_FATAL ANY)
+    execute_process(COMMAND ${_llvm_profdata} merge -output=${_profdata} ${_pgo_dir}/profiles COMMAND_ERROR_IS_FATAL ANY)
+    file(REMOVE_RECURSE ${_pgo_dir})
+    list(APPEND BUILD_OPTIONS -DLLVM_PROFDATA_FILE=${_profdata})
+endif ()
+
 execute_process(
         COMMAND ${CMAKE_COMMAND}
         -S ${LLVM_BUILD_DIR}/${LLVM_SRC_DIRNAME}/llvm
@@ -470,5 +528,57 @@ foreach (F driver.cpp cc1_main.cpp cc1as_main.cpp cc1gen_reproducer_main.cpp)
 endforeach ()
 file(COPY "${LLVM_BUILD_DIR}/${LLVM_SRC_DIRNAME}/flang/tools/flang-driver/fc1_main.cpp"
         DESTINATION "${FUSED_DRIVER_STAGE}/flang-tools-flang-driver")
+
+if (POLYREGION_LLVM_PGO_BOLT)
+    if (LLVM_VARIANT STREQUAL "dylib")
+        file(GLOB _bolt_targets "${LLVM_DIST_DIR}/lib/libLLVMpolyregion.so.*" "${LLVM_DIST_DIR}/lib/libclang-cpp.so.*")
+    else ()
+        set(_bolt_targets "${LLVM_DIST_DIR}/bin/clang-${LLVM_MAJOR}")
+    endif ()
+
+    set(_bolt_dir ${LLVM_BUILD_DIR}-bolt)
+    file(REMOVE_RECURSE ${_bolt_dir})
+    file(MAKE_DIRECTORY ${_bolt_dir})
+    foreach (_target ${_bolt_targets})
+        get_filename_component(_name ${_target} NAME)
+        # XXX BOLT reads .debug_line_str raw; compressed DWARF 5 input fails its string offset assertion
+        execute_process(
+                COMMAND ${LLVM_DIST_DIR}/bin/llvm-objcopy --decompress-debug-sections ${_target} ${_bolt_dir}/${_name}
+                COMMAND_ERROR_IS_FATAL ANY)
+        execute_process(
+                COMMAND ${LLVM_DIST_DIR}/bin/llvm-bolt ${_bolt_dir}/${_name} -o ${_target}
+                -instrument --instrumentation-file-append-pid --instrumentation-file=${_bolt_dir}/${_name}.profile
+                COMMAND_ERROR_IS_FATAL ANY)
+    endforeach ()
+
+    polyregion_train_clang(${LLVM_DIST_DIR}/bin/clang ${LLVM_BUILD_DIR}/include ${_bolt_dir}/train)
+
+    foreach (_target ${_bolt_targets})
+        get_filename_component(_name ${_target} NAME)
+        file(GLOB _profiles "${_bolt_dir}/${_name}.profile.*.fdata")
+        execute_process(
+                COMMAND ${LLVM_DIST_DIR}/bin/merge-fdata -o ${_bolt_dir}/${_name}.fdata ${_profiles}
+                COMMAND_ERROR_IS_FATAL ANY)
+        execute_process(
+                COMMAND ${LLVM_DIST_DIR}/bin/llvm-bolt ${_bolt_dir}/${_name} -o ${_target} -data ${_bolt_dir}/${_name}.fdata
+                -reorder-blocks=ext-tsp -reorder-functions=cdsort -split-functions -split-all-cold -split-eh
+                -use-gnu-stack -update-debug-sections
+                COMMAND_ERROR_IS_FATAL ANY)
+        execute_process(
+                COMMAND ${LLVM_DIST_DIR}/bin/llvm-objcopy --compress-debug-sections=zlib ${_target}
+                COMMAND_ERROR_IS_FATAL ANY)
+    endforeach ()
+    file(REMOVE_RECURSE ${_bolt_dir})
+
+    file(GLOB _dist_files LIST_DIRECTORIES false "${LLVM_DIST_DIR}/bin/*" "${LLVM_DIST_DIR}/lib/*.so*")
+    foreach (_file ${_dist_files})
+        file(READ ${_file} _magic LIMIT 4 HEX)
+        if (_magic STREQUAL "7f454c46" AND NOT IS_SYMLINK ${_file})
+            execute_process(
+                    COMMAND ${LLVM_DIST_DIR}/bin/llvm-objcopy -w --remove-section=.rela.* --remove-section=!.rela.dyn --remove-section=!.rela.plt ${_file}
+                    COMMAND_ERROR_IS_FATAL ANY)
+        endif ()
+    endforeach ()
+endif ()
 
 message(STATUS "LLVM build complete!")
