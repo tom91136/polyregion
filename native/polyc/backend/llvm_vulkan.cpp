@@ -396,6 +396,6 @@ bool VulkanLowering::bindEntryArgs(llvm::Function &llvmFn, const std::vector<Arg
   }
   for (const auto &stmt : fn.body)
     const auto _ = cg.mkStmt(stmt, llvmFn);
-  if (auto *bb = B.GetInsertBlock(); bb && bb->getTerminator() == nullptr) B.CreateUnreachable();
+  if (auto *bb = B.GetInsertBlock(); bb && (bb->empty() || !bb->back().isTerminator())) B.CreateUnreachable();
   return true;
 }

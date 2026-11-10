@@ -1899,7 +1899,7 @@ Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program, c
     // Abstract method bodies (e.g. typeclass methods like `Monoid.mempty`) emit no terminator.
     // Insert an `unreachable` so LLVM module verification is happy — the symbol should never
     // actually be invoked since DynamicDispatchPass routes calls through a vtable.
-    if (auto *bb = B.GetInsertBlock(); bb && bb->getTerminator() == nullptr) {
+    if (auto *bb = B.GetInsertBlock(); bb && (bb->empty() || !bb->back().isTerminator())) {
       B.CreateUnreachable();
     }
     stackVarPtrs.clear();
