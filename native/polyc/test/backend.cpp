@@ -570,6 +570,33 @@ TEST_CASE("SPIR-V kernels load and store Bool fields as bytes", "[backend][spirv
   CHECK_THAT(ir, !Catch::Matchers::ContainsSubstring("store i1"));
 }
 
+TEST_CASE("SPIR-V kernels store bool array elements as bytes", "[backend][spirv]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Named scratch("scratch", Type::Arr(Type::Bool1(), 8, TypeSpace::Local()).widen());
+  const Named out("out", Type::Arr(Type::Bool1(), 1, TypeSpace::Global()).widen());
+  const Named flag("flag", Type::Bool1());
+  const Function entry =
+      mkFn("kernel", {Arg(out, {})}, Type::Unit0(),
+           {Var(scratch, std::optional<Expr::Any>{}, false).widen(),
+            Stmt::Update(selectNamed(scratch), Term::IntS32Const(3), Term::Bool1Const(true)).widen(),
+            Var(flag, Expr::Index(selectNamed(scratch).widen(), Term::IntS32Const(3), Type::Bool1()).widen(), false).widen(),
+            Stmt::Update(selectNamed(out), Term::IntS32Const(0), selectNamed(flag).widen()).widen(),
+            Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  const auto compiled = polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}),
+                                                      {Target::Object_LLVM_SPIRV64_Kernel, ""}, OptLevel::O0);
+  REQUIRE(compiled.binary);
+  const auto &ir = llvmIrOf(compiled);
+  CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("addrspace(3) global [8 x i8]"));
+  CHECK_THAT(ir, !Catch::Matchers::ContainsSubstring("[8 x i1]"));
+  CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("load i8, ptr addrspace(3)"));
+  CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("icmp ne i8"));
+  CHECK_THAT(ir, !Catch::Matchers::ContainsSubstring("load i1, ptr addrspace(3)"));
+}
+
 TEST_CASE("SPIR-V kernels read a global pointer field through a private pointer without a space cast", "[backend][spirv]") {
   polyregion::compiler::initialise();
   using namespace polyregion::polyast::dsl;

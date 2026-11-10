@@ -191,6 +191,7 @@ llvm::Type *TargetedContext::resolveType(const AnyType &tpe, const Map<std::stri
         // (see voidLike), so collapse to i8.
         if (functionBoundary) return llvm::PointerType::get(actual, ptrAS(x.space));
         if (spirvKernel && x.length == 0) return llvm::Type::getInt8Ty(actual);
+        if (spirvKernel && x.comp.is<Type::Bool1>()) return llvm::ArrayType::get(llvm::Type::getInt8Ty(actual), x.length);
         return llvm::ArrayType::get(resolveType(x.comp, structs, functionBoundary), x.length);
       }, //
       [&](const Type::Var &x) -> llvm::Type * {

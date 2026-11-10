@@ -131,6 +131,7 @@ ValPtr physicalIndexVal(CodeGen &gen, const Expr::Index &x, const std::string &k
       auto *basePtr = gen.mkTermVal(*lhs);
       const auto ptr = arrElemPtr(gen, gen.resolveType(*arrTpe), arrTpe->comp, basePtr, gen.i64Index(x.idx), key + "_idx_ptr");
       if (gen.structByPtr() && arrTpe->comp.template is<Type::Struct>()) return ptr;
+      if (arrTpe->comp.is<Type::Bool1>()) return loadBool(gen, ptr, gen.resolveType(arrTpe->comp));
       return C.load(B, ptr, gen.resolveType(arrTpe->comp));
     } else {
       throw BackendException::semantic("array index not called on array type (" + to_string(lhs->tpe) + ")(" + repr(x) + ")");
