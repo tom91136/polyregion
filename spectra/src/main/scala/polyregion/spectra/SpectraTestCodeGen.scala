@@ -628,6 +628,7 @@ private[spectra] object SpectraTestCodeGen {
   private def cppSurface: String = {
     val calls = declarations.map(cppSurfaceCall)
     s"""// $Banner
+       |// clang-format off
        |// Compile-only instantiations of every host reference body; runtime coverage is in test/host.
        |#include <cstdint>
        |
