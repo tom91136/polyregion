@@ -179,12 +179,12 @@ lazy val ewgen = project
     }
   )
 
-lazy val `interface-codegen` = project
-  .in(file("interface-codegen"))
+lazy val bindgen = project
+  .in(file("bindgen"))
   .settings(
     commonSettings,
     sdkPublishSettings,
-    name                                   := "interface-codegen",
+    name                                   := "bindgen",
     libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test
   )
   .dependsOn(ast.jvm(scala3Version))
@@ -207,7 +207,7 @@ lazy val codegen = project
       (Compile / runMain).toTask(" polyregion.ast.CodeGen").value
     }
   )
-  .dependsOn(ast.jvm(scala3Version), `binding-jvm`, `interface-codegen`)
+  .dependsOn(ast.jvm(scala3Version), `binding-jvm`, bindgen)
 
 lazy val pass = (projectMatrix in file("pass"))
   .settings(
@@ -539,13 +539,13 @@ lazy val root = project
     exportMavenRepo := Def.uncached {
       Def.taskDyn {
         IO.delete(mavenDir)
-        Def.sequential(ast.jvm(scala3Version) / publish, `interface-codegen` / publish, Def.task(mavenDir))
+        Def.sequential(ast.jvm(scala3Version) / publish, bindgen / publish, Def.task(mavenDir))
       }.value
     }
   )
   .aggregate(
     `binding-jvm`,
-    `interface-codegen`,
+    bindgen,
     codegen,
     ewgen,
     `runtime-scala`,

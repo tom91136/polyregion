@@ -147,8 +147,8 @@ _codegen-sbt:
     cd frontend && {{ sbt }} -batch -J-Dsbt.server.autostart=false 'codegen/genCodegen'
 
 # Validate the interface code generators for C++, Fortran and Scala.
-test-interface-codegen:
-    cd frontend && {{ sbt }} 'interface-codegen/testFull'
+test-bindgen:
+    cd frontend && {{ sbt }} 'bindgen/testFull'
 
 _codegen-format:
     find native/polyast/generated native/bindings/jvm/generated native/common/generated \
@@ -194,7 +194,7 @@ build-pass-native:
     fi
     cd frontend && {{ sbt }} 'passNative/exportPassDso'
 
-# Publish the JVM SDK artefacts (ast, interface-codegen) as a Maven repository at native/out/maven.
+# Publish the JVM SDK artefacts (ast, bindgen) as a Maven repository at native/out/maven.
 build-jvm-sdk:
     cd frontend && {{ sbt }} exportMavenRepo
 
@@ -765,7 +765,7 @@ clean-all: clean-llvm clean-dist clean-sysroot clean-vcpkg clean-build
 # === Aggregate ===
 
 # Local mirror of the CI checks.
-ci: check-codegen check-format check-ci test-interface-codegen
+ci: check-codegen check-format check-ci test-bindgen
 
 # === Internal ===
 

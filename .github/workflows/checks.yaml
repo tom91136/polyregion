@@ -45,8 +45,8 @@ jobs:
       - name: Fail if regenerated sources drift
         run: just _codegen-diff
 
-      - name: Test interface codegen
-        run: just test-interface-codegen
+      - name: Test bindgen
+        run: just test-bindgen
 
   pass-js-linux:
     runs-on: ubuntu-24.04

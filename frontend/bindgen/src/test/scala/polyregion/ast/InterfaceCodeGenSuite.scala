@@ -9,7 +9,7 @@ import polyregion.ast.PolyAST as p
 class InterfaceCodeGenSuite extends munit.FunSuite {
 
   private def golden(name: String): String =
-    Using.resource(Source.fromResource(s"interface-codegen/$name"))(_.mkString)
+    Using.resource(Source.fromResource(s"bindgen/$name"))(_.mkString)
 
   private val t = p.Type.Var("T")
   private val u = p.Type.Var("U")
@@ -202,7 +202,7 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
     )
     assertEquals(InterfaceCodeGen.scalaObject(reversed, scala), InterfaceCodeGen.scalaObject(interfaceDef, scala))
 
-    val path = Files.createTempFile("polyregion-interface-codegen", ".hpp")
+    val path = Files.createTempFile("polyregion-bindgen", ".hpp")
     try {
       Files.writeString(path, "stale")
       assert(InterfaceCodeGen.checkCurrent(path, cpp).isLeft)

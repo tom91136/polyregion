@@ -31,10 +31,10 @@ lazy val polyregionMaven: File = {
 lazy val polyregionSdk = settingKey[String]("Maven repository of the Polyregion JVM SDK.")
 
 lazy val polyregionVersion: String =
-  Option((polyregionMaven / "uk" / "ac" / "bristol" / "uob-hpc" / "interface-codegen_3").listFiles())
+  Option((polyregionMaven / "uk" / "ac" / "bristol" / "uob-hpc" / "bindgen_3").listFiles())
     .map(_.filter(_.isDirectory).map(_.getName).toList) match {
     case Some(version :: Nil) => version
-    case other                => sys.error(s"Expected one interface-codegen version in $polyregionMaven, found $other")
+    case other                => sys.error(s"Expected one bindgen version in $polyregionMaven, found $other")
   }
 
 lazy val api = Project("spectraApi", file("test/scala"))
@@ -59,7 +59,7 @@ lazy val spectra = Project("spectra", file("."))
     },
     updateCacheName := s"${updateCacheName.value}_${Hash.toHex(Hash(polyregionSdk.value)).take(8)}",
     libraryDependencies ++= Seq(
-      "uk.ac.bristol.uob-hpc" %% "interface-codegen" % polyregionVersion,
+      "uk.ac.bristol.uob-hpc" %% "bindgen"           % polyregionVersion,
       "org.scalameta"         %% "munit"             % "1.3.4" % Test
     ),
     genSpectra := Def.uncached {
