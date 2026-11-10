@@ -153,14 +153,19 @@ class Binder {
     } else raise(fmt::format("Binder value is not a ref type: {}", show(val)));
   }
 
+  static int64_t scalarBytes(const mlir::Type type) {
+    if (const auto logical = llvm::dyn_cast<fir::LogicalType>(type)) return logical.getFKind();
+    return type.isIndex() ? 8 : type.getIntOrFloatBitWidth() / 8;
+  }
+
   static void bindRef(OpBuilder &B, Value val, const std::optional<polyast::StructLayout> &layout, std::vector<CaptureField> &fields,
                       const bool temporary = false) {
 
     if (const auto refTy = llvm::dyn_cast<fir::ReferenceType>(val.getType())) { // T = fir.ref<E>
       // XXX types mapped here should all be pointers because since they originate from a ref/memref
-      if (const auto refElemTy = refTy.getEleTy(); refElemTy.isIntOrIndexOrFloat()) {
+      if (const auto refElemTy = refTy.getEleTy(); refElemTy.isIntOrIndexOrFloat() || llvm::isa<fir::LogicalType>(refElemTy)) {
         const auto llvmPtr = getRefPtr(B, val);
-        const auto i64Size = intConst(B, i64Ty(B), refElemTy.isIndex() ? 8 : refElemTy.getIntOrFloatBitWidth() / 8);
+        const auto i64Size = intConst(B, i64Ty(B), scalarBytes(refElemTy));
         const std::vector witnesses{CaptureField::Witness{llvmPtr, i64Size}};
         fields.emplace_back(CaptureField{
             .type = refElemTy,
@@ -184,7 +189,7 @@ class Binder {
         // XXX getIntOrFloatBitWidth asserts on record element types; fall back to polyast layout.
         const auto eleTy = seqTy.getEleTy();
         int64_t elemBytes = 0;
-        if (eleTy.isIntOrIndexOrFloat()) elemBytes = eleTy.getIntOrFloatBitWidth() / 8;
+        if (eleTy.isIntOrIndexOrFloat() || llvm::isa<fir::LogicalType>(eleTy)) elemBytes = scalarBytes(eleTy);
         else if (layout) elemBytes = static_cast<int64_t>(layout->sizeInBytes);
         const bool dynamicExtent = seqTy.hasDynamicExtents();
         const auto llvmPtr = getRefPtr(B, val);

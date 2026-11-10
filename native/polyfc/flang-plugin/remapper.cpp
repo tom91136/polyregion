@@ -198,7 +198,7 @@ Term::Any polyfc::Remapper::termOf(const Expr::Any &expr) {
 
 Type::Any polyfc::Remapper::handleType(const mlir::Type type, const bool captureBoundary) {
 
-  auto handleSeq = [&](fir::SequenceType t) -> Type::Any { return Type::Ptr(handleType(t.getEleTy()), TypeSpace::Global()); };
+  auto handleSeq = [&](fir::SequenceType t) -> Type::Any { return Type::Ptr(memoryType(t.getEleTy()), TypeSpace::Global()); };
 
   auto handleBox = [&](const fir::BoxType t) -> std::pair<Type::Any, FType> {
     if (fir::isBoxNone(t)) {
@@ -207,7 +207,7 @@ Type::Any polyfc::Remapper::handleType(const mlir::Type type, const bool capture
       defs.insert({FBoxedNoneMirror::tpe(), FBoxedNoneM.def()});
       return {FBoxedNoneMirror::tpe(), FBoxedNoneM};
     } else {
-      const auto comp0 = handleType(t.getEleTy());
+      const auto comp0 = memoryType(t.getEleTy());
       const auto comp = comp0.is<Type::Ptr>() ? comp0 : Type::Ptr(comp0, TypeSpace::Global()); // add ptr, even if the component isn't
       FBoxedMirror mirror(comp, fir::getBoxRank(t));
       const auto def = mirror.def();
@@ -248,7 +248,7 @@ Type::Any polyfc::Remapper::handleType(const mlir::Type type, const bool capture
                // XXX a CHARACTER is byte data; ref<char<1,N>> is a byte pointer, not a pointer-to-(byte array)
                if (llvm::isa<fir::CharacterType>(t.getEleTy())) return Type::Ptr(Type::IntU8(), TypeSpace::Global());
                // Otherwise use normal pointer semantic
-               return Type::Ptr(handleType(t.getEleTy()), TypeSpace::Global());
+               return Type::Ptr(memoryType(t.getEleTy()), TypeSpace::Global());
              },
              [&](const fir::HeapType t) -> Type::Any { return handleType(t.getEleTy()); },
              [&](fir::SequenceType t) -> Type::Any {
@@ -257,7 +257,7 @@ Type::Any polyfc::Remapper::handleType(const mlir::Type type, const bool capture
                // handled above), but inline arrays need Type::Arr so struct GEP indexes the
                // bytes that live alongside the other fields.
                if (!t.hasDynamicExtents() && !t.hasUnknownShape() && t.getDimension() == 1) {
-                 return Type::Arr(handleType(t.getEleTy()), static_cast<int32_t>(t.getConstantArraySize()), TypeSpace::Global());
+                 return Type::Arr(memoryType(t.getEleTy()), static_cast<int32_t>(t.getConstantArraySize()), TypeSpace::Global());
                }
                return handleSeq(t);
              },
@@ -270,7 +270,7 @@ Type::Any polyfc::Remapper::handleType(const mlir::Type type, const bool capture
              },
              [&](fir::RecordType t) -> Type::Any {
                const StructDef def(Sym({t.getName().str()}), {}, t.getTypeList() | map([&](const auto &name, const auto &tpe) {
-                                                                   return Named(name, handleType(tpe));
+                                                                   return Named(name, memoryType(tpe));
                                                                  }) | to_vector(),
                                    std::vector<Type::Struct>{}, false);
                const Type::Struct ty(def.name, {});
@@ -282,6 +282,20 @@ Type::Any polyfc::Remapper::handleType(const mlir::Type type, const bool capture
                return captureBoundary ? Type::Ptr(box, TypeSpace::Global()) : box;
              }) //
          ^ get_or_else(Type::Nothing());
+}
+
+Type::Any polyfc::Remapper::memoryType(const mlir::Type type) {
+  if (const auto logical = llvm::dyn_cast<fir::LogicalType>(type)) {
+    switch (logical.getFKind()) {
+      case 1: return Type::IntS8();
+      case 2: return Type::IntS16();
+      case 4: return Type::IntS32();
+      case 8: return Type::IntS64();
+      default: raise(fmt::format("Unsupported logical kind {}", logical.getFKind()));
+    }
+  }
+  if (const auto heap = llvm::dyn_cast<fir::HeapType>(type)) return memoryType(heap.getEleTy());
+  return handleType(type);
 }
 
 Expr::Any polyfc::Remapper::handleValueAsScalar(const mlir::Value val) {
@@ -487,7 +501,7 @@ void polyfc::Remapper::handleFunc(mlir::func::FuncOp funcOp) {
   size_t pi = 0;
   for (const auto blockArg : block.getArguments()) {
     const Type::Any vtpe = llvm::isa<fir::ReferenceType>(blockArg.getType())
-                               ? handleType(llvm::cast<fir::ReferenceType>(blockArg.getType()).getEleTy())
+                               ? memoryType(llvm::cast<fir::ReferenceType>(blockArg.getType()).getEleTy())
                                : handleType(blockArg.getType());
     const Named p(fmt::format("_fp{}", pi++), vtpe);
     args.emplace_back(p, std::optional<SourcePosition>{});
@@ -1220,9 +1234,9 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
             ^ foreach_total( //
                 [&](const FBoxed &e) { witness(c.getResult(), FArrayCoord{e.addr(), offsetExpr, e.comp()}); },
                 [&](const FVar &e) {
-                  witness(c.getResult(), FArrayCoord{Expr::Alias(e.value).widen(), offsetExpr, handleType(seqTy.getEleTy())});
+                  witness(c.getResult(), FArrayCoord{Expr::Alias(e.value).widen(), offsetExpr, memoryType(seqTy.getEleTy())});
                 },
-                [&](const Expr::Any &e) { witness(c.getResult(), FArrayCoord{e, offsetExpr, handleType(seqTy.getEleTy())}); });
+                [&](const Expr::Any &e) { witness(c.getResult(), FArrayCoord{e, offsetExpr, memoryType(seqTy.getEleTy())}); });
       },
 
       [&](fir::AllocaOp a) {
@@ -1231,10 +1245,10 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
         // variable. The default `handleType` path collapses `!fir.array<NxT>` to `Ptr(T)` which
         // leaves the local uninitialised; writes via array-coor then clobber whatever neighbours
         // the slot. Emit `Type::Arr(T, N)` so the storage actually exists on stack.
-        Type::Any tpe = handleType(a.getInType());
+        Type::Any tpe = memoryType(a.getInType());
         if (auto seqTy = llvm::dyn_cast<fir::SequenceType>(a.getInType());
             seqTy && !seqTy.hasDynamicExtents() && !seqTy.hasUnknownShape()) {
-          tpe = Type::Arr(handleType(seqTy.getEleTy()), static_cast<int32_t>(seqTy.getConstantArraySize()), TypeSpace::Global()).widen();
+          tpe = Type::Arr(memoryType(seqTy.getEleTy()), static_cast<int32_t>(seqTy.getConstantArraySize()), TypeSpace::Global()).widen();
         }
         const Named named(fmt::format("alloca_{}", ++id), tpe);
         push(Stmt::Var(named, std::optional<Expr::Any>{}, /*isMutable*/ true).widen());
@@ -1246,21 +1260,27 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
       },
       [&](fir::LoadOp l) {
         const auto expr = handleValue(l.getMemref());
+        const auto witnessLoaded = [&](const Expr::Any &e) {
+          if (!llvm::isa<fir::LogicalType>(l.getResult().getType())) return witness(l.getResult(), e);
+          const auto v = newVar(e);
+          witness(l.getResult(), Expr::IntrOp(Intr::LogicNeq(v, dsl::integral(v.tpe, 0))).widen());
+        };
         if (const auto ref = expr ^ narrow<Expr::Any, FVar, FBoxed, FArrayCoord>()) {
-          *ref                                                                                              //
-              ^ foreach_total([&](const Expr::Any &e) { witness(l.getResult(), index0(e)); },               //
-                              [&](const FVar &e) { witness(l.getResult(), Expr::Alias(e.value).widen()); }, //
+          *ref                                                                                     //
+              ^ foreach_total([&](const Expr::Any &e) { witnessLoaded(index0(e)); },               //
+                              [&](const FVar &e) { witnessLoaded(Expr::Alias(e.value).widen()); }, //
                               [&](const FArrayCoord &e) {
                                 const auto base = termOf(e.array);
                                 const auto off = newVar(e.offset);
-                                witness(l.getResult(), Expr::Index(base, off, e.comp).widen());
+                                witnessLoaded(Expr::Index(base, off, e.comp).widen());
                               }, //
                               [&](const FBoxed &e) {
                                 // XXX scalar-shaped result: materialise the loaded value via the
                                 // box's heap addr so downstream converts/arith see the scalar, not
                                 // the FBoxed wrapper. Box-typed results preserve the wrapper for
                                 // subsequent box_addr / rebox / fir.embox use sites.
-                                if (l.getResult().getType().isIntOrIndexOrFloat()) witness(l.getResult(), index0(e.addr()));
+                                if (l.getResult().getType().isIntOrIndexOrFloat() || llvm::isa<fir::LogicalType>(l.getResult().getType()))
+                                  witnessLoaded(index0(e.addr()));
                                 else witness(l.getResult(), e);
                               }); //
         } else poison0(fmt::format("LoadOp RHS value not an Expr|FBoxed|FArrayCoord, was {}", fRepr(expr)));
@@ -1280,7 +1300,10 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
           for (const auto m : stale)
             aggLoadCache.erase(m);
         }
-        const auto rhs = handleValueAs(s.getValue());
+        const auto value = handleValueAs(s.getValue());
+        const auto rhs = llvm::isa<fir::LogicalType>(s.getValue().getType())
+                             ? Expr::Cast(newVar(value), memoryType(s.getValue().getType())).widen()
+                             : value;
         if (const auto lhs = handleValue(s.getMemref()) ^ narrow<Expr::Any, FVar, FBoxed, FArrayCoord>()) {
           *lhs                                                                               //
               ^ foreach_total([&](const Expr::Any &e) { push(update0(e, newVar(rhs))); },    //

@@ -58,6 +58,7 @@ struct Remapper {
   mlir::Type resolveType(const polyast::Type::Any &tpe);
   polyast::StructLayout resolveLayout(const polyast::StructDef &def);
   polyast::Type::Any handleType(mlir::Type type, bool captureBoundary = false);
+  polyast::Type::Any memoryType(mlir::Type type);
   FExpr handleValue(mlir::Value val, const std::optional<std::vector<polyast::Named>> &altRoot = {});
   polyast::Expr::Any handleValueAsScalar(mlir::Value val);
 
