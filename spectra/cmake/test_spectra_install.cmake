@@ -63,16 +63,32 @@ if(DEFINED PACKAGES)
   if(NOT EXISTS "${_package_include}/polyregion/spectra_api.hpp")
     message(FATAL_ERROR "Spectra install has no polyregion/spectra_api.hpp under ${_package_include}")
   endif()
-  file(WRITE "${_source}/stdpar.cpp" [=[
+  set(_stdpar_source "${WORK_DIR}/consumer-stdpar")
+  set(_stdpar_build "${WORK_DIR}/build-stdpar")
+  file(WRITE "${_stdpar_source}/CMakeLists.txt" "cmake_minimum_required(VERSION 3.23 FATAL_ERROR)
+project(spectra_stdpar_consumer LANGUAGES CXX)
+add_library(stdpar OBJECT stdpar.cpp)
+target_compile_features(stdpar PRIVATE cxx_std_17)
+target_include_directories(stdpar SYSTEM PRIVATE \"${_package_include}\")
+")
+  file(WRITE "${_stdpar_source}/stdpar.cpp" [=[
 #include <polyregion/spectra/stdpar.hpp>
 int main() { return 0; }
 ]=])
   execute_process(
-    COMMAND "${CXX_COMPILER}" -std=c++17 -fsyntax-only -isystem "${_package_include}" "${_source}/stdpar.cpp"
+    COMMAND "${CMAKE_COMMAND}" -S "${_stdpar_source}" -B "${_stdpar_build}" "-DCMAKE_CXX_COMPILER=${CXX_COMPILER}"
     RESULT_VARIABLE _stdpar_rc
     OUTPUT_VARIABLE _stdpar_stdout
     ERROR_VARIABLE _stdpar_stderr
   )
+  if(_stdpar_rc EQUAL 0)
+    execute_process(
+      COMMAND "${CMAKE_COMMAND}" --build "${_stdpar_build}"
+      RESULT_VARIABLE _stdpar_rc
+      OUTPUT_VARIABLE _stdpar_stdout
+      ERROR_VARIABLE _stdpar_stderr
+    )
+  endif()
   if(NOT _stdpar_rc EQUAL 0)
     message(FATAL_ERROR "stdpar.hpp does not compile against the installed package headers (${_stdpar_rc}):\n${_stdpar_stdout}${_stdpar_stderr}")
   endif()
