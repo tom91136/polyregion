@@ -54,7 +54,6 @@ struct FBoxed {
   FBoxedMirror mirror;
 
   FBoxed(polyast::Expr::Any base, FBoxedMirror aggregate);
-  FBoxed();
   [[nodiscard]] polyast::Type::Any comp() const;
   [[nodiscard]] polyast::Expr::Any addr() const;
   [[nodiscard]] polyast::Expr::Any dims() const;
@@ -92,7 +91,8 @@ struct FTuple {
 };
 
 struct FShapeShift {
-  std::vector<polyast::Expr::Any> lowerBounds, extents;
+  std::vector<polyast::Expr::Any> lowerBounds;
+  std::vector<std::optional<polyast::Expr::Any>> extents;
   [[nodiscard]] size_t rank() const { return lowerBounds.size(); }
   friend bool operator==(const FShapeShift &lhs, const FShapeShift &rhs);
 };
@@ -105,7 +105,7 @@ struct FShift {
 };
 
 struct FShape {
-  std::vector<polyast::Expr::Any> extents;
+  std::vector<std::optional<polyast::Expr::Any>> extents;
   [[nodiscard]] size_t rank() const;
   [[nodiscard]] FShapeShift asShapeShift() const;
   friend bool operator==(const FShape &lhs, const FShape &rhs);
@@ -144,6 +144,6 @@ std::string fRepr(const FType &t);
 std::function<polyast::Expr::Any(const polyast::Term::Any &, const polyast::Term::Any &)> reductionOp(const polydco::FReduction::Kind &k,
                                                                                                       const polyast::Type::Any &t);
 
-polyast::Expr::Any reductionInit(const polydco::FReduction::Kind &k, const polyast::Type::Any &t);
+polyast::Term::Any reductionInit(const polydco::FReduction::Kind &k, const polyast::Type::Any &t);
 
 } // namespace polyregion::polyfc

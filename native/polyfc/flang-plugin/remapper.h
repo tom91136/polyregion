@@ -20,6 +20,8 @@ namespace polyregion::polyfc {
 
 using namespace aspartame;
 
+[[noreturn]] void unlowered(const std::string &reason, mlir::Location loc);
+
 // a `do concurrent ... reduce(...)` rewritten for polyregion.core.transform_reduce: the loop lists its reduce operators, and the
 // body's final store of each per-iteration accumulator into its host result slot names that accumulator's result field
 inline constexpr llvm::StringLiteral CoreReduceAttr = "polyfc.core_reduce";
@@ -64,11 +66,7 @@ struct Remapper {
 
   template <typename T = polyast::Expr::Any> T handleValueAs(const mlir::Value val) {
     const auto expr = handleValue(val);
-    return expr ^ get_maybe<T>() ^ fold([&]() -> T {
-             if constexpr (std::is_same_v<T, polyast::Expr::Any>) {
-               return polyast::Expr::Alias(polyast::Term::Poison(handleType(val.getType())));
-             } else return T{};
-           });
+    return expr ^ get_maybe<T>() ^ fold([&]() -> T { unlowered(fmt::format("no requested view of {}", fRepr(expr)), val.getLoc()); });
   }
 
   void handleOp(mlir::Operation *op);

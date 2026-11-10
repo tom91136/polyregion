@@ -13,6 +13,8 @@
 #include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
+#include "polyregion/error.h"
+
 #include "ast.h"
 #include "ftypes.h"
 
@@ -27,7 +29,7 @@ Expr::Any polyfc::selectAny(const Expr::Any &base, const Named &that) {
       return Expr::Alias(selectField(*sel, that));
     }
   }
-  return Expr::Alias(Term::Poison(that.tpe));
+  raise(fmt::format("selecting field {} from non-variable base {} is not lowered", that.symbol, repr(base)));
 }
 Type::Struct polyfc::FDescExtraMirror::tpe() { return Type::Struct(Sym({"FDescExtra"}), {}); }
 StructDef polyfc::FDescExtraMirror::def() const { return StructDef(tpe().name, {}, {derivedType, typeParamValue}, {}, false); }
@@ -54,17 +56,13 @@ StructDef polyfc::FBoxedMirror::def() const {
 }
 
 polyfc::FBoxed::FBoxed(Expr::Any base, FBoxedMirror aggregate) : base(std::move(base)), mirror(std::move(aggregate)) {}
-polyfc::FBoxed::FBoxed() : FBoxed(Expr::Alias(Term::Poison(Type::Nothing())), {}) {}
 Type::Any polyfc::FBoxed::comp() const { return mirror.comp(); }
 Expr::Any polyfc::FBoxed::addr() const { return selectAny(base, mirror.addr); }
 Expr::Any polyfc::FBoxed::dims() const { return selectAny(base, mirror.dims); }
 Expr::Any polyfc::FBoxed::dimAt(const size_t rank) const {
   // Index expects a Term::Any lhs; extract the Term from the Alias-wrapped Expr we built.
-  const auto dimsExpr = selectAny(base, mirror.dims);
-  if (auto alias = dimsExpr.get<Expr::Alias>()) {
-    return Expr::Index(alias->ref, Term::IntS64Const(rank), FDimMirror::tpe());
-  }
-  return Expr::Alias(Term::Poison(FDimMirror::tpe()));
+  const auto dims = selectAny(base, mirror.dims).get<Expr::Alias>()->ref;
+  return Expr::Index(dims, Term::IntS64Const(rank), FDimMirror::tpe());
 }
 Type::Struct polyfc::FBoxedNoneMirror::tpe() { return Type::Struct(Sym({"FBoxedNone"}), {}); }
 StructDef polyfc::FBoxedNoneMirror::def() const { return StructDef(tpe().name, {}, {addr}, {}, false); }
@@ -90,6 +88,10 @@ bool polyfc::operator==(const FSlice &lhs, const FSlice &rhs) {
 }
 bool polyfc::operator==(const FVar &lhs, const FVar &rhs) { return lhs.value == rhs.value; }
 
+static std::string reprExtents(const std::vector<std::optional<Expr::Any>> &extents) {
+  return extents | mk_string(", ", [](const auto &e) { return e ? repr(*e) : std::string{"*"}; });
+}
+
 std::string polyfc::fRepr(const FExpr &t) {
   return t //
          ^ fold_total([&](const Expr::Any &p) { return repr(p); }, [&](const FVar &p) { return fmt::format("FVar({})", repr(p.value)); },
@@ -97,11 +99,11 @@ std::string polyfc::fRepr(const FExpr &t) {
                       [&](const FBoxedNone &p) { return fmt::format("FBoxedNone({})", repr(p.base)); },
                       [&](const FTuple &p) { return fmt::format("FTuple({})", p.values | mk_string(", ", show_repr)); },
                       [&](const FShift &p) { return fmt::format("FShift(.lowerBounds={})", p.lowerBounds | mk_string(", ", show_repr)); },
-                      [&](const FShape &p) { return fmt::format("FShape(.extents={})", p.extents | mk_string(", ", show_repr)); },
+                      [&](const FShape &p) { return fmt::format("FShape(.extents={})", reprExtents(p.extents)); },
                       [&](const FShapeShift &p) {
                         return fmt::format("FShapeShift(.lowerBounds={}, .extents={})", //
                                            p.lowerBounds | mk_string(", ", show_repr),  //
-                                           p.extents | mk_string(", ", show_repr));
+                                           reprExtents(p.extents));
                       },
                       [&](const FSlice &p) {
                         return fmt::format("FSlice(.lowerBounds={}, .upperBounds={}, .strides={})", //
@@ -139,45 +141,42 @@ std::function<Expr::Any(const Term::Any &, const Term::Any &)> polyfc::reduction
     case polydco::FReduction::Kind::Eqv: return [](const auto &l, const auto &r) -> Expr::Any { return Expr::IntrOp(Intr::LogicEq(l, r)); };
     case polydco::FReduction::Kind::Neqv:
       return [](const auto &l, const auto &r) -> Expr::Any { return Expr::IntrOp(Intr::LogicNeq(l, r)); };
-    default: return [t](const auto &, const auto &) -> Expr::Any { return Expr::Alias(Term::Poison(t)); };
+    default: raise(fmt::format("reduction operator {} is not supported", magic_enum::enum_name(k)));
   }
 }
 
-Expr::Any polyfc::reductionInit(const polydco::FReduction::Kind &k, const Type::Any &t) {
-  auto unsupported = [&]() -> Expr::Any { return Expr::Alias(Term::Poison(t)); };
-  // dsl::numeric returns a Term::Any in the new IR; wrap with Alias for an Expr::Any.
-  auto liftTerm = [](const Term::Any &term) -> Expr::Any { return Expr::Alias(term); };
+Term::Any polyfc::reductionInit(const polydco::FReduction::Kind &k, const Type::Any &t) {
+  auto unsupported = [&]() -> Term::Any { raise(fmt::format("reduction {} on {} is not supported", magic_enum::enum_name(k), repr(t))); };
   return t.kind().match_total(
-      [&](const TypeKind::Integral &) -> Expr::Any {
+      [&](const TypeKind::Integral &) -> Term::Any {
         switch (k) {
-          case polydco::FReduction::Kind::Add: return liftTerm(dsl::numeric(t, [](const auto &_) { return static_cast<decltype(_)>(0); }));
-          case polydco::FReduction::Kind::Mul: return liftTerm(dsl::numeric(t, [](const auto &_) { return static_cast<decltype(_)>(1); }));
+          case polydco::FReduction::Kind::Add: return dsl::numeric(t, [](const auto &_) { return static_cast<decltype(_)>(0); });
+          case polydco::FReduction::Kind::Mul: return dsl::numeric(t, [](const auto &_) { return static_cast<decltype(_)>(1); });
           case polydco::FReduction::Kind::Max:
-            return liftTerm(dsl::numeric(t, [](const auto &_) { return std::numeric_limits<std::decay_t<decltype(_)>>::lowest(); }));
+            return dsl::numeric(t, [](const auto &_) { return std::numeric_limits<std::decay_t<decltype(_)>>::lowest(); });
           case polydco::FReduction::Kind::Min:
-            return liftTerm(dsl::numeric(t, [](const auto &_) { return std::numeric_limits<std::decay_t<decltype(_)>>::max(); }));
-          case polydco::FReduction::Kind::IAnd:
-            return liftTerm(dsl::numeric(t, [](const auto &_) { return static_cast<decltype(_)>(~0); }));
-          case polydco::FReduction::Kind::IOr: return liftTerm(dsl::numeric(t, [](const auto &_) { return static_cast<decltype(_)>(0); }));
-          case polydco::FReduction::Kind::IEor: return liftTerm(dsl::numeric(t, [](const auto &_) { return static_cast<decltype(_)>(0); }));
-          case polydco::FReduction::Kind::And: return t.is<Type::Bool1>() ? Expr::Alias(Term::Bool1Const(true)) : unsupported();
-          case polydco::FReduction::Kind::Or: return t.is<Type::Bool1>() ? Expr::Alias(Term::Bool1Const(false)) : unsupported();
-          case polydco::FReduction::Kind::Eqv: return t.is<Type::Bool1>() ? Expr::Alias(Term::Bool1Const(true)) : unsupported();
-          case polydco::FReduction::Kind::Neqv: return t.is<Type::Bool1>() ? Expr::Alias(Term::Bool1Const(false)) : unsupported();
+            return dsl::numeric(t, [](const auto &_) { return std::numeric_limits<std::decay_t<decltype(_)>>::max(); });
+          case polydco::FReduction::Kind::IAnd: return dsl::numeric(t, [](const auto &_) { return static_cast<decltype(_)>(~0); });
+          case polydco::FReduction::Kind::IOr: return dsl::numeric(t, [](const auto &_) { return static_cast<decltype(_)>(0); });
+          case polydco::FReduction::Kind::IEor: return dsl::numeric(t, [](const auto &_) { return static_cast<decltype(_)>(0); });
+          case polydco::FReduction::Kind::And: return t.is<Type::Bool1>() ? Term::Bool1Const(true).widen() : unsupported();
+          case polydco::FReduction::Kind::Or: return t.is<Type::Bool1>() ? Term::Bool1Const(false).widen() : unsupported();
+          case polydco::FReduction::Kind::Eqv: return t.is<Type::Bool1>() ? Term::Bool1Const(true).widen() : unsupported();
+          case polydco::FReduction::Kind::Neqv: return t.is<Type::Bool1>() ? Term::Bool1Const(false).widen() : unsupported();
           default: return unsupported();
         }
       },
-      [&](const TypeKind::Fractional &) -> Expr::Any {
+      [&](const TypeKind::Fractional &) -> Term::Any {
         switch (k) {
-          case polydco::FReduction::Kind::Add: return liftTerm(dsl::numeric(t, [](const auto &_) { return static_cast<decltype(_)>(0); }));
-          case polydco::FReduction::Kind::Mul: return liftTerm(dsl::numeric(t, [](const auto &_) { return static_cast<decltype(_)>(1); }));
+          case polydco::FReduction::Kind::Add: return dsl::numeric(t, [](const auto &_) { return static_cast<decltype(_)>(0); });
+          case polydco::FReduction::Kind::Mul: return dsl::numeric(t, [](const auto &_) { return static_cast<decltype(_)>(1); });
           case polydco::FReduction::Kind::Max:
-            return liftTerm(dsl::numeric(t, [](const auto &_) { return std::numeric_limits<std::decay_t<decltype(_)>>::lowest(); }));
+            return dsl::numeric(t, [](const auto &_) { return std::numeric_limits<std::decay_t<decltype(_)>>::lowest(); });
           case polydco::FReduction::Kind::Min:
-            return liftTerm(dsl::numeric(t, [](const auto &_) { return std::numeric_limits<std::decay_t<decltype(_)>>::max(); }));
+            return dsl::numeric(t, [](const auto &_) { return std::numeric_limits<std::decay_t<decltype(_)>>::max(); });
           default: return unsupported();
         }
       },
-      [&](const TypeKind::None &) -> Expr::Any { return unsupported(); },
-      [&](const TypeKind::Ref &) -> Expr::Any { return unsupported(); });
+      [&](const TypeKind::None &) -> Term::Any { return unsupported(); },
+      [&](const TypeKind::Ref &) -> Term::Any { return unsupported(); });
 }
