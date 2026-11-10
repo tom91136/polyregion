@@ -52,6 +52,9 @@ if(NOT _build_rc EQUAL 0)
 endif()
 
 if(DEFINED PACKAGES)
+  if(NOT POLYCPP)
+    message(FATAL_ERROR "PACKAGES requires POLYCPP to compile against the installed packages")
+  endif()
   string(REPLACE "," ";" _packages "${PACKAGES}")
   set(_package_root "${_prefix}/${LIBDIR}/polyregion/packages")
   foreach(_package IN LISTS _packages)
@@ -63,38 +66,24 @@ if(DEFINED PACKAGES)
   if(NOT EXISTS "${_package_include}/polyregion/spectra_api.hpp")
     message(FATAL_ERROR "Spectra install has no polyregion/spectra_api.hpp under ${_package_include}")
   endif()
-  set(_stdpar_source "${WORK_DIR}/consumer-stdpar")
-  set(_stdpar_build "${WORK_DIR}/build-stdpar")
-  file(WRITE "${_stdpar_source}/CMakeLists.txt" "cmake_minimum_required(VERSION 3.23 FATAL_ERROR)
-project(spectra_stdpar_consumer LANGUAGES CXX)
-add_library(stdpar OBJECT stdpar.cpp)
-target_compile_features(stdpar PRIVATE cxx_std_17)
-target_include_directories(stdpar SYSTEM PRIVATE \"${_package_include}\")
-")
-  file(WRITE "${_stdpar_source}/stdpar.cpp" [=[
+  set(_stdpar_source "${WORK_DIR}/stdpar.cpp")
+  file(WRITE "${_stdpar_source}" [=[
 #include <polyregion/spectra/stdpar.hpp>
 int main() { return 0; }
 ]=])
   execute_process(
-    COMMAND "${CMAKE_COMMAND}" -S "${_stdpar_source}" -B "${_stdpar_build}" "-DCMAKE_CXX_COMPILER=${CXX_COMPILER}"
+    COMMAND "${POLYCPP}" -std=c++17 -fstdpar -fstdpar-arch=host@native "-fstdpar-library-path=${_package_root}"
+            -c "${_stdpar_source}" -o "${WORK_DIR}/stdpar.o"
     RESULT_VARIABLE _stdpar_rc
     OUTPUT_VARIABLE _stdpar_stdout
     ERROR_VARIABLE _stdpar_stderr
   )
-  if(_stdpar_rc EQUAL 0)
-    execute_process(
-      COMMAND "${CMAKE_COMMAND}" --build "${_stdpar_build}"
-      RESULT_VARIABLE _stdpar_rc
-      OUTPUT_VARIABLE _stdpar_stdout
-      ERROR_VARIABLE _stdpar_stderr
-    )
-  endif()
   if(NOT _stdpar_rc EQUAL 0)
-    message(FATAL_ERROR "stdpar.hpp does not compile against the installed package headers (${_stdpar_rc}):\n${_stdpar_stdout}${_stdpar_stderr}")
+    message(FATAL_ERROR "stdpar.hpp does not compile through polycpp against the installed package headers (${_stdpar_rc}):\n${_stdpar_stdout}${_stdpar_stderr}")
   endif()
 endif()
 
-if(DEFINED POLYCPP)
+if(DEFINED CORE_ARCH)
   file(WRITE "${_source}/core.cpp" [=[
 #include <algorithm>
 #include <execution>

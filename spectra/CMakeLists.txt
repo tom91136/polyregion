@@ -270,6 +270,7 @@ if(NOT SPECTRA_VENDOR_ONLY)
   set(_spectra_install_args)
   if(SPECTRA_ENABLE_PACKAGE)
     set(_spectra_installed_packages spectra)
+    list(APPEND _spectra_install_args -DPOLYCPP=${_spectra_polycpp})
     if(_spectra_core_package)
       list(APPEND _spectra_installed_packages polyregion.core)
       set(_spectra_install_core_target)
@@ -282,7 +283,7 @@ if(NOT SPECTRA_VENDOR_ONLY)
       endif()
       if(_spectra_install_core_target)
         list(APPEND _spectra_install_args
-             -DPOLYCPP=${_spectra_polycpp} -DCORE_ARCH=${_spectra_install_core_target}
+             -DCORE_ARCH=${_spectra_install_core_target}
              -DCORE_CAPABILITY=${_spectra_qualified_capabilities})
       endif()
     endif()
