@@ -2259,10 +2259,11 @@ TEST_CASE("an arena pointee starting inside its allocation copies only the host 
   capture->wide = reinterpret_cast<Wide *>(block + 4);
   f.allocation.genArenaMirror(reinterpret_cast<const char *>(capture), 1, 1, *captureMeta, sizeof(uintptr_t), sizeof(Capture));
   const auto &staging = f.allocation.genArenaStaging;
-  CHECK(staging.size() == sizeof(Capture) + 12);
-  CHECK(*reinterpret_cast<const uint64_t *>(staging.data() + offsetof(Capture, wide)) == sizeof(Capture) + 4);
-  CHECK(std::memcmp(staging.data() + sizeof(Capture), block, 8) == 0);
-  CHECK(std::all_of(staging.begin() + sizeof(Capture) + 8, staging.end(), [](const char c) { return c == 0; }));
+  const size_t blockAt = (sizeof(Capture) + alignof(Wide) - 1) & ~(alignof(Wide) - 1);
+  CHECK(staging.size() == blockAt + 12);
+  CHECK(*reinterpret_cast<const uintptr_t *>(staging.data() + offsetof(Capture, wide)) == blockAt + 4);
+  CHECK(std::memcmp(staging.data() + blockAt, block, 8) == 0);
+  CHECK(std::all_of(staging.begin() + blockAt + 8, staging.end(), [](const char c) { return c == 0; }));
 }
 
 TEST_CASE("a straddling arena pointee reads back only the host bytes") {
