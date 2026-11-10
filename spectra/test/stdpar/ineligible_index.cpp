@@ -22,14 +22,15 @@ std::string failures;
 void expect(const char *name, const bool ok) {
   if (!ok) failures += failures.empty() ? name : std::string(" ") + name;
 }
-}
+} // namespace
 
 int main(int argc, char **argv) {
   const auto par = std::execution::par_unseq;
   const auto sizes = argc > 1 ? std::vector<std::size_t>{10000} : std::vector<std::size_t>{0, 1, 31, 32, 33};
   for (const std::size_t n : sizes) {
     std::deque<int> d(n);
-    for (std::size_t i = 0; i < n; ++i) d[i] = static_cast<int>((i / 4) % 11);
+    for (std::size_t i = 0; i < n; ++i)
+      d[i] = static_cast<int>((i / 4) % 11);
     std::deque<int> p = d;
     if (n > 0) p[n / 2] += 1;
 

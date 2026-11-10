@@ -80,7 +80,7 @@ template <class In, class Out> bool disjoint_output(In first, std::ptrdiff_t n, 
          || out + static_cast<std::uintptr_t>(m) * sizeof(value_t<Out>) <= in;
 }
 
-}
+} // namespace spectra::stdpar::details
 
 namespace std { // NOLINT(*-dcl58-cpp)
 
@@ -545,8 +545,7 @@ It1 search(execution::parallel_unsequenced_policy, It1 first1, It1 last1, It2 fi
   return std::search(first1, last1, first2, last2, pred);
 }
 
-template <class It, class Size, class T>
-It search_n(execution::parallel_unsequenced_policy, It first, It last, Size count, T value) {
+template <class It, class Size, class T> It search_n(execution::parallel_unsequenced_policy, It first, It last, Size count, T value) {
   using V = ::spectra::stdpar::details::value_t<It>;
   if constexpr (::spectra::stdpar::details::element_v<It> && std::is_same_v<T, V>) {
     const auto n = last - first;

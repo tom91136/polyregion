@@ -42,7 +42,8 @@ int main() {
     if (desc != expectedDesc) failures += " desc:" + std::to_string(n);
 
     std::vector<int> in(n), out(n), expected(n);
-    for (int i = 0; i < n; ++i) in[i] = (i * 7) % 5 - 2;
+    for (int i = 0; i < n; ++i)
+      in[i] = (i * 7) % 5 - 2;
 
     std::inclusive_scan(in.begin(), in.end(), expected.begin(), add);
     spectra::inclusive_scan(in.data(), out.data(), n, add);

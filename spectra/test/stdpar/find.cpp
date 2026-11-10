@@ -27,7 +27,7 @@ std::string failures;
 void expect(const char *name, const bool ok) {
   if (!ok) failures += failures.empty() ? name : std::string(" ") + name;
 }
-}
+} // namespace
 
 int main() {
   const auto par = std::execution::par_unseq;
@@ -35,7 +35,8 @@ int main() {
   const auto negative = [](const int x) { return x < 0; };
   for (const std::size_t n : {0u, 1u, 31u, 32u, 33u, 1u << 20}) {
     std::vector<int> a(n);
-    for (std::size_t i = 0; i < n; ++i) a[i] = static_cast<int>((i * 7919) % 1009) - 500;
+    for (std::size_t i = 0; i < n; ++i)
+      a[i] = static_cast<int>((i * 7919) % 1009) - 500;
     for (const int needle : {-500, 0, 7, 508, 9999})
       expect("find", std::find(par, a.begin(), a.end(), needle) == std::find(a.begin(), a.end(), needle));
     expect("find_if", std::find_if(par, a.begin(), a.end(), is_seven) == std::find_if(a.begin(), a.end(), is_seven));

@@ -27,22 +27,23 @@ std::string failures;
 void expect(const char *name, const bool ok) {
   if (!ok) failures += failures.empty() ? name : std::string(" ") + name;
 }
-}
+} // namespace
 
 int main() {
   const auto par = std::execution::par_unseq;
   const auto same = [](const int x, const int y) { return x == y; };
   for (const std::size_t n : {0u, 1u, 31u, 32u, 33u, 1u << 20}) {
     std::vector<int> a(n);
-    for (std::size_t i = 0; i < n; ++i) a[i] = static_cast<int>((i / 4) % 11);
+    for (std::size_t i = 0; i < n; ++i)
+      a[i] = static_cast<int>((i / 4) % 11);
     for (const std::size_t m : {0u, 1u, 2u, 5u, 33u}) {
       std::vector<int> present = m <= n ? std::vector<int>(a.begin() + (n - m) / 2, a.begin() + (n - m) / 2 + m) : std::vector<int>(m, 42);
       std::vector<int> absent(m, 42);
       for (std::vector<int> needle : {present, absent}) {
-        expect("search", std::search(par, a.begin(), a.end(), needle.begin(), needle.end()) ==
-                             std::search(a.begin(), a.end(), needle.begin(), needle.end()));
-        expect("search_pred", std::search(par, a.begin(), a.end(), needle.begin(), needle.end(), same) ==
-                                  std::search(a.begin(), a.end(), needle.begin(), needle.end(), same));
+        expect("search", std::search(par, a.begin(), a.end(), needle.begin(), needle.end())
+                             == std::search(a.begin(), a.end(), needle.begin(), needle.end()));
+        expect("search_pred", std::search(par, a.begin(), a.end(), needle.begin(), needle.end(), same)
+                                  == std::search(a.begin(), a.end(), needle.begin(), needle.end(), same));
       }
     }
     for (const std::size_t c : {0u, 1u, 4u, 5u, 33u}) {

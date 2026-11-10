@@ -45,7 +45,7 @@ template <class T, class Par, class Seq> void check_out(const char *name, const 
     ok = ok && big[i] == sentinel;
   expect(name, ok);
 }
-}
+} // namespace
 
 int main() {
   const auto par = std::execution::par_unseq;

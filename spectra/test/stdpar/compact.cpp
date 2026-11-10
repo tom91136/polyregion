@@ -51,7 +51,7 @@ template <class T, class Par, class Seq> void check_inplace(const char *name, co
   const auto got = par(p) - p.begin();
   expect(name, got == count && std::equal(ref.begin(), ref.begin() + count, p.begin()));
 }
-}
+} // namespace
 
 int main() {
   const auto par = std::execution::par_unseq;

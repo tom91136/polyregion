@@ -54,15 +54,15 @@ void check_raw(const Vec &x, const bool empty) {
 int main(int argc, char **argv) {
   const bool empty = argc > 1 && std::string(argv[1]) == "empty";
 
-  Vec a(64), b(40), negative(40, -3), repeated(20, 7), ascending(30), far(40);
+  Vec a(64), b(40), negative(40, -3), repeated(20, 7), ascending(30), distant(40);
   for (std::size_t i = 0; i < a.size(); ++i)
     a[i] = static_cast<int>(i / 2) - 16;
   for (std::size_t i = 0; i < b.size(); ++i)
     b[i] = static_cast<int>(i) - 8;
   for (std::size_t i = 0; i < ascending.size(); ++i)
     ascending[i] = static_cast<int>(i) + 1;
-  for (std::size_t i = 0; i < far.size(); ++i)
-    far[i] = 1000 + static_cast<int>(i);
+  for (std::size_t i = 0; i < distant.size(); ++i)
+    distant[i] = 1000 + static_cast<int>(i);
 
   check(
       "copy_if", empty ? negative : a, b, empty,
@@ -91,7 +91,7 @@ int main(int argc, char **argv) {
       [](const Vec &x, const Vec &y, auto out) { return std::set_difference(par, x.begin(), x.end(), y.begin(), y.end(), out); },
       [](const Vec &x, const Vec &y, auto out) { return std::set_difference(x.begin(), x.end(), y.begin(), y.end(), out); });
   check(
-      "set_intersection", a, empty ? far : b, empty,
+      "set_intersection", a, empty ? distant : b, empty,
       [](const Vec &x, const Vec &y, auto out) { return std::set_intersection(par, x.begin(), x.end(), y.begin(), y.end(), out); },
       [](const Vec &x, const Vec &y, auto out) { return std::set_intersection(x.begin(), x.end(), y.begin(), y.end(), out); });
   std::printf("%s", failures.empty() ? "pass" : failures.c_str());

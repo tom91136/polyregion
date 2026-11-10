@@ -91,7 +91,7 @@ template <class C> void run(const std::size_t n) {
   std::copy_if(a.begin(), a.end(), std::back_inserter(expected), positive);
   expect("back_inserter", pushed == expected);
 }
-}
+} // namespace
 
 int main(int argc, char **argv) {
   const std::string mode = argc > 1 ? argv[1] : "";

@@ -32,17 +32,19 @@ void expect(const char *name, const bool ok) {
 template <class It> std::pair<std::ptrdiff_t, std::ptrdiff_t> offsets(const std::pair<It, It> &r, It base) {
   return {r.first - base, r.second - base};
 }
-}
+} // namespace
 
 int main() {
   const auto par = std::execution::par_unseq;
   const auto descending = [](const int x, const int y) { return x > y; };
   for (const std::size_t n : {0u, 1u, 2u, 31u, 32u, 33u, 1u << 20}) {
     std::vector<int> ties(n);
-    for (std::size_t i = 0; i < n; ++i) ties[i] = static_cast<int>((i * 7919 + 3) % 11);
+    for (std::size_t i = 0; i < n; ++i)
+      ties[i] = static_cast<int>((i * 7919 + 3) % 11);
     std::vector<int> flat(n, 5);
     std::vector<int> ramp(n);
-    for (std::size_t i = 0; i < n; ++i) ramp[i] = static_cast<int>((i * 7919) % 1009) - 500;
+    for (std::size_t i = 0; i < n; ++i)
+      ramp[i] = static_cast<int>((i * 7919) % 1009) - 500;
 
     for (const auto *v : {&ties, &flat, &ramp}) {
       const auto b = v->begin(), e = v->end();

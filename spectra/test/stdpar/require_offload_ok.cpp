@@ -18,7 +18,8 @@ int main() {
   std::string failures;
   for (const std::size_t n : {0u, 1u, 31u, 32u, 33u, 1000u}) {
     std::vector<int> a(n);
-    for (std::size_t i = 0; i < n; ++i) a[i] = static_cast<int>((i * 7919) % 1009) - 500;
+    for (std::size_t i = 0; i < n; ++i)
+      a[i] = static_cast<int>((i * 7919) % 1009) - 500;
     std::vector<int> p = a, s = a;
     std::reverse(par, p.begin(), p.end());
     std::reverse(s.begin(), s.end());

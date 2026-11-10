@@ -28,7 +28,7 @@ std::string failures;
 void expect(const char *name, const bool ok) {
   if (!ok) failures += failures.empty() ? name : std::string(" ") + name;
 }
-}
+} // namespace
 
 int main() {
   const auto par = std::execution::par_unseq;
@@ -36,7 +36,8 @@ int main() {
   const auto twice = [](const int x) { return 2 * x; };
   for (const std::size_t n : {0u, 1u, 31u, 32u, 33u, 1u << 20}) {
     std::vector<int> a(n);
-    for (std::size_t i = 0; i < n; ++i) a[i] = static_cast<int>((i * 7919) % 1009) - 500;
+    for (std::size_t i = 0; i < n; ++i)
+      a[i] = static_cast<int>((i * 7919) % 1009) - 500;
     std::vector<int> p(n), s(n);
 
     std::exclusive_scan(par, a.begin(), a.end(), p.begin(), 0, plus);
