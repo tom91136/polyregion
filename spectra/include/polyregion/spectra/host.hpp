@@ -384,7 +384,9 @@ POLYREGION_SPECTRA_HOST_FALLBACK inline void transform_exclusive_scan(const T *i
 
 template <class T, class U, class Map, class Op>
 POLYREGION_SPECTRA_HOST_FALLBACK inline void transform_inclusive_scan(const T *in, U *out, std::int32_t n, Map map, Op op) {
-  std::transform_inclusive_scan(in, in + n, out, op, map);
+  if (n <= 0) return;
+  out[0] = map(in[0]);
+  std::transform_inclusive_scan(in + 1, in + n, out + 1, op, map, out[0]);
 }
 
 template <class T, class U, class Map, class Op>
