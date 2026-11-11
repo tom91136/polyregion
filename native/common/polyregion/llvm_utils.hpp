@@ -52,6 +52,11 @@ static void collectCPUFeatures(const std::string &CPU,             //
         | for_each([&](const auto &f) { drain.emplace_back(std::move(f)); });
   };
 
+  const auto disabled = drain                                                             //
+                        | filter([](const auto &f) { return !f.empty() && f[0] == '-'; }) //
+                        | map([](const auto &f) { return f.substr(1); })                  //
+                        | to_vector();
+
   // normalise drain first, stuff could come in with +/- prefix
   drain = drain                                                              //
           | filter([](const auto &f) { return !f.empty() && f[0] != '-'; })  //
@@ -113,6 +118,7 @@ static void collectCPUFeatures(const std::string &CPU,             //
     default: throw std::logic_error("Unexpected arch from triple:" + Triple::getArchTypeName(arch).str());
   }
 
+  drain = drain | filter([&](const auto &f) { return !(disabled ^ contains(f)); }) | to_vector();
   drain ^= sort();
   drain ^= distinct();
 }

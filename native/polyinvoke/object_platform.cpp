@@ -365,15 +365,12 @@ std::vector<Property> ObjectDevice::properties() {
 std::vector<std::string> ObjectDevice::features() {
   POLYINVOKE_TRACE();
 
-  const auto probed = llvm::sys::getHostCPUFeatures();
-  auto features = probed                                                            //
-                  | filter([](const auto &feature) { return feature.getValue(); })  //
-                  | map([](const auto &feature) { return feature.getKey().str(); }) //
+  auto features = llvm::sys::getHostCPUFeatures()                                                                      //
+                  | map([](const auto &feature) { return (feature.getValue() ? "+" : "-") + feature.getKey().str(); }) //
                   | to_vector();
 
-  if (probed.empty())
-    polyregion::llvm_shared::collectCPUFeatures(llvm::sys::getHostCPUName().str(), llvm::Triple(llvm::sys::getProcessTriple()).getArch(),
-                                                features);
+  polyregion::llvm_shared::collectCPUFeatures(llvm::sys::getHostCPUName().str(), llvm::Triple(llvm::sys::getProcessTriple()).getArch(),
+                                              features);
 
   // XXX x87 is never CPUID-probed and collectCPUFeatures may not resolve this host's arch/model
   features.emplace_back("x87");
