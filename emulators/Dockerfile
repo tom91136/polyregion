@@ -13,10 +13,11 @@ ARG SWIFTSHADER_COMMIT=2843cbcc714fe111e1083127c048a18002bc10ed
 
 FROM almalinux:8 AS base
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+COPY --from=ci dnf_retry.sh /usr/local/bin/dnf-retry
 
-RUN dnf -y --setopt=retries=5 --setopt=timeout=30 install epel-release dnf-plugins-core \
+RUN dnf-retry -y --setopt=retries=5 --setopt=timeout=30 install epel-release dnf-plugins-core \
  && dnf config-manager --set-enabled powertools \
- && dnf -y --setopt=retries=5 --setopt=timeout=30 install gcc-toolset-13 git make cmake ninja-build pkgconfig \
+ && dnf-retry -y --setopt=retries=5 --setopt=timeout=30 install gcc-toolset-13 git make cmake ninja-build pkgconfig \
       python3.11 python3.11-pip flex bison wget xz tar which file patch \
       zlib-devel expat-devel libzstd-devel libffi-devel ncurses-devel \
       libxml2-devel libdrm-devel elfutils-libelf-devel \
@@ -133,7 +134,7 @@ RUN git clone -b ${VULKAN_REF} --depth 1 https://github.com/KhronosGroup/Vulkan-
 FROM base AS icdloader
 ARG OPENCL_HEADERS_REF
 ARG OCL_ICD_REF
-RUN dnf --setopt=retries=5 --setopt=timeout=30 install -y -q ruby autoconf automake libtool && dnf clean all
+RUN dnf-retry --setopt=retries=5 --setopt=timeout=30 install -y -q ruby autoconf automake libtool && dnf clean all
 RUN git clone -b ${OPENCL_HEADERS_REF} --depth 1 https://github.com/KhronosGroup/OpenCL-Headers /src/ocl-h \
  && cmake -S /src/ocl-h -B /src/ocl-h/b -DCMAKE_INSTALL_PREFIX=/opt/ocl && cmake --install /src/ocl-h/b \
  && git clone -b ${OCL_ICD_REF} --depth 1 https://github.com/OCL-dev/ocl-icd /src/ocl-icd \
@@ -196,7 +197,7 @@ COPY --from=pocl     /opt/pocl     /opt/pocl
 COPY --from=ocelot   /src/gpuocelot/ocelot/build/libgpuocelot.so /opt/ocelot/libgpuocelot.so
 COPY --from=swiftshader /opt/swiftshader /opt/swiftshader
 COPY collect.sh /src/collect.sh
-RUN dnf --setopt=retries=5 --setopt=timeout=30 install -y -q patchelf && bash /src/collect.sh
+RUN dnf-retry --setopt=retries=5 --setopt=timeout=30 install -y -q patchelf && bash /src/collect.sh
 
 FROM export AS check
 COPY vecadd.cu vecadd.cl.cpp vecadd.vk.cpp run.sh /src/

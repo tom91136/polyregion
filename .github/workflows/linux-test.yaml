@@ -37,7 +37,13 @@ jobs:
       POLYREGION_ARCH: ${{ matrix.arch }}
     steps:
       - name: Install container dependencies
-        run: ${{ matrix.distro.pkg }}
+        # XXX runs before checkout (no git yet), so it cannot use ci/dnf_retry.sh
+        run: |
+          for attempt in 1 2 3; do
+            ${{ matrix.distro.pkg }} && exit 0
+            [ "$attempt" = 3 ] && exit 1
+            sleep 60
+          done
 
       - uses: &checkout actions/checkout@v6
 

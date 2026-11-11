@@ -313,7 +313,7 @@ build-emulators:
       windows) cmd //c "windows.bat $(cygpath -w "$PWD" 2>/dev/null || echo "$PWD")\\out" ;;
       linux)
         TMP="${EMU_TMPDIR:-$HOME/.podman-tmp}"; mkdir -p "$TMP"
-        TMPDIR="$TMP" {{ container }} build -f Dockerfile --target check -t polyemu .
+        TMPDIR="$TMP" {{ container }} build -f Dockerfile --build-context ci=../ci --target check -t polyemu .
         rm -rf out
         cid=$({{ container }} create polyemu)
         {{ container }} cp "$cid:/out" ./out
