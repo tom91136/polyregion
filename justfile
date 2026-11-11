@@ -16,6 +16,8 @@ export POLYREGION_LLVM_DYLIB := dylib
 # Dist-name infix: Windows always stages static (build.cmake forces it); elsewhere follows the LLVM dylib build.
 lib_kind := if os() == "windows" { "static" } else if dylib == "ON" { "dylib" } else { "static" }
 
+dist_dir := justfile_directory() / "native" / "out" / "polyregion-" + build_type + "-" + arch + "-" + lib_kind + "-dist"
+
 # Repo root with forward slashes - justfile_directory() yields backslashes on Windows that bash recipes mangle.
 repo := replace(justfile_directory(), "\\", "/")
 
@@ -565,8 +567,19 @@ build-device-libs extra='': (_native "DEVICE_LIBS" extra)
 # cmake-configure the polyregion native build.
 configure         extra='': (_native "CONFIGURE"   extra)
 
-# Build + stage the relocatable polyregion dist (bin/ + lib/).
-build-dist        extra='': _pass-bundle (_native "DIST"        extra)
+# Build + stage the relocatable polyregion dist (bin/ + lib/); on linux-x86_64 it carries the Spectra package.
+build-dist        extra='': _pass-bundle (_spectra-package extra) (_native "DIST" extra)
+
+# Install the toolchain into the dist, then build the Spectra package with it and install the package alongside.
+_spectra-package extra='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [ "{{ os() }}-{{ arch }}" = linux-x86_64 ] && [ "${POLYREGION_ASAN:-}" != ON ] && [ "${POLYC_PASS_BUNDLE:-dso}" = dso ] || exit 0
+    just _native TOOLCHAIN "{{ extra }}"
+    export POLYREGION_DIST="{{ dist_dir }}" POLYREGION_TEST_PROFILE=emulators
+    cd spectra
+    just build-package -DCMAKE_INSTALL_LIBDIR=lib
+    cmake --install target/package --prefix "$POLYREGION_DIST" --component spectra-package
 
 # Build + stage the test-only dist (test binaries + check_* sources).
 build-test-dist   extra='': (_native "DIST_TEST"   extra)

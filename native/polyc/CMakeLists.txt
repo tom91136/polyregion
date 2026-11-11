@@ -282,10 +282,12 @@ configure_file(
   @ONLY)
 target_include_directories(polyc PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 
-install(TARGETS polyc-bin RUNTIME DESTINATION bin)
-install(FILES "${_polypass_artefact}" DESTINATION lib)
+install(TARGETS polyc-bin RUNTIME DESTINATION bin COMPONENT polyregion-toolchain)
+install(FILES "${_polypass_artefact}" DESTINATION lib COMPONENT polyregion-toolchain)
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/polyregion"
         DESTINATION include
+        COMPONENT polyregion-toolchain
         FILES_MATCHING PATTERN "polypass.h")
 install(DIRECTORY "${POLYREGION_DEVICE_LIBS_DIR}/" DESTINATION lib
+        COMPONENT polyregion-toolchain
         FILES_MATCHING PATTERN "*.bc" PATTERN "*.LICENSE")

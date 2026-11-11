@@ -32,6 +32,9 @@ add_custom_target(polycpp-header-resource ${header_commands})
 
 # =========================== Generate header resource target ===========================
 polyregion_copy_lib_targets(polycpp-lib-resource polycpp ${POLYREGION_STAGE_DIR_polycpp} ${POLYREGION_STAGED_LIBS_polycpp})
+if (NOT POLYREGION_FUSED_DRIVER)
+    polyregion_copy_lib_targets(polycpp-plugin-resource polycpp ${POLYREGION_STAGE_DIR_polycpp} ${POLYREGION_STAGED_PLUGINS_polycpp})
+endif ()
 if (POLYREGION_FUSED_DRIVER)
     # Fused mem=reflect uses polyld-link (polyreflect statically linked); install as the
     # platform's lld name (lld-link.exe on Windows, ld.lld on POSIX) next to polycpp so
@@ -135,10 +138,10 @@ if (POLYREGION_FUSED_DRIVER)
             [["fmt/format.h"]]
             [["aspartame/all.hpp"]]
             [["ast.h"]])
-    add_dependencies(polycpp polycpp-lib-resource polycpp-header-resource polyld-link polycpp-polyld-resource)
+    add_dependencies(polycpp polycpp-header-resource polyld-link polycpp-polyld-resource)
 else ()
     add_executable(polycpp driver_main.cpp)
-    add_dependencies(polycpp polycpp-lib-resource polycpp-header-resource)
+    add_dependencies(polycpp polycpp-plugin-resource polycpp-header-resource)
 endif ()
 
 add_executable(polycpp-package-fixture test/package_fixture.cpp)
@@ -157,7 +160,7 @@ add_test(
         -P ${CMAKE_CURRENT_SOURCE_DIR}/../polyfront/rt/test/package_emit_cli.cmake)
 
 add_executable(polycpp-tests test/test_all.cpp)
-add_dependencies(polycpp-tests polycpp polystl polycpp-package-fixture)
+add_dependencies(polycpp-tests polycpp polycpp-lib-resource polystl polycpp-package-fixture)
 target_include_directories(polycpp-tests PRIVATE
         ../include
         ${CMAKE_SOURCE_DIR}/../polystl
@@ -213,12 +216,12 @@ if (APPLE)
             ARGS -SXx $<TARGET_FILE:polycpp>)
 endif ()
 
-install(TARGETS polycpp RUNTIME DESTINATION bin)
+install(TARGETS polycpp RUNTIME DESTINATION bin COMPONENT polyregion-toolchain)
 install(TARGETS polystl polystl-static polyreflect-rt
         LIBRARY DESTINATION lib/polycpp/lib
         ARCHIVE DESTINATION lib/polycpp/lib
         RUNTIME DESTINATION lib/polycpp/lib
-        FILE_SET HEADERS DESTINATION lib/polycpp/include)
+        FILE_SET HEADERS DESTINATION lib/polycpp/include COMPONENT polyregion-toolchain)
 install(TARGETS polyc-jit-static ARCHIVE DESTINATION lib/polycpp/lib)
 if (WIN32)
     install(FILES "$<TARGET_FILE:polyc-shared>" DESTINATION bin)
@@ -231,9 +234,9 @@ if (WIN32)
 endif ()
 if (NOT POLYREGION_FUSED_DRIVER)
     install(TARGETS polycpp-clang-plugin polyreflect-plugin
-            LIBRARY DESTINATION lib/polycpp/lib
-            RUNTIME DESTINATION lib/polycpp/lib)
+            LIBRARY DESTINATION lib/polycpp/lib COMPONENT polyregion-toolchain
+            RUNTIME DESTINATION lib/polycpp/lib COMPONENT polyregion-toolchain)
 endif ()
 foreach (HEADER_TARGET polycommon polycommon-generated polyinvoke-obj polyrt-obj)
-    install(TARGETS ${HEADER_TARGET} FILE_SET HEADERS DESTINATION lib/polycpp/include)
+    install(TARGETS ${HEADER_TARGET} FILE_SET HEADERS DESTINATION lib/polycpp/include COMPONENT polyregion-toolchain)
 endforeach ()

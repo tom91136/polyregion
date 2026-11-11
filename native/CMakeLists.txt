@@ -561,10 +561,10 @@ set(CMAKE_CTEST_ARGUMENTS
 
 set(POLYREGION_STAGE_DIR_polycpp "lib/polycpp/lib")
 set(POLYREGION_STAGE_DIR_polyfc "lib/polyfc/lib")
+set(POLYREGION_STAGED_PLUGINS_polycpp polycpp-clang-plugin polyreflect-plugin)
 set(POLYREGION_STAGED_LIBS_polycpp polyreflect-rt polystl-static polystl polyc-shared polyc-jit-static)
 set(POLYREGION_STAGED_LIBS_polyfc polyreflect-rt polydco-static polydco polyc-shared polyc-jit-static)
 if (NOT POLYREGION_FUSED_DRIVER)
-    list(PREPEND POLYREGION_STAGED_LIBS_polycpp polycpp-clang-plugin polyreflect-plugin)
     list(PREPEND POLYREGION_STAGED_LIBS_polyfc polyfc-flang-plugin polyreflect-plugin)
 endif ()
 if (NOT POLYREGION_HAS_FLANG)
@@ -620,11 +620,13 @@ install(DIRECTORY "${POLYREGION_MAVEN_REPO}/"
         DESTINATION share/polyregion/maven
         COMPONENT polyregion-toolchain)
 
+set(POLYREGION_TOOLCHAIN_TARGETS polyc-bin polytest-bin polycpp)
+add_custom_target(polyregion-toolchain DEPENDS ${POLYREGION_TOOLCHAIN_TARGETS})
+
 set(POLYREGION_DIST_TARGETS
-        polyc-bin
+        ${POLYREGION_TOOLCHAIN_TARGETS}
+        polycpp-lib-resource
         polyinfo
-        polytest-bin
-        polycpp
         polyc-JNI
         polyc-JNIshim
         polyinvoke-JNI)

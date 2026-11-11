@@ -88,14 +88,9 @@ jobs:
     if: ${{ !cancelled() }}
     uses: ./.github/workflows/spectra-surface.yaml
 
-  spectra-package:
-    needs: linux-build
-    if: ${{ !cancelled() }}
-    uses: ./.github/workflows/spectra-package.yaml
-
   spectra-test-linux:
-    needs: [linux-build, linux-emulators, spectra-package]
-    if: ${{ !cancelled() && needs.spectra-package.result == 'success' }}
+    needs: [linux-build, linux-emulators]
+    if: ${{ !cancelled() && needs.linux-build.outputs.spectra-package != '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -109,8 +104,8 @@ jobs:
       runs_on: ${{ matrix.runs_on }}
 
   spectra-test-macos:
-    needs: [macos-build, macos-emulators, spectra-package]
-    if: ${{ !cancelled() && needs.spectra-package.result == 'success' }}
+    needs: [macos-build, macos-emulators, linux-build]
+    if: ${{ !cancelled() && needs.linux-build.outputs.spectra-package != '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -124,8 +119,8 @@ jobs:
       runs_on: ${{ matrix.runs_on }}
 
   spectra-test-windows:
-    needs: [windows-build, windows-emulators, spectra-package]
-    if: ${{ !cancelled() && needs.spectra-package.result == 'success' }}
+    needs: [windows-build, windows-emulators, linux-build]
+    if: ${{ !cancelled() && needs.linux-build.outputs.spectra-package != '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -139,6 +134,6 @@ jobs:
       runs_on: ${{ matrix.runs_on }}
 
   spectra-test-cross:
-    needs: [cross-build, spectra-package]
-    if: ${{ !cancelled() && needs.spectra-package.result == 'success' }}
+    needs: [cross-build, linux-build]
+    if: ${{ !cancelled() && needs.linux-build.outputs.spectra-package != '' }}
     uses: ./.github/workflows/spectra-test-cross.yaml

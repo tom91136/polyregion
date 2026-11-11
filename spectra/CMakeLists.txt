@@ -104,6 +104,9 @@ if(NOT SPECTRA_VENDOR_ONLY)
     if(NOT _spectra_profile_result EQUAL 0)
       message(FATAL_ERROR "polytest --list-targets failed (${_spectra_profile_result})")
     endif()
+    if(NOT _spectra_profile_targets)
+      message(FATAL_ERROR "polytest --list-targets returned no targets for profile '${SPECTRA_TEST_PROFILE}'")
+    endif()
     string(REPLACE "\n" ";" _spectra_profile_targets "${_spectra_profile_targets}")
     message(STATUS "Spectra test targets: ${_spectra_profile_targets}")
 
@@ -705,14 +708,17 @@ if(NOT SPECTRA_VENDOR_ONLY AND SPECTRA_ENABLE_PACKAGE)
   if(TARGET spectra-vendor AND NOT SPECTRA_PREBUILT_PACKAGE)
     add_dependencies(spectra-package spectra-vendor)
   endif()
-  install(FILES "${_spectra_package}" DESTINATION "${CMAKE_INSTALL_LIBDIR}/polyregion/packages/spectra")
+  install(FILES "${_spectra_package}" DESTINATION "${CMAKE_INSTALL_LIBDIR}/polyregion/packages/spectra"
+          COMPONENT spectra-package)
   if(_spectra_core_package)
-    install(FILES "${_spectra_core_package}" DESTINATION "${CMAKE_INSTALL_LIBDIR}/polyregion/packages/polyregion.core")
+    install(FILES "${_spectra_core_package}" DESTINATION "${CMAKE_INSTALL_LIBDIR}/polyregion/packages/polyregion.core"
+            COMPONENT spectra-package)
   endif()
   foreach(_spectra_header _spectra_header_name IN ZIP_LISTS _spectra_package_headers _spectra_package_header_names)
     get_filename_component(_spectra_header_dir "${_spectra_header_name}" DIRECTORY)
     install(FILES "${_spectra_header}"
-            DESTINATION "${CMAKE_INSTALL_LIBDIR}/polyregion/packages/spectra/include/${_spectra_header_dir}")
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}/polyregion/packages/spectra/include/${_spectra_header_dir}"
+            COMPONENT spectra-package)
   endforeach()
 endif()
 

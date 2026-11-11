@@ -382,6 +382,23 @@ elseif (ACTION STREQUAL "BUILD")
             COMMAND_ECHO STDERR
             RESULT_VARIABLE SUCCESS)
     check_process_return(${SUCCESS} "${TARGET} build")
+elseif (ACTION STREQUAL "TOOLCHAIN")
+    setup_vcpkg()
+    message(STATUS "Installing polyregion toolchain into ${LLVM_DIST_DIR}")
+    execute_process(
+            COMMAND ${CMAKE_COMMAND}
+            --build ${BUILD_NAME}
+            --target polyregion-toolchain
+            COMMAND_ECHO STDERR
+            RESULT_VARIABLE SUCCESS)
+    check_process_return(${SUCCESS} "polyregion toolchain build")
+    execute_process(
+            COMMAND ${CMAKE_COMMAND}
+            --install ${BUILD_NAME}
+            --component polyregion-toolchain
+            COMMAND_ECHO STDERR
+            RESULT_VARIABLE SUCCESS)
+    check_process_return(${SUCCESS} "polyregion toolchain install")
 elseif (ACTION STREQUAL "DIST")
     setup_vcpkg()
     message(STATUS "Installing polyregion dist into ${LLVM_DIST_DIR}")
