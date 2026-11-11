@@ -530,7 +530,7 @@ build-sysroot:
     fi
     mkdir -p out
     img=polyregion-sysroot-${base}:{{ arch }}
-    {{ container }} build --pull ${flags[@]+"${flags[@]}"} -f "$dockerfile" ${args[@]+"${args[@]}"} -t "$img" .
+    {{ container }} build --pull ${flags[@]+"${flags[@]}"} -f "$dockerfile" --build-context ci=../ci ${args[@]+"${args[@]}"} -t "$img" .
     cid=$({{ container }} create "$img")
     {{ container }} export "$cid" | xz -T0 > "out/sysroot-${base}-{{ arch }}.tar.xz"
     {{ container }} rm "$cid" >/dev/null

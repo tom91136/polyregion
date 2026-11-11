@@ -3,11 +3,12 @@ FROM ${SYSBASE} AS staging
 ARG RHEL_TRIPLE
 ARG GNU_TRIPLE
 ARG EXTRA_PKGS
+COPY --from=ci dnf_retry.sh /usr/local/bin/dnf-retry
 
-RUN dnf --setopt=retries=5 --setopt=timeout=30 install -y dnf-plugins-core && dnf config-manager --set-enabled powertools
+RUN dnf-retry --setopt=retries=5 --setopt=timeout=30 install -y dnf-plugins-core && dnf config-manager --set-enabled powertools
 
 RUN mkdir -p /mnt/sys-root \
- && dnf --installroot /mnt/sys-root --releasever 8 --setopt install_weak_deps=false --setopt=retries=5 --setopt=timeout=30 \
+ && dnf-retry --installroot /mnt/sys-root --releasever 8 --setopt install_weak_deps=false --setopt=retries=5 --setopt=timeout=30 \
         --nodocs -y install \
         glibc glibc-devel glibc-headers glibc-static \
         libgcc libstdc++ libstdc++-devel libstdc++-static \
