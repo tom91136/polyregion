@@ -410,6 +410,8 @@ lazy val pass = (projectMatrix in file("pass"))
             sysrootFlag ++ crossFlag ++ cfg.compileOptions ++ Seq("-I", (gcPrefix / "include").getAbsolutePath) ++
               (if (isWin) Seq("-D_CRT_SECURE_NO_WARNINGS=") else Nil)
           )
+          // XXX scala-native 0.5.12 eh.cpp calls std::abort without <cstdlib>, which LLVM 23 libc++ on macOS no longer includes
+          .withCppOptions(cfg.cppOptions ++ Seq("-include", "cstdlib"))
           // XXX macOS ld64 picks the first match so we must prepend
           .withLinkingOptions(sysrootFlag ++ crossFlag ++ thinLtoFlag ++ linkOpts ++ cfg.linkingOptions)
       },
