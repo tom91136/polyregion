@@ -55,6 +55,7 @@ extern "C" bool SPIRVTranslate(Module *M, std::string &SpirvObj, std::string &Er
 #include "llvm/InitializePasses.h"
 #include "llvm/Linker/Linker.h"
 #include "llvm/MC/MCInstrInfo.h"
+#include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Object/ELF.h"
 #include "llvm/Pass.h"
@@ -121,9 +122,17 @@ const llvmc::CpuInfo &llvmc::hostCpuInfo() {
 #endif
     // XXX QEMU riscv_hwprobe emulation can report 'v' without the zve* bits it implies
     const bool hasV = hostFeatures.lookup("v");
+    const auto triple = defaultHostTriple();
+    const std::unique_ptr<llvm::MCSubtargetInfo> sti(targetFromTriple(triple)->createMCSubtargetInfo(triple, "", ""));
+    const auto known = sti->getAllProcessorFeatures();
     llvm::SubtargetFeatures Features;
     for (const auto &F : hostFeatures) {
       if (hasV && !F.second && F.first().starts_with("zve")) continue;
+#if LLVM_VERSION_MAJOR >= 23
+      if (llvm::none_of(known, [&](const auto &kv) { return F.first() == kv.key(); })) continue;
+#else
+      if (llvm::none_of(known, [&](const auto &kv) { return F.first() == kv.Key; })) continue;
+#endif
       Features.AddFeature(F.first(), F.second);
     }
     hostCpuInfo = {.uArch = llvm::sys::getHostCPUName().str(), .features = Features.getString()};
