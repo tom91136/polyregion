@@ -1,7 +1,7 @@
 package polyregion.scalalang
 
 import cats.syntax.all.*
-import polyregion.ast.{MsgPack, PolyAST as p, ProgramLinker, calleeName, canonicalName, given}
+import polyregion.ast.{MsgPack, PolyAST as p, ProgramLinker, calleeName, given}
 import polyregion.scalalang.generated.PolyASTWireSchema
 
 import java.nio.file.{Files, Path, Paths}
@@ -92,8 +92,8 @@ private[scalalang] object InterfaceResolver {
       p.FunctionDecl(
         target.calleeName,
         Nil,
-        target.receiver.map(value => p.Arg(p.Named("this", value.tpe), None)),
-        target.args.zipWithIndex.map((value, index) => p.Arg(p.Named(s"arg$index", value.tpe), None)),
+        target.receiver.map(value => p.Arg(p.Named("this", value.tpe))),
+        target.args.zipWithIndex.map((value, index) => p.Arg(p.Named(s"arg$index", value.tpe))),
         Nil,
         Nil,
         target.rtn,

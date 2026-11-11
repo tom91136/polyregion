@@ -11,9 +11,6 @@ class Quoted(val underlying: scala.quoted.Quotes) {
   export underlying.reflect.*
   given quotes: scala.quoted.Quotes = underlying
 
-  // Reference = CaptureVarName | DefaultTermValue
-  case class Reference(value: String | p.Expr, tpe: p.Type)
-
   // // TODO rename to FnScope
   // case class FnDependencies(
   //     clss: Map[p.Sym, p.StructDef] = Map.empty,  // external class defs
@@ -38,17 +35,20 @@ class Quoted(val underlying: scala.quoted.Quotes) {
   ) {
     @targetName("witness_module")
     def witness(x: Symbol, tpe: p.Type.Struct) = copy(modules = modules + (x -> tpe))
-    def witness(x: ClassDef, application: p.Type.Struct) =
-      if (TypeRepr.of[polyregion.scalalang.intrinsics.type].typeSymbol.fullName == x.symbol.fullName) {
+    def witness(x: ClassDef, application: p.Type.Struct) = {
+      val sym      = x.symbol
+      val fullName = sym.fullName
+      if (TypeRepr.of[polyregion.scalalang.intrinsics.type].typeSymbol.fullName == fullName) {
         this
-      } else if (x.symbol.flags.is(Flags.Module)) {
-        report.errorAndAbort(s"Witness illegal module ClassDef ${x.symbol} (${x.symbol.fullName})")
+      } else if (sym.flags.is(Flags.Module)) {
+        report.errorAndAbort(s"Witness illegal module ClassDef $sym ($fullName)")
       } else {
-        copy(classes = classes.updatedWith(x.symbol) {
+        copy(classes = classes.updatedWith(sym) {
           case Some(ivks) => Some(ivks + application)
           case None       => Some(Set(application))
         })
       }
+    }
 
     def witness(x: DefDef, application: p.Expr.Invoke) =
       copy(functions = functions.updatedWith(x.symbol) {
@@ -100,8 +100,7 @@ class Quoted(val underlying: scala.quoted.Quotes) {
           val newOrdinal = names
             .collect { case (k, n) if k.name == s.name => n }
             .maxOption
-            .map(_ + 1)
-            .getOrElse(0)
+            .fold(0)(_ + 1)
           (indexedName(newOrdinal), copy(names = names + (s -> newOrdinal)))
       }
     }

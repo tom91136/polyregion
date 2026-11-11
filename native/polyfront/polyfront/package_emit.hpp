@@ -50,9 +50,10 @@ inline Checked<std::vector<uint8_t>> compress(llvm::ArrayRef<uint8_t> input) {
   std::vector<uint8_t> output(::ZSTD_compressBound(input.size()));
   const auto outputSize = ::ZSTD_compress(output.data(), output.size(), input.data(), input.size(), 3);
   if (::ZSTD_isError(outputSize))
-    return {{}, {"cannot compress package archive payload (zstd: " + std::string(::ZSTD_getErrorName(outputSize)) + ")"}};
+    return {.value = {},
+            .errors = {"cannot compress package archive payload (zstd: " + std::string(::ZSTD_getErrorName(outputSize)) + ")"}};
   output.resize(outputSize);
-  return {{std::move(output)}, {}};
+  return {.value = std::move(output), .errors = {}};
 }
 
 inline Checked<polyast::Program> implementationClosure(const PackageIndex &index, const polyast::Function &root) {
@@ -64,7 +65,7 @@ inline Checked<polyast::Program> implementationClosure(const PackageIndex &index
     if (!functionNames.emplace(name).second) continue;
     const auto matches = index.functionsByName.find(name);
     if (matches == index.functionsByName.end() || matches->second.empty())
-      return {{}, {"package implementation closure is missing function `" + polyast::fqcn(name) + "`"}};
+      return {.value = {}, .errors = {"package implementation closure is missing function `" + polyast::fqcn(name) + "`"}};
     for (const auto *function : matches->second)
       functionFrontier ^=
           concat(function->template collect_all<polyast::Type::FnRef>() | map([](const auto &reference) { return reference.name; }));
@@ -93,7 +94,7 @@ inline Checked<polyast::Program> implementationClosure(const PackageIndex &index
     if (!definitionNames.emplace(name).second) continue;
     const auto matches = index.definitionsByName.find(name);
     if (matches == index.definitionsByName.end() || matches->second.empty())
-      return {{}, {"package implementation closure is missing struct `" + polyast::fqcn(name) + "`"}};
+      return {.value = {}, .errors = {"package implementation closure is missing struct `" + polyast::fqcn(name) + "`"}};
     for (const auto *definition : matches->second)
       definitionFrontier ^=
           concat(definition->template collect_all<polyast::Type::Struct>() | map([](const auto &type) { return type.name; }));
@@ -101,20 +102,24 @@ inline Checked<polyast::Program> implementationClosure(const PackageIndex &index
 
   auto definitions =
       index.package.program.defs | filter([&](const auto &definition) { return definitionNames.contains(definition.name); }) | to_vector();
-  return {{polyast::Program({}, std::move(functions), std::move(definitions), index.package.program.phase, index.package.program.metadata)},
-          {}};
+  return {.value = polyast::Program({}, std::move(functions), std::move(definitions), index.package.program.phase,
+                                    index.package.program.metadata),
+          .errors = {}};
 }
 
 inline Checked<EncodedImplementation> encodeImplementation(const PackageIndex &index, const polyast::Function &root) {
-  if (!root.implements) return {{}, {"package archive root has no public declaration"}};
+  if (!root.implements) return {.value = {}, .errors = {"package archive root has no public declaration"}};
   auto closure = implementationClosure(index, root);
-  if (!closure) return {{}, std::move(closure.errors)};
+  if (!closure) return {.value = {}, .errors = std::move(closure.errors)};
   const auto raw = polyast::hashed_program_to_msgpack(*closure.value);
   auto compressed = compress(raw);
-  if (!compressed) return {{}, std::move(compressed.errors)};
-  return {{EncodedImplementation{polyast::fqcn(*root.implements), polyast::fqcn(root.decl.name), encodeHeader(root),
-                                 static_cast<uint64_t>(raw.size()), std::move(*compressed.value)}},
-          {}};
+  if (!compressed) return {.value = {}, .errors = std::move(compressed.errors)};
+  return {.value = EncodedImplementation{.declaration = polyast::fqcn(*root.implements),
+                                         .implementation = polyast::fqcn(root.decl.name),
+                                         .header = encodeHeader(root),
+                                         .rawSize = static_cast<uint64_t>(raw.size()),
+                                         .compressed = std::move(*compressed.value)},
+          .errors = {}};
 }
 
 inline Checked<std::vector<EncodedImplementation>> encodeImplementations(const polyast::Package &package) {
@@ -135,16 +140,16 @@ inline Checked<std::vector<EncodedImplementation>> encodeImplementations(const p
         auto result = encodeImplementation(packageIndex, *roots[index]);
         if (result) encoded[index] = std::move(*result.value);
         else {
-          std::lock_guard lock(errorsMutex);
+          const std::scoped_lock lock(errorsMutex);
           errors.insert(errors.end(), std::make_move_iterator(result.errors.begin()), std::make_move_iterator(result.errors.end()));
         }
       }
     } catch (...) {
-      std::lock_guard lock(errorsMutex);
+      const std::scoped_lock lock(errorsMutex);
       if (!workerFailure) workerFailure = std::current_exception();
     }
   };
-  const auto workerCount = std::min<size_t>(roots.size(), std::max(1u, std::thread::hardware_concurrency()));
+  const auto workerCount = std::min<size_t>(roots.size(), std::max(1U, std::thread::hardware_concurrency()));
   std::optional<std::string> startError;
   {
     std::vector<std::thread> workers;
@@ -160,29 +165,29 @@ inline Checked<std::vector<EncodedImplementation>> encodeImplementations(const p
       startError = "cannot start package encoder workers: " + std::string(error.what());
     }
   }
-  if (startError) return {{}, {std::move(*startError)}};
+  if (startError) return {.value = {}, .errors = {std::move(*startError)}};
   if (workerFailure) {
     try {
       std::rethrow_exception(workerFailure);
     } catch (const std::exception &error) {
-      return {{}, {"package encoder worker failed: " + std::string(error.what())}};
+      return {.value = {}, .errors = {"package encoder worker failed: " + std::string(error.what())}};
     } catch (...) {
-      return {{}, {"package encoder worker failed"}};
+      return {.value = {}, .errors = {"package encoder worker failed"}};
     }
   }
-  if (!errors.empty()) return {{}, std::move(errors)};
+  if (!errors.empty()) return {.value = {}, .errors = std::move(errors)};
 
   std::vector<EncodedImplementation> out;
   out.reserve(encoded.size());
   for (auto &item : encoded)
     out.emplace_back(std::move(*item));
-  return {{std::move(out)}, {}};
+  return {.value = std::move(out), .errors = {}};
 }
 
 inline Checked<std::vector<uint8_t>> encodeArchive(const polyast::Interface &interface, const std::vector<EncodedImplementation> &encoded) {
   const auto interfaceRaw = polyast::interface_to_msgpack(interface);
   auto interfaceCompressed = compress(interfaceRaw);
-  if (!interfaceCompressed) return {{}, std::move(interfaceCompressed.errors)};
+  if (!interfaceCompressed) return {.value = {}, .errors = std::move(interfaceCompressed.errors)};
   size_t indexSize = 0;
   for (const auto &item : encoded)
     indexSize += 4 + item.declaration.size() + 4 + item.implementation.size() + 4 + item.header.size() + 8 + 8 + 8;
@@ -191,7 +196,12 @@ inline Checked<std::vector<uint8_t>> encodeArchive(const polyast::Interface &int
   std::vector<ArchiveEntry> entries;
   entries.reserve(encoded.size());
   for (const auto &item : encoded) {
-    entries.emplace_back(ArchiveEntry{item.declaration, item.implementation, item.header, offset, item.compressed.size(), item.rawSize});
+    entries.emplace_back(ArchiveEntry{.declaration = item.declaration,
+                                      .implementation = item.implementation,
+                                      .header = item.header,
+                                      .offset = offset,
+                                      .compressedSize = item.compressed.size(),
+                                      .uncompressedSize = item.rawSize});
     offset += item.compressed.size();
   }
 
@@ -213,7 +223,7 @@ inline Checked<std::vector<uint8_t>> encodeArchive(const polyast::Interface &int
   out.insert(out.end(), interfaceCompressed.value->begin(), interfaceCompressed.value->end());
   for (const auto &item : encoded)
     out.insert(out.end(), item.compressed.begin(), item.compressed.end());
-  return {{std::move(out)}, {}};
+  return {.value = std::move(out), .errors = {}};
 }
 
 } // namespace detail
@@ -224,17 +234,17 @@ struct ValidatedArchiveFragment {
 };
 
 inline Checked<ValidatedArchiveFragment> validateArchiveFragment(Archive archive) {
-  if (!archive.storage) return {{}, {"package fragment `" + archive.path + "` has no backing storage"}};
+  if (!archive.storage) return {.value = {}, .errors = {"package fragment `" + archive.path + "` has no backing storage"}};
   const auto data = archive.storage->getBuffer();
   const auto bytes = llvm::ArrayRef(reinterpret_cast<const uint8_t *>(data.data()), data.size());
   std::vector<polyast::Program> implementations;
   implementations.reserve(archive.entries.size());
   for (const auto &entry : archive.entries) {
     auto decoded = detail::decodeValidatedImplementation(entry, bytes);
-    if (!decoded) return {{}, std::move(decoded.errors)};
+    if (!decoded) return {.value = {}, .errors = std::move(decoded.errors)};
     implementations.emplace_back(std::move(*decoded.value));
   }
-  return {{ValidatedArchiveFragment{std::move(archive), std::move(implementations)}}, {}};
+  return {.value = ValidatedArchiveFragment{.archive = std::move(archive), .implementations = std::move(implementations)}, .errors = {}};
 }
 
 class ArchiveBuilder {
@@ -246,9 +256,9 @@ public:
 
   Checked<bool> addPackage(const polyast::Package &package) {
     auto declarations = declarationIndexes(package.interface);
-    if (!declarations) return {{}, std::move(declarations.errors)};
+    if (!declarations) return {.value = {}, .errors = std::move(declarations.errors)};
     auto additions = detail::encodeImplementations(package);
-    if (!additions) return {{}, std::move(additions.errors)};
+    if (!additions) return {.value = {}, .errors = std::move(additions.errors)};
     const auto coveredNames = *additions.value | map([](const auto &addition) { return addition.declaration; }) | to<std::unordered_set>();
     auto added = addEncoded(std::move(*additions.value));
     if (added)
@@ -260,16 +270,19 @@ public:
   Checked<bool> addArchive(const ValidatedArchiveFragment &fragment) {
     const auto &archive = fragment.archive;
     auto declarations = declarationIndexes(archive.interface);
-    if (!declarations) return {{}, std::move(declarations.errors)};
-    if (!archive.storage) return {{}, {"package fragment `" + archive.path + "` has no backing storage"}};
+    if (!declarations) return {.value = {}, .errors = std::move(declarations.errors)};
+    if (!archive.storage) return {.value = {}, .errors = {"package fragment `" + archive.path + "` has no backing storage"}};
     const auto data = archive.storage->getBuffer();
     const auto bytes = llvm::ArrayRef(reinterpret_cast<const uint8_t *>(data.data()), data.size());
     std::vector<detail::EncodedImplementation> additions;
     additions.reserve(archive.entries.size());
     for (const auto &entry : archive.entries) {
       const auto compressed = bytes.slice(static_cast<size_t>(entry.offset), static_cast<size_t>(entry.compressedSize));
-      additions.emplace_back(detail::EncodedImplementation{entry.declaration, entry.implementation, entry.header, entry.uncompressedSize,
-                                                           std::vector<uint8_t>(compressed.begin(), compressed.end())});
+      additions.emplace_back(detail::EncodedImplementation{.declaration = entry.declaration,
+                                                           .implementation = entry.implementation,
+                                                           .header = entry.header,
+                                                           .rawSize = entry.uncompressedSize,
+                                                           .compressed = std::vector<uint8_t>(compressed.begin(), compressed.end())});
     }
     const auto coveredNames = additions | map([](const auto &addition) { return addition.declaration; }) | to<std::unordered_set>();
     auto added = addEncoded(std::move(additions));
@@ -280,10 +293,10 @@ public:
   }
 
   Checked<Archive> publishFile(const std::string &path) const {
-    if (auto errors = archiveInterfaceErrors(interface); !errors.empty()) return {{}, std::move(errors)};
-    if (const auto errors = completenessErrors(); !errors.empty()) return {{}, errors};
+    if (auto errors = archiveInterfaceErrors(interface); !errors.empty()) return {.value = {}, .errors = std::move(errors)};
+    if (const auto errors = completenessErrors(); !errors.empty()) return {.value = {}, .errors = errors};
     auto encoded = detail::encodeArchive(interface, implementations);
-    if (!encoded) return {{}, std::move(encoded.errors)};
+    if (!encoded) return {.value = {}, .errors = std::move(encoded.errors)};
 
     Checked<Archive> out;
     llvm::SmallString<256> temporaryModel(path);
@@ -291,7 +304,7 @@ public:
     llvm::SmallString<256> temporary;
     int temporaryFd = -1;
     if (const auto error = llvm::sys::fs::createUniqueFile(temporaryModel, temporaryFd, temporary))
-      return {{}, {"cannot create temporary package: " + error.message()}};
+      return {.value = {}, .errors = {"cannot create temporary package: " + error.message()}};
     const auto cleanup = llvm::scope_exit([&] { (void)llvm::sys::fs::remove(temporary, false); });
     const auto fail = [&](std::string error) {
       out.errors.emplace_back(std::move(error));
@@ -322,14 +335,14 @@ public:
 
   Checked<Archive> publish(const std::string &root) const {
     const auto packageName = polyast::fqcn(interface.name);
-    if (!safePathComponent(packageName)) return {{}, {"invalid package identity `" + packageName + "`"}};
+    if (!safePathComponent(packageName)) return {.value = {}, .errors = {"invalid package identity `" + packageName + "`"}};
 
     llvm::SmallString<256> directory(root);
     llvm::sys::path::append(directory, packageName);
     if (llvm::sys::fs::exists(directory) && llvm::sys::fs::is_symlink_file(directory))
-      return {{}, {"package emission directory cannot be a symbolic link"}};
+      return {.value = {}, .errors = {"package emission directory cannot be a symbolic link"}};
     if (const auto error = llvm::sys::fs::create_directories(directory))
-      return {{}, {"cannot create package directory: " + error.message()}};
+      return {.value = {}, .errors = {"cannot create package directory: " + error.message()}};
 
     llvm::SmallString<256> target(directory);
     llvm::sys::path::append(target, PackageName);
@@ -338,10 +351,10 @@ public:
 
 private:
   Checked<std::vector<size_t>> declarationIndexes(const polyast::Interface &fragment) const {
-    if (auto errors = archiveInterfaceErrors(interface); !errors.empty()) return {{}, std::move(errors)};
-    if (auto errors = archiveInterfaceErrors(fragment); !errors.empty()) return {{}, std::move(errors)};
-    if (fragment.name != interface.name) return {{}, {"package fragment identity differs"}};
-    if (fragment.metadata != interface.metadata) return {{}, {"package fragment metadata differs"}};
+    if (auto errors = archiveInterfaceErrors(interface); !errors.empty()) return {.value = {}, .errors = std::move(errors)};
+    if (auto errors = archiveInterfaceErrors(fragment); !errors.empty()) return {.value = {}, .errors = std::move(errors)};
+    if (fragment.name != interface.name) return {.value = {}, .errors = {"package fragment identity differs"}};
+    if (fragment.metadata != interface.metadata) return {.value = {}, .errors = {"package fragment metadata differs"}};
     std::vector<size_t> indexes;
     indexes.reserve(fragment.declarations.size());
     for (const auto &declaration : fragment.declarations) {
@@ -354,12 +367,12 @@ private:
           continue;
         }
       }
-      return {{},
-              {sameName == declarationsByName.end()
-                   ? "package fragment contains unknown declaration `" + polyast::fqcn(declaration.name) + "`"
-                   : "package fragment declaration `" + polyast::fqcn(declaration.name) + "` differs"}};
+      return {.value = {},
+              .errors = {sameName == declarationsByName.end()
+                             ? "package fragment contains unknown declaration `" + polyast::fqcn(declaration.name) + "`"
+                             : "package fragment declaration `" + polyast::fqcn(declaration.name) + "` differs"}};
     }
-    return {{std::move(indexes)}, {}};
+    return {.value = std::move(indexes), .errors = {}};
   }
 
   Checked<bool> addEncoded(std::vector<detail::EncodedImplementation> additions) {
@@ -369,7 +382,7 @@ private:
         const auto &item = implementations[existing->second];
         if (item.declaration != addition.declaration || item.header != addition.header || item.rawSize != addition.rawSize
             || item.compressed != addition.compressed)
-          return {{}, {"package contains conflicting implementation `" + addition.implementation + "`"}};
+          return {.value = {}, .errors = {"package contains conflicting implementation `" + addition.implementation + "`"}};
       }
     }
     for (auto &addition : additions) {
@@ -377,7 +390,7 @@ private:
       implementationByName.emplace(addition.implementation, implementations.size());
       implementations.emplace_back(std::move(addition));
     }
-    return {{true}, {}};
+    return {.value = true, .errors = {}};
   }
 
   std::vector<std::string> completenessErrors() const {
@@ -400,7 +413,7 @@ private:
 inline Checked<Archive> publishPackage(const polyast::Package &package, const std::string &root) {
   ArchiveBuilder builder(package.interface);
   auto added = builder.addPackage(package);
-  if (!added) return {{}, std::move(added.errors)};
+  if (!added) return {.value = {}, .errors = std::move(added.errors)};
   return builder.publish(root);
 }
 

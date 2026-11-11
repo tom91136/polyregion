@@ -1,6 +1,8 @@
 #include "reflect-stack.h"
 
+#include <optional>
 #include <unordered_set>
+#include <vector>
 
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/DebugInfoMetadata.h"
@@ -30,8 +32,8 @@ static bool runSplice(llvm::Module &M, const bool verbose) {
   auto *ptrTy = llvm::PointerType::get(C, 0);
   auto *recordTy = llvm::FunctionType::get(voidTy, {ptrTy, sizeTy, i8Ty}, false);
   auto *releaseTy = llvm::FunctionType::get(voidTy, {ptrTy, i8Ty}, false);
-  auto RecordFn = llvm::cast<llvm::Function>(M.getOrInsertFunction("_rt_record", recordTy).getCallee());
-  auto ReleaseFn = llvm::cast<llvm::Function>(M.getOrInsertFunction("_rt_release", releaseTy).getCallee());
+  auto *RecordFn = llvm::cast<llvm::Function>(M.getOrInsertFunction("_rt_record", recordTy).getCallee());
+  auto *ReleaseFn = llvm::cast<llvm::Function>(M.getOrInsertFunction("_rt_release", releaseTy).getCallee());
 
   std::unordered_set<llvm::Function *> Protected;
   llvm_shared::findFunctionsWithStringAnnotations(M, [&](llvm::Function *F, llvm::StringRef Annotation) {
@@ -69,7 +71,7 @@ static bool runSplice(llvm::Module &M, const bool verbose) {
 
   for (llvm::Function &F : M) {
     if (F.isDeclaration()) continue;
-    if (Protected.count(&F) > 0) {
+    if (Protected ^ contains(&F)) {
       if (verbose) llvm::errs() << "[ReflectStackPass] Skipping protected function " << F.getName() << "\n";
       continue;
     }
@@ -81,15 +83,15 @@ static bool runSplice(llvm::Module &M, const bool verbose) {
                          | to_vector();
     if (Allocas.empty()) continue;
 
-    llvm::DILocation *zeroDebugLoc{};
-    if (const auto SP = F.getSubprogram()) zeroDebugLoc = llvm::DILocation::get(C, 0, 0, SP);
+    const llvm::DILocation *zeroDebugLoc{};
+    if (auto *const SP = F.getSubprogram()) zeroDebugLoc = llvm::DILocation::get(C, 0, 0, SP);
 
     if (verbose) llvm::errs() << "[ReflectStackPass] In " << F.getName() << " (" << Allocas.size() << " allocas)\n";
 
     const std::unordered_set<const llvm::Value *> Tracked(Allocas.begin(), Allocas.end());
     const auto Markers = llvm::instructions(F) | collect([&](auto &I) -> std::optional<llvm::IntrinsicInst *> {
                            auto *II = llvm::dyn_cast<llvm::IntrinsicInst>(&I);
-                           if (II && II->isLifetimeStartOrEnd() && Tracked.count(llvm::getUnderlyingObject(II->getArgOperand(0))))
+                           if (II && II->isLifetimeStartOrEnd() && Tracked ^ contains(llvm::getUnderlyingObject(II->getArgOperand(0))))
                              return II;
                            return {};
                          }) //
@@ -105,16 +107,16 @@ static bool runSplice(llvm::Module &M, const bool verbose) {
       llvm::IRBuilder B(AI->getNextNode());
       const auto sizeBytes = AI->getAllocationSize(M.getDataLayout()).value_or(llvm::TypeSize::getFixed(0)).getFixedValue();
       if (sizeBytes == 1) B.CreateMemSet(AI, B.getInt8(0), B.getInt64(1), AI->getAlign());
-      const auto Call =
+      auto *const Call =
           B.CreateCall(RecordFn, {AI, llvm::ConstantInt::get(sizeTy, sizeBytes), B.getInt8(to_integral(rt_reflect::Type::StackAlloc))});
       if (zeroDebugLoc) Call->setDebugLoc(zeroDebugLoc);
     }
     for (llvm::BasicBlock &BB : F) {
       if (auto *Ret = llvm::dyn_cast<llvm::ReturnInst>(BB.getTerminator())) {
         llvm::IRBuilder B(Ret);
-        const auto dealloc = B.getInt8(to_integral(rt_reflect::Type::StackFree));
+        auto *const dealloc = B.getInt8(to_integral(rt_reflect::Type::StackFree));
         for (auto *AI : Allocas) {
-          const auto Call = B.CreateCall(ReleaseFn, {AI, dealloc});
+          auto *const Call = B.CreateCall(ReleaseFn, {AI, dealloc});
           if (zeroDebugLoc) Call->setDebugLoc(zeroDebugLoc);
         }
       }
@@ -124,7 +126,7 @@ static bool runSplice(llvm::Module &M, const bool verbose) {
 }
 
 polyreflect::ReflectStackPass::ReflectStackPass(const bool verbose) : verbose(verbose) {}
-llvm::PreservedAnalyses polyreflect::ReflectStackPass::run(llvm::Module &M, llvm::ModuleAnalysisManager &) {
+llvm::PreservedAnalyses polyreflect::ReflectStackPass::run(llvm::Module &M, llvm::ModuleAnalysisManager &) const {
   if (runSplice(M, verbose)) return llvm::PreservedAnalyses::none();
   return llvm::PreservedAnalyses::all();
 }

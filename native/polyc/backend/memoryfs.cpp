@@ -1,5 +1,6 @@
 #include "memoryfs.h"
 
+#include <optional>
 #include <string>
 
 #ifdef _WIN32
@@ -42,10 +43,10 @@ std::optional<std::string> open(const std::string &name) {
   return tmp;
 #else
   auto ns = "/" + scoped;
-  int shmFd = shm_open(ns.data(), O_RDWR | O_CREAT | O_EXCL, S_IRWXU);
+  const int shmFd = shm_open(ns.data(), O_RDWR | O_CREAT | O_EXCL, S_IRWXU);
   if (shmFd < 0) {
     auto tmp = scoped + "-XXXXXX";
-    int tmpFd = mkstemp(tmp.data());
+    const int tmpFd = mkstemp(tmp.data());
     if (tmpFd < 0) return {};
     ::close(tmpFd);
     return tmp;
@@ -60,7 +61,7 @@ bool close(const std::string &name) {
   std::wstring wname(name.begin(), name.end());
   return DeleteFileW(wname.c_str());
 #else
-  if (name.rfind("/dev/shm/", 0) == 0) {
+  if (name.starts_with("/dev/shm/")) {
     auto leaf = name.substr(std::string("/dev/shm").size());
     if (shm_unlink(leaf.data()) == 0) return true;
   }

@@ -1,5 +1,12 @@
 #include <algorithm>
+#include <cstdint>
 #include <cstdlib>
+#include <optional>
+#include <string>
+#include <system_error>
+#include <utility>
+#include <variant>
+#include <vector>
 
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/Support/FileSystem.h"
@@ -71,7 +78,7 @@ int finishPackageCompilation(const int result, const std::string &path) {
     program = polyregion::polystl::hip::reconcileLaunchConstants(std::move(*merged.value), *device);
   }
   const auto written = polyregion::polyfront::writeProgramMsgpack(program, path);
-  if (const auto error = std::get_if<std::error_code>(&written)) {
+  if (const auto *const error = std::get_if<std::error_code>(&written)) {
     fmt::print(stderr, "[PolyCpp] Cannot write package program {}: {}\n", path, error->message());
     return EXIT_FAILURE;
   }
@@ -93,12 +100,12 @@ int main(int argc, const char *argv[]) {
     return polyregion::polyc(argc - 1, argv + 1);
   }
 
-#if defined(_WIN32)
+#ifdef _WIN32
   // XXX per-process mspdbsrv endpoint; see polyfc/driver_main.cpp.
   polyregion::env::put("_MSPDBSRV_ENDPOINT_", fmt::format("polycpp-{}", llvm::sys::Process::getProcessId()).c_str(), true);
 #endif
 
-  std::string execPath = llvm::sys::fs::getMainExecutable(argv[0], (void *)&addrAnchor);
+  std::string execPath = llvm::sys::fs::getMainExecutable(argv[0], reinterpret_cast<void *>(&addrAnchor));
   std::string execParentPath = llvm::sys::path::parent_path(execPath).str();
 
   std::string clangPath;
@@ -123,7 +130,7 @@ int main(int argc, const char *argv[]) {
              },
              [&](const std::optional<StdParOptions> &opts) {
                auto remaining = args.remaining() ^ map([](const auto &s) -> std::string { return s; });
-               auto append = [&](const std::vector<std::string> &xs) { xs ^ append_to(remaining); };
+               const auto append = [&](const std::vector<std::string> &xs) { xs ^ append_to(remaining); };
 
                if (opts) {
                  remaining ^= concat(mkDelimitedEnvPaths(polyregion::env::PolystlInclude, "-isystem", llvm::sys::EnvPathSeparator));
@@ -280,7 +287,7 @@ int main(int argc, const char *argv[]) {
                  }
                }
 
-#if defined(__APPLE__)
+#ifdef __APPLE__
                // Runtime, libc++, and JIT dependencies can share install locations; ld64.lld warns for repeated identical rpaths.
                remaining ^= distinct_by_if([](const auto &x) { return x.starts_with("-Wl,-rpath,"); }, [](const auto &x) { return x; });
 #endif

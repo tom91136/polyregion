@@ -88,14 +88,20 @@ inline void write(const std::string &p, const uint8_t *data, const size_t size) 
   llvm::SmallString<256> model(p);
   model.append(".tmp-%%%%%%");
   auto tmp = detail::fs::TempFile::create(model);
-  if (!tmp) return llvm::consumeError(tmp.takeError());
-  const detail::Header header{detail::Magic, detail::Version, detail::digestOf(data, size)};
+  if (!tmp) {
+    llvm::consumeError(tmp.takeError());
+    return;
+  }
+  const detail::Header header{.magic = detail::Magic, .version = detail::Version, .digest = detail::digestOf(data, size)};
   {
     llvm::raw_fd_ostream out(tmp->FD, /*shouldClose=*/false);
     out.write(reinterpret_cast<const char *>(&header), sizeof(header));
     out.write(reinterpret_cast<const char *>(data), size);
     out.flush();
-    if (out.has_error()) return llvm::consumeError(tmp->discard());
+    if (out.has_error()) {
+      llvm::consumeError(tmp->discard());
+      return;
+    }
   }
   if (auto err = tmp->keep(p)) llvm::consumeError(std::move(err));
 }

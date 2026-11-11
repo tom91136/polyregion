@@ -238,8 +238,8 @@ private[spectra] object SpectraTestCodeGen {
        |$testHelpers
        |""".stripMargin
 
-  private def indentBlock(block: CppBlock, pad: String): String =
-    block.lines.map(line => if (line.isEmpty) line else pad + line).mkString("\n")
+  private def indentBlock(block: CppBlock): String =
+    block.lines.map(line => if (line.isEmpty) line else "  " + line).mkString("\n")
 
   private def cppType(tpe: p.Type): String = tpe match {
     case p.Type.Var(name, _) => name
@@ -298,7 +298,7 @@ private[spectra] object SpectraTestCodeGen {
   }
 
   private def callableArgs(decl: p.FunctionDecl): List[p.Arg] =
-    decl.args.collect { case arg @ p.Arg(p.Named(_, _: p.Type.Exec, _), _, _) => arg }
+    decl.args.collect { case arg @ p.Arg(p.Named(_, p.Type.Exec(_, _, _), _), _, _) => arg }
 
   private def cppTestRun(decl: p.FunctionDecl, captured: Boolean, exact: Boolean, api: String): String = {
     val name = decl.name.last
@@ -327,10 +327,10 @@ private[spectra] object SpectraTestCodeGen {
     val call =
       s"  ${cppTestRetCap(decl.rtn)}$api::$name<$templateArgs>(${decl.args.map(cppTestCallArg).mkString(", ")});"
     s"""template <$templateParams> static bool $runName(const char *scenario, int n) {
-       |${indentBlock(sem.setup, "  ")}$live
+       |${indentBlock(sem.setup)}$live
        |$fdecls
        |$call
-       |${indentBlock(sem.verify, "  ")}
+       |${indentBlock(sem.verify)}
        |  std::fprintf(stderr, "  %-24s<%-18s> %s\\n", "$name", scenario, ok ? "OK" : "MISMATCH");
        |  return ok;
        |}""".stripMargin
@@ -357,14 +357,15 @@ private[spectra] object SpectraTestCodeGen {
     val widths = widthCases(decl.tpeVars.size)
     val typeCalls = widths
       .map(width => s"  ok &= run<${width.types.mkString(", ")}>(\"${width.label}/n${sem.n}\", ${sem.n});")
-    val baseline = widths.head
+    val baseline      = widths.head
+    val baselineTypes = baseline.types.mkString(", ")
     val sizeCalls = testSizes(name, sem.n)
-      .map(n => s"  ok &= run<${baseline.types.mkString(", ")}>(\"${baseline.label}/n$n\", $n);")
+      .map(n => s"  ok &= run<$baselineTypes>(\"${baseline.label}/n$n\", $n);")
     val capturedCalls =
       if (callableArgs(decl).isEmpty) Nil
       else
         (sem.n :: testSizes(name, sem.n).maxOption.toList).map(n =>
-          s"  ok &= run_captured<${baseline.types.mkString(", ")}>(\"${baseline.label}/n$n/captured\", $n);"
+          s"  ok &= run_captured<$baselineTypes>(\"${baseline.label}/n$n/captured\", $n);"
         )
     val exactCalls =
       if (resultBoundedAlgorithms(name))
@@ -414,20 +415,42 @@ private[spectra] object SpectraTestCodeGen {
       cppType: String
   )
 
-  private val surfaceValues = List(
-    SurfaceValue("4", "Int", "0", "integer(c_int32_t)", "0_c_int32_t", "std::int32_t"),
-    SurfaceValue("8", "Long", "0L", "integer(c_int64_t)", "0_c_int64_t", "std::int64_t"),
+  private val surfaceValues = Vector(
     SurfaceValue(
-      "12",
-      "SpectraSurfaceValue12",
-      "SpectraSurfaceValue12(0, 0, 0)",
-      "type(spectra_surface_value12)",
-      "spectra_surface_value12(0, 0, 0)",
-      "SpectraSurfaceValue12"
+      suffix = "4",
+      scalaType = "Int",
+      scalaZero = "0",
+      fortranType = "integer(c_int32_t)",
+      fortranZero = "0_c_int32_t",
+      cppType = "std::int32_t"
+    ),
+    SurfaceValue(
+      suffix = "8",
+      scalaType = "Long",
+      scalaZero = "0L",
+      fortranType = "integer(c_int64_t)",
+      fortranZero = "0_c_int64_t",
+      cppType = "std::int64_t"
+    ),
+    SurfaceValue(
+      suffix = "12",
+      scalaType = "SpectraSurfaceValue12",
+      scalaZero = "SpectraSurfaceValue12(0, 0, 0)",
+      fortranType = "type(spectra_surface_value12)",
+      fortranZero = "spectra_surface_value12(0, 0, 0)",
+      cppType = "SpectraSurfaceValue12"
     )
   )
-  private val surfaceBool = SurfaceValue("bool", "Boolean", "false", "logical(c_bool)", ".false.", "bool")
-  private val surfaceUnit = SurfaceValue("unit", "Unit", "()", "", "", "void")
+  private val surfaceBool = SurfaceValue(
+    suffix = "bool",
+    scalaType = "Boolean",
+    scalaZero = "false",
+    fortranType = "logical(c_bool)",
+    fortranZero = ".false.",
+    cppType = "bool"
+  )
+  private val surfaceUnit =
+    SurfaceValue(suffix = "unit", scalaType = "Unit", scalaZero = "()", fortranType = "", fortranZero = "", cppType = "void")
 
   private def surfaceMapping(decl: p.FunctionDecl): Map[String, SurfaceValue] = {
     val base = Math.floorMod(decl.name.last.hashCode, surfaceValues.size)
@@ -530,7 +553,7 @@ private[spectra] object SpectraTestCodeGen {
     case p.Type.Ptr(comp, _)  => s"values${surfaceValue(comp, mapping).suffix}"
     case variable: p.Type.Var => s"value${surfaceValue(variable, mapping).suffix}"
     case p.Type.IntS32        => "n"
-    case _: p.Type.Exec       => s"spectra_surface_${decl.name.last}_${arg.named.symbol}"
+    case p.Type.Exec(_, _, _) => s"spectra_surface_${decl.name.last}_${arg.named.symbol}"
     case other                => surfaceValue(other, mapping).fortranZero
   }
 
@@ -545,8 +568,9 @@ private[spectra] object SpectraTestCodeGen {
       case p.Type.IntS32 => s"integer_result = polyregion_${decl.name.last}" -> logicalArgs
       case other         => sys.error(s"unsupported Spectra Fortran surface result: $other")
     }
+    val lastArgIndex = args.size - 1
     val formattedArgs = args.zipWithIndex.map { case (value, argIndex) =>
-      if (argIndex == args.size - 1) s"    $value)" else s"    $value, &"
+      if (argIndex == lastArgIndex) s"    $value)" else s"    $value, &"
     }
     val profile = surfaceProfile(decl, mapping)
     val comment = Option.when(profile.nonEmpty)(s"  ! ${decl.name.last}: $profile\n").getOrElse("")
@@ -1666,6 +1690,7 @@ private[spectra] object SpectraTestCodeGen {
     )
   )
 
+  @SuppressWarnings(Array("bonsai:invariant-in-loop"))
   def textOutputs(root: Path): List[(Path, String)] = {
     val expected = declarations.map(_.name.last).toSet
     val missing  = expected -- oracles.keySet
@@ -1678,7 +1703,7 @@ private[spectra] object SpectraTestCodeGen {
     )
     declarations.foreach { decl =>
       val name = decl.name.last
-      val expectedFunctors = decl.args.collect { case p.Arg(p.Named(symbol, _: p.Type.Exec, _), _, _) =>
+      val expectedFunctors = decl.args.collect { case p.Arg(p.Named(symbol, p.Type.Exec(_, _, _), _), _, _) =>
         symbol
       }.toSet
       val actualFunctors = oracles(name).functors.keySet

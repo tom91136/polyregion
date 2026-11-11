@@ -29,6 +29,7 @@ inline std::string_view groupKindName(const GroupKind kind) {
 namespace detail {
 
 inline bool in(std::string_view value, std::initializer_list<std::string_view> set) {
+  // NOLINTNEXTLINE(readability-use-anyofallof)
   for (const auto &x : set)
     if (x == value) return true;
   return false;

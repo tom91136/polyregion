@@ -1,5 +1,11 @@
 #include "llvm_nvptx.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/Instructions.h"
@@ -18,7 +24,7 @@ namespace {
 // during AST codegen the module still carries LLVM's default layout (i64 ABI align 4); the NVPTX layout
 // with i64:64 binds only after codegen. sizing words off the default under-counts an i64-padded aggregate,
 // leaving its tail words unshuffled, so resolve the target layout while the module's is still default
-uint64_t nvptxShuffleWords(CodeGen &cg, llvm::Type *valTy) {
+uint64_t nvptxShuffleWords(const CodeGen &cg, llvm::Type *valTy) {
   const auto &moduleDL = cg.M.getDataLayout();
   const llvm::DataLayout dl = moduleDL.isDefault() ? cg.C.options.targetInfo().resolveDataLayout() : moduleDL;
   return (dl.getTypeAllocSize(valTy) + 3) / 4;
@@ -69,7 +75,7 @@ ValPtr NVPTXTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &ex
   };
 
   auto barrier0 = [&] {
-    const auto callee = llvm::Intrinsic::getOrInsertDeclaration(&cg.M, llvm::Intrinsic::nvvm_barrier_cta_sync_aligned_all, {});
+    auto *const callee = llvm::Intrinsic::getOrInsertDeclaration(&cg.M, llvm::Intrinsic::nvvm_barrier_cta_sync_aligned_all, {});
     return cg.B.CreateCall(callee, cg.mkTermVal(Term::IntU32Const(0)));
   };
 
@@ -92,7 +98,7 @@ ValPtr NVPTXTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &ex
   };
   auto effectiveMask = [&](const Term::Any &mask, llvm::Value *active) -> llvm::Value * {
     auto *requested = cg.B.CreateIntCast(cg.mkTermVal(mask), cg.C.i32Ty(), false);
-    auto *isAll = cg.B.CreateICmpEQ(requested, llvm::ConstantInt::get(cg.C.i32Ty(), 0xFFFFFFFFu));
+    auto *isAll = cg.B.CreateICmpEQ(requested, llvm::ConstantInt::get(cg.C.i32Ty(), 0xFFFFFFFFU));
     // Literal masks cannot make inactive lanes valid sources; the all-lanes sentinel means every lane
     // active at this convergent operation, including a partial warp.
     return cg.B.CreateSelect(isAll, active, cg.B.CreateAnd(requested, active));
@@ -104,9 +110,9 @@ ValPtr NVPTXTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &ex
   auto shuffle = [&](char kind, llvm::Intrinsic::ID id, const Term::Any &value, const Term::Any &delta, const Term::Any &width,
                      const Term::Any &mask, const Type::Any &rtn) -> ValPtr {
     auto &B = cg.B;
-    auto valTy = cg.resolveType(rtn);
+    auto *valTy = cg.resolveType(rtn);
     const auto words = nvptxShuffleWords(cg, valTy);
-    auto srcVal = cg.mkTermVal(value);
+    auto *srcVal = cg.mkTermVal(value);
     auto *i32Ty = cg.C.i32Ty();
     auto *lane = cg.intr0(llvm::Intrinsic::nvvm_read_ptx_sreg_laneid);
     auto *a = B.CreateIntCast(cg.mkTermVal(delta), i32Ty, false);
@@ -158,7 +164,7 @@ ValPtr NVPTXTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &ex
       if (id == llvm::Intrinsic::nvvm_shfl_sync_bfly_i32) return llvm::Intrinsic::nvvm_shfl_bfly_i32;
       return llvm::Intrinsic::nvvm_shfl_idx_i32;
     }();
-    auto shfl = llvm::Intrinsic::getOrInsertDeclaration(&cg.M, legacySubgroup ? legacyId : id, {});
+    auto *shfl = llvm::Intrinsic::getOrInsertDeclaration(&cg.M, legacySubgroup ? legacyId : id, {});
     // the shuffle yields a value of the declared element type; a pointer arg (an aggregate passed by
     // address) still returns the shuffled value, not dstPtr - the caller stores the result into a
     // value-typed slot, so returning the pointer would write the pointer bits over the aggregate
@@ -298,12 +304,19 @@ ValPtr NVPTXTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &ex
               [&](const AtomicOp::Or &) -> llvm::Value * { return B.CreateOr(a, b); },
               [&](const AtomicOp::Xor &) -> llvm::Value * { return B.CreateXor(a, b); },
               [&](const AtomicOp::Min &) -> llvm::Value * {
-                auto *less = numeric.isFloat ? B.CreateFCmpOLT(a, b) : (numeric.isSigned ? B.CreateICmpSLT(a, b) : B.CreateICmpULT(a, b));
+                auto *less = [&]() -> llvm::Value * {
+                  if (numeric.isFloat) return B.CreateFCmpOLT(a, b);
+                  if (numeric.isSigned) return B.CreateICmpSLT(a, b);
+                  return B.CreateICmpULT(a, b);
+                }();
                 return B.CreateSelect(less, a, b);
               },
               [&](const AtomicOp::Max &) -> llvm::Value * {
-                auto *greater =
-                    numeric.isFloat ? B.CreateFCmpOGT(a, b) : (numeric.isSigned ? B.CreateICmpSGT(a, b) : B.CreateICmpUGT(a, b));
+                auto *greater = [&]() -> llvm::Value * {
+                  if (numeric.isFloat) return B.CreateFCmpOGT(a, b);
+                  if (numeric.isSigned) return B.CreateICmpSGT(a, b);
+                  return B.CreateICmpUGT(a, b);
+                }();
                 return B.CreateSelect(greater, a, b);
               });
         };
@@ -353,7 +366,7 @@ ValPtr NVPTXTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &ex
         auto *published = llvm::BasicBlock::Create(ctx, "group_reduce_published", fn);
         B.CreateCondBr(B.CreateICmpEQ(lane, ci32(0)), publish, published);
         B.SetInsertPoint(publish);
-        (void)cg.C.store(B, value, B.CreateGEP(scratchTy, scratch, {ci32(0), warp}));
+        B.CreateStore(value, B.CreateGEP(scratchTy, scratch, {ci32(0), warp}));
         B.CreateBr(published);
         B.SetInsertPoint(published);
         barrier0();
@@ -364,26 +377,26 @@ ValPtr NVPTXTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &ex
         auto *complete = llvm::BasicBlock::Create(ctx, "group_reduce_complete", fn);
         B.CreateCondBr(B.CreateICmpEQ(thread, ci32(0)), leader, complete);
         B.SetInsertPoint(leader);
-        (void)cg.C.store(B, cg.C.load(B, B.CreateGEP(scratchTy, scratch, {ci32(0), ci32(0)}), valTy), acc);
-        (void)cg.C.store(B, ci32(1), index);
+        B.CreateStore(B.CreateLoad(valTy, B.CreateGEP(scratchTy, scratch, {ci32(0), ci32(0)})), acc);
+        B.CreateStore(ci32(1), index);
         auto *test = llvm::BasicBlock::Create(ctx, "group_reduce_test", fn);
         auto *body = llvm::BasicBlock::Create(ctx, "group_reduce_body", fn);
         auto *exit = llvm::BasicBlock::Create(ctx, "group_reduce_exit", fn);
         B.CreateBr(test);
         B.SetInsertPoint(test);
-        auto *current = cg.C.load(B, index, i32Ty);
+        auto *current = B.CreateLoad(i32Ty, index);
         B.CreateCondBr(B.CreateICmpULT(current, warps), body, exit);
         B.SetInsertPoint(body);
-        auto *partial = cg.C.load(B, B.CreateGEP(scratchTy, scratch, {ci32(0), current}), valTy);
-        (void)cg.C.store(B, combine(cg.C.load(B, acc, valTy), partial), acc);
-        (void)cg.C.store(B, B.CreateAdd(current, ci32(1)), index);
+        auto *partial = B.CreateLoad(valTy, B.CreateGEP(scratchTy, scratch, {ci32(0), current}));
+        B.CreateStore(combine(B.CreateLoad(valTy, acc), partial), acc);
+        B.CreateStore(B.CreateAdd(current, ci32(1)), index);
         B.CreateBr(test);
         B.SetInsertPoint(exit);
-        (void)cg.C.store(B, cg.C.load(B, acc, valTy), B.CreateGEP(scratchTy, scratch, {ci32(0), ci32(0)}));
+        B.CreateStore(B.CreateLoad(valTy, acc), B.CreateGEP(scratchTy, scratch, {ci32(0), ci32(0)}));
         B.CreateBr(complete);
         B.SetInsertPoint(complete);
         barrier0();
-        auto *result = cg.C.load(B, B.CreateGEP(scratchTy, scratch, {ci32(0), ci32(0)}), valTy);
+        auto *result = B.CreateLoad(valTy, B.CreateGEP(scratchTy, scratch, {ci32(0), ci32(0)}));
         barrier0();
         return result;
       },
@@ -422,7 +435,7 @@ void NVPTXTargetSpecificHandler::postProcessModule(CodeGen &cg) {
   llvm::Module &M = cg.M;
   llvm::LLVMContext &ctx = cg.C.actual;
   llvm::GlobalVariable *sharedGlobal = nullptr;
-  auto getSharedGlobal = [&]() {
+  const auto getSharedGlobal = [&] {
     if (sharedGlobal) return sharedGlobal;
     // an `extern __shared__` decl in codegen may already have emitted the dynamic shared global; share it
     if (auto *existing = M.getNamedGlobal(PolycDynSharedGlobal)) return sharedGlobal = existing;
@@ -434,10 +447,11 @@ void NVPTXTargetSpecificHandler::postProcessModule(CodeGen &cg) {
     return sharedGlobal;
   };
 
-  auto kernels = M                                                                                                                    //
-                 | filter([](const auto &fn) { return !fn.isDeclaration() && fn.getCallingConv() == llvm::CallingConv::PTX_Kernel; }) //
-                 | map([](const auto &fn) { return const_cast<llvm::Function *>(&fn); })                                              //
-                 | to_vector();
+  const auto kernels =
+      M                                                                                                                    //
+      | filter([](const auto &fn) { return !fn.isDeclaration() && fn.getCallingConv() == llvm::CallingConv::PTX_Kernel; }) //
+      | map([](const auto &fn) { return const_cast<llvm::Function *>(&fn); })                                              //
+      | to_vector();
 
   // NVPTX kernel entry points must have external (non-local) linkage; internal linkage trips
   // getFunctionParamOptimizedAlign's non-local-linkage assertion at device O0
@@ -446,8 +460,8 @@ void NVPTXTargetSpecificHandler::postProcessModule(CodeGen &cg) {
 
   for (auto *fn : kernels) {
     bool hasSharedParam = false;
-    for (auto &arg : fn->args()) {
-      if (auto *pty = llvm::dyn_cast<llvm::PointerType>(arg.getType()); pty && pty->getAddressSpace() == 3) {
+    for (const auto &arg : fn->args()) {
+      if (const auto *pty = llvm::dyn_cast<llvm::PointerType>(arg.getType()); pty && pty->getAddressSpace() == 3) {
         hasSharedParam = true;
         break;
       }
@@ -459,8 +473,8 @@ void NVPTXTargetSpecificHandler::postProcessModule(CodeGen &cg) {
     std::vector<llvm::Type *> newParamTys;
     std::vector<bool> coerceArg;
     coerceArg.reserve(fn->arg_size());
-    for (auto &arg : fn->args()) {
-      auto *pty = llvm::dyn_cast<llvm::PointerType>(arg.getType());
+    for (const auto &arg : fn->args()) {
+      const auto *pty = llvm::dyn_cast<llvm::PointerType>(arg.getType());
       const bool isShared = pty && pty->getAddressSpace() == 3;
       coerceArg.push_back(isShared);
       newParamTys.push_back(isShared ? defaultPtrTy : arg.getType());
@@ -472,8 +486,8 @@ void NVPTXTargetSpecificHandler::postProcessModule(CodeGen &cg) {
     newFn->takeName(fn);
 
     llvm::ValueToValueMapTy vmap;
-    auto newArgIt = newFn->arg_begin();
-    auto oldArgIt = fn->arg_begin();
+    auto *newArgIt = newFn->arg_begin();
+    auto *oldArgIt = fn->arg_begin();
     for (size_t i = 0; i < coerceArg.size(); ++i, ++oldArgIt, ++newArgIt) {
       if (coerceArg[i]) {
         vmap[&*oldArgIt] = sg;
@@ -491,9 +505,9 @@ void NVPTXTargetSpecificHandler::postProcessModule(CodeGen &cg) {
     // we erase the old function and the verifier rejects the module.
     if (auto *md = M.getNamedMetadata("nvvm.annotations")) {
       for (unsigned i = 0; i < md->getNumOperands(); ++i) {
-        auto *node = md->getOperand(i);
+        const llvm::MDNode *node = md->getOperand(i);
         if (node->getNumOperands() < 1) continue;
-        auto *first = llvm::dyn_cast_or_null<llvm::ValueAsMetadata>(node->getOperand(0).get());
+        const auto *first = llvm::dyn_cast_or_null<llvm::ValueAsMetadata>(node->getOperand(0).get());
         if (first && first->getValue() == fn) {
           std::vector<llvm::Metadata *> newOps;
           newOps.reserve(node->getNumOperands());

@@ -20,7 +20,7 @@ class StringInterner {
 
 public:
   int32_t id(const std::string &x) {
-    if (auto it = ids_.find(x); it != ids_.end()) return it->second;
+    if (const auto it = ids_.find(x); it != ids_.end()) return it->second;
     if (entries_.size() > static_cast<size_t>(std::numeric_limits<int32_t>::max())) throw std::runtime_error("String table too large");
     auto next = static_cast<int32_t>(entries_.size());
     entries_.push_back(x);
@@ -168,7 +168,7 @@ class MsgpackReader {
 
   uint16_t u16() {
     require(2);
-    uint16_t x = (static_cast<uint16_t>(cursor_[0]) << 8) | static_cast<uint16_t>(cursor_[1]);
+    const uint16_t x = (static_cast<uint16_t>(cursor_[0]) << 8) | static_cast<uint16_t>(cursor_[1]);
     cursor_ += 2;
     return x;
   }
@@ -177,8 +177,8 @@ class MsgpackReader {
 
   uint32_t u32() {
     require(4);
-    uint32_t x = (static_cast<uint32_t>(cursor_[0]) << 24) | (static_cast<uint32_t>(cursor_[1]) << 16)
-                 | (static_cast<uint32_t>(cursor_[2]) << 8) | static_cast<uint32_t>(cursor_[3]);
+    const uint32_t x = (static_cast<uint32_t>(cursor_[0]) << 24) | (static_cast<uint32_t>(cursor_[1]) << 16)
+                       | (static_cast<uint32_t>(cursor_[2]) << 8) | static_cast<uint32_t>(cursor_[3]);
     cursor_ += 4;
     return x;
   }
@@ -187,10 +187,10 @@ class MsgpackReader {
 
   uint64_t u64() {
     require(8);
-    uint64_t x = (static_cast<uint64_t>(cursor_[0]) << 56) | (static_cast<uint64_t>(cursor_[1]) << 48)
-                 | (static_cast<uint64_t>(cursor_[2]) << 40) | (static_cast<uint64_t>(cursor_[3]) << 32)
-                 | (static_cast<uint64_t>(cursor_[4]) << 24) | (static_cast<uint64_t>(cursor_[5]) << 16)
-                 | (static_cast<uint64_t>(cursor_[6]) << 8) | static_cast<uint64_t>(cursor_[7]);
+    const uint64_t x = (static_cast<uint64_t>(cursor_[0]) << 56) | (static_cast<uint64_t>(cursor_[1]) << 48)
+                       | (static_cast<uint64_t>(cursor_[2]) << 40) | (static_cast<uint64_t>(cursor_[3]) << 32)
+                       | (static_cast<uint64_t>(cursor_[4]) << 24) | (static_cast<uint64_t>(cursor_[5]) << 16)
+                       | (static_cast<uint64_t>(cursor_[6]) << 8) | static_cast<uint64_t>(cursor_[7]);
     cursor_ += 8;
     return x;
   }

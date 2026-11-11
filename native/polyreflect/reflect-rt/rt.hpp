@@ -8,11 +8,14 @@
   #include <cstddef>
   #include <new>
 
+// NOLINTNEXTLINE(readability-redundant-declaration)
 void *polyrt_record_operator_new(std::size_t);
 extern "C" void *polyrt_record_operator_new_nothrow(std::size_t, const void *);
 extern "C" void *polyrt_record_operator_new_aligned(std::size_t, std::size_t);
 extern "C" void *polyrt_record_operator_new_aligned_nothrow(std::size_t, std::size_t, const void *);
+// NOLINTNEXTLINE(readability-redundant-declaration)
 extern "C" void polyrt_record_operator_delete(void *);
+// NOLINTNEXTLINE(readability-redundant-declaration)
 extern "C" void polyrt_record_operator_delete_sized(void *, std::size_t);
 extern "C" void polyrt_record_operator_delete_nothrow(void *, const void *);
 extern "C" void polyrt_record_operator_delete_aligned(void *, std::size_t);

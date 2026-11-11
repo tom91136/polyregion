@@ -1,9 +1,16 @@
 #include "lld_lite.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <deque>
 #include <fstream>
+#include <ios>
 #include <mutex>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "lld/Common/CommonLinkerContext.h"
 #include "lld/Common/Driver.h"
@@ -25,14 +32,14 @@ bool link(ArrayRef<const char *> args, llvm::raw_ostream &stdoutOS, llvm::raw_os
 std::pair<std::optional<std::string>, std::optional<std::string>>
 polyregion::backend::lld_lite::linkElf(const std::vector<std::string> &args, const std::vector<llvm::MemoryBufferRef> &files) {
   static std::mutex linkMutex;
-  const std::lock_guard lock(linkMutex);
+  const std::scoped_lock lock(linkMutex);
 
   // XXX deque for stable c_str() across push_back; LLD holds the pointers below.
   std::deque<std::string> inMemoryFiles;
 
   std::vector<const char *> allArgs{""};
   allArgs ^= concat(args | map([](const auto &a) { return a.c_str(); }));
-  for (auto f : files) {
+  for (const auto f : files) {
     if (auto path = memoryfs::open(f.getBufferIdentifier().str()); path) {
       inMemoryFiles.push_back(*path);
       allArgs.push_back(inMemoryFiles.back().c_str());
@@ -64,7 +71,7 @@ polyregion::backend::lld_lite::linkElf(const std::vector<std::string> &args, con
   lld::CommonLinkerContext::destroy();
 
   auto outputBuffer = llvm::MemoryBuffer::getFile(*output);
-  if (auto code = outputBuffer.getError()) throw std::logic_error(code.message());
+  if (const auto code = outputBuffer.getError()) throw std::logic_error(code.message());
 
   for (const auto &f : inMemoryFiles)
     memoryfs::close(f);

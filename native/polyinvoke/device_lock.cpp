@@ -6,6 +6,8 @@
 
 #include "polyinvoke/device_lock.h"
 
+#include <cerrno>
+#include <memory>
 #include <stdexcept>
 #include <string>
 
@@ -31,7 +33,7 @@ std::string lockPath(const PhysicalDevice &device) {
   llvm::SmallString<256> dir;
   llvm::sys::path::system_temp_directory(/*ErasedOnReboot=*/true, dir);
   if (dir.empty()) {
-    if (auto ec = llvm::sys::fs::current_path(dir)) dir = ".";
+    if (const auto ec = llvm::sys::fs::current_path(dir)) dir = ".";
   }
   llvm::sys::path::append(dir, "polyinvoke-" + device.str() + ".lock");
   return dir.str().str();
@@ -81,16 +83,16 @@ struct DeviceLock::Impl {
 DeviceLock::DeviceLock(const PhysicalDevice &device) : impl_(std::make_unique<Impl>()) {
   if (!device.needsLock()) return;
   impl_->path = lockPath(device);
-  int fd = ::open(impl_->path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+  const int fd = ::open(impl_->path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0644);
   if (fd < 0) {
     throw std::runtime_error("DeviceLock: cannot open lock file " + impl_->path + " (errno=" + std::to_string(errno) + ")");
   }
   if (::flock(fd, LOCK_EX) != 0) {
-    int err = errno;
+    const int err = errno;
     ::close(fd);
     throw std::runtime_error("DeviceLock: flock failed on " + impl_->path + " (errno=" + std::to_string(err) + ")");
   }
-  if (int hi = ::fcntl(fd, F_DUPFD_CLOEXEC, 900); hi >= 0) {
+  if (const int hi = ::fcntl(fd, F_DUPFD_CLOEXEC, 900); hi >= 0) {
     ::close(fd);
     impl_->fd = hi;
   } else impl_->fd = fd;

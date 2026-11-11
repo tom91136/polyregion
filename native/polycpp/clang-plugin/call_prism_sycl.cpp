@@ -1,9 +1,22 @@
+#include <algorithm>
 #include <cctype>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <iterator>
+#include <memory>
+#include <optional>
+#include <string>
 #include <string_view>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/Stmt.h"
+
+#include "aspartame/ext/llvm.hpp"
 
 #include "polyregion/types.h"
 
@@ -42,13 +55,9 @@ constexpr std::string_view LegacySycl = "cl::sycl::";
 }
 
 [[nodiscard]] bool containsReturn(const clang::Stmt &statement) {
-  for (const auto *child : statement.children()) {
-    if (!child) continue;
-    if (llvm::isa<clang::ReturnStmt>(child)) return true;
-    if (llvm::isa<clang::LambdaExpr>(child)) continue;
-    if (containsReturn(*child)) return true;
-  }
-  return false;
+  return statement.children() ^ exists([](const clang::Stmt *child) {
+           return child && (llvm::isa<clang::ReturnStmt>(child) || (!llvm::isa<clang::LambdaExpr>(child) && containsReturn(*child)));
+         });
 }
 
 [[nodiscard]] bool usmAllocate(const std::string_view name) { return syclNameIs(name, "sycl::malloc_device"); }
@@ -86,9 +95,9 @@ constexpr std::string_view LegacySycl = "cl::sycl::";
   const auto *enumType = expression.getType()->getAs<clang::EnumType>();
   const auto *enumeration = enumType ? enumType->getDecl() : nullptr;
   if (!integer || !enumeration || !syclNameIs(enumeration->getQualifiedNameAsString(), "sycl::usm::alloc")) return false;
-  for (const auto *enumerator : enumeration->enumerators())
-    if (enumerator->getName() == "device" && enumerator->getInitVal().getZExtValue() == integer->getValue().getZExtValue()) return true;
-  return false;
+  return enumeration->enumerators() ^ exists([&](const clang::EnumConstantDecl *enumerator) {
+           return enumerator->getName() == "device" && enumerator->getInitVal().getZExtValue() == integer->getValue().getZExtValue();
+         });
 }
 
 [[nodiscard]] size_t semanticArgumentCount(const clang::CallExpr &call) {
@@ -108,7 +117,7 @@ enum class GroupKind { Unknown, Workgroup, Subgroup };
   return GroupKind::Unknown;
 }
 
-void requireEffectFreeGroupArgument(const clang::Expr &expression, clang::ASTContext &context) {
+void requireEffectFreeGroupArgument(const clang::Expr &expression, const clang::ASTContext &context) {
   if (const auto *member = llvm::dyn_cast<clang::CXXMemberCallExpr>(expression.IgnoreParenImpCasts())) {
     const auto *method = member->getMethodDecl();
     if (method && (method->getName() == "get_group" || method->getName() == "get_sub_group")
@@ -146,12 +155,12 @@ enum class PointerProvenance { Unknown, Local, Remote };
 
 [[nodiscard]] bool packageExport(const clang::FunctionDecl &function) {
   const auto annotated = [](const clang::FunctionDecl &candidate) {
-    for (const auto *attribute : candidate.attrs())
-      if (const auto *annotation = llvm::dyn_cast<clang::AnnotateAttr>(attribute)) {
-        const auto value = annotation->getAnnotation();
-        if (value.starts_with("polyregion_export:") || value.starts_with("polyregion_export_template:")) return true;
-      }
-    return false;
+    return candidate.attrs() ^ exists([](const clang::Attr *attribute) {
+             const auto *annotation = llvm::dyn_cast<clang::AnnotateAttr>(attribute);
+             if (!annotation) return false;
+             const auto value = annotation->getAnnotation();
+             return value.starts_with("polyregion_export:") || value.starts_with("polyregion_export_template:");
+           });
   };
   if (annotated(function)) return true;
   const auto *primary = function.getPrimaryTemplate();
@@ -190,13 +199,11 @@ enum class PointerProvenance { Unknown, Local, Remote };
             parameterType = prototype->getParamType(i);
         }
         if (!parameterType.isNull())
-          if (const auto reference = parameterType->getAs<clang::ReferenceType>();
+          if (const auto *const reference = parameterType->getAs<clang::ReferenceType>();
               reference && !reference->getPointeeType().isConstQualified())
             return true;
       }
-  for (const auto *child : statement.children())
-    if (child && mayReassign(*child, variable)) return true;
-  return false;
+  return statement.children() ^ exists([&](const clang::Stmt *child) { return child && mayReassign(*child, variable); });
 }
 
 [[nodiscard]] PointerProvenance pointerProvenance(const clang::Expr *expression, Set<const clang::Decl *> seen = {}) {
@@ -344,20 +351,20 @@ static Opt<MatchedCall> syclUsm(const clang::CallExpr &call, const clang::Functi
   const auto untypedGeneric = generic && call.getType()->isPointerType() && call.getType()->getPointeeType()->isVoidType();
   if (generic && untypedGeneric != (semanticArguments == 4)) raise("Unsupported generic SYCL allocation overload");
   const auto *expression = &call;
-  return MatchedCall{Lowering{[expression, allocate, generic, untypedGeneric, oneDplDeviceAllocate, temporary,
-                               semanticArguments](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+  return MatchedCall{.lower = Lowering{[expression, allocate, generic, untypedGeneric, oneDplDeviceAllocate, temporary,
+                                        semanticArguments](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
                        Vector<Term::Any> arguments;
                        arguments.reserve(semanticArguments);
                        for (size_t i = 0; i < semanticArguments; ++i)
                          arguments.emplace_back(r.newVar(self.handleExpr(expression->getArg(i), r)));
                        if (!allocate) {
                          const auto rawPointer = Type::Ptr(Type::IntU8(), TypeSpace::Global()).widen();
-                         const auto pointer = r.newVar(self.conform(r, Expr::Alias(arguments[0]), rawPointer));
+                         const auto pointer = r.newVar(Remapper::conform(r, Expr::Alias(arguments[0]), rawPointer));
                          return Expr::SpecOp(Spec::RemoteFree(packageContext(), pointer));
                        }
                        const auto u64 = Type::IntU64();
-                       const auto countArgument = oneDplDeviceAllocate ? 1u : 0u;
-                       auto bytes = r.newVar(self.conform(r, Expr::Alias(arguments[countArgument]), u64));
+                       const auto countArgument = oneDplDeviceAllocate ? 1U : 0U;
+                       auto bytes = r.newVar(Remapper::conform(r, Expr::Alias(arguments[countArgument]), u64));
                        const auto result = expression->getType().getCanonicalType();
                        const auto pointee = result->isPointerType() ? result->getPointeeType() : clang::QualType{};
                        if ((!generic || !untypedGeneric) && !pointee.isNull() && !pointee->isVoidType()) {
@@ -369,7 +376,7 @@ static Opt<MatchedCall> syclUsm(const clang::CallExpr &call, const clang::Functi
                        const auto allocation = r.newVar(Expr::SpecOp(operation));
                        return Expr::Cast(allocation, self.handleType(expression->getType(), r));
                      }},
-                     false};
+                     .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> syclCollective(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
@@ -378,37 +385,40 @@ static Opt<MatchedCall> syclCollective(const clang::CallExpr &call, const clang:
   const bool inclusive = syclNameIs(name, "sycl::inclusive_scan_over_group");
   const bool exclusive = syclNameIs(name, "sycl::exclusive_scan_over_group");
   if ((!reduce && !inclusive && !exclusive) || (call.getNumArgs() != 3 && call.getNumArgs() != 4)) return {};
-  const auto operationIndex = inclusive && call.getNumArgs() == 4 ? 2u : call.getNumArgs() - 1;
+  const auto operationIndex = inclusive && call.getNumArgs() == 4 ? 2U : call.getNumArgs() - 1;
   const auto operation = collectiveOperation(*call.getArg(operationIndex));
   const auto group = groupKind(*call.getArg(0));
   const auto *expression = &call;
   return MatchedCall{
-      Lowering{[expression, reduce, inclusive, exclusive, operation, group](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
-        if (!operation) raise("Unsupported SYCL group collective operation");
-        if (exclusive && !operation->is<AtomicOp::Add>()) raise("SYCL exclusive group scans currently support only addition");
-        requireEffectFreeGroupArgument(*expression->getArg(0), self.context);
-        Vector<Term::Any> arguments{Term::Unit0Const()};
-        arguments.reserve(expression->getNumArgs());
-        for (unsigned i = 1; i < expression->getNumArgs(); ++i)
-          arguments.emplace_back(r.newVar(self.handleExpr(expression->getArg(i), r)));
-        if (group != GroupKind::Workgroup) raise("SYCL group collective requires a work-group");
-        const auto result = self.handleType(expression->getType(), r);
-        const auto rawValue = arguments[1];
-        const auto value = expression->getNumArgs() == 4 ? r.newVar(self.conform(r, Expr::Alias(rawValue), result)) : rawValue;
-        const auto collective = r.newVar(Expr::SpecOp(reduce      ? Spec::Any(Spec::GpuGroupReduce(*operation, value, result))
-                                                      : inclusive ? Spec::Any(Spec::GpuGroupInclusiveScan(*operation, value, result))
-                                                                  : Spec::Any(Spec::GpuGroupExclusiveScan(*operation, value, result))));
-        if (expression->getNumArgs() == 3) return Expr::Alias(collective);
-        const auto initialIndex = inclusive ? 3u : 2u;
-        const auto initial = r.newVar(self.conform(r, Expr::Alias(arguments[initialIndex]), result));
-        if (operation->is<AtomicOp::Add>()) return Expr::IntrOp(Intr::Add(initial, collective, result));
-        if (operation->is<AtomicOp::Min>()) return Expr::IntrOp(Intr::Min(initial, collective, result));
-        if (operation->is<AtomicOp::Max>()) return Expr::IntrOp(Intr::Max(initial, collective, result));
-        if (operation->is<AtomicOp::Or>()) return Expr::IntrOp(Intr::BOr(initial, collective, result));
-        if (operation->is<AtomicOp::And>()) return Expr::IntrOp(Intr::BAnd(initial, collective, result));
-        return Expr::IntrOp(Intr::BXor(initial, collective, result));
-      }},
-      false};
+      .lower =
+          Lowering{[expression, reduce, inclusive, exclusive, operation, group](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+            if (!operation) raise("Unsupported SYCL group collective operation");
+            if (exclusive && !operation->is<AtomicOp::Add>()) raise("SYCL exclusive group scans currently support only addition");
+            requireEffectFreeGroupArgument(*expression->getArg(0), self.context);
+            Vector<Term::Any> arguments{Term::Unit0Const()};
+            arguments.reserve(expression->getNumArgs());
+            for (unsigned i = 1; i < expression->getNumArgs(); ++i)
+              arguments.emplace_back(r.newVar(self.handleExpr(expression->getArg(i), r)));
+            if (group != GroupKind::Workgroup) raise("SYCL group collective requires a work-group");
+            const auto result = self.handleType(expression->getType(), r);
+            const auto rawValue = arguments[1];
+            const auto value = expression->getNumArgs() == 4 ? r.newVar(Remapper::conform(r, Expr::Alias(rawValue), result)) : rawValue;
+            const auto collective = r.newVar(Expr::SpecOp([&]() -> Spec::Any {
+              if (reduce) return Spec::Any(Spec::GpuGroupReduce(*operation, value, result));
+              if (inclusive) return Spec::Any(Spec::GpuGroupInclusiveScan(*operation, value, result));
+              return Spec::Any(Spec::GpuGroupExclusiveScan(*operation, value, result));
+            }()));
+            if (expression->getNumArgs() == 3) return Expr::Alias(collective);
+            const auto initialIndex = inclusive ? 3U : 2U;
+            const auto initial = r.newVar(Remapper::conform(r, Expr::Alias(arguments[initialIndex]), result));
+            if (operation->is<AtomicOp::Add>()) return Expr::IntrOp(Intr::Add(initial, collective, result));
+            if (operation->is<AtomicOp::Min>()) return Expr::IntrOp(Intr::Min(initial, collective, result));
+            if (operation->is<AtomicOp::Max>()) return Expr::IntrOp(Intr::Max(initial, collective, result));
+            if (operation->is<AtomicOp::Or>()) return Expr::IntrOp(Intr::BOr(initial, collective, result));
+            if (operation->is<AtomicOp::And>()) return Expr::IntrOp(Intr::BAnd(initial, collective, result));
+            return Expr::IntrOp(Intr::BXor(initial, collective, result));
+          }},
+      .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> syclVote(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
@@ -419,27 +429,27 @@ static Opt<MatchedCall> syclVote(const clang::CallExpr &call, const clang::Funct
   if ((!any && !all && !none) || (call.getNumArgs() != 2 && call.getNumArgs() != 3)) return {};
   const auto group = groupKind(*call.getArg(0));
   const auto *expression = &call;
-  return MatchedCall{Lowering{[expression, all, none, group](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+  return MatchedCall{.lower = Lowering{[expression, all, none, group](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
                        requireEffectFreeGroupArgument(*expression->getArg(0), self.context);
                        if (expression->getNumArgs() == 3) raise("SYCL predicate group-vote overload is not supported");
                        auto predicate = r.newVar(self.handleExpr(expression->getArg(1), r));
                        if (const auto pointer = predicate.tpe().get<Type::Ptr>())
                          predicate = r.newVar(Expr::Index(predicate, Term::IntU64Const(0), pointer->comp));
                        if (group == GroupKind::Subgroup) {
-                         const auto mask = Term::IntU32Const(0xFFFFFFFFu);
+                         const auto mask = Term::IntU32Const(0xFFFFFFFFU);
                          const auto voted = r.newVar(Expr::SpecOp(all ? Spec::Any(Spec::GpuVoteAll(mask, predicate))
                                                                       : Spec::Any(Spec::GpuVoteAny(mask, predicate))));
                          if (!none) return Expr::Alias(voted);
                          return Expr::IntrOp(Intr::LogicEq(voted, Term::Bool1Const(false)));
                        }
                        if (group != GroupKind::Workgroup) raise("SYCL group vote requires a supported group kind");
-                       predicate = r.newVar(self.conform(r, Expr::Alias(predicate), Type::Bool1()));
+                       predicate = r.newVar(Remapper::conform(r, Expr::Alias(predicate), Type::Bool1()));
                        const auto operation = all ? AtomicOp::Any(AtomicOp::And()) : AtomicOp::Any(AtomicOp::Or());
                        const auto reduced = r.newVar(Expr::SpecOp(Spec::GpuGroupReduce(operation, predicate, predicate.tpe())));
                        if (!none) return Expr::Alias(reduced);
                        return Expr::IntrOp(Intr::LogicEq(reduced, Term::Bool1Const(false)));
                      }},
-                     false};
+                     .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> syclGroupOperation(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
@@ -452,7 +462,7 @@ static Opt<MatchedCall> syclGroupOperation(const clang::CallExpr &call, const cl
   const bool defaultFenceScope = call.getNumArgs() < 2 || llvm::isa<clang::CXXDefaultArgExpr>(call.getArg(1));
   const auto *expression = &call;
   return MatchedCall{
-      Lowering{[expression, barrier, shift, group, defaultFenceScope](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+      .lower = Lowering{[expression, barrier, shift, group, defaultFenceScope](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
         requireEffectFreeGroupArgument(*expression->getArg(0), self.context);
         Vector<Term::Any> arguments{Term::Unit0Const()};
         arguments.reserve(expression->getNumArgs());
@@ -463,7 +473,7 @@ static Opt<MatchedCall> syclGroupOperation(const clang::CallExpr &call, const cl
           if (group == GroupKind::Workgroup) return Expr::SpecOp(Spec::GpuBarrierAll());
           if (group == GroupKind::Subgroup) {
             r.push(Stmt::Var(r.newName(Type::Unit0()), Expr::SpecOp(Spec::GpuFenceAll()), false));
-            r.push(Stmt::Var(r.newName(Type::Unit0()), Expr::SpecOp(Spec::GpuSubgroupBarrier(Term::IntU32Const(0xFFFFFFFFu))), false));
+            r.push(Stmt::Var(r.newName(Type::Unit0()), Expr::SpecOp(Spec::GpuSubgroupBarrier(Term::IntU32Const(0xFFFFFFFFU))), false));
             return Expr::SpecOp(Spec::GpuFenceAll());
           }
           raise("SYCL group_barrier requires a supported group kind");
@@ -474,16 +484,16 @@ static Opt<MatchedCall> syclGroupOperation(const clang::CallExpr &call, const cl
         if (arguments.size() == 3 && !expression->getArg(2)->getType()->isIntegralOrEnumerationType())
           raise("SYCL shift/broadcast currently requires an integral lane or delta");
         const auto result = self.handleType(expression->getType(), r);
-        const auto value = r.newVar(self.conform(r, Expr::Alias(arguments[1]), result));
-        const auto lane = arguments.size() == 3 ? r.newVar(self.conform(r, Expr::Alias(arguments[2]), Type::IntU32()))
+        const auto value = r.newVar(Remapper::conform(r, Expr::Alias(arguments[1]), result));
+        const auto lane = arguments.size() == 3 ? r.newVar(Remapper::conform(r, Expr::Alias(arguments[2]), Type::IntU32()))
                                                 : Term::Any(Term::IntU32Const(shift ? 1 : 0));
         const auto subgroupSize = r.newVar(Expr::SpecOp(Spec::GpuSubgroupSize()));
         const auto width = r.newVar(Expr::IntrOp(Intr::Sub(subgroupSize, Term::IntU32Const(1), Type::IntU32())));
-        const auto mask = Term::IntU32Const(0xFFFFFFFFu);
+        const auto mask = Term::IntU32Const(0xFFFFFFFFU);
         if (shift) return Expr::SpecOp(Spec::GpuShuffleUp(value, lane, width, mask, result));
         return Expr::SpecOp(Spec::GpuShuffleIdx(value, lane, width, mask, result));
       }},
-      false};
+      .preservesExceptionMetadata = false};
 }
 
 static Term::Any linearLocalId(Remapper::RemapContext &r) {
@@ -532,36 +542,37 @@ static Opt<MatchedCall> syclItemAccess(const clang::CallExpr &call, const clang:
   const auto ownerName = owner.str();
   const auto dimensions = dimensionsOf(*method->getParent());
   return MatchedCall{
-      Lowering{[expression, memberName, ownerName, dimensions, structuredGroup](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+      .lower = Lowering{[expression, memberName, ownerName, dimensions, structuredGroup](Remapper &self,
+                                                                                         Remapper::RemapContext &r) -> Expr::Any {
         const auto result = self.handleType(expression->getType(), r);
         if (structuredGroup) {
           (void)r.newVar(self.handleExpr(expression->getImplicitObjectArgument(), r));
           return Expr::Alias(Term::Poison(result));
         }
         const auto dim = [&]() -> Term::Any {
-          return expression->getNumArgs() == 1 ? r.newVar(self.conform(r, self.handleExpr(expression->getArg(0), r), Type::IntU32()))
+          return expression->getNumArgs() == 1 ? r.newVar(Remapper::conform(r, self.handleExpr(expression->getArg(0), r), Type::IntU32()))
                                                : Term::Any(Term::IntU32Const(0));
         };
         if (ownerName == "sub_group") {
           if (memberName == "get_local_linear_id" || memberName == "get_local_id")
-            return self.conform(r, Expr::SpecOp(Spec::GpuLaneIdx()), result);
-          if (memberName == "get_max_local_range") return self.conform(r, Expr::SpecOp(Spec::GpuSubgroupSize()), result);
+            return Remapper::conform(r, Expr::SpecOp(Spec::GpuLaneIdx()), result);
+          if (memberName == "get_max_local_range") return Remapper::conform(r, Expr::SpecOp(Spec::GpuSubgroupSize()), result);
           if (memberName == "get_local_linear_range") {
             const auto lane = r.newVar(Expr::SpecOp(Spec::GpuLaneIdx()));
             const auto base = r.newVar(Expr::IntrOp(Intr::Sub(linearLocalId(r), lane, Type::IntU32())));
             const auto remaining = r.newVar(Expr::IntrOp(Intr::Sub(linearLocalCount(r), base, Type::IntU32())));
             const auto subgroupSize = r.newVar(Expr::SpecOp(Spec::GpuSubgroupSize()));
-            return self.conform(r, Expr::IntrOp(Intr::Min(subgroupSize, remaining, Type::IntU32())), result);
+            return Remapper::conform(r, Expr::IntrOp(Intr::Min(subgroupSize, remaining, Type::IntU32())), result);
           }
           if (memberName == "get_group_linear_id" || memberName == "get_group_id") {
             const auto subgroupSize = r.newVar(Expr::SpecOp(Spec::GpuSubgroupSize()));
-            return self.conform(r, Expr::IntrOp(Intr::Div(linearLocalId(r), subgroupSize, Type::IntU32())), result);
+            return Remapper::conform(r, Expr::IntrOp(Intr::Div(linearLocalId(r), subgroupSize, Type::IntU32())), result);
           }
         }
         if (memberName == "barrier" && ownerName == "nd_item") {
           if (expression->getNumArgs() == 0 || llvm::isa<clang::CXXDefaultArgExpr>(expression->getArg(0)))
             return Expr::SpecOp(Spec::GpuBarrierAll());
-          const auto scope = expression->getArg(0)->IgnoreParenImpCasts();
+          const auto *const scope = expression->getArg(0)->IgnoreParenImpCasts();
           const auto *reference = llvm::dyn_cast<clang::DeclRefExpr>(scope);
           const auto *constant = reference ? llvm::dyn_cast<clang::EnumConstantDecl>(reference->getDecl()) : nullptr;
           if (constant && constant->getName().contains("global_and_local")) return Expr::SpecOp(Spec::GpuBarrierAll());
@@ -573,14 +584,14 @@ static Opt<MatchedCall> syclItemAccess(const clang::CallExpr &call, const clang:
         }
         const auto linear = [&](const auto &indexAt, const auto &sizeAt) -> Expr::Any {
           const auto arithmetic = result.kind().is<TypeKind::Integral>() ? result : Type::IntU64();
-          auto value = r.newVar(self.conform(r, Expr::Alias(indexAt(0)), arithmetic));
+          auto value = r.newVar(Remapper::conform(r, Expr::Alias(indexAt(0)), arithmetic));
           for (unsigned i = 1; i < dimensions; ++i) {
-            const auto size = r.newVar(self.conform(r, Expr::Alias(sizeAt(i)), arithmetic));
-            const auto index = r.newVar(self.conform(r, Expr::Alias(indexAt(i)), arithmetic));
+            const auto size = r.newVar(Remapper::conform(r, Expr::Alias(sizeAt(i)), arithmetic));
+            const auto index = r.newVar(Remapper::conform(r, Expr::Alias(indexAt(i)), arithmetic));
             const auto scaled = r.newVar(Expr::IntrOp(Intr::Mul(value, size, arithmetic)));
             value = r.newVar(Expr::IntrOp(Intr::Add(scaled, index, arithmetic)));
           }
-          return self.conform(r, Expr::Alias(value), result);
+          return Remapper::conform(r, Expr::Alias(value), result);
         };
         const auto globalIndex = [&](const unsigned i) { return r.newVar(Expr::SpecOp(Spec::GpuGlobalIdx(Term::IntU32Const(i)))); };
         const auto localIndex = [&](const unsigned i) { return r.newVar(Expr::SpecOp(Spec::GpuLocalIdx(Term::IntU32Const(i)))); };
@@ -601,10 +612,10 @@ static Opt<MatchedCall> syclItemAccess(const clang::CallExpr &call, const clang:
         if (memberName == "get_local_linear_id") return linear(localIndex, localSize);
         if (memberName == "get_group_linear_id") return linear(groupIndex, groupSize);
         if (memberName == "get_id" || memberName == "get_global_id")
-          return self.conform(r, Expr::SpecOp(Spec::GpuGlobalIdx(dim())), result);
-        if (memberName == "get_local_id") return self.conform(r, Expr::SpecOp(Spec::GpuLocalIdx(dim())), result);
+          return Remapper::conform(r, Expr::SpecOp(Spec::GpuGlobalIdx(dim())), result);
+        if (memberName == "get_local_id") return Remapper::conform(r, Expr::SpecOp(Spec::GpuLocalIdx(dim())), result);
         if (memberName == "get_group" || memberName == "get_group_id")
-          return self.conform(r, Expr::SpecOp(Spec::GpuGroupIdx(dim())), result);
+          return Remapper::conform(r, Expr::SpecOp(Spec::GpuGroupIdx(dim())), result);
         if (memberName == "get_range" || memberName == "get_global_range") {
           if (!r.syclLogicalGlobalSizes.empty()) {
             unsigned dimension = 0;
@@ -616,20 +627,20 @@ static Opt<MatchedCall> syclItemAccess(const clang::CallExpr &call, const clang:
             }
             if (dimension >= r.syclLogicalGlobalSizes.size()) raise("SYCL logical range dimension is out of bounds");
             const auto &logical = r.syclLogicalGlobalSizes[dimension];
-            return self.conform(r, Expr::Alias(Term::Select(logical, {}, logical.tpe)), result);
+            return Remapper::conform(r, Expr::Alias(Term::Select(logical, {}, logical.tpe)), result);
           }
-          return self.conform(r, Expr::SpecOp(Spec::GpuGlobalSize(dim())), result);
+          return Remapper::conform(r, Expr::SpecOp(Spec::GpuGlobalSize(dim())), result);
         }
-        if (memberName == "get_local_range") return self.conform(r, Expr::SpecOp(Spec::GpuLocalSize(dim())), result);
+        if (memberName == "get_local_range") return Remapper::conform(r, Expr::SpecOp(Spec::GpuLocalSize(dim())), result);
         if (memberName == "get_local_linear_range") {
           auto size = localSize(0);
           for (unsigned i = 1; i < dimensions; ++i)
             size = r.newVar(Expr::IntrOp(Intr::Mul(size, localSize(i), Type::IntU32())));
-          return self.conform(r, Expr::Alias(size), result);
+          return Remapper::conform(r, Expr::Alias(size), result);
         }
         return Expr::Alias(Term::Poison(result));
       }},
-      false};
+      .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> syclItemSubscript(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
@@ -640,12 +651,12 @@ static Opt<MatchedCall> syclItemSubscript(const clang::CallExpr &call, const cla
       || !call.getType()->isIntegralOrEnumerationType())
     return {};
   const auto *expression = operation;
-  return MatchedCall{Lowering{[expression](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+  return MatchedCall{.lower = Lowering{[expression](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
                        (void)r.newVar(self.handleExpr(expression->getArg(0), r));
-                       const auto dimension = r.newVar(self.conform(r, self.handleExpr(expression->getArg(1), r), Type::IntU32()));
-                       return self.conform(r, Expr::SpecOp(Spec::GpuGlobalIdx(dimension)), self.handleType(expression->getType(), r));
+                       const auto dimension = r.newVar(Remapper::conform(r, self.handleExpr(expression->getArg(1), r), Type::IntU32()));
+                       return Remapper::conform(r, Expr::SpecOp(Spec::GpuGlobalIdx(dimension)), self.handleType(expression->getType(), r));
                      }},
-                     false};
+                     .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> syclSubGroupRangeSubscript(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
@@ -688,7 +699,7 @@ static Opt<MatchedCall> syclDevice(const clang::CallExpr &call, const clang::Fun
   }
   const auto *expression = &call;
   return MatchedCall{
-      Lowering{[expression, kind, name = name.str()](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+      .lower = Lowering{[expression, kind, name = name.str()](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
         if (const auto *member = llvm::dyn_cast<clang::CXXMemberCallExpr>(expression))
           (void)r.newVar(self.handleExpr(member->getImplicitObjectArgument(), r));
         if (kind) {
@@ -705,17 +716,17 @@ static Opt<MatchedCall> syclDevice(const clang::CallExpr &call, const clang::Fun
         const auto result = self.handleType(expression->getType(), r);
         if (parameter && *parameter == "sycl::info::device::max_work_group_size") {
           const auto actual = r.newVar(Expr::ForeignCall("polyrt_device_max_threads_per_block_u64", {packageContext()}, Type::IntU64()));
-          return self.conform(r, Expr::IntrOp(Intr::Min(actual, Term::IntU64Const(1024), Type::IntU64())), result);
+          return Remapper::conform(r, Expr::IntrOp(Intr::Min(actual, Term::IntU64Const(1024), Type::IntU64())), result);
         }
         if (parameter && *parameter == "sycl::info::device::local_mem_size")
-          return self.conform(r, Expr::ForeignCall("polyrt_device_local_memory_bytes", {packageContext()}, Type::IntU64()), result);
+          return Remapper::conform(r, Expr::ForeignCall("polyrt_device_local_memory_bytes", {packageContext()}, Type::IntU64()), result);
         if (parameter && *parameter == "sycl::info::device::global_mem_size")
-          return self.conform(r, Expr::ForeignCall("polyrt_device_global_memory_bytes", {packageContext()}, Type::IntU64()), result);
+          return Remapper::conform(r, Expr::ForeignCall("polyrt_device_global_memory_bytes", {packageContext()}, Type::IntU64()), result);
         if (parameter && *parameter == "sycl::info::device::max_compute_units")
-          return self.conform(r, Expr::ForeignCall("polyrt_device_compute_units", {packageContext()}, Type::IntU64()), result);
+          return Remapper::conform(r, Expr::ForeignCall("polyrt_device_compute_units", {packageContext()}, Type::IntU64()), result);
         raise("Unsupported SYCL device info query: " + parameter.value_or("<unknown>"));
       }},
-      false};
+      .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> syclQueue(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
@@ -745,7 +756,7 @@ static Opt<MatchedCall> syclQueue(const clang::CallExpr &call, const clang::Func
   if (parallelFor && call.getNumArgs() != 2) raise("Unsupported SYCL handler::parallel_for overload");
   const auto *expression = member;
   return MatchedCall{
-      Lowering{[expression, submit, wait, memcpy, parallelFor](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+      .lower = Lowering{[expression, submit, wait, memcpy, parallelFor](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
         (void)r.newVar(self.handleExpr(expression->getImplicitObjectArgument(), r));
         if (submit) {
           if (expression->getNumArgs() < 1) return Expr::Alias(Term::Poison(self.handleType(expression->getType(), r)));
@@ -769,8 +780,9 @@ static Opt<MatchedCall> syclQueue(const clang::CallExpr &call, const clang::Func
             const auto named = self.namedOfDecl(parameter, type);
             if (const auto pointer = type.get<Type::Ptr>()) {
               const auto referent = r.newVar(pointer->comp);
-              r.push(Stmt::Var(
-                  named, Expr::RefTo(self.selectPath(r, {}, referent), {}, pointer->comp, TypeSpace::Global(), Region::Opaque()), true));
+              r.push(Stmt::Var(named,
+                               Expr::RefTo(Remapper::selectPath(r, {}, referent), {}, pointer->comp, TypeSpace::Global(), Region::Opaque()),
+                               true));
             } else {
               r.push(Stmt::Var(named, std::optional<Expr::Any>{}, true));
             }
@@ -801,7 +813,7 @@ static Opt<MatchedCall> syclQueue(const clang::CallExpr &call, const clang::Func
             arguments.emplace_back(r.newVar(self.handleExpr(expression->getArg(i), r)));
           const auto destination = arguments[0];
           const auto source = arguments[1];
-          const auto bytes = r.newVar(self.conform(r, Expr::Alias(arguments[2]), Type::IntU64()));
+          const auto bytes = r.newVar(Remapper::conform(r, Expr::Alias(arguments[2]), Type::IntU64()));
           const auto destinationProvenance = pointerProvenance(expression->getArg(0));
           const auto sourceProvenance = pointerProvenance(expression->getArg(1));
           if (destinationProvenance == PointerProvenance::Unknown || sourceProvenance == PointerProvenance::Unknown)
@@ -809,10 +821,11 @@ static Opt<MatchedCall> syclQueue(const clang::CallExpr &call, const clang::Func
                   + expression->getBeginLoc().printToString(self.context.getSourceManager()));
           if (destinationProvenance == PointerProvenance::Local && sourceProvenance == PointerProvenance::Local)
             raise("SYCL queue::memcpy between local pointers is not supported");
-          const Direction::Any direction = destinationProvenance == PointerProvenance::Remote
-                                               ? sourceProvenance == PointerProvenance::Remote ? Direction::Any(Direction::RemoteToRemote())
-                                                                                               : Direction::Any(Direction::LocalToRemote())
-                                               : Direction::Any(Direction::RemoteToLocal());
+          const Direction::Any direction = [&]() -> Direction::Any {
+            if (destinationProvenance != PointerProvenance::Remote) return Direction::Any(Direction::RemoteToLocal());
+            if (sourceProvenance == PointerProvenance::Remote) return Direction::Any(Direction::RemoteToRemote());
+            return Direction::Any(Direction::LocalToRemote());
+          }();
           r.push(Stmt::Var(r.newVar(Type::Unit0()),
                            Expr::SpecOp(Spec::RemoteMemcpy(packageContext(), destination, source, bytes, direction)), false));
           return Expr::Alias(Term::Poison(self.handleType(expression->getType(), r)));
@@ -824,7 +837,11 @@ static Opt<MatchedCall> syclQueue(const clang::CallExpr &call, const clang::Func
         const auto *rangeArgument = expression->getArg(0)->IgnoreImplicit();
         const auto *rangeRecord = rangeArgument->getType().getNonReferenceType()->getAsCXXRecordDecl();
         const bool plainRange = !rangeRecord || !rangeRecord->getName().starts_with("nd_range");
-        const unsigned plainDimensions = plainRange && rangeRecord ? dimensionsOf(*rangeRecord) : plainRange ? 1 : 0;
+        const unsigned plainDimensions = [&]() -> unsigned {
+          if (plainRange && rangeRecord) return dimensionsOf(*rangeRecord);
+          if (plainRange) return 1;
+          return 0;
+        }();
         const auto previousLogicalGlobalSizes = r.syclLogicalGlobalSizes;
         r.syclLogicalGlobalSizes.clear();
         for (unsigned i = 0; i < plainDimensions; ++i)
@@ -863,11 +880,12 @@ static Opt<MatchedCall> syclQueue(const clang::CallExpr &call, const clang::Func
                               || !fn->collect_all<Spec::GpuGroupInclusiveScan>().empty()
                               || !fn->collect_all<Spec::GpuGroupExclusiveScan>().empty();
           if (direct) return true;
-          for (const auto &invoke : fn->collect_all<Expr::Invoke>())
-            if (const auto reference = invoke.callee.get<Type::FnRef>())
-              if (const auto callee = functionsByName ^ get_maybe(reference->name); callee && requiresUniformWorkgroupClosure(*callee))
-                return true;
-          return false;
+          return fn->collect_all<Expr::Invoke>() ^ exists([&](const Expr::Invoke &invoke) {
+                   const auto reference = invoke.callee.get<Type::FnRef>();
+                   if (!reference) return false;
+                   const auto callee = functionsByName ^ get_maybe(reference->name);
+                   return callee && requiresUniformWorkgroupClosure(*callee);
+                 });
         };
         const bool requiresUniformWorkgroup = requiresUniformWorkgroupClosure(kernel);
         const auto *kernelCall = operatorDecl;
@@ -925,7 +943,7 @@ static Opt<MatchedCall> syclQueue(const clang::CallExpr &call, const clang::Func
           if (!array || array->length <= static_cast<int32_t>(dimension)) raise("SYCL range extent dimension is out of bounds");
           Vector<Named> prefix{storage};
           prefix.insert(prefix.end(), path.begin(), path.end() - 1);
-          const auto selected = self.selectPath(r, prefix, path.back());
+          const auto selected = Remapper::selectPath(r, prefix, path.back());
           return r.newVar(Expr::Cast(r.newVar(Expr::Index(selected, Term::IntU64Const(dimension), array->comp)), u32));
         };
         const auto rangeDimension = [&](const clang::Expr *range, unsigned dimension) -> Term::Any {
@@ -970,7 +988,7 @@ static Opt<MatchedCall> syclQueue(const clang::CallExpr &call, const clang::Func
                    record && record->getName().starts_with("nd_range")) {
           const auto rangeType = self.handleType(range->getType(), r);
           const auto storage = r.newVar(rangeType);
-          r.push(Stmt::Mut(self.selectPath(r, {}, storage), self.conform(r, self.handleExpr(range, r), rangeType)));
+          r.push(Stmt::Mut(Remapper::selectPath(r, {}, storage), Remapper::conform(r, self.handleExpr(range, r), rangeType)));
           const auto global = Vector<std::string_view>{"g", "globalSize"};
           const auto local = Vector<std::string_view>{"l", "localSize"};
           const auto dimensions = dimensionsOf(*record);
@@ -994,16 +1012,22 @@ static Opt<MatchedCall> syclQueue(const clang::CallExpr &call, const clang::Func
           if (range->getType()->isRecordType() && !directRange) {
             const auto rangeType = self.handleType(range->getType(), r);
             const auto storage = r.newVar(rangeType);
-            r.push(Stmt::Mut(self.selectPath(r, {}, storage), self.conform(r, self.handleExpr(range, r), rangeType)));
+            r.push(Stmt::Mut(Remapper::selectPath(r, {}, storage), Remapper::conform(r, self.handleExpr(range, r), rangeType)));
             for (unsigned i = 0; i < dimensions; ++i)
               plainRangeCounts.emplace_back(storedExtent(storage, rangeType, {}, i));
           } else
             for (unsigned i = 0; i < dimensions; ++i)
               plainRangeCounts.emplace_back(rangeDimension(range, i));
-          blockX = Term::IntU32Const(dimensions == 1   ? static_cast<uint32_t>(program_meta::VkWorkgroupSizeXValue)
-                                     : dimensions == 2 ? 16
-                                                       : 8);
-          blockY = Term::IntU32Const(dimensions == 1 ? 1 : dimensions == 2 ? 16 : 8);
+          blockX = Term::IntU32Const([&]() -> uint32_t {
+            if (dimensions == 1) return static_cast<uint32_t>(program_meta::VkWorkgroupSizeXValue);
+            if (dimensions == 2) return 16;
+            return 8;
+          }());
+          blockY = Term::IntU32Const([&]() -> uint32_t {
+            if (dimensions == 1) return 1;
+            if (dimensions == 2) return 16;
+            return 8;
+          }());
           blockZ = Term::IntU32Const(dimensions < 3 ? 1 : 4);
           const auto groups = [&](const unsigned i, const Term::Any &block) -> Term::Any {
             if (i >= plainRangeCounts.size()) return Term::Any(Term::IntU32Const(1));
@@ -1011,7 +1035,8 @@ static Opt<MatchedCall> syclQueue(const clang::CallExpr &call, const clang::Func
             if (!padding) raise("SYCL plain-range block size is not constant");
             const auto quotient = r.newVar(Expr::IntrOp(Intr::Div(plainRangeCounts[i], block, u32)));
             const auto remainder = r.newVar(Expr::IntrOp(Intr::Rem(plainRangeCounts[i], block, u32)));
-            const auto extra = r.newVar(self.conform(r, Expr::IntrOp(Intr::LogicNeq(remainder, Term::IntU32Const(0))), Type::IntU32()));
+            const auto extra =
+                r.newVar(Remapper::conform(r, Expr::IntrOp(Intr::LogicNeq(remainder, Term::IntU32Const(0))), Type::IntU32()));
             return r.newVar(Expr::IntrOp(Intr::Add(quotient, extra, u32)));
           };
           gridX = groups(0, blockX);
@@ -1021,7 +1046,7 @@ static Opt<MatchedCall> syclQueue(const clang::CallExpr &call, const clang::Func
         const auto closureExpression = self.handleExpr(lambda, r);
         const auto closure = r.newName(closureExpression.tpe());
         r.push(Stmt::Var(closure, closureExpression, true));
-        auto typeArguments = kernel->decl.tpeVars | map([](const auto &variable) { return variable.widen(); }) | to_vector();
+        const auto typeArguments = kernel->decl.tpeVars | map([](const auto &variable) { return variable.widen(); }) | to_vector();
         uint64_t localElementBytes = 0;
         Term::Any sharedBytes = Term::IntU32Const(0);
         const auto closureType = closureExpression.tpe().get<Type::Struct>();
@@ -1059,12 +1084,12 @@ static Opt<MatchedCall> syclQueue(const clang::CallExpr &call, const clang::Func
                             size, u32))),
                         size, u32)));
           const auto elementOffset = r.newVar(Expr::IntrOp(Intr::Div(aligned, size, u32)));
-          r.push(Stmt::Mut(self.selectPath(r, {closure, *accessor}, *offset), Expr::Cast(elementOffset, offset->tpe)));
-          const auto elements = self.selectPath(r, {closure, *accessor}, *count).widen();
+          r.push(Stmt::Mut(Remapper::selectPath(r, {closure, *accessor}, *offset), Expr::Cast(elementOffset, offset->tpe)));
+          const auto elements = Remapper::selectPath(r, {closure, *accessor}, *count).widen();
           const auto bytes = r.newVar(Expr::IntrOp(Intr::Mul(r.newVar(Expr::Cast(elements, u32)), size, u32)));
           sharedBytes = r.newVar(Expr::IntrOp(Intr::Add(aligned, bytes, u32)));
         }
-        std::vector<Term::Any> launchArguments{self.selectPath(r, {}, closure).widen()};
+        std::vector<Term::Any> launchArguments{Remapper::selectPath(r, {}, closure).widen()};
         if (!plainRangeCounts.empty()) {
           Vector<Stmt::Any> guards;
           for (unsigned i = 0; i < plainRangeCounts.size(); ++i) {
@@ -1074,9 +1099,11 @@ static Opt<MatchedCall> syclQueue(const clang::CallExpr &call, const clang::Func
             kernel->decl.args.emplace_back(count);
             guards.emplace_back(Stmt::Var(global, Expr::SpecOp(Spec::GpuGlobalIdx(Term::IntU32Const(i))), false));
             guards.emplace_back(Stmt::Var(
-                outside, Expr::IntrOp(Intr::LogicGte(self.selectPath(r, {}, global).widen(), self.selectPath(r, {}, count).widen())),
+                outside,
+                Expr::IntrOp(Intr::LogicGte(Remapper::selectPath(r, {}, global).widen(), Remapper::selectPath(r, {}, count).widen())),
                 false));
-            guards.emplace_back(Stmt::Cond(self.selectPath(r, {}, outside).widen(), {Stmt::Return(Expr::Alias(Term::Unit0Const()))}, {}));
+            guards.emplace_back(
+                Stmt::Cond(Remapper::selectPath(r, {}, outside).widen(), {Stmt::Return(Expr::Alias(Term::Unit0Const()))}, {}));
             launchArguments.emplace_back(plainRangeCounts[i]);
           }
           kernel->body.insert(kernel->body.begin(), guards.begin(), guards.end());
@@ -1096,7 +1123,7 @@ static Opt<MatchedCall> syclQueue(const clang::CallExpr &call, const clang::Func
         r.push(Stmt::Cond(empty, {}, {Stmt::Var(r.newName(Type::Unit0()), launch, false)}));
         return Expr::Alias(Term::Unit0Const());
       }},
-      false};
+      .preservesExceptionMetadata = false};
 }
 
 Vector<CallPrism> syclPrisms() {

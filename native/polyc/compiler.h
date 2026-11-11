@@ -36,6 +36,7 @@ inline constexpr uint32_t DefaultWorkgroupMemoryBytes = 32768;
 struct POLYREGION_EXPORT Options {
   POLYREGION_EXPORT compiletime::Target target = compiletime::Target::Object_LLVM_HOST;
   POLYREGION_EXPORT std::string arch;
+  // NOLINTNEXTLINE(readability-redundant-member-init)
   POLYREGION_EXPORT std::string pipelineSpec = {}; // pipeline spec ("Name(k=v,k=v); Name; ...")
   POLYREGION_EXPORT bool hostMirroring = false;    // compile only Host-affinity functions, emit bitcode
   POLYREGION_EXPORT uint32_t workgroupMemoryBytes = defaultWorkgroupMemoryBytes(target);

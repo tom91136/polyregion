@@ -1,6 +1,7 @@
 #include "ast_visitors.h"
 
 #include <optional>
+#include <utility>
 #include <vector>
 
 #include "clang/AST/Decl.h"
@@ -20,7 +21,7 @@ std::optional<clang::CXXMethodDecl *> OverloadTargetVisitor ::run(clang::Stmt *s
   return target;
 }
 bool OverloadTargetVisitor::VisitCallExpr(clang::CallExpr *S) {
-  if (const auto decl = S->getCalleeDecl(); decl) {
+  if (const auto *const decl = S->getCalleeDecl(); decl) {
     target = OverloadTargetVisitor(owner).run(decl->getBody());
     return !target.has_value();
   } else {
@@ -30,7 +31,7 @@ bool OverloadTargetVisitor::VisitCallExpr(clang::CallExpr *S) {
 
 bool OverloadTargetVisitor::VisitCXXOperatorCallExpr(clang::CXXOperatorCallExpr *S) {
   if (S->getOperator() != clang::OverloadedOperatorKind::OO_Call) return true;
-  if (auto cxxMethodDecl = llvm::dyn_cast_if_present<clang::CXXMethodDecl>(S->getCalleeDecl())) {
+  if (auto *cxxMethodDecl = llvm::dyn_cast_if_present<clang::CXXMethodDecl>(S->getCalleeDecl())) {
     if (cxxMethodDecl->getParent() == owner) target.emplace(cxxMethodDecl);
   }
   return !target.has_value();
@@ -39,17 +40,19 @@ bool OverloadTargetVisitor::VisitCXXOperatorCallExpr(clang::CXXOperatorCallExpr 
 SpecialisationPathVisitor::SpecialisationPathVisitor(const clang::ASTContext &context) {
   SpecialisationPathVisitor::TraverseDecl(context.getTranslationUnitDecl());
 }
-clang::FunctionDecl *currentFnDecl{};
+static clang::FunctionDecl *currentFnDecl{};
 
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 bool SpecialisationPathVisitor::shouldVisitTemplateInstantiations() const { return true; }
 
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 bool SpecialisationPathVisitor::VisitDecl(clang::Decl *decl) {
   if (decl && decl->isFunctionOrFunctionTemplate()) currentFnDecl = decl->getAsFunction();
   return true;
 }
 bool SpecialisationPathVisitor::VisitCallExpr(clang::CallExpr *expr) {
   if (expr) {
-    if (auto decl = llvm::dyn_cast_or_null<clang::FunctionDecl>(expr->getCalleeDecl()); decl && decl->isFunctionTemplateSpecialization()) {
+    if (auto *decl = llvm::dyn_cast_or_null<clang::FunctionDecl>(expr->getCalleeDecl()); decl && decl->isFunctionTemplateSpecialization()) {
       map.emplace(decl, std::pair{currentFnDecl, expr});
     }
   }

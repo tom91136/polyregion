@@ -1,6 +1,16 @@
 #include "ast.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <exception>
+#include <functional>
+#include <iterator>
+#include <stdexcept>
 #include <string>
+#include <unordered_map>
+#include <utility>
+#include <variant>
+#include <vector>
 
 #include "aspartame/all.hpp"
 #include "fmt/format.h"
@@ -97,7 +107,7 @@ std::variant<std::string, Program> polyregion::polyast::decodeHashedProgram(cons
 }
 
 static void renderCompileEvent(std::string &out, const CompileEvent &e, size_t depth) {
-  const std::string prefix(4 + depth * 2, ' ');
+  const std::string prefix(4 + (depth * 2), ' ');
   fmt::format_to(std::back_inserter(out), "{}[{}, +{}ms] {}", prefix, e.epochMillis, static_cast<double>(e.elapsedNanos) / 1e6, e.name);
   if (e.data.empty()) {
     out += '\n';
@@ -116,7 +126,7 @@ static void renderCompileEvent(std::string &out, const CompileEvent &e, size_t d
 
 string polyast::qualified(const Term::Select &select) {
   std::string s = select.root.symbol;
-  for (auto &step : select.steps) {
+  for (const auto &step : select.steps) {
     step.match_total( //
         [&](const PathStep::Field &f) {
           s += ".";
@@ -144,7 +154,7 @@ Type::Struct polyast::typeOf(const StructDef &def) {
 
 string polyast::repr(const CompileResult &compilation) {
   std::string out;
-  auto sink = std::back_inserter(out);
+  const auto sink = std::back_inserter(out);
   fmt::format_to(sink, "Compilation {{\n  binary: {}\n  messages: {}\n  features: {}",
                  compilation.binary ? std::to_string(compilation.binary->size()) + " bytes" : "(empty)",
                  compilation.messages.empty() ? "(none)" : "`" + compilation.messages + "`",
@@ -235,7 +245,7 @@ bool polyast::isOpaque(const StructLayout &sl, const std::unordered_map<Type::St
                          [&](const auto &s) {
                            return table ^ get_maybe(s) | map([&](const auto &x) { return isOpaque(x, table); }) | get_or_else(false);
                          },
-                         []() { return true; });
+                         [] { return true; });
             });
 }
 
@@ -344,7 +354,7 @@ Program dsl::program(const Vector<StructDef> &structs, const Vector<Function> &f
 }
 Program dsl::program(const Function &function) { return Program(function, {}, {}, PassPhase::Initial(), {}); }
 
-dsl::IndexBuilder::IndexBuilder(const Index &index) : index(index) {}
+dsl::IndexBuilder::IndexBuilder(Index index) : index(std::move(index)) {}
 dsl::IndexBuilder::operator Expr::Any() const { return index; }
 Stmt::Update dsl::IndexBuilder::operator=(const Term::Any &that) const {
   // The new shape demands lhs be a Term::Select; carry whatever the Index wraps.
@@ -353,7 +363,7 @@ Stmt::Update dsl::IndexBuilder::operator=(const Term::Any &that) const {
   return Stmt::Update(*sel, index.idx, that);
 }
 
-dsl::NamedBuilder::NamedBuilder(const Named &named) : named(named) {}
+dsl::NamedBuilder::NamedBuilder(Named named) : named(std::move(named)) {}
 dsl::NamedBuilder::operator Term::Any() const { return Term::Select(named, {}, named.tpe); }
 dsl::NamedBuilder::operator Term::Select() const { return Term::Select(named, {}, named.tpe); }
 dsl::NamedBuilder::operator Named() const { return named; }
@@ -371,7 +381,7 @@ dsl::IndexBuilder dsl::NamedBuilder::operator[](const Term::Any &idx) const {
 
 dsl::Mut dsl::NamedBuilder::operator=(const Expr::Any &that) const { return Stmt::Mut(Term::Select(named, {}, named.tpe), that); }
 
-dsl::AssignmentBuilder::AssignmentBuilder(const string &name, bool isMutable) : name(name), isMutable(isMutable) {}
-Stmt::Any dsl::AssignmentBuilder::operator=(Term::Any rhs) const { return Stmt::Var(Named(name, rhs.tpe()), Expr::Alias(rhs), isMutable); }
+dsl::AssignmentBuilder::AssignmentBuilder(string name, bool isMutable) : name(std::move(name)), isMutable(isMutable) {}
+Stmt::Any dsl::AssignmentBuilder::operator=(Term::Any t) const { return Stmt::Var(Named(name, t.tpe()), Expr::Alias(t), isMutable); }
 Stmt::Any dsl::AssignmentBuilder::operator=(Type::Any tpe) const { return Stmt::Var(Named(name, tpe), {}, isMutable); }
-Stmt::Any dsl::AssignmentBuilder::operator=(const Expr::Any &rhs) const { return Stmt::Var(Named(name, rhs.tpe()), rhs, isMutable); }
+Stmt::Any dsl::AssignmentBuilder::operator=(const Expr::Any &e) const { return Stmt::Var(Named(name, e.tpe()), e, isMutable); }

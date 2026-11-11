@@ -9,7 +9,7 @@ public:
   bool verbose;
 
   explicit ReflectMemPass(bool verbose);
-  llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &);
+  llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &) const;
 };
 
 } // namespace polyregion::polyreflect

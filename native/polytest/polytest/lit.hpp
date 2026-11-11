@@ -42,7 +42,7 @@ struct TestCase {
   static std::vector<TestCase> parseTestCase(std::ifstream &file,          //
                                              const std::string &directive, //
                                              const std::vector<Variable> &extraMatrices = {}) {
-    TestCase testCase;
+    const TestCase testCase;
 
     auto parseNormalised = [&]<typename F>(std::ifstream &s, F f) {
       auto pos = s.tellg();
@@ -66,18 +66,18 @@ struct TestCase {
       return std::nullopt;
     };
 
-    auto parseExpects = [&]() {
+    auto parseExpects = [&] {
       return parseNormalised(file, [&](const std::string &line) -> std::optional<Run::Expect> {
         return parseRight("requires", line) ^ map([](const auto &expect) {
                  const auto delimIdx = expect.find(':', 0);
                  const auto [location, message] = expect ^ split_at(delimIdx);
-                 auto lineNum = location ^ starts_with("@") ? std::optional{std::stoi(location ^ drop(1))} : std::nullopt;
+                 const auto lineNum = location ^ starts_with("@") ? std::optional{std::stoi(location ^ drop(1))} : std::nullopt;
                  return Run::Expect{lineNum, message ^ drop(1) ^ trim()};
                });
       });
     };
 
-    auto parseStderrCounts = [&]() {
+    auto parseStderrCounts = [&] {
       return parseNormalised(file, [&](const std::string &line) -> std::optional<Run::StderrCount> {
         const auto value = parseRight("stderr-count:", line);
         const auto parts = value ? *value ^ trim() ^ split_once(' ') : std::nullopt;
@@ -86,7 +86,7 @@ struct TestCase {
       });
     };
 
-    auto parseRuns = [&]() {
+    auto parseRuns = [&] {
       return parseNormalised(file, [&](const std::string &line) -> std::optional<Run> {
         return parseRight("do:", line) ^ map([&](const auto &runLine) {
                  auto expect = parseExpects();
@@ -108,7 +108,7 @@ struct TestCase {
       return values.empty() ? std::nullopt : std::optional{values.front()};
     };
 
-    auto parseMatrices = [&]() {
+    auto parseMatrices = [&] {
       return parseNormalised(file, [&](const std::string &line) -> std::optional<std::vector<Variable>> {
         return parseRight("using:", line) ^ map([](const auto &matrixLine) {
                  return matrixLine ^ trim() ^ split(' ') ^ map([](const auto &v) {

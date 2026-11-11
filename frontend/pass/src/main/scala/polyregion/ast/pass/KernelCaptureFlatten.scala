@@ -59,7 +59,7 @@ object KernelCaptureFlatten extends ProgramPass {
       }
 
     def hasPointers(tpe: p.Type, seen: Set[p.Sym]): Boolean = tpe match {
-      case _: p.Type.Ptr          => true
+      case p.Type.Ptr(_, _)       => true
       case p.Type.Arr(comp, _, _) => hasPointers(comp, seen)
       case struct: p.Type.Struct if !seen(struct.name) =>
         defs.get(struct.name).flatMap(_.headOption).exists { definition =>
@@ -129,14 +129,12 @@ object KernelCaptureFlatten extends ProgramPass {
 
     def launchTarget(launch: p.Spec.RemoteLaunch): Option[p.Function] = launch.kernel.tpe match {
       case p.Type.FnRef(name) =>
-        val candidates = byName.getOrElse(name, Nil)
+        val candidates  = byName.getOrElse(name, Nil)
+        val tpeArgCount = launch.tpeArgs.size
+        val argCount    = launch.args.size
         def matching(typesMatch: (p.Type, p.Type) => Boolean) = candidates.filter { candidate =>
           val parameters = launchParameters(candidate, launch.tpeArgs)
-          candidate.affinity == p.Function.Affinity.Offload &&
-          candidate.receiver.isEmpty &&
-          candidate.rtn == p.Type.Unit0 &&
-          candidate.tpeVars.size == launch.tpeArgs.size &&
-          parameters.size == launch.args.size &&
+          TypeOps.launchShaped(candidate, tpeArgCount, parameters, argCount) &&
           parameters.zip(launch.args).forall { case (parameter, argument) =>
             typesMatch(parameter.named.tpe, argument.tpe)
           }
@@ -183,7 +181,7 @@ object KernelCaptureFlatten extends ProgramPass {
             case select @ p.Term.Select(root, _, _) if root == capture => select
           })
           val escaped = captureSelects.filter(select =>
-            leaves.exists(leaf => select.steps.length < leaf.path.length && leaf.path.startsWith(select.steps))
+            leaves.exists(leaf => select.steps.lengthCompare(leaf.path) < 0 && leaf.path.startsWith(select.steps))
           )
           escaped
             .find(_.steps.isEmpty)
@@ -194,9 +192,12 @@ object KernelCaptureFlatten extends ProgramPass {
                   "the entire capture pointer escapes before a pointer leaf; capture identity is unsupported"
                 )
             }
-          val minimalEscapes = escaped.sortBy(_.steps.length).foldLeft(List.empty[p.Term.Select]) { (roots, select) =>
-            if (roots.exists(root => select.steps.startsWith(root.steps))) roots else roots :+ select
-          }
+          val minimalEscapes = escaped
+            .sortBy(_.steps.length)
+            .foldLeft(List.empty[p.Term.Select]) { (roots, select) =>
+              if (roots.exists(root => select.steps.startsWith(root.steps))) roots else select :: roots
+            }
+            .reverse
           minimalEscapes.foreach { select =>
             if (!select.tpe.isInstanceOf[p.Type.Struct])
               fail(
@@ -204,28 +205,22 @@ object KernelCaptureFlatten extends ProgramPass {
                 s"pointer-bearing capture subobject ${pathRepr(select.steps)} has non-struct type ${select.tpe.repr}"
               )
           }
+          val leafByPath = leaves.groupBy(_.path)
+          def rejectSlot(use: String)(steps: List[p.PathStep]): Unit =
+            leafByPath
+              .get(steps)
+              .flatMap(_.headOption)
+              .foreach(leaf => fail(kernel, s"$use of capture pointer slot ${pathRepr(leaf.path)} is unsupported"))
           kernel.body
             .flatMap(_.collectWhere[p.Expr] {
               case p.Expr.RefTo(p.Term.Select(root, steps, _), None, _, _, _) if root == capture => steps
             })
-            .foreach(steps =>
-              leaves
-                .find(_.path == steps)
-                .foreach(leaf =>
-                  fail(kernel, s"address-taking of capture pointer slot ${pathRepr(leaf.path)} is unsupported")
-                )
-            )
+            .foreach(rejectSlot("address-taking"))
           kernel.body
             .flatMap(_.collectWhere[p.Stmt] {
               case p.Stmt.Mut(p.Term.Select(root, steps, _), _) if root == capture => steps
             })
-            .foreach(steps =>
-              leaves
-                .find(_.path == steps)
-                .foreach(leaf =>
-                  fail(kernel, s"mutation of capture pointer slot ${pathRepr(leaf.path)} is unsupported")
-                )
-            )
+            .foreach(rejectSlot("mutation"))
           val used = leaves.filter(leaf =>
             captureSelects.exists(select => select.steps.startsWith(leaf.path)) ||
               minimalEscapes.exists(select => leaf.path.startsWith(select.steps))
@@ -274,11 +269,7 @@ object KernelCaptureFlatten extends ProgramPass {
       }
       val rewritten = kernel.body
         .modifyAll[p.Term](rewriteTerm)
-        .modifyAll[p.Stmt] {
-          case p.Stmt.Mut(select, expr)      => p.Stmt.Mut(rewriteTerm(select).asInstanceOf[p.Term.Select], expr)
-          case p.Stmt.Update(select, idx, v) => p.Stmt.Update(rewriteTerm(select).asInstanceOf[p.Term.Select], idx, v)
-          case stmt                          => stmt
-        }
+        .modifyAll[p.Stmt](AddressRefinement.retargetWrites(rewriteTerm))
       val stale = rewritten.flatMap(_.collectWhere[p.Term] {
         case select @ p.Term.Select(root, steps, _)
             if root == plan.capture &&
@@ -293,10 +284,11 @@ object KernelCaptureFlatten extends ProgramPass {
           Some(p.Expr.Alias(p.Term.Select(plan.capture, repair.path, repair.tpe))),
           isMutable = true
         )
+        val depth = repair.path.length
         val patches = plan.bindings.collect {
           case binding if binding.leaf.path.startsWith(repair.path) =>
             p.Stmt.Mut(
-              p.Term.Select(repair.local, binding.leaf.path.drop(repair.path.length), binding.leaf.tpe),
+              p.Term.Select(repair.local, binding.leaf.path.drop(depth), binding.leaf.tpe),
               p.Expr.Alias(p.Term.Select(binding.arg.named, Nil, binding.leaf.tpe))
             )
         }

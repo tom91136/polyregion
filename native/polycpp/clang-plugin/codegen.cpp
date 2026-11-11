@@ -1,6 +1,18 @@
 #include "codegen.h"
 
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <string>
 #include <string_view>
+#include <system_error>
+#include <tuple>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
 #include "clang/AST/Attr.h"
 #include "clang/AST/RecordLayout.h"
@@ -65,20 +77,20 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
                                                runtime::PlatformKind kind) {
   Remapper remapper(C);
 
-  auto parent = functor.getParent();
-  auto returnTpe = functor.getReturnType();
-  auto body = functor.getBody();
+  const auto *parent = functor.getParent();
+  const auto returnTpe = functor.getReturnType();
+  auto *body = functor.getBody();
 
   auto r = Remapper::RemapContext{};
   r.entryCapture = parent->getCanonicalDecl();
-  auto parentDef = remapper.handleRecord(parent, r);
+  const auto parentDef = remapper.handleRecord(parent, r);
 
   auto rtnTpe = remapper.handleType(returnTpe, r);
 
   auto stmts = r.scoped([&](auto &r) { remapper.handleStmt(body, r); }, false, rtnTpe, parentDef);
   stmts.push_back(Stmt::Return(Expr::Alias(Term::Unit0Const())));
 
-  auto recv = Arg(Named(conventions::ThisReceiver, Type::Ptr(Type::Struct(parentDef->name, {}), TypeSpace::Global())), {});
+  const auto recv = Arg(Named(conventions::ThisReceiver, Type::Ptr(Type::Struct(parentDef->name, {}), TypeSpace::Global())), {});
 
   // The kernel ABI prepends a thread-id Int64 to Entry functions and the offload lambdas take
   // an int64 tid as their first parameter -- the runtime fills the same slot for both. Drop
@@ -89,7 +101,7 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
                                                   | to_vector();
   if (!userParams.empty() && remapper.handleType(userParams.front()->getType(), r).is<Type::IntS64>()) {
     // declName() carries the per-decl ID suffix so the alias matches what DeclRefExpr emits.
-    auto name = declName(userParams.front());
+    const auto name = declName(userParams.front());
     if (!name.empty()) {
       tidAliases.push_back(Stmt::Var(Named(name, Type::IntS64()), Expr::Alias(dsl::Select(Vector<Named>{}, Named("__tid", Type::IntS64()))),
                                      /*isMutable*/ false));
@@ -98,24 +110,25 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
   }
   stmts.insert(stmts.begin(), tidAliases.begin(), tidAliases.end());
 
-  auto args = userParams                                                                                           //
-              | map([&](const auto &x) { return Arg(Named(declName(x), remapper.annotateLocalSpace(x, r)), {}); }) //
-              | append(recv)                                                                                       //
-              | to_vector();
+  const auto args = userParams                                                                                           //
+                    | map([&](const auto &x) { return Arg(Named(declName(x), remapper.annotateLocalSpace(x, r)), {}); }) //
+                    | append(recv)                                                                                       //
+                    | to_vector();
 
-  auto f0 = std::make_shared<Function>(FunctionDecl(Sym({conventions::EntryName}), std::vector<Type::Var>{}, std::optional<Arg>{}, args,
-                                                    std::vector<Arg>{}, std::vector<Arg>{}, rtnTpe, FunctionAffinity::Offload()),
-                                       stmts, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), CallConvention::OffloadEntry());
+  const auto f0 =
+      std::make_shared<Function>(FunctionDecl(Sym({conventions::EntryName}), std::vector<Type::Var>{}, std::optional<Arg>{}, args,
+                                              std::vector<Arg>{}, std::vector<Arg>{}, rtnTpe, FunctionAffinity::Offload()),
+                                 stmts, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), CallConvention::OffloadEntry());
 
   auto program = Program(*f0, r.functions | values() | map([&](const auto &x) { return *x; }) | to_vector(),
                          r.structs | values() | map([&](const auto &x) { return *x; }) | to_vector(), PassPhase::Initial(), {});
 
   auto exportedStructNames = std::unordered_set<std::string>{fqcn(parentDef->name)};
 
-  auto layouts = r.layouts                                                                                    //
-                 | values()                                                                                   //
-                 | map([&](const auto &x) { return std::pair{exportedStructNames ^ contains(x->name), *x}; }) //
-                 | to_vector();
+  const auto layouts = r.layouts                                                                                    //
+                       | values()                                                                                   //
+                       | map([&](const auto &x) { return std::pair{exportedStructNames ^ contains(x->name), *x}; }) //
+                       | to_vector();
 
   if (opts.verbose) {
     emit(diag, loc, clang::DiagnosticsEngine::Level::Remark, POLYREGION_DIAG_POLYSTL "Remapped program [%0, sizeof capture=%1]\n%2",
@@ -132,22 +145,22 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
   };
 
   if (opts.jit) {
-    auto jitObjects = opts.targets                                                                //
-                      | filter([&](const auto &target, const auto &) { return accepts(target); }) //
-                      | collect([&](const auto &target, const auto &arch) -> std::optional<polyfront::KernelObject> {
-                          auto format = runtime::moduleFormatOf(target);
-                          if (!format) return std::nullopt;
-                          const auto pp = polyfront::passes::arenaPassesFor(target, arch, opts.stackDepth);
-                          polyfront::KernelObject ko;
-                          ko.format = *format;
-                          ko.kind = runtime::targetPlatformKind(target);
-                          ko.features = polyfront::passes::jitFeaturesFor(target, arch);
-                          ko.target = target;
-                          ko.arch = arch;
-                          ko.pipelineSpec = pp.size() >= 2 ? pp[1] : std::string{};
-                          return ko;
-                        }) //
-                      | to_vector();
+    const auto jitObjects = opts.targets                                                                //
+                            | filter([&](const auto &target, const auto &) { return accepts(target); }) //
+                            | collect([&](const auto &target, const auto &arch) -> std::optional<polyfront::KernelObject> {
+                                auto format = runtime::moduleFormatOf(target);
+                                if (!format) return std::nullopt;
+                                const auto pp = polyfront::passes::arenaPassesFor(target, arch, opts.stackDepth);
+                                polyfront::KernelObject ko;
+                                ko.format = *format;
+                                ko.kind = runtime::targetPlatformKind(target);
+                                ko.features = polyfront::passes::jitFeaturesFor(target, arch);
+                                ko.target = target;
+                                ko.arch = arch;
+                                ko.pipelineSpec = pp.size() >= 2 ? pp[1] : std::string{};
+                                return ko;
+                              }) //
+                            | to_vector();
     const auto packed = polyast::hashed_program_to_msgpack(program);
     if (opts.verbose)
       emit(diag, loc, clang::DiagnosticsEngine::Level::Remark, POLYREGION_DIAG_POLYSTL "JIT deferred [%0]: %1 target(s), program %2 bytes",
@@ -155,15 +168,15 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
     // the deferred path decides before lowering, so a raise counts too: both end up writing the #error buffer
     const bool jitAsserts =
         !program.template collect_all<polyast::Spec::Assert>().empty() || !program.template collect_all<polyast::Stmt::Raise>().empty();
-    return polyfront::recorded(polyfront::KernelBundle{moduleId,
-                                                       jitObjects,
-                                                       layouts,
-                                                       remapper.readOnlyMembers,
-                                                       program_to_json(program).dump(),
-                                                       {},
-                                                       {},
-                                                       jitAsserts,
-                                                       std::string(packed.begin(), packed.end())});
+    return polyfront::recorded(polyfront::KernelBundle{.moduleName = moduleId,
+                                                       .objects = jitObjects,
+                                                       .layouts = layouts,
+                                                       .readOnlyMembers = remapper.readOnlyMembers,
+                                                       .metadata = program_to_json(program).dump(),
+                                                       .hostMirrorBitcode = {},
+                                                       .mirrorId = {},
+                                                       .asserts = jitAsserts,
+                                                       .program = std::string(packed.begin(), packed.end())});
   }
 
   const auto compiled =
@@ -185,48 +198,49 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
   const bool asserts =
       compiled ^ exists([](const auto &, const auto &, const auto &result) { return polyfront::entryNeedsErrorBuffer(result); });
 
-  auto objects = compiled //
-                 | collect([&](const auto &target, const auto &features, const auto &result) -> std::optional<polyfront::KernelObject> {
-                     emit(diag, loc, clang::DiagnosticsEngine::Level::Remark,
-                          POLYREGION_DIAG_POLYSTL "Compilation events for [%0, target=%1, features=%2]\n%3", moduleId,
-                          std::string(magic_enum::enum_name(target)), features, repr(result));
+  const auto objects =
+      compiled //
+      | collect([&](const auto &target, const auto &features, const auto &result) -> std::optional<polyfront::KernelObject> {
+          emit(diag, loc, clang::DiagnosticsEngine::Level::Remark,
+               POLYREGION_DIAG_POLYSTL "Compilation events for [%0, target=%1, features=%2]\n%3", moduleId,
+               std::string(magic_enum::enum_name(target)), features, repr(result));
 
-                     if (auto bin = result.binary; !bin) {
-                       emit(diag, loc, borrowsHost ? clang::DiagnosticsEngine::Level::Remark : clang::DiagnosticsEngine::Level::Warning,
-                            POLYREGION_DIAG_POLYSTL "Backend failed to compile program [%0, target=%1, features=%2]\nReason: %3", moduleId,
-                            std::string(magic_enum::enum_name(target)), features, result.messages);
-                       return std::nullopt;
-                     } else {
+          if (auto bin = result.binary; !bin) {
+            emit(diag, loc, borrowsHost ? clang::DiagnosticsEngine::Level::Remark : clang::DiagnosticsEngine::Level::Warning,
+                 POLYREGION_DIAG_POLYSTL "Backend failed to compile program [%0, target=%1, features=%2]\nReason: %3", moduleId,
+                 std::string(magic_enum::enum_name(target)), features, result.messages);
+            return std::nullopt;
+          } else {
 
-                       if (!result.messages.empty()) {
-                         emit(diag, loc, clang::DiagnosticsEngine::Level::Warning,
-                              POLYREGION_DIAG_POLYSTL "Backend emitted binary (%0KB) with warnings [%1, target=%2, features=%3]\n%4",
-                              std::to_string(static_cast<float>(bin->size()) / 1000.f), moduleId,
-                              std::string(magic_enum::enum_name(target)), features, result.messages);
+            if (!result.messages.empty()) {
+              emit(diag, loc, clang::DiagnosticsEngine::Level::Warning,
+                   POLYREGION_DIAG_POLYSTL "Backend emitted binary (%0KB) with warnings [%1, target=%2, features=%3]\n%4",
+                   std::to_string(static_cast<float>(bin->size()) / 1000.F), moduleId, std::string(magic_enum::enum_name(target)), features,
+                   result.messages);
 
-                       } else {
-                         emit(diag, loc, clang::DiagnosticsEngine::Level::Remark,
-                              POLYREGION_DIAG_POLYSTL "Backend emitted binary (%0KB) [%1, target=%2, features=%3]",
-                              std::to_string(static_cast<float>(bin->size()) / 1000.f), moduleId,
-                              std::string(magic_enum::enum_name(target)), features, result.messages);
-                       }
+            } else {
+              emit(diag, loc, clang::DiagnosticsEngine::Level::Remark,
+                   POLYREGION_DIAG_POLYSTL "Backend emitted binary (%0KB) [%1, target=%2, features=%3]",
+                   std::to_string(static_cast<float>(bin->size()) / 1000.F), moduleId, std::string(magic_enum::enum_name(target)), features,
+                   result.messages);
+            }
 
-                       if (auto format = runtime::moduleFormatOf(target)) {
-                         return polyfront::KernelObject{
-                             *format,                              //
-                             runtime::targetPlatformKind(target),  //
-                             result.features,                      //
-                             std::string(bin->begin(), bin->end()) //
-                         };
-                       } else {
-                         emit(diag, loc, clang::DiagnosticsEngine::Level::Remark,
-                              POLYREGION_DIAG_POLYSTL "Backend emitted binary for unknown target [%1, target=%2, features=%3]", moduleId,
-                              std::string(magic_enum::enum_name(target)), features, result.messages);
-                         return std::nullopt;
-                       }
-                     }
-                   }) //
-                 | to_vector();
+            if (auto format = runtime::moduleFormatOf(target)) {
+              return polyfront::KernelObject{
+                  *format,                              //
+                  runtime::targetPlatformKind(target),  //
+                  result.features,                      //
+                  std::string(bin->begin(), bin->end()) //
+              };
+            } else {
+              emit(diag, loc, clang::DiagnosticsEngine::Level::Remark,
+                   POLYREGION_DIAG_POLYSTL "Backend emitted binary for unknown target [%1, target=%2, features=%3]", moduleId,
+                   std::string(magic_enum::enum_name(target)), features, result.messages);
+              return std::nullopt;
+            }
+          }
+        }) //
+      | to_vector();
   // If targets were requested for this kind but every one of them failed to compile, escalate
   // to a hard error: a kernel bundle with zero objects compiles cleanly but then fails at run
   // time with "no compatible image", which is much harder to diagnose than a compile-time
@@ -243,8 +257,14 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
   if (mir.error)
     emit(diag, loc, clang::DiagnosticsEngine::Level::Warning, POLYREGION_DIAG_POLYSTL "Host mirroring compile failed [%0]: %1", moduleId,
          *mir.error);
-  return polyfront::recorded(polyfront::KernelBundle{moduleId, objects, layouts, remapper.readOnlyMembers, program_to_json(program).dump(),
-                                                     mir.bitcode, mir.mirrorId, asserts});
+  return polyfront::recorded(polyfront::KernelBundle{.moduleName = moduleId,
+                                                     .objects = objects,
+                                                     .layouts = layouts,
+                                                     .readOnlyMembers = remapper.readOnlyMembers,
+                                                     .metadata = program_to_json(program).dump(),
+                                                     .hostMirrorBitcode = mir.bitcode,
+                                                     .mirrorId = mir.mirrorId,
+                                                     .asserts = asserts});
 }
 
 void polystl::compilePackageProgram(const polyfront::Options &opts,                                //
@@ -263,7 +283,7 @@ void polystl::compilePackageProgram(const polyfront::Options &opts,             
 
   if ((C.getLangOpts().CUDA || C.getLangOpts().HIP) && C.getLangOpts().CUDAIsDevice) {
     for (const auto *kernel : deviceKernels) {
-      auto fn = remapper.handleCall(kernel, r).second;
+      const auto fn = remapper.handleCall(kernel, r).second;
       fn->decl.affinity = FunctionAffinity::Offload();
       fn->convention = CallConvention::OffloadEntry();
     }
@@ -508,7 +528,7 @@ void polystl::compilePackageProgram(const polyfront::Options &opts,             
     });
   }
   for (const auto &exportedFunction : exports) {
-    auto fn = remapper.handleCall(exportedFunction.decl, r).second;
+    const auto fn = remapper.handleCall(exportedFunction.decl, r).second;
     fn->decl.name = exportedFunction.name;
     fn->implements = exportedFunction.implements;
     fn->requiredCapabilities = exportedFunction.requiredCapabilities;

@@ -1,8 +1,16 @@
 #include "reflect-mem.h"
 
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <optional>
 #include <stack>
+#include <string>
+#include <unordered_map>
 #include <unordered_set>
+#include <utility>
+#include <vector>
 
 #include "llvm/ADT/MapVector.h"
 #include "llvm/Analysis/AliasAnalysis.h"
@@ -45,6 +53,7 @@
 #include "llvm/Transforms/Utils/ScalarEvolutionExpander.h"
 
 #include "aspartame/all.hpp"
+#include "aspartame/ext/llvm.hpp"
 
 #include "polyregion/conventions.h"
 #include "polyregion/interval.hpp"
@@ -57,11 +66,11 @@ using namespace aspartame;
 using namespace polyregion;
 
 const llvm::ConstantInt *getConstantInt(llvm::Value *v, const llvm::DataLayout &DL) {
-  if (auto *CI = dyn_cast<llvm::ConstantInt>(v)) return CI;
-  if (auto *CE = dyn_cast<llvm::Constant>(v)) {
+  if (const auto *CI = dyn_cast<llvm::ConstantInt>(v)) return CI;
+  if (const auto *CE = dyn_cast<llvm::Constant>(v)) {
     if (llvm::Constant *C = llvm::ConstantFoldConstant(CE, DL)) return dyn_cast<llvm::ConstantInt>(C);
   }
-  if (auto *Inst = dyn_cast<llvm::Instruction>(v)) {
+  if (const auto *Inst = dyn_cast<llvm::Instruction>(v)) {
     if (llvm::Constant *C = llvm::ConstantFoldInstruction(Inst, DL)) return dyn_cast<llvm::ConstantInt>(C);
   }
   return {};
@@ -92,12 +101,12 @@ struct MemAccess {
     if (!isRead && isWrite) access = Kind::WriteOnly;
 
     const auto intConst = [&](const size_t size, const size_t value) {
-      const auto ty = llvm::IntegerType::getIntNTy(C, size);
+      auto *const ty = llvm::IntegerType::getIntNTy(C, size);
       return llvm::ConstantInt::get(ty, llvm::APInt(ty->getBitWidth(), value));
     };
 
     const auto singleUnit = [&](llvm::Value *operand, const llvm::Type *tpe) {
-      const auto unitSize = intConst(64, tpe->getScalarSizeInBits() / 8);
+      auto *const unitSize = intConst(64, tpe->getScalarSizeInBits() / 8);
       return MemAccess{
           .kind = access,
           .origin = operand,
@@ -130,7 +139,7 @@ struct MemAccess {
   }
 };
 
-static std::string showConcise(const llvm::Value *V) {
+std::string showConcise(const llvm::Value *V) {
   if (llvm::isa<llvm::Function>(V)) {
     return V->getName().str();
   }
@@ -148,22 +157,20 @@ class CoarseGrainedTaintAnalysis {
   std::function<bool(llvm::Function *)> fnPredicate = [](const auto &) { return true; };
   bool debug = false;
 
-  bool isTainted(llvm::Value *V) const { return tainted.count(V); }
+  bool isTainted(llvm::Value *V) const { return tainted ^ contains(V); }
 
   bool isReturnTainted(llvm::Function *F) const {
-    for (const auto &BB : *F) {
-      if (const auto RI = llvm::dyn_cast<llvm::ReturnInst>(BB.getTerminator())) {
-        if (RI->getReturnValue() && isTainted(RI->getReturnValue())) return true;
-      }
-    }
-    return false;
+    return llvm::make_range(F->begin(), F->end()) ^ exists([&](const llvm::BasicBlock &BB) {
+             const auto *const RI = llvm::dyn_cast<llvm::ReturnInst>(BB.getTerminator());
+             return RI && RI->getReturnValue() && isTainted(RI->getReturnValue());
+           });
   }
 
   void taint(llvm::Value *V) {
 
     if (llvm::isa<llvm::ConstantPointerNull>(V)) return;
 
-    if (const auto GV = llvm::dyn_cast<llvm::GlobalVariable>(V)) { // skip LLVM globals
+    if (const auto *const GV = llvm::dyn_cast<llvm::GlobalVariable>(V)) { // skip LLVM globals
       if (GV->getSection() == "llvm.metadata") return;
       if (const auto name = GV->getName();      //
           name == "@llvm.global.annotations" || //
@@ -171,7 +178,7 @@ class CoarseGrainedTaintAnalysis {
         return;
     }
 
-    if (const auto F = llvm::dyn_cast<llvm::Function>(V)) {
+    if (const auto *const F = llvm::dyn_cast<llvm::Function>(V)) {
       switch (F->getIntrinsicID()) {
         case llvm::Intrinsic::annotation: [[fallthrough]];
         case llvm::Intrinsic::ptr_annotation: [[fallthrough]];
@@ -182,13 +189,13 @@ class CoarseGrainedTaintAnalysis {
       }
     }
 
-    if (const auto I = llvm::dyn_cast<llvm::Instruction>(V)) {
+    if (auto *const I = llvm::dyn_cast<llvm::Instruction>(V)) {
       if (!fnPredicate(I->getFunction())) return;
       if (debug) llvm::errs() << "[CGTA]       marking ins `" << *I << "` (from: " << I->getFunction()->getName() << ")\n";
-    } else if (const auto A = llvm::dyn_cast<llvm::Argument>(V)) {
+    } else if (auto *const A = llvm::dyn_cast<llvm::Argument>(V)) {
       if (!fnPredicate(A->getParent())) return;
       if (debug) llvm::errs() << "[CGTA]       marking arg `" << *A << "` (from: " << A->getParent()->getName() << ")\n";
-    } else if (const auto F = llvm::dyn_cast<llvm::Function>(V)) {
+    } else if (auto *const F = llvm::dyn_cast<llvm::Function>(V)) {
       if (!fnPredicate(F)) return;
       if (debug) llvm::errs() << "[CGTA]       marking fn  `" << showConcise(F) << "`\n";
     } else {
@@ -230,7 +237,7 @@ class CoarseGrainedTaintAnalysis {
             [&](llvm::IntToPtrInst *I) { taint(I->getOperand(0)); },             //
             [&](llvm::PtrToIntInst *I) { taint(I->getOperand(0)); },             //
             [&](llvm::PHINode *I) {
-              for (auto &U : I->incoming_values())
+              for (const auto &U : I->incoming_values())
                 taint(U.get());
             },
             [&](llvm::SelectInst *I) {
@@ -274,7 +281,7 @@ class CoarseGrainedTaintAnalysis {
               [&](llvm::StoreInst *) { taint(U); },         //
               [&](llvm::CallBase *CB) {
                 // XXX it's impossible to get a CallInst in a ConstantExpr, so this should be safe
-                auto F = CB->getCalledFunction();
+                auto *F = CB->getCalledFunction();
                 if (!fnPredicate(F)) return;
                 if (!F) return; // XXX handle indirect calls later
                 bool defer = false;
@@ -311,21 +318,21 @@ public:
     t.fnPredicate = fnPredicate;
     std::unordered_set<llvm::Function *> visited;
     std::stack<llvm::Function *> workList;
-    for (const auto R : Roots)
+    for (auto *const R : Roots)
       workList.emplace(R);
-    for (const auto V : Values)
+    for (auto *const V : Values)
       t.taint(V);
 
     if (debug) llvm::errs() << "[CGTA] resolving globals for " << M.getName() << "\n";
     for (auto &G : M.globals()) {
       // if (debug) llvm::errs() << "[CGTA]   global: " << G << "\n";
       if (!G.hasInitializer()) continue;
-      auto init = G.getInitializer();
+      auto *init = G.getInitializer();
       if (llvm::isa<llvm::GlobalValue>(init)) continue;
       for (auto &op : init->operands()) {
         t.globals.emplace(op, &G);
-        if (auto AGG = llvm::dyn_cast<llvm::ConstantAggregate>(op)) {
-          for (auto &aggOps : AGG->operands())
+        if (auto *AGG = llvm::dyn_cast<llvm::ConstantAggregate>(op)) {
+          for (const auto &aggOps : AGG->operands())
             t.globals.emplace(aggOps, AGG);
         }
       }
@@ -333,7 +340,7 @@ public:
     if (debug) llvm::errs() << "[CGTA] found " << t.globals.size() << " globals\n";
     t.propagateForward();
     while (!workList.empty()) {
-      auto F = workList.top();
+      auto *F = workList.top();
       workList.pop();
       if (!visited.insert(F).second) continue;
       if (debug) llvm::errs() << "[CGTA] function: `" << showConcise(F) << "`\n";
@@ -348,18 +355,18 @@ public:
         if (!t.isTainted(&arg)) continue;
         if (debug) llvm::errs() << "[CGTA]   tainted arg: `" << arg << "`\n";
         for (const auto &U : F->uses()) {
-          if (auto ACS = llvm::AbstractCallSite(&U)) {
+          if (const auto ACS = llvm::AbstractCallSite(&U)) {
             t.taint(ACS.getCallArgOperand(arg.getArgNo()));
 
-            const auto call = ACS.getInstruction();
-            if (auto next = call->getFunction(); next && fnPredicate(next)) {
+            auto *const call = ACS.getInstruction();
+            if (auto *next = call->getFunction(); next && fnPredicate(next)) {
               if (t.isReturnTainted(next)) t.taint(call);
               if (debug) llvm::errs() << "[CGTA]   push next: `" << next->getName() << "`\n";
               workList.push(next);
             }
           } else if (debug) {
 
-            if (const auto fnNoACS = llvm::dyn_cast<llvm::Function>(&U)) {
+            if (const auto *const fnNoACS = llvm::dyn_cast<llvm::Function>(&U)) {
               llvm::errs() << "[CGTA]   unknown use (failed ACS, usage is a function): " << fnNoACS->getName() << "\n";
             } else {
               llvm::errs() << "[CGTA]   unknown use (failed ACS): \n";
@@ -383,7 +390,7 @@ struct Target {
   llvm::Value *unitInBytes;
 };
 
-static llvm::Instruction *laterInsertPoint(llvm::Instruction *a, llvm::Instruction *b, const llvm::DominatorTree &DT) {
+llvm::Instruction *laterInsertPoint(llvm::Instruction *a, llvm::Instruction *b, const llvm::DominatorTree &DT) {
   if (a->getParent() == b->getParent()) return !a->comesBefore(b) ? a : b;
   if (DT.dominates(a, b)) return b;
   if (DT.dominates(b, a)) return a;
@@ -399,9 +406,9 @@ struct CoalescedTarget {
 void callMap(llvm::IRBuilder<> &B, llvm::Module &M, llvm::Value *origin, llvm::Value *sizeInBytes, llvm::Value *unitInBytes,
              MemAccess::Kind kind) {
   auto *intPtrTy = B.getIntPtrTy(M.getDataLayout());
-  const auto mapFnTy = llvm::FunctionType::get(B.getVoidTy(), llvm::ArrayRef<llvm::Type *>{B.getPtrTy(), intPtrTy, intPtrTy}, false);
+  auto *const mapFnTy = llvm::FunctionType::get(B.getVoidTy(), llvm::ArrayRef<llvm::Type *>{B.getPtrTy(), intPtrTy, intPtrTy}, false);
   const auto fn = M.getOrInsertFunction(
-      [&]() {
+      [&] {
         switch (kind) {
           case MemAccess::Kind::ReadOnly: return "polyrt_map_read";
           case MemAccess::Kind::WriteOnly: return "polyrt_map_write";
@@ -424,14 +431,14 @@ void insertMapCalls(llvm::Module &M, //
   llvm::DenseMap<const llvm::Instruction *, size_t> instrPos;
   {
     size_t n = 0;
-    for (auto &F : M)
-      for (auto &BB : F)
-        for (auto &I : BB)
+    for (const auto &F : M)
+      for (const auto &BB : F)
+        for (const auto &I : BB)
           instrPos[&I] = n++;
   }
   const auto posOf = [&](llvm::Value *V) -> size_t {
-    if (auto *I = llvm::dyn_cast<llvm::Instruction>(V)) return instrPos.lookup(I);
-    if (auto *A = llvm::dyn_cast<llvm::Argument>(V)) return A->getArgNo(); // args sort ahead of body
+    if (const auto *I = llvm::dyn_cast<llvm::Instruction>(V)) return instrPos.lookup(I);
+    if (const auto *A = llvm::dyn_cast<llvm::Argument>(V)) return A->getArgNo(); // args sort ahead of body
     return 0;
   };
   // total order (module position, then first-seen index) for deterministic sorting
@@ -454,7 +461,7 @@ void insertMapCalls(llvm::Module &M, //
     //    2. Multiple groups have direct use from argument, emit error
     if (verbose) llvm::errs() << "[ReflectMemPass] In " << (F ? F->getName() : llvm::StringRef("(top-level)")) << "\n";
     for (auto &V : Vs) {
-      auto I = llvm::dyn_cast<llvm::Instruction>(V);
+      auto *I = llvm::dyn_cast<llvm::Instruction>(V);
       if (!I) continue;
 
       const auto access = MemAccess::resolve(M.getContext(), I);
@@ -477,21 +484,21 @@ void insertMapCalls(llvm::Module &M, //
         });
       };
 
-      if (auto *AddRec = llvm::dyn_cast_if_present<llvm::SCEVAddRecExpr>(SE.getSCEV(access->origin))) {
+      if (const auto *AddRec = llvm::dyn_cast_if_present<llvm::SCEVAddRecExpr>(SE.getSCEV(access->origin))) {
         if (!SE.hasLoopInvariantBackedgeTakenCount(AddRec->getLoop())) {
           emplaceNonSCEV("SCEV");
           continue;
         }
-        const auto scLB = AddRec->getStart();
-        const auto scStride = AddRec->getStepRecurrence(SE);
-        const auto scExitCount = SE.getExitCount(AddRec->getLoop(), AddRec->getLoop()->getExitingBlock());
+        const auto *const scLB = AddRec->getStart();
+        const auto *const scStride = AddRec->getStepRecurrence(SE);
+        const auto *const scExitCount = SE.getExitCount(AddRec->getLoop(), AddRec->getLoop()->getExitingBlock());
         if (llvm::isa<llvm::SCEVCouldNotCompute>(scExitCount)) {
           emplaceNonSCEV("SCEVNoExit");
           continue;
         }
         // XXX EvalTy = scStride width; hard-coded i64 or LLVM's 65-bit APInt default trips getMulExpr
         auto *scStrideTy = scStride->getType();
-        const auto scTripCount = SE.getTripCountFromExitCount(
+        const auto *const scTripCount = SE.getTripCountFromExitCount(
             /*ExitCount*/ scExitCount,
             /*EvalTy*/ scStrideTy,
             /*L*/ AddRec->getLoop());
@@ -499,23 +506,23 @@ void insertMapCalls(llvm::Module &M, //
           emplaceNonSCEV("SCEVNoTrip");
           continue;
         }
-        const auto scUB = SE.getAddExpr(scLB, SE.getMulExpr(scStride, scTripCount));
-        const auto loopPredecessor = AddRec->getLoop()->getLoopPredecessor();
+        const auto *const scUB = SE.getAddExpr(scLB, SE.getMulExpr(scStride, scTripCount));
+        auto *const loopPredecessor = AddRec->getLoop()->getLoopPredecessor();
         if (!loopPredecessor) {
           emplaceNonSCEV("SCEVNoPredecessor");
           continue;
         }
-        const auto predecessor = loopPredecessor->getTerminator();
+        auto *const predecessor = loopPredecessor->getTerminator();
         // LLVM 22 dropped the DataLayout parameter from SCEVExpander; the expander now pulls
         // it from `SE.getDataLayout()` directly.
         llvm::SCEVExpander Expander(SE, "scev");
         Expander.setInsertPoint(predecessor);
-        const auto lb = Expander.expandCodeFor(scLB);
-        const auto ub = Expander.expandCodeFor(scUB);
+        auto *const lb = Expander.expandCodeFor(scLB);
+        auto *const ub = Expander.expandCodeFor(scUB);
         llvm::IRBuilder<> B(predecessor);
         // ptr-diff width = IntPtrTy; SCEVExpander folds via getMulExpr on aarch32
         auto *diffTy = B.getIntPtrTy(M.getDataLayout());
-        const auto ptrDiff = B.CreateSub(B.CreatePtrToInt(ub, diffTy), B.CreatePtrToInt(lb, diffTy));
+        auto *const ptrDiff = B.CreateSub(B.CreatePtrToInt(ub, diffTy), B.CreatePtrToInt(lb, diffTy));
         if (verbose)
           llvm::errs() << "[ReflectMemPass]   " << static_cast<char>(access->kind) << " InvariantSCEV@`" << *predecessor << "`"
                        << " origin=`" << *lb << "`"
@@ -537,11 +544,11 @@ void insertMapCalls(llvm::Module &M, //
     auto &DT = FAM.getResult<llvm::DominatorTreeAnalysis>(*BB->getParent());
     std::vector<Target> independent;
     IntervalMap<CoalescedTarget> coalesced;
-    for (auto &t : ts) {
+    for (const auto &t : ts) {
       int64_t offset = -1;
-      const auto base = GetPointerBaseWithConstantOffset(t.origin, offset, M.getDataLayout());
-      if (const auto constSize = getConstantInt(t.sizeInBytes, M.getDataLayout()); offset != -1 && constSize) {
-        coalesced.insert({offset, constSize->getSExtValue()},
+      auto *const base = GetPointerBaseWithConstantOffset(t.origin, offset, M.getDataLayout());
+      if (const auto *const constSize = getConstantInt(t.sizeInBytes, M.getDataLayout()); offset != -1 && constSize) {
+        coalesced.insert({.offset = offset, .size = constSize->getSExtValue()},
                          CoalescedTarget{.access = t.access, .insertPoint = t.insertPoint, .origin = base},
                          [&DT](const CoalescedTarget &l, const CoalescedTarget &r) {
                            return CoalescedTarget{.access = MemAccess::combine(l.access, r.access),
@@ -560,7 +567,7 @@ void insertMapCalls(llvm::Module &M, //
       callMap(B, M, //
               B.CreateConstInBoundsGEP1_64(B.getInt8Ty(), ct.origin, range.offset), B.getInt64(range.size), B.getInt64(1), ct.access);
     }
-    for (auto &t : independent) {
+    for (const auto &t : independent) {
 
       if (verbose) llvm::errs() << "[ReflectMemPass] Insert independent: [" << static_cast<char>(t.access) << "] `" << *t.origin << "`\n";
       B.SetInsertPoint(t.insertPoint);
@@ -574,12 +581,12 @@ bool runSplice(llvm::Module &M, llvm::FunctionAnalysisManager &FAM, const bool v
   std::vector<llvm::Value *> values;
   llvm_shared::findValuesWithStringAnnotations(M, [&](llvm::Function &F, llvm::Value *V, llvm::StringRef Annotation) {
     if (!Annotation.starts_with(POLYREFLECT_TRACK_ANNOTATION)) return;
-    const auto U = llvm::getUnderlyingObject(V, 0);
-    if (auto GV = llvm::dyn_cast<llvm::GlobalVariable>(U)) {
+    auto *const U = llvm::getUnderlyingObject(V, 0);
+    if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(U)) {
       if (verbose) llvm::errs() << "[ReflectMemPass] Found annotated (GV) in " << F.getName() << ": `" << *GV << "`\n";
       roots.emplace_back(&F);
       values.emplace_back(GV);
-    } else if (auto I = llvm::dyn_cast<llvm::Instruction>(U)) {
+    } else if (auto *I = llvm::dyn_cast<llvm::Instruction>(U)) {
       if (verbose) llvm::errs() << "[ReflectMemPass] Found annotated (Ins) in " << F.getName() << ": `" << *I << "`\n";
       roots.emplace_back(&F);
       values.emplace_back(I);
@@ -604,7 +611,7 @@ bool runSplice(llvm::Module &M, llvm::FunctionAnalysisManager &FAM, const bool v
   }
 
   const auto tainted =
-      CoarseGrainedTaintAnalysis::propagate(M, roots, values, [&](const llvm::Function *F) { return ignored.count(F) == 0; }, verbose);
+      CoarseGrainedTaintAnalysis::propagate(M, roots, values, [&](const llvm::Function *F) { return !(ignored ^ contains(F)); }, verbose);
 
   if (verbose) llvm::errs() << "[ReflectMemPass] CGTA yielded " << tainted.size() << " tainted values\n";
 
@@ -621,9 +628,9 @@ bool runSplice(llvm::Module &M, llvm::FunctionAnalysisManager &FAM, const bool v
   if (verbose) {
     size_t cgtaLoads = 0, cgtaStores = 0;
     llvm::errs() << "[ReflectMemPass] CGTA summary:\n";
-    for (auto &[F, Vs] : groups) {
+    for (const auto &[F, Vs] : groups) {
       llvm::errs() << "[ReflectMemPass]   - " << (F ? F->getName() : llvm::StringRef("(top-level)")) << "\n";
-      for (auto &V : Vs) {
+      for (const auto &V : Vs) {
         llvm::errs() << "[ReflectMemPass]     `" << showConcise(V) << "`\n";
         if (llvm::isa<llvm::LoadInst>(V)) cgtaLoads++;
         else if (llvm::isa<llvm::StoreInst>(V)) cgtaStores++;
@@ -655,7 +662,7 @@ bool runSplice(llvm::Module &M, llvm::FunctionAnalysisManager &FAM, const bool v
 } // namespace
 
 polyreflect::ReflectMemPass::ReflectMemPass(const bool verbose) : verbose(verbose) {}
-llvm::PreservedAnalyses polyreflect::ReflectMemPass::run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM) {
+llvm::PreservedAnalyses polyreflect::ReflectMemPass::run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM) const {
   auto &FAM = MAM.getResult<llvm::FunctionAnalysisManagerModuleProxy>(M).getManager();
   if (runSplice(M, FAM, verbose)) return llvm::PreservedAnalyses::none();
   return llvm::PreservedAnalyses::all();

@@ -14,10 +14,11 @@ class SupportSuite extends munit.FunSuite {
       assertEquals(r.toList, List.tabulate(r.size)(Support.linearise(r.start, r.step)(_)))
 
     val values = List(1, 2, 3, 10, -1, -2, -3, -10, 0)
+    val steps  = values.filter(_ != 0)
     for {
       start <- values
       stop  <- values
-      step  <- values.filter(_ != 0)
+      step  <- steps
     } {
       assertLinearise(start to stop by step)
       assertLinearise(start until stop by step)

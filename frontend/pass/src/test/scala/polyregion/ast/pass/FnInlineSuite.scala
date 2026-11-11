@@ -792,7 +792,7 @@ class FnInlineSuite extends munit.FunSuite {
       "refined.symbol",
       rtn = refined,
       body = List(
-        p.Stmt.Var(declared, Some(p.Expr.Alias(p.Term.Poison(erased))), isMutable = false),
+        p.Stmt.Var(declared, Some(p.Expr.Alias(p.Term.Poison(erased)))),
         p.Stmt.Return(p.Expr.Alias(p.Term.Select(used, Nil, refined)))
       )
     )

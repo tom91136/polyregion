@@ -40,8 +40,7 @@ class ArenaViewSuite extends munit.FunSuite {
         ),
         p.Stmt.Var(
           pp,
-          Some(p.Expr.RefTo(selectT(itVal), None, iterTpe, p.Type.Space.Global, p.Region.Opaque)),
-          isMutable = false
+          Some(p.Expr.RefTo(selectT(itVal), None, iterTpe, p.Type.Space.Global, p.Region.Opaque))
         ),
         p.Stmt.Mut(
           p.Term.Select(pp, List(p.PathStep.Field("ptr"), p.PathStep.Field("val")), p.Type.IntS32),
@@ -114,9 +113,9 @@ class ArenaViewSuite extends munit.FunSuite {
   test("a capture field is addressed from the root argument rather than from zero") {
     val result = ArenaView(PassTest.program(scalarCapture(), Nil, scalarDefs), NoopLog)
     val root   = result.entry.args.head.named
-    val stores = result.entry.collectAll[p.Stmt].collect { case s @ p.Stmt.Update(_, _, p.Term.IntS32Const(5)) => s }
+    val stores = result.entry.collectAll[p.Stmt].collect { case p.Stmt.Update(_, i, p.Term.IntS32Const(5)) => i }
     assertEquals(stores.size, 1, result.entry.body.map(_.repr).mkString("\n"))
-    val index = stores.head match { case p.Stmt.Update(_, i, _) => i; case _ => fail("expected a store") }
+    val index = stores.head
     val defs  = result.entry.collectAll[p.Stmt].collect { case p.Stmt.Var(n, Some(e), _) => n -> e }.toMap
     def reachesRoot(term: p.Term): Boolean = term match {
       case p.Term.Select(n, Nil, _) => n == root || defs.get(n).exists(_.collectAll[p.Term].exists(reachesRoot))
@@ -202,8 +201,7 @@ class ArenaViewSuite extends munit.FunSuite {
                 p.Term.IntS64Const(0),
                 privatePtr
               )
-            ),
-            isMutable = false
+            )
           ),
           p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
         )
@@ -243,8 +241,8 @@ class ArenaViewSuite extends munit.FunSuite {
         args = List(capArg),
         body = List(
           p.Stmt.Var(storage, None, isMutable = true),
-          p.Stmt.Var(rawPointer, Some(p.Expr.Cast(selectT(storage), selfPtr)), isMutable = false),
-          p.Stmt.Var(pointer, Some(p.Expr.Alias(selectT(rawPointer))), isMutable = false),
+          p.Stmt.Var(rawPointer, Some(p.Expr.Cast(selectT(storage), selfPtr))),
+          p.Stmt.Var(pointer, Some(p.Expr.Alias(selectT(rawPointer)))),
           p.Stmt.Mut(
             p.Term.Select(pointer, List(p.PathStep.Field(selfMember.symbol)), selfPtr),
             p.Expr.Cast(selectT(pointer), selfPtr)
@@ -258,8 +256,7 @@ class ArenaViewSuite extends munit.FunSuite {
                   selectT(pointer)
                 )
               )
-            ),
-            isMutable = false
+            )
           ),
           p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
         )
@@ -304,7 +301,7 @@ class ArenaViewSuite extends munit.FunSuite {
         args = List(capArg),
         body = List(
           p.Stmt.Var(storage, None, isMutable = true),
-          p.Stmt.Var(pointer, Some(direct), isMutable = false),
+          p.Stmt.Var(pointer, Some(direct)),
           p.Stmt.Var(holder, None, isMutable = true),
           p.Stmt.Mut(
             p.Term.Select(holder, List(p.PathStep.Field(pointerMember.symbol)), pointerTpe),
@@ -312,8 +309,7 @@ class ArenaViewSuite extends munit.FunSuite {
           ),
           p.Stmt.Var(
             loaded,
-            Some(p.Expr.Alias(p.Term.Select(holder, List(p.PathStep.Field(pointerMember.symbol)), pointerTpe))),
-            isMutable = false
+            Some(p.Expr.Alias(p.Term.Select(holder, List(p.PathStep.Field(pointerMember.symbol)), pointerTpe)))
           ),
           p.Stmt.Var(copied, None, isMutable = true),
           p.Stmt.Mut(
@@ -329,8 +325,7 @@ class ArenaViewSuite extends munit.FunSuite {
                   selectT(pointer)
                 )
               )
-            ),
-            isMutable = false
+            )
           ),
           p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
         )
@@ -386,8 +381,7 @@ class ArenaViewSuite extends munit.FunSuite {
             p.Stmt.Var(local, None, isMutable = true),
             p.Stmt.Var(
               source,
-              Some(p.Expr.RefTo(selectT(local), None, derivedTpe, p.Type.Space.Private, p.Region.Opaque)),
-              isMutable = false
+              Some(p.Expr.RefTo(selectT(local), None, derivedTpe, p.Type.Space.Private, p.Region.Opaque))
             ),
             p.Stmt.Var(
               adjusted,
@@ -401,8 +395,7 @@ class ArenaViewSuite extends munit.FunSuite {
                   p.Intr
                     .LogicNeq(selectT(source), p.Term.NullPtrConst(derivedTpe, p.Type.Space.Global, p.Region.Opaque))
                 )
-              ),
-              isMutable = false
+              )
             ),
             p.Stmt.Cond(
               selectT(nonNull),
@@ -422,8 +415,7 @@ class ArenaViewSuite extends munit.FunSuite {
             ),
             p.Stmt.Var(
               nullSource,
-              Some(p.Expr.Alias(p.Term.NullPtrConst(derivedTpe, p.Type.Space.Global, p.Region.Opaque))),
-              false
+              Some(p.Expr.Alias(p.Term.NullPtrConst(derivedTpe, p.Type.Space.Global, p.Region.Opaque)))
             ),
             p.Stmt.Var(
               isNull,
@@ -432,8 +424,7 @@ class ArenaViewSuite extends munit.FunSuite {
                   p.Intr
                     .LogicEq(selectT(nullSource), p.Term.NullPtrConst(derivedTpe, p.Type.Space.Global, p.Region.Opaque))
                 )
-              ),
-              false
+              )
             ),
             p.Stmt.Var(flag, Some(p.Expr.Alias(p.Term.IntS32Const(0))), true),
             p.Stmt.Cond(
@@ -510,8 +501,7 @@ class ArenaViewSuite extends munit.FunSuite {
                 p.Term.IntS64Const(0),
                 globalPtr
               )
-            ),
-            isMutable = false
+            )
           ),
           p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
         )
@@ -552,8 +542,7 @@ class ArenaViewSuite extends munit.FunSuite {
                   p.Term.NullPtrConst(capTpe, p.Type.Space.Global, p.Region.Opaque)
                 )
               )
-            ),
-            isMutable = false
+            )
           ),
           p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
         )
@@ -584,8 +573,7 @@ class ArenaViewSuite extends munit.FunSuite {
           p.Stmt.Var(local, Some(p.Expr.Alias(p.Term.IntS64Const(5))), isMutable = true),
           p.Stmt.Var(
             localRef,
-            Some(p.Expr.RefTo(selectT(local), None, p.Type.IntS64, p.Type.Space.Global, p.Region.Opaque)),
-            false
+            Some(p.Expr.RefTo(selectT(local), None, p.Type.IntS64, p.Type.Space.Global, p.Region.Opaque))
           ),
           p.Stmt.Var(
             arenaRef,
@@ -597,8 +585,7 @@ class ArenaViewSuite extends munit.FunSuite {
                 p.Type.Space.Global,
                 p.Region.Opaque
               )
-            ),
-            false
+            )
           ),
           p.Stmt.Var(picked, None, isMutable = true),
           p.Stmt.Cond(
@@ -606,8 +593,8 @@ class ArenaViewSuite extends munit.FunSuite {
             List(p.Stmt.Mut(selectT(picked), p.Expr.Alias(selectT(arenaRef)))),
             List(p.Stmt.Mut(selectT(picked), p.Expr.Alias(selectT(localRef))))
           ),
-          p.Stmt.Var(alias, Some(p.Expr.Alias(selectT(picked))), false),
-          p.Stmt.Var(value, Some(p.Expr.Index(selectT(alias), p.Term.IntS64Const(0), p.Type.IntS64)), false),
+          p.Stmt.Var(alias, Some(p.Expr.Alias(selectT(picked)))),
+          p.Stmt.Var(value, Some(p.Expr.Index(selectT(alias), p.Term.IntS64Const(0), p.Type.IntS64))),
           p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
         )
       ),
@@ -641,8 +628,7 @@ class ArenaViewSuite extends munit.FunSuite {
           p.Stmt.Var(local, Some(p.Expr.Alias(p.Term.IntS64Const(5))), isMutable = true),
           p.Stmt.Var(
             localRef,
-            Some(p.Expr.RefTo(selectT(local), None, p.Type.IntS64, p.Type.Space.Global, p.Region.Opaque)),
-            false
+            Some(p.Expr.RefTo(selectT(local), None, p.Type.IntS64, p.Type.Space.Global, p.Region.Opaque))
           ),
           p.Stmt.Var(
             arenaRef,
@@ -654,8 +640,7 @@ class ArenaViewSuite extends munit.FunSuite {
                 p.Type.Space.Global,
                 p.Region.Opaque
               )
-            ),
-            false
+            )
           ),
           p.Stmt.Var(picked, None, isMutable = true),
           p.Stmt.Cond(
@@ -712,7 +697,7 @@ class ArenaViewSuite extends munit.FunSuite {
             )
           ),
           p.Stmt.Var(copy, Some(p.Expr.Alias(selectT(picked))), isMutable = true),
-          p.Stmt.Var(value, Some(p.Expr.Index(selectT(copy), p.Term.IntS64Const(0), p.Type.IntS64)), false),
+          p.Stmt.Var(value, Some(p.Expr.Index(selectT(copy), p.Term.IntS64Const(0), p.Type.IntS64))),
           p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
         )
       ),
@@ -741,8 +726,7 @@ class ArenaViewSuite extends munit.FunSuite {
               p.Expr.IntrOp(
                 p.Intr.LogicEq(selectT(current), p.Term.NullPtrConst(capTpe, p.Type.Space.Global, p.Region.Opaque))
               )
-            ),
-            isMutable = false
+            )
           ),
           p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
         )
@@ -779,18 +763,15 @@ class ArenaViewSuite extends munit.FunSuite {
                 p.Type.Space.Global,
                 p.Region.Rooted(capArg.named)
               )
-            ),
-            isMutable = false
+            )
           ),
           p.Stmt.Var(
             loaded,
-            Some(p.Expr.SpecOp(p.Spec.GpuVolatileLoad(selectT(pointer), value.tpe))),
-            isMutable = false
+            Some(p.Expr.SpecOp(p.Spec.GpuVolatileLoad(selectT(pointer), value.tpe)))
           ),
           p.Stmt.Var(
             stored,
-            Some(p.Expr.SpecOp(p.Spec.GpuVolatileStore(selectT(pointer), selectT(loaded)))),
-            isMutable = false
+            Some(p.Expr.SpecOp(p.Spec.GpuVolatileStore(selectT(pointer), selectT(loaded))))
           ),
           p.Stmt.Var(
             swapped,
@@ -805,8 +786,7 @@ class ArenaViewSuite extends munit.FunSuite {
                   value.tpe
                 )
               )
-            ),
-            isMutable = false
+            )
           ),
           p.Stmt.Var(
             compared,
@@ -821,8 +801,7 @@ class ArenaViewSuite extends munit.FunSuite {
                   value.tpe
                 )
               )
-            ),
-            isMutable = false
+            )
           ),
           p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
         )
@@ -864,18 +843,15 @@ class ArenaViewSuite extends munit.FunSuite {
         body = List(
           p.Stmt.Var(
             pointer,
-            Some(p.Expr.Alias(p.Term.Select(capArg.named, List(p.PathStep.Field("pair")), pairPtr))),
-            isMutable = false
+            Some(p.Expr.Alias(p.Term.Select(capArg.named, List(p.PathStep.Field("pair")), pairPtr)))
           ),
           p.Stmt.Var(
             loaded,
-            Some(p.Expr.SpecOp(p.Spec.GpuVolatileLoad(selectT(pointer), pairTpe))),
-            isMutable = false
+            Some(p.Expr.SpecOp(p.Spec.GpuVolatileLoad(selectT(pointer), pairTpe)))
           ),
           p.Stmt.Var(
             stored,
-            Some(p.Expr.SpecOp(p.Spec.GpuVolatileStore(selectT(pointer), selectT(loaded)))),
-            isMutable = false
+            Some(p.Expr.SpecOp(p.Spec.GpuVolatileStore(selectT(pointer), selectT(loaded))))
           ),
           p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
         )
@@ -913,11 +889,10 @@ class ArenaViewSuite extends munit.FunSuite {
   )
 
   private def loadAndIndex(source: p.Term, loaded: p.Named): List[p.Stmt] = List(
-    p.Stmt.Var(loaded, Some(p.Expr.Alias(source)), isMutable = false),
+    p.Stmt.Var(loaded, Some(p.Expr.Alias(source))),
     p.Stmt.Var(
       named("value", p.Type.IntS32),
-      Some(p.Expr.Index(selectT(loaded), p.Term.IntS64Const(0), p.Type.IntS32)),
-      isMutable = false
+      Some(p.Expr.Index(selectT(loaded), p.Term.IntS64Const(0), p.Type.IntS32))
     ),
     p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
   )
@@ -1049,11 +1024,8 @@ class ArenaViewSuite extends munit.FunSuite {
         args = List(byValue, explicit),
         body = List(
           p.Stmt.Var(copy, Some(p.Expr.Alias(selectT(byValue.named))), true),
-          p.Stmt.Var(
-            named("early", p.Type.IntS32),
-            Some(p.Expr.Index(copyField, p.Term.IntS64Const(0), p.Type.IntS32)),
-            false
-          ),
+          p.Stmt
+            .Var(named("early", p.Type.IntS32), Some(p.Expr.Index(copyField, p.Term.IntS64Const(0), p.Type.IntS32))),
           p.Stmt.Mut(copyField, p.Expr.Alias(selectT(explicit.named)))
         ) ::: loadAndIndex(copyField, named("loaded", pointerTpe))
       ),
@@ -1094,9 +1066,15 @@ class ArenaViewSuite extends munit.FunSuite {
           p.Stmt.Var(pair, None, isMutable = true),
           p.Stmt.Mut(first, p.Expr.Alias(selectT(left.named))),
           p.Stmt.Mut(second, p.Expr.Alias(selectT(right.named))),
-          p.Stmt.Var(named("a", p.Type.IntS32), Some(p.Expr.Index(first, p.Term.IntS64Const(0), p.Type.IntS32)), false),
+          p.Stmt.Var(
+            named("a", p.Type.IntS32),
+            Some(p.Expr.Index(first, p.Term.IntS64Const(0), p.Type.IntS32))
+          ),
           p.Stmt
-            .Var(named("b", p.Type.IntS32), Some(p.Expr.Index(second, p.Term.IntS64Const(0), p.Type.IntS32)), false),
+            .Var(
+              named("b", p.Type.IntS32),
+              Some(p.Expr.Index(second, p.Term.IntS64Const(0), p.Type.IntS32))
+            ),
           p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
         )
       ),
@@ -1115,7 +1093,7 @@ class ArenaViewSuite extends munit.FunSuite {
         List(
           p.Stmt.Var(holder, None, isMutable = true),
           p.Stmt.Mut(holderField(holder), p.Expr.Alias(selectT(external.named))),
-          p.Stmt.Var(copy, Some(p.Expr.Alias(selectT(holder))), isMutable = false)
+          p.Stmt.Var(copy, Some(p.Expr.Alias(selectT(holder))))
         ) ::: loadAndIndex(holderField(copy), named("loaded", pointerTpe))
       ),
       NoopLog
@@ -1136,13 +1114,11 @@ class ArenaViewSuite extends munit.FunSuite {
           p.Stmt.Var(loaded, Some(p.Expr.Alias(holderField(holder))), isMutable = true),
           p.Stmt.Var(
             named("address", p.Type.Ptr(pointerTpe, p.Type.Space.Private)),
-            Some(p.Expr.RefTo(selectT(loaded), None, pointerTpe, p.Type.Space.Private, p.Region.Opaque)),
-            isMutable = false
+            Some(p.Expr.RefTo(selectT(loaded), None, pointerTpe, p.Type.Space.Private, p.Region.Opaque))
           ),
           p.Stmt.Var(
             named("value", p.Type.IntS32),
-            Some(p.Expr.Index(selectT(loaded), p.Term.IntS64Const(0), p.Type.IntS32)),
-            false
+            Some(p.Expr.Index(selectT(loaded), p.Term.IntS64Const(0), p.Type.IntS32))
           ),
           p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
         )
@@ -1165,11 +1141,7 @@ class ArenaViewSuite extends munit.FunSuite {
         List(external),
         List(
           p.Stmt.Var(holder, None, isMutable = true),
-          p.Stmt.Var(
-            self,
-            Some(p.Expr.RefTo(selectT(holder), None, holderTpe, p.Type.Space.Private, p.Region.Opaque)),
-            false
-          ),
+          p.Stmt.Var(self, Some(p.Expr.RefTo(selectT(holder), None, holderTpe, p.Type.Space.Private, p.Region.Opaque))),
           p.Stmt.Var(alias, Some(p.Expr.Alias(selectT(self))), isMutable = true),
           p.Stmt.Mut(
             p.Term.Select(alias, List(p.PathStep.Field("pointer")), pointerTpe).asInstanceOf[p.Term.Select],
@@ -1211,8 +1183,7 @@ class ArenaViewSuite extends munit.FunSuite {
                 p.Type.Space.Global,
                 p.Region.Opaque
               )
-            ),
-            false
+            )
           ),
           p.Stmt.Mut(holderField(holder), p.Expr.Alias(selectT(derived)))
         ) ::: loadAndIndex(holderField(holder), named("loaded", pointerTpe))
@@ -1242,8 +1213,7 @@ class ArenaViewSuite extends munit.FunSuite {
                 p.Type.Space.Global,
                 p.Region.Opaque
               )
-            ),
-            false
+            )
           ),
           p.Stmt.Mut(holderField(holder), p.Expr.Alias(selectT(derived))),
           p.Stmt.Var(copy, Some(p.Expr.Alias(selectT(holder))), isMutable = true)
@@ -1273,8 +1243,7 @@ class ArenaViewSuite extends munit.FunSuite {
                 p.Type.Space.Global,
                 p.Region.Opaque
               )
-            ),
-            false
+            )
           ),
           p.Stmt.Mut(holderField(holder), p.Expr.Alias(selectT(derived))),
           p.Stmt.Update(holderField(holder), p.Term.IntS64Const(0), p.Term.IntS32Const(5)),
@@ -1312,8 +1281,7 @@ class ArenaViewSuite extends munit.FunSuite {
                 p.Type.Space.Global,
                 p.Region.Opaque
               )
-            ),
-            false
+            )
           ),
           p.Stmt.Mut(selectT(cursor), p.Expr.Alias(selectT(next)))
         ) ::: loadAndIndex(selectT(cursor), named("loaded", pointerTpe))
@@ -1341,8 +1309,7 @@ class ArenaViewSuite extends munit.FunSuite {
             p.Stmt.Mut(holderField(target), p.Expr.Alias(selectT(external.named))),
             p.Stmt.Var(
               reference,
-              Some(p.Expr.RefTo(selectT(target), None, holderTpe, p.Type.Space.Global, p.Region.Opaque)),
-              false
+              Some(p.Expr.RefTo(selectT(target), None, holderTpe, p.Type.Space.Global, p.Region.Opaque))
             ),
             p.Stmt.Var(wrapper, None, isMutable = true),
             p.Stmt.Mut(
@@ -1391,8 +1358,7 @@ class ArenaViewSuite extends munit.FunSuite {
                   p.Type.Space.Global,
                   p.Region.Opaque
                 )
-              ),
-              false
+              )
             ),
             p.Stmt.Var(cell, None, isMutable = true),
             p.Stmt.Mut(
@@ -1403,8 +1369,7 @@ class ArenaViewSuite extends munit.FunSuite {
               named("value", p.Type.IntS32),
               Some(
                 p.Expr.Alias(p.Term.Select(cell, List(p.PathStep.Field("target"), p.PathStep.Deref), p.Type.IntS32))
-              ),
-              false
+              )
             ),
             p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
           )
@@ -1439,13 +1404,10 @@ class ArenaViewSuite extends munit.FunSuite {
           body = List(
             p.Stmt.Var(holder, None, isMutable = true),
             p.Stmt.Mut(holderField(holder), p.Expr.Alias(selectT(external.named))),
-            p.Stmt.Var(
-              self,
-              Some(p.Expr.RefTo(selectT(holder), None, holderTpe, p.Type.Space.Global, p.Region.Opaque)),
-              false
-            ),
-            p.Stmt.Var(twin, Some(p.Expr.Cast(selectT(self), twin.tpe)), false),
-            p.Stmt.Var(back, Some(p.Expr.Cast(selectT(twin), back.tpe)), false)
+            p.Stmt
+              .Var(self, Some(p.Expr.RefTo(selectT(holder), None, holderTpe, p.Type.Space.Global, p.Region.Opaque))),
+            p.Stmt.Var(twin, Some(p.Expr.Cast(selectT(self), twin.tpe))),
+            p.Stmt.Var(back, Some(p.Expr.Cast(selectT(twin), back.tpe)))
           ) ::: loadAndIndex(
             p.Term.Select(back, List(p.PathStep.Field("pointer")), pointerTpe),
             named("loaded", pointerTpe)
@@ -1498,12 +1460,8 @@ class ArenaViewSuite extends munit.FunSuite {
         List(
           p.Stmt.Var(holder, None, isMutable = true),
           p.Stmt.Mut(holderField(holder), p.Expr.Alias(selectT(external.named))),
-          p.Stmt.Var(
-            self,
-            Some(p.Expr.RefTo(selectT(holder), None, holderTpe, p.Type.Space.Global, p.Region.Opaque)),
-            false
-          ),
-          p.Stmt.Var(viewed, Some(p.Expr.Cast(selectT(self), viewed.tpe)), false)
+          p.Stmt.Var(self, Some(p.Expr.RefTo(selectT(holder), None, holderTpe, p.Type.Space.Global, p.Region.Opaque))),
+          p.Stmt.Var(viewed, Some(p.Expr.Cast(selectT(self), viewed.tpe)))
         ) ::: loadAndIndex(
           p.Term.Select(viewed, List(p.PathStep.Field("pointer")), pointerTpe),
           named("loaded", pointerTpe)
@@ -1525,14 +1483,12 @@ class ArenaViewSuite extends munit.FunSuite {
           p.Stmt.Var(flag, Some(p.Expr.Alias(p.Term.Bool1Const(true))), isMutable = true),
           p.Stmt.Var(
             self,
-            Some(p.Expr.RefTo(selectT(flag), None, p.Type.Bool1, p.Type.Space.Private, p.Region.Opaque)),
-            false
+            Some(p.Expr.RefTo(selectT(flag), None, p.Type.Bool1, p.Type.Space.Private, p.Region.Opaque))
           ),
           p.Stmt.Var(alias, Some(p.Expr.Alias(selectT(self))), isMutable = true),
           p.Stmt.Var(
             named("value", p.Type.Bool1),
-            Some(p.Expr.Index(selectT(alias), p.Term.IntS64Const(0), p.Type.Bool1)),
-            false
+            Some(p.Expr.Index(selectT(alias), p.Term.IntS64Const(0), p.Type.Bool1))
           ),
           p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
         )
@@ -1562,7 +1518,7 @@ class ArenaViewSuite extends munit.FunSuite {
             p.Stmt.Mut(first, p.Expr.Alias(p.Term.IntS32Const(1))),
             p.Stmt.Var(reference, None, isMutable = true),
             p.Stmt
-              .Var(field, Some(p.Expr.RefTo(first, None, p.Type.IntS32, p.Type.Space.Global, p.Region.Opaque)), false),
+              .Var(field, Some(p.Expr.RefTo(first, None, p.Type.IntS32, p.Type.Space.Global, p.Region.Opaque))),
             p.Stmt.Mut(selectT(reference), p.Expr.Alias(selectT(field))),
             p.Stmt.Var(copy, Some(p.Expr.Alias(selectT(reference))), isMutable = true)
           ) ::: loadAndIndex(selectT(copy), named("loaded", pointerTpe))
@@ -1630,8 +1586,7 @@ class ArenaViewSuite extends munit.FunSuite {
         p.Stmt.Mut(holderField(holder), p.Expr.Alias(selectT(external.named))),
         p.Stmt.Var(
           address,
-          Some(p.Expr.RefTo(selectT(holder), None, holderTpe, p.Type.Space.Private, p.Region.Opaque)),
-          isMutable = false
+          Some(p.Expr.RefTo(selectT(holder), None, holderTpe, p.Type.Space.Private, p.Region.Opaque))
         ),
         p.Stmt.Var(
           named("present", p.Type.Bool1),
@@ -1639,8 +1594,7 @@ class ArenaViewSuite extends munit.FunSuite {
             p.Expr.IntrOp(
               p.Intr.LogicNeq(selectT(address), p.Term.NullPtrConst(holderTpe, p.Type.Space.Private, p.Region.Opaque))
             )
-          ),
-          isMutable = false
+          )
         )
       ) ::: loadAndIndex(holderField(holder), named("loaded", pointerTpe))
     )

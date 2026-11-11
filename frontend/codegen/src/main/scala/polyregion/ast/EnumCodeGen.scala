@@ -23,9 +23,10 @@ object EnumCodeGen {
   }
 
   def cppHeader: String = {
-    val namespaces = Enums.All.map(_.namespace).distinct
+    val namespaces  = Enums.All.map(_.namespace).distinct
+    val byNamespace = byEnum.groupBy(_.head.namespace)
     val blocks = namespaces.map { ns =>
-      val enums = byEnum.filter(_.head.namespace == ns).map(cppEnum).mkString("\n\n")
+      val enums = byNamespace.getOrElse(ns, Nil).map(cppEnum).mkString("\n\n")
       s"""namespace polyregion::$ns {
          |
          |$enums

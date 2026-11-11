@@ -37,13 +37,11 @@ class AddressRefinementAllocationSuite extends munit.FunSuite {
       List(
         p.Stmt.Var(
           pointer,
-          Some(p.Expr.Alias(p.Term.Select(capture, List(p.PathStep.Field("data")), pointerType))),
-          isMutable = false
+          Some(p.Expr.Alias(p.Term.Select(capture, List(p.PathStep.Field("data")), pointerType)))
         ),
         p.Stmt.Var(
           value,
-          Some(p.Expr.Index(selectT(pointer), p.Term.IntS64Const(0), p.Type.IntS32)),
-          isMutable = false
+          Some(p.Expr.Index(selectT(pointer), p.Term.IntS64Const(0), p.Type.IntS32))
         )
       )
     }

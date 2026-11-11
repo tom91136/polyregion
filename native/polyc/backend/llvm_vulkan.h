@@ -15,10 +15,10 @@ struct VulkanLowering : PointerModel {
   CodeGen &cg;
   explicit VulkanLowering(CodeGen &cg) : cg(cg) {}
 
-  Map<std::string, std::pair<AnyType, llvm::Value *>> bufferHandles{};
+  Map<std::string, std::pair<AnyType, llvm::Value *>> bufferHandles;
   llvm::Value *scalarBlock = nullptr;
-  Map<std::string, std::pair<unsigned, AnyType>> scalarSlots{};
-  Map<std::string, std::tuple<AnyType, llvm::Type *, llvm::Value *>> localBases{};
+  Map<std::string, std::pair<unsigned, AnyType>> scalarSlots;
+  Map<std::string, std::tuple<AnyType, llvm::Type *, llvm::Value *>> localBases;
 
   void reset() override;
 
@@ -28,7 +28,7 @@ struct VulkanLowering : PointerModel {
   [[nodiscard]] llvm::Value *uniformBlockHandle(llvm::Type *blockTy, unsigned binding, const std::string &name);
   [[nodiscard]] llvm::Value *bufferElementPtr(const AnyType &ptrTpe, llvm::Value *handle, llvm::Value *index);
 
-  [[nodiscard]] llvm::Value *handleOf(const Term::Select &select);
+  [[nodiscard]] llvm::Value *handleOf(const Term::Select &select) const;
   [[nodiscard]] llvm::Value *elementPtr(const Term::Select &lhs, llvm::Value *idx);
   [[nodiscard]] llvm::Value *scalarValueOf(const Term::Select &select);
   [[nodiscard]] llvm::Value *localElementPtr(const Term::Select &select, llvm::Value *index);
@@ -43,7 +43,7 @@ struct VulkanLowering : PointerModel {
   void structFieldCopy(llvm::Value *dst, llvm::Value *src, llvm::Type *rootTy, const AnyType &tpe, std::vector<llvm::Value *> idxs);
   void structFieldZero(llvm::Value *dst, llvm::Type *rootTy, const AnyType &tpe, std::vector<llvm::Value *> idxs);
 
-  [[nodiscard]] std::optional<ValPtr> termSelectVal(CodeGen &, const Term::Select &select) override;
+  [[nodiscard]] std::optional<ValPtr> termSelectVal(CodeGen &, const Term::Select &x) override;
   [[nodiscard]] std::optional<ValPtr> mkIndex(const Term::Select &lhs, const Term::Any &idx);
   [[nodiscard]] std::optional<ValPtr> mkRefTo(const Term::Select &lhs, const Opt<Term::Any> &idx);
   [[nodiscard]] bool mkUpdate(const Term::Select &lhs, const Term::Any &idx, const Term::Any &value);

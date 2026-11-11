@@ -1,5 +1,18 @@
 #include "llvm.h"
 
+#include <algorithm>
+#include <cctype>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <tuple>
+#include <utility>
+#include <vector>
+
 #include "llvm/ADT/FloatingPointMode.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Intrinsics.h"
@@ -89,31 +102,31 @@ ValPtr arrElemPtr(CodeGen &gen, llvm::Type *arrTy, const Type::Any &comp, llvm::
 
 ValPtr loadBool(CodeGen &gen, llvm::Value *ptr, llvm::Type *ty) {
   auto *storedTy = gen.C.isSpirv() ? llvm::Type::getInt8Ty(gen.C.actual) : ty;
-  return gen.B.CreateICmpNE(gen.C.load(gen.B, ptr, storedTy), llvm::ConstantInt::get(storedTy, 0, true));
+  return gen.B.CreateICmpNE(gen.B.CreateLoad(storedTy, ptr), llvm::ConstantInt::get(storedTy, 0, true));
 }
 
 ValPtr physicalIndexVal(CodeGen &gen, const Expr::Index &x, const std::string &key) {
   auto &B = gen.B;
   auto &C = gen.C;
-  auto &M = gen.M;
+  const auto &M = gen.M;
   using llvm::ConstantInt;
   // sign-extend the index to i64: SPIR-V treats access-chain Element as unsigned, so a 32-bit -1 jumps ~16 GB
   if (const auto lhs = x.lhs.template get<Term::Select>()) {
     if (const auto arrTpe = lhs->tpe.template get<Type::Ptr>()) {
       if (arrTpe->comp.is<Type::Unit0>()) {
-        const auto val = gen.mkTermVal(Term::Unit0Const());
+        auto *const val = gen.mkTermVal(Term::Unit0Const());
         auto *basePtr = gen.mkTermVal(*lhs);
         B.CreateInBoundsGEP(val->getType(), basePtr, gen.i64Index(x.idx), key + "_ptr");
         return val;
       } else if (auto innerArr = arrTpe->comp.get<Type::Arr>()) {
-        const auto arrLlvmTy = gen.resolveType(*innerArr);
-        const auto compLlvmTy = gen.resolveType(innerArr->comp);
-        const auto basePtr = gen.mkTermVal(*lhs);
-        const auto ptr = B.CreateInBoundsGEP(arrLlvmTy, basePtr, {ConstantInt::get(C.i32Ty(), 0), gen.i64Index(x.idx)}, key + "_idx_ptr");
+        auto *const arrLlvmTy = gen.resolveType(*innerArr);
+        auto *const compLlvmTy = gen.resolveType(innerArr->comp);
+        auto *const basePtr = gen.mkTermVal(*lhs);
+        auto *const ptr = B.CreateInBoundsGEP(arrLlvmTy, basePtr, {ConstantInt::get(C.i32Ty(), 0), gen.i64Index(x.idx)}, key + "_idx_ptr");
         if (innerArr->comp.is<Type::Bool1>()) return loadBool(gen, ptr, compLlvmTy);
-        return C.load(B, ptr, compLlvmTy);
+        return B.CreateLoad(compLlvmTy, ptr);
       } else {
-        const auto ty = gen.resolveType(arrTpe->comp);
+        auto *const ty = gen.resolveType(arrTpe->comp);
         auto *basePtr = gen.mkTermVal(*lhs);
         llvm::Value *ptr;
         if (gen.spirvStructByMemcpy()) {
@@ -125,14 +138,14 @@ ValPtr physicalIndexVal(CodeGen &gen, const Expr::Index &x, const std::string &k
         }
         if (arrTpe->comp.is<Type::Bool1>()) return loadBool(gen, ptr, ty);
         if (gen.structByPtr() && arrTpe->comp.template is<Type::Struct>()) return ptr;
-        return C.load(B, ptr, ty);
+        return B.CreateLoad(ty, ptr);
       }
     } else if (const auto arrTpe = lhs->tpe.template get<Type::Arr>()) {
       auto *basePtr = gen.mkTermVal(*lhs);
-      const auto ptr = arrElemPtr(gen, gen.resolveType(*arrTpe), arrTpe->comp, basePtr, gen.i64Index(x.idx), key + "_idx_ptr");
+      auto *const ptr = arrElemPtr(gen, gen.resolveType(*arrTpe), arrTpe->comp, basePtr, gen.i64Index(x.idx), key + "_idx_ptr");
       if (gen.structByPtr() && arrTpe->comp.template is<Type::Struct>()) return ptr;
       if (arrTpe->comp.is<Type::Bool1>()) return loadBool(gen, ptr, gen.resolveType(arrTpe->comp));
-      return C.load(B, ptr, gen.resolveType(arrTpe->comp));
+      return B.CreateLoad(gen.resolveType(arrTpe->comp), ptr);
     } else {
       throw BackendException::semantic("array index not called on array type (" + to_string(lhs->tpe) + ")(" + repr(x) + ")");
     }
@@ -145,7 +158,7 @@ bool samePointerPointee(const Type::Any &lhs, const Type::Any &rhs) {
   return lhsPtr && rhsPtr && lhsPtr->comp == rhsPtr->comp;
 }
 
-static bool isPointerSlotReference(const Expr::RefTo &x) {
+bool isPointerSlotReference(const Expr::RefTo &x) {
   const auto lhs = x.lhs.template get<Term::Select>();
   // RegionRespace can refine a pointer's storage space without changing the identity of its slot.
   return lhs && !x.idx && samePointerPointee(lhs->tpe, x.comp);
@@ -153,7 +166,7 @@ static bool isPointerSlotReference(const Expr::RefTo &x) {
 
 static ValPtr selectPtrImpl(CodeGen &gen, const Term::Select &select, bool oneGep, const Opt<TypeSpace::Any> &preferredSpace = {});
 
-static ValPtr physicalRefToPtr(CodeGen &gen, const Expr::RefTo &x, const std::string &key) {
+ValPtr physicalRefToPtr(CodeGen &gen, const Expr::RefTo &x, const std::string &key) {
   auto &B = gen.B;
   auto &C = gen.C;
   auto &M = gen.M;
@@ -164,18 +177,18 @@ static ValPtr physicalRefToPtr(CodeGen &gen, const Expr::RefTo &x, const std::st
         // A selected pointer field is a slot: walk to that slot using the RefTo's proven address space, then load
         // the pointer value in that space before applying the element offset. The generic mkTermVal path would
         // load an already-shared offset as AS0 and physicalRefToVal would subsequently convert it a second time.
-        const auto slot = selectPtrImpl(gen, *select, /*oneGep*/ false, x.space);
-        return C.load(B, slot, B.getPtrTy(C.addressSpace(x.space)));
+        auto *const slot = selectPtrImpl(gen, *select, /*oneGep*/ false, x.space);
+        return B.CreateLoad(B.getPtrTy(C.addressSpace(x.space)), slot);
       }
       return gen.mkTermVal(baseTerm);
     }();
     auto *offset = x.idx ? gen.i64Index(*x.idx) : llvm::ConstantInt::get(C.i64Ty(), 0, true);
     if (auto innerArr = ptrTpe.comp.template get<Type::Arr>())
       return B.CreateGEP(gen.resolveType(*innerArr), base, {llvm::ConstantInt::get(C.i32Ty(), 0), offset}, key + "_ref_to_ptr_arr");
-    auto ty = ptrTpe.comp.template is<Type::Unit0>() ? llvm::Type::getInt8Ty(C.actual) : gen.resolveType(ptrTpe.comp);
+    auto *ty = ptrTpe.comp.template is<Type::Unit0>() ? llvm::Type::getInt8Ty(C.actual) : gen.resolveType(ptrTpe.comp);
     // kernel SPIR-V: ptrtoint round-trip works around Arc OpenCL mis-handling negative OpPtrAccessChain elements
     if (C.isSpirvKernel()) {
-      auto elemSize = llvm::ConstantInt::get(C.i64Ty(), M.getDataLayout().getTypeAllocSize(ty));
+      auto *elemSize = llvm::ConstantInt::get(C.i64Ty(), M.getDataLayout().getTypeAllocSize(ty));
       auto *byteOffset = B.CreateMul(offset, elemSize);
       return gen.byteOffsetPtr(base, byteOffset, key + "_ref_to_ptr");
     }
@@ -190,7 +203,7 @@ static ValPtr physicalRefToPtr(CodeGen &gen, const Expr::RefTo &x, const std::st
       if (isPointerSlotReference(x)) return gen.mkSelectPtr(*lhs);
       return stepPtr(*arrTpe, x.lhs);
     } else if (auto arrTpe = lhs->tpe.template get<Type::Arr>(); arrTpe) {
-      auto arrLlvmTy = gen.resolveType(*arrTpe);
+      auto *arrLlvmTy = gen.resolveType(*arrTpe);
       // An array field can itself be reached through a pointer field whose declared space is generic but whose
       // stored value has proven shared/local provenance. Walk that path in the RefTo's address space before
       // applying the runtime index; otherwise the final addrspacecast converts an already-shared offset twice.
@@ -212,12 +225,12 @@ static ValPtr physicalRefToPtr(CodeGen &gen, const Expr::RefTo &x, const std::st
     // no slot to spill, but it is itself the address, so step it like a pointer-typed select
     if (const auto ptrTpe = x.lhs.tpe().template get<Type::Ptr>(); ptrTpe && x.idx) return stepPtr(*ptrTpe, x.lhs);
     if (x.idx) throw BackendException::semantic("Cannot take reference of a constant with index in " + to_string(x));
-    const auto val = gen.mkTermVal(x.lhs);
+    auto *const val = gen.mkTermVal(x.lhs);
     // a struct-typed parameter is lowered to a pointer at the function boundary; the value IS
     // already the address, so return it directly instead of boxing it in an alloca.
     if (val->getType()->isPointerTy() && !x.lhs.tpe().template is<Type::Ptr>() && !x.lhs.tpe().template is<Type::Arr>()) return val;
-    const auto slot = C.allocaAS(B, val->getType(), C.AllocaAS, key + "_const_ref");
-    const auto _ = C.store(B, val, slot);
+    auto *const slot = C.allocaAS(B, val->getType(), C.AllocaAS, key + "_const_ref");
+    B.CreateStore(val, slot);
     return slot;
   }
 }
@@ -225,13 +238,13 @@ static ValPtr physicalRefToPtr(CodeGen &gen, const Expr::RefTo &x, const std::st
 // a RefTo's declared space is its ABI: the address must land in that space rather than inherit whatever the
 // base happened to lower to, or a workgroup address reaches a flat consumer (and back) by reinterpretation
 ValPtr physicalRefToVal(CodeGen &gen, const Expr::RefTo &x, const std::string &key) {
-  const auto ptr = physicalRefToPtr(gen, x, key);
+  auto *const ptr = physicalRefToPtr(gen, x, key);
   if (!ptr->getType()->isPointerTy()) return ptr;
   // The slot of a pointer-valued local has the target's physical alloca space, regardless of
   // stale pointee-space metadata on RefTo. Casting it to the pointee's space turns `T*&` into an
   // address in global/workgroup storage and makes rebinding write to the wrong object.
   if (isPointerSlotReference(x)) return ptr;
-  const auto want = gen.B.getPtrTy(gen.C.addressSpace(x.space));
+  auto *const want = gen.B.getPtrTy(gen.C.addressSpace(x.space));
   return ptr->getType() == want ? ptr : gen.B.CreateAddrSpaceCast(ptr, want);
 }
 
@@ -240,9 +253,9 @@ void physicalStoreUpdate(CodeGen &gen, const Term::Select &lhs, const Term::Any 
   auto &C = gen.C;
   auto &M = gen.M;
   const bool componentIsSizedArray = lhs.tpe.template is<Type::Arr>();
-  const auto dest = gen.mkTermVal(lhs);
-  const auto valTy = value.tpe().template is<Type::Bool1>() ? llvm::Type::getInt8Ty(C.actual) : gen.resolveType(value.tpe());
-  const auto gepTy = componentIsSizedArray ? gen.resolveType(lhs.tpe) : valTy;
+  auto *const dest = gen.mkTermVal(lhs);
+  auto *const valTy = value.tpe().template is<Type::Bool1>() ? llvm::Type::getInt8Ty(C.actual) : gen.resolveType(value.tpe());
+  auto *const gepTy = componentIsSizedArray ? gen.resolveType(lhs.tpe) : valTy;
   const auto getPtr = [&]() -> llvm::Value * {
     if (componentIsSizedArray)
       return arrElemPtr(gen, gepTy, lhs.tpe.template get<Type::Arr>()->comp, dest, gen.i64Index(idx), qualified(lhs) + "_update_ptr");
@@ -253,13 +266,13 @@ void physicalStoreUpdate(CodeGen &gen, const Term::Select &lhs, const Term::Any 
     }
     return B.CreateInBoundsGEP(gepTy, dest, {gen.i64Index(idx)}, qualified(lhs) + "_update_ptr");
   };
-  const auto ptr = getPtr();
+  auto *const ptr = getPtr();
   if (gen.structByPtr() && value.tpe().template is<Type::Struct>()) {
     gen.copyStruct(ptr, gen.mkTermVal(value), value.tpe());
   } else if (value.tpe().template is<Type::Bool1>()) {
-    const auto _ = C.store(B, B.CreateZExt(gen.mkTermVal(value), valTy), ptr);
+    B.CreateStore(B.CreateZExt(gen.mkTermVal(value), valTy), ptr);
   } else {
-    const auto _ = C.store(B, gen.mkTermVal(value), ptr);
+    B.CreateStore(gen.mkTermVal(value), ptr);
   }
 }
 
@@ -271,7 +284,7 @@ ValPtr selectPtrImpl(CodeGen &gen, const Term::Select &select, const bool oneGep
   auto fail = [&] { return " (part of the select expression " + to_string(select) + ")"; };
 
   auto structTypeOf = [&](const Type::Any &tpe) -> StructInfo {
-    auto findTy = [&](const Type::Struct &s) -> StructInfo {
+    const auto findTy = [&](const Type::Struct &s) -> StructInfo {
       return gen.structTypes ^ get_maybe(fqcn(s.name)) | fold([&]() -> StructInfo {
                throw BackendException("Unseen struct type " + to_string(s.name) + " in select path" + fail());
              });
@@ -305,7 +318,7 @@ ValPtr selectPtrImpl(CodeGen &gen, const Term::Select &select, const bool oneGep
 
   if (select.steps.empty()) return gen.findStackVar(select.root);
   auto tpe = select.root.tpe;
-  auto root = gen.findStackVar(select.root);
+  auto *root = gen.findStackVar(select.root);
 
   // A preferred space describes the storage reached by the complete select, not every enclosing object pointer.
   // Find the deepest pointer hop so an outer private `this` remains private while (for example) its final CUB
@@ -338,27 +351,27 @@ ValPtr selectPtrImpl(CodeGen &gen, const Term::Select &select, const bool oneGep
         probeTpe = info.def.members[*idx].tpe;
     }
   }
-  const auto loadPointer = [&](llvm::Value *slot, const Type::Ptr &pointer, const size_t step) {
+  const auto loadPointer = [&](llvm::Value *slot, const Type::Ptr &pointer, const size_t step) -> ValPtr {
     const auto prefer = preferredPointerStep == step;
     const auto &layout = gen.M.getDataLayout();
     const auto sameWidth =
         !prefer || layout.getPointerSize(gen.C.addressSpace(pointer.space)) == layout.getPointerSize(gen.C.addressSpace(*preferredSpace));
     if (!C.isNVPTX() && sameWidth) {
       const auto space = prefer ? *preferredSpace : pointer.space;
-      return C.load(B, slot, C.loadedPtrTy(B, space));
+      return B.CreateLoad(C.loadedPtrTy(B, space), slot);
     }
-    auto *value = C.load(B, slot, C.loadedPtrTy(B, pointer.space));
+    auto *value = B.CreateLoad(C.loadedPtrTy(B, pointer.space), slot);
     if (!prefer) return value;
     auto *wanted = C.loadedPtrTy(B, *preferredSpace);
     return value->getType() == wanted ? value : B.CreateAddrSpaceCast(value, wanted);
   };
 
   // an inline Arr local sits behind a ref-ptr slot (see Stmt::Var); load it before indexing (SPIR-V doesn't)
-  if (auto arr = tpe.template get<Type::Arr>(); arr && !C.isSpirv()) root = C.load(B, root, B.getPtrTy(C.addressSpace(arr->space)));
+  if (auto arr = tpe.template get<Type::Arr>(); arr && !C.isSpirv()) root = B.CreateLoad(B.getPtrTy(C.addressSpace(arr->space)), root);
 
   llvm::SmallVector<llvm::Value *, 8> idxs;
   llvm::Type *gepBaseTy = nullptr;
-  auto flush = [&]() {
+  auto flush = [&] {
     if (idxs.empty()) return;
     // Logical SPIR-V may carry a nullable local pointer through structured control flow. LLVM's SSA
     // construction can materialise the untaken value of a guarded field projection, so `inbounds` would
@@ -371,7 +384,7 @@ ValPtr selectPtrImpl(CodeGen &gen, const Term::Select &select, const bool oneGep
   };
 
   // GEP to member `idx` of `info`, advancing root/tpe (shared by direct fields and transitive-base hops)
-  auto emitMember = [&](const StructInfo &info, const size_t idx) {
+  const auto emitMember = [&](const StructInfo &info, const size_t idx) {
     // a union reinterprets its members over shared storage. an overlaid union puts every member at offset 0; a
     // de-aliased union gives its discontinuity members a distinct byte offset (see resolveLayouts) so the AMDGPU
     // O3 optimiser cannot confuse the tail-flag storage with an overlapping block_exchange buffer
@@ -401,10 +414,10 @@ ValPtr selectPtrImpl(CodeGen &gen, const Term::Select &select, const bool oneGep
     }
     if (idx < info.def.members.size()) tpe = info.def.members[idx].tpe;
     // a pointer wrapper of a Struct (functionBoundary lowering) needs a deref
-    const auto fieldLlvmType = info.tpe->getElementType(idx);
+    auto *const fieldLlvmType = info.tpe->getElementType(idx);
     if (fieldLlvmType->isPointerTy() && tpe.template is<Type::Struct>()) {
       flush();
-      root = C.load(B, root, llvm::cast<llvm::PointerType>(fieldLlvmType));
+      root = B.CreateLoad(llvm::cast<llvm::PointerType>(fieldLlvmType), root);
     }
   };
 
@@ -476,9 +489,9 @@ ValPtr selectPtrImpl(CodeGen &gen, const Term::Select &select, const bool oneGep
     if (!idxOpt) {
       // EBO'd empty base: resolve to the empty struct's own address (offset 0) rather than fail
       if (info.memberIndices.empty()) continue;
-      auto pool = info.memberIndices ^ mk_string("\n", "\n", "\n", [](const auto &k, const auto &v) {
-                    return " -> `" + k + "` = " + std::to_string(v) + ")";
-                  });
+      const auto pool = info.memberIndices ^ mk_string("\n", "\n", "\n", [](const auto &k, const auto &v) {
+                          return " -> `" + k + "` = " + std::to_string(v) + ")";
+                        });
       throw BackendException("Illegal select path with unknown struct member index of name `" + fieldStep->name + "`, pool=" + pool
                              + fail());
     }
@@ -494,7 +507,7 @@ struct PhysicalPointerModel final : PointerModel {
     // memcpy copies between two pointers; an aggregate rvalue (poison/constant/SSA, e.g. an uninitialised
     // struct local) arrives as a value, not a pointer, so store it directly as the by-value path does
     if (!src->getType()->isPointerTy()) {
-      const auto _ = gen.C.store(gen.B, src, dst);
+      gen.B.CreateStore(src, dst);
       return;
     }
     if (auto s = tpe.get<Type::Struct>()) {
@@ -511,7 +524,7 @@ struct PhysicalPointerModel final : PointerModel {
     }
   }
   void zeroAggregate(CodeGen &gen, ValPtr dst, const AnyType &tpe) override {
-    const auto _ = gen.C.store(gen.B, llvm::Constant::getNullValue(gen.resolveType(tpe)), dst);
+    gen.B.CreateStore(llvm::Constant::getNullValue(gen.resolveType(tpe)), dst);
   }
   ValPtr indexVal(CodeGen &gen, const Expr::Index &index, const std::string &key) override { return physicalIndexVal(gen, index, key); }
   ValPtr refToVal(CodeGen &gen, const Expr::RefTo &refTo, const std::string &key) override { return physicalRefToVal(gen, refTo, key); }
@@ -555,14 +568,14 @@ static bool isUnsigned(const Type::Any &tpe) { // unsigned types in PolyAst; a b
 
 // a CondBr on a constant leaves the untaken successor unreachable; the SPIR-V structurizer cannot resolve one
 static void condBr(llvm::IRBuilder<> &B, ValPtr cond, llvm::BasicBlock *whenTrue, llvm::BasicBlock *whenFalse) {
-  if (const auto c = llvm::dyn_cast<llvm::ConstantInt>(cond)) B.CreateBr(c->isOne() ? whenTrue : whenFalse);
+  if (const auto *const c = llvm::dyn_cast<llvm::ConstantInt>(cond)) B.CreateBr(c->isOne() ? whenTrue : whenFalse);
   else B.CreateCondBr(cond, whenTrue, whenFalse);
 }
 
 // a FnRef-typed value is a stubbed kernel handle (Specialisation/FnInline thread it through as a type-erased
 // pointer that is never dereferenced device-side), so the Var/Mut store paths store null for it
 static void storeStubbedHandle(CodeGen &gen, llvm::Type *slotTy, llvm::Value *dst) {
-  const auto _ = gen.C.store(gen.B, llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(slotTy)), dst);
+  gen.B.CreateStore(llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(slotTy)), dst);
 }
 
 static constexpr int64_t nIntMin(uint64_t bits) { return -(int64_t(1) << (bits - 1)); }
@@ -617,40 +630,40 @@ ValPtr CodeGen::invokeMalloc(ValPtr size) {
 }
 
 ValPtr CodeGen::extFn1(const std::string &name, const AnyType &rtn, const AnyTerm &arg) { //
-  const auto fn = resolveExtFn(rtn, name, {arg.tpe()});
+  auto *const fn = resolveExtFn(rtn, name, {arg.tpe()});
   if (C.isSpirv()) fn->setCallingConv(llvm::CallingConv::SPIR_FUNC);
   if (!rtn.is<Type::Unit0>()) fn->addFnAttr(llvm::Attribute::WillReturn);
-  const auto call = B.CreateCall(fn, mkTermVal(arg));
+  auto *const call = B.CreateCall(fn, mkTermVal(arg));
   call->setCallingConv(fn->getCallingConv());
   return call;
 }
 ValPtr CodeGen::extFn2(const std::string &name, const AnyType &rtn, const AnyTerm &lhs, const AnyTerm &rhs) {
-  const auto fn = resolveExtFn(rtn, name, {lhs.tpe(), rhs.tpe()});
+  auto *const fn = resolveExtFn(rtn, name, {lhs.tpe(), rhs.tpe()});
   if (C.isSpirv()) {
     fn->setCallingConv(llvm::CallingConv::SPIR_FUNC);
     fn->addFnAttr(llvm::Attribute::NoBuiltin);
     fn->addFnAttr(llvm::Attribute::Convergent);
   }
-  const auto call = B.CreateCall(fn, {mkTermVal(lhs), mkTermVal(rhs)});
+  auto *const call = B.CreateCall(fn, {mkTermVal(lhs), mkTermVal(rhs)});
   call->setCallingConv(fn->getCallingConv());
   return call;
 }
 ValPtr CodeGen::intr0(const llvm::Intrinsic::ID id) { //
-  const auto callee = llvm::Intrinsic::getOrInsertDeclaration(&M, id, {});
+  auto *const callee = llvm::Intrinsic::getOrInsertDeclaration(&M, id, {});
   return B.CreateCall(callee);
 }
 ValPtr CodeGen::intr1(const llvm::Intrinsic::ID id, const AnyType &overload, const AnyTerm &arg) { //
-  const auto callee = llvm::Intrinsic::getOrInsertDeclaration(&M, id, resolveType(overload));
+  auto *const callee = llvm::Intrinsic::getOrInsertDeclaration(&M, id, resolveType(overload));
   return B.CreateCall(callee, mkTermVal(arg));
 }
 ValPtr CodeGen::intrAbs(const AnyType &overload, const AnyTerm &arg) { //
   // llvm.abs.iN takes an is_int_min_poison flag; false because abs(MIN_VALUE) == MIN_VALUE in both langs.
-  const auto callee = llvm::Intrinsic::getOrInsertDeclaration(&M, llvm::Intrinsic::abs, resolveType(overload));
+  auto *const callee = llvm::Intrinsic::getOrInsertDeclaration(&M, llvm::Intrinsic::abs, resolveType(overload));
   return B.CreateCall(callee, {mkTermVal(arg), B.getFalse()});
 }
 ValPtr CodeGen::intr2(const llvm::Intrinsic::ID id, const AnyType &overload, //
                       const AnyTerm &lhs, const AnyTerm &rhs) {              //
-  const auto callee = llvm::Intrinsic::getOrInsertDeclaration(&M, id, resolveType(overload));
+  auto *const callee = llvm::Intrinsic::getOrInsertDeclaration(&M, id, resolveType(overload));
   return B.CreateCall(callee, {mkTermVal(lhs), mkTermVal(rhs)});
 }
 
@@ -671,10 +684,10 @@ ValPtr CodeGen::findStackVar(const Named &named) {
                return value;
              },
              [&]() -> ValPtr {
-               auto pool = stackVarPtrs ^ mk_string("\n", "\n", "\n", [](const auto &k, const auto &v) {
-                             auto &[tpe, ir] = v;
-                             return " -> `" + k + "` = " + to_string(tpe) + "(IR=" + llvm_tostring(ir) + ")";
-                           });
+               const auto pool = stackVarPtrs ^ mk_string("\n", "\n", "\n", [](const auto &k, const auto &v) {
+                                   auto &[tpe, ir] = v;
+                                   return " -> `" + k + "` = " + to_string(tpe) + "(IR=" + llvm_tostring(ir) + ")";
+                                 });
                throw BackendException("Unseen variable: " + to_string(named) + ", variable table=\n->" + pool);
              });
 }
@@ -711,7 +724,7 @@ ValPtr CodeGen::mkTermVal(const Term::Any &term, const std::string &key) {
       [&](const Term::Poison &x) -> ValPtr {
         // Pointer poison maps to null (analyses treat it as poison-equivalent); other types use
         // PoisonValue so non-pointer Poison nodes from the rewriter do not abort codegen.
-        auto tpe = resolveType(x.t, x.t.template is<Type::FnRef>());
+        auto *tpe = resolveType(x.t, x.t.template is<Type::FnRef>());
         if (llvm::isa<llvm::PointerType>(tpe)) {
           return llvm::ConstantPointerNull::get(static_cast<llvm::PointerType *>(tpe));
         }
@@ -729,12 +742,12 @@ ValPtr CodeGen::mkTermVal(const Term::Any &term, const std::string &key) {
         if (x.tpe.template is<Type::Arr>()) {
           if (x.steps.empty())
             return C.isSpirv() ? mkSelectPtr(x)
-                               : C.load(B, mkSelectPtr(x), B.getPtrTy(C.addressSpace(x.tpe.template get<Type::Arr>()->space)));
+                               : B.CreateLoad(B.getPtrTy(C.addressSpace(x.tpe.template get<Type::Arr>()->space)), mkSelectPtr(x));
           return mkSelectPtr(x);
         }
         if (structByPtr() && x.tpe.template is<Type::Struct>()) return mkSelectPtr(x);
         if (C.isSpirv() && x.tpe.template is<Type::Bool1>() && !x.steps.empty()) return loadBool(*this, mkSelectPtr(x), resolveType(x.tpe));
-        return C.load(B, mkSelectPtr(x), resolveType(x.tpe));
+        return B.CreateLoad(resolveType(x.tpe), mkSelectPtr(x));
       });
 }
 
@@ -746,7 +759,7 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
       [&](const Expr::SpecOp &x) -> ValPtr { return targetHandler->mkSpecVal(*this, x); },
       [&](const Expr::MathOp &x) -> ValPtr { return targetHandler->mkMathVal(*this, x); },
       [&](const Expr::IntrOp &x) -> ValPtr {
-        auto intr = x.op;
+        const auto intr = x.op;
         const auto comparePointers = [&](const AnyTerm &lhs, const AnyTerm &rhs, bool equal) -> ValPtr {
           if (!samePointerPointee(lhs.tpe(), rhs.tpe()))
             throw BackendException::semantic("incompatible pointer operands in " + to_string(expr));
@@ -879,27 +892,27 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
       [&](const Expr::Cast &x) -> ValPtr {
         // we only allow widening or narrowing of integral and fractional types
         // pointers are not allowed to participate on either end
-        auto from = [&]() -> ValPtr {
+        auto *from = [&]() -> ValPtr {
           if (const auto rhsPtr = x.from.tpe().get<Type::Ptr>()) {
             if (const auto lhsPtr = x.as.get<Type::Ptr>()) {
               if (const auto select = x.from.template get<Term::Select>(); select && !select->steps.empty()) {
                 const auto &layout = M.getDataLayout();
                 if (C.isNVPTX()
                     || layout.getPointerSize(C.addressSpace(rhsPtr->space)) != layout.getPointerSize(C.addressSpace(lhsPtr->space))) {
-                  const auto slot = selectPtrImpl(*this, *select, /*oneGep*/ false);
-                  auto *value = C.load(B, slot, B.getPtrTy(C.addressSpace(rhsPtr->space)));
+                  auto *const slot = selectPtrImpl(*this, *select, /*oneGep*/ false);
+                  auto *value = B.CreateLoad(B.getPtrTy(C.addressSpace(rhsPtr->space)), slot);
                   auto *wanted = B.getPtrTy(C.addressSpace(lhsPtr->space));
                   return value->getType() == wanted ? value : B.CreateAddrSpaceCast(value, wanted);
                 }
-                const auto slot = selectPtrImpl(*this, *select, /*oneGep*/ false, lhsPtr->space);
-                return C.load(B, slot, B.getPtrTy(C.addressSpace(lhsPtr->space)));
+                auto *const slot = selectPtrImpl(*this, *select, /*oneGep*/ false, lhsPtr->space);
+                return B.CreateLoad(B.getPtrTy(C.addressSpace(lhsPtr->space)), slot);
               }
             }
           }
           return mkTermVal(x.from);
         }();
-        auto fromTpe = resolveType(x.from.tpe());
-        auto toTpe = resolveType(x.as);
+        auto *fromTpe = resolveType(x.from.tpe());
+        auto *toTpe = resolveType(x.as);
         enum class NumKind { Fractional, Integral };
 
         // Same type
@@ -929,13 +942,13 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
                                              + " bytes) would read past the source allocation");
           }
           if (const auto sel = x.from.template get<Term::Select>()) {
-            const auto ptr = mkSelectPtr(*sel);
-            return structByPtr() ? ptr : C.load(B, ptr, toTpe);
+            auto *const ptr = mkSelectPtr(*sel);
+            return structByPtr() ? ptr : B.CreateLoad(toTpe, ptr);
           }
           if (structByPtr()) return from;
-          const auto slot = C.allocaAS(B, fromTpe, C.AllocaAS, key + "_struct_cast");
+          auto *const slot = C.allocaAS(B, fromTpe, C.AllocaAS, key + "_struct_cast");
           B.CreateStore(from, slot);
-          return C.load(B, slot, toTpe);
+          return B.CreateLoad(toTpe, slot);
         }
 
         // Reinterpret aggregates through their storage, materialising a slot when needed.
@@ -945,7 +958,7 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
               return selectPtrImpl(*this, *sel, /*oneGep*/ false, ptr->space);
             return x.from.tpe().is<Type::Arr>() ? mkTermVal(x.from) : mkSelectPtr(*sel);
           }
-          const auto slot = C.allocaAS(B, fromTpe, C.AllocaAS, key + "_aggregate_ptr");
+          auto *const slot = C.allocaAS(B, fromTpe, C.AllocaAS, key + "_aggregate_ptr");
           B.CreateStore(from, slot);
           return slot;
         }
@@ -964,7 +977,7 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
           return B.CreateIntToPtr(from, toTpe);
         }
 
-        auto fromKind = x.from.tpe().kind().match_total( //
+        const auto fromKind = x.from.tpe().kind().match_total( //
             [&](const TypeKind::Integral &) -> NumKind { return NumKind::Integral; },
             [&](const TypeKind::Fractional &) -> NumKind { return NumKind::Fractional; },
             [&](const TypeKind::Ref &) -> NumKind {
@@ -972,7 +985,7 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
             },
             [&](const TypeKind::None &) -> NumKind { throw BackendException("none!?"); });
 
-        auto toKind = x.as.kind().match_total( //
+        const auto toKind = x.as.kind().match_total( //
             [&](const TypeKind::Integral &) -> NumKind { return NumKind::Integral; },
             [&](const TypeKind::Fractional &) -> NumKind { return NumKind::Fractional; },
             [&](const TypeKind::Ref &) -> NumKind {
@@ -984,20 +997,20 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
 
           // to the equally sized integral type first if narrowing; XXX narrowing directly produces a poison value
 
-          auto min32BitIntBits = std::max<llvm::TypeSize::ScalarTy>(32, toTpe->getPrimitiveSizeInBits());
-          auto toTpeMaxInFp = llvm::ConstantFP::get(fromTpe, double(nIntMax(min32BitIntBits)));
-          auto toTpeMinInFp = llvm::ConstantFP::get(fromTpe, double(nIntMin(min32BitIntBits)));
-          auto min32BitIntTy = llvm::Type::getIntNTy(C.actual, min32BitIntBits);
-          auto toTpeMaxInInt = llvm::ConstantInt::get(min32BitIntTy, nIntMax(min32BitIntBits));
-          auto toTpeMinInInt = llvm::ConstantInt::get(min32BitIntTy, nIntMin(min32BitIntBits));
+          const auto min32BitIntBits = std::max<llvm::TypeSize::ScalarTy>(32, toTpe->getPrimitiveSizeInBits());
+          auto *toTpeMaxInFp = llvm::ConstantFP::get(fromTpe, double(nIntMax(min32BitIntBits)));
+          auto *toTpeMinInFp = llvm::ConstantFP::get(fromTpe, double(nIntMin(min32BitIntBits)));
+          auto *min32BitIntTy = llvm::Type::getIntNTy(C.actual, min32BitIntBits);
+          auto *toTpeMaxInInt = llvm::ConstantInt::get(min32BitIntTy, nIntMax(min32BitIntBits));
+          auto *toTpeMinInInt = llvm::ConstantInt::get(min32BitIntTy, nIntMin(min32BitIntBits));
 
           ValPtr c = B.CreateSelect(B.CreateFCmpOGE(from, toTpeMaxInFp), toTpeMaxInInt,                //
                                     B.CreateSelect(B.CreateFCmpOLE(from, toTpeMinInFp), toTpeMinInInt, //
                                                    B.CreateFPToSI(from, min32BitIntTy)));
           c = B.CreateIntCast(c, toTpe, !isUnsigned(x.as));
 
-          auto zero = llvm::ConstantInt::get(toTpe, 0);
-          auto isNan = targetHandler->isNaN(*this, from);
+          auto *zero = llvm::ConstantInt::get(toTpe, 0);
+          auto *isNan = targetHandler->isNaN(*this, from);
           return B.CreateSelect(isNan, zero, c);
         } else if (fromKind == NumKind::Integral && toKind == NumKind::Fractional) {
           // XXX this is a *widening* conversion, even though we may lose precision
@@ -1010,8 +1023,8 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
         } else throw BackendException("unhandled cast");
       },
       [&](const Expr::BitCast &x) -> ValPtr {
-        const auto from = mkTermVal(x.from);
-        const auto to = resolveType(x.as);
+        auto *const from = mkTermVal(x.from);
+        auto *const to = resolveType(x.as);
         if (B.GetInsertBlock()->getModule()->getDataLayout().getTypeSizeInBits(from->getType())
             != B.GetInsertBlock()->getModule()->getDataLayout().getTypeSizeInBits(to))
           throw BackendException::semantic("bit-cast changes width from " + to_string(x.from.tpe()) + " to " + to_string(x.as));
@@ -1072,12 +1085,12 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
                            auto *slotTy = resolveType(term.tpe(), /*functionBoundary*/ false);
                            auto *slot = C.allocaAS(B, slotTy, C.AllocaAS, "struct_arg");
                            auto *val = mkTermVal(term);
-                           const auto _ = C.store(B, val, slot);
+                           B.CreateStore(val, slot);
                            params.push_back(slot);
                            continue;
                          }
                        }
-                       auto val = mkTermVal(term);
+                       auto *val = mkTermVal(term);
                        params.push_back(term.tpe().template is<Type::Bool1>() ? B.CreateZExt(val, resolveType(Type::Bool1(), true)) : val);
                      }
                      // an actual whose AS differs from the formal's crosses spaces explicitly: SPIR-V widens
@@ -1085,7 +1098,7 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
                      // flat formal takes the aperture. reinterpreting instead would narrow the pointer silently
                      for (size_t i = 0; i < params.size(); ++i) {
                        auto *formal = fn->getFunctionType()->getParamType(i);
-                       auto *actual = params[i]->getType();
+                       const llvm::Type *actual = params[i]->getType();
                        if (formal != actual && formal->isPointerTy() && actual->isPointerTy())
                          params[i] = B.CreateAddrSpaceCast(params[i], formal);
                      }
@@ -1093,7 +1106,7 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
                        throw BackendException(fmt::format("Invocation {} passes {} LLVM arguments to {} parameters", repr(sig),
                                                           params.size(), fn->arg_size()));
                      for (size_t i = 0; i < params.size(); ++i) {
-                       auto *formal = fn->getFunctionType()->getParamType(i);
+                       const llvm::Type *formal = fn->getFunctionType()->getParamType(i);
                        if (formal != params[i]->getType())
                          throw BackendException(fmt::format("Invocation {} argument {} lowers to {}, expected {}", repr(sig), i,
                                                             llvm_tostring(params[i]->getType()), llvm_tostring(formal)));
@@ -1114,7 +1127,8 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
           fn->addFnAttr(llvm::Attribute::WillReturn);
           fn->addRetAttr(llvm::Attribute::NoAlias);
         }
-        const auto call = B.CreateCall(fn, x.args ^ map([&](const auto &a) { return mkTermVal(a); }));
+        // NOLINTNEXTLINE(misc-const-correctness)
+        auto *const call = B.CreateCall(fn, x.args ^ map([&](const auto &a) { return mkTermVal(a); }));
         return x.rtn.is<Type::Unit0>() ? mkTermVal(Term::Unit0Const()) : call;
       },
       [&](const Expr::OffsetOf &x) -> ValPtr {
@@ -1135,10 +1149,10 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
       [&](const Expr::Index &x) -> ValPtr { return ptrModel->indexVal(*this, x, key); },
       [&](const Expr::RefTo &x) -> ValPtr { return ptrModel->refToVal(*this, x, key); },
       [&](const Expr::Alloc &x) -> ValPtr { //
-        const auto componentTpe = B.getPtrTy(0);
-        const auto size = mkTermVal(x.size);
-        const auto elemSize = C.sizeOf(B, componentTpe);
-        const auto ptr = invokeMalloc(B.CreateMul(B.CreateIntCast(size, resolveType(Type::IntS64()), true), elemSize));
+        auto *const componentTpe = B.getPtrTy(0);
+        auto *const size = mkTermVal(x.size);
+        auto *const elemSize = C.sizeOf(B, componentTpe);
+        auto *const ptr = invokeMalloc(B.CreateMul(B.CreateIntCast(size, resolveType(Type::IntS64()), true), elemSize));
         return B.CreateBitCast(ptr, componentTpe);
       });
 }
@@ -1188,7 +1202,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
           if (const auto alias = x.expr->template get<Expr::Alias>())
             if (const auto select = alias->ref.template get<Term::Select>();
                 select && !select->steps.empty() && select->root.tpe.template is<Type::Ptr>()) {
-              auto rhs = mkExprVal(*x.expr, x.name.symbol + "_array_alias");
+              auto *rhs = mkExprVal(*x.expr, x.name.symbol + "_array_alias");
               if (rhs->getType()->isPointerTy()) {
                 stackVarPtrs.insert_or_assign(x.name.symbol, Pair<Type::Any, llvm::Value *>{x.name.tpe, rhs});
                 return BlockKind::Normal;
@@ -1197,10 +1211,10 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
 
         if (x.name.tpe.is<Type::Unit0>()) {
           // Unit0 declaration, discard declaration but keep RHS effect.
-          if (x.expr) auto _ = mkExprVal(*x.expr, x.name.symbol + "_var_rhs");
+          if (x.expr) const llvm::Value *_ = mkExprVal(*x.expr, x.name.symbol + "_var_rhs");
         } else {
-          const auto tpe = resolveType(x.name.tpe);
-          auto allocTy = ptrModel->localAllocType(*this, x.name.tpe, tpe);
+          auto *const tpe = resolveType(x.name.tpe);
+          auto *allocTy = ptrModel->localAllocType(*this, x.name.tpe, tpe);
           const auto localArr =
               x.name.tpe.template get<Type::Arr>() ^ exists([](const auto &a) { return a.space.template is<TypeSpace::Local>(); });
           const auto dynShared = x.name.tpe.template get<Type::Arr>()
@@ -1267,9 +1281,9 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
             // type; the polyAST drops the alignas, so the natural i8 alignment is 1 and the reinterpreted load
             // faults. floor the global at 16 (over-alignment is always sound)
             std::function<bool(llvm::Type *)> hasByteBuffer = [&](llvm::Type *t) -> bool {
-              if (auto *at = llvm::dyn_cast<llvm::ArrayType>(t))
+              if (const auto *at = llvm::dyn_cast<llvm::ArrayType>(t))
                 return at->getElementType()->isIntegerTy(8) ? at->getNumElements() > 8 : hasByteBuffer(at->getElementType());
-              if (auto *st = llvm::dyn_cast<llvm::StructType>(t))
+              if (const auto *st = llvm::dyn_cast<llvm::StructType>(t))
                 return llvm::any_of(st->elements(), [&](auto *e) { return hasByteBuffer(e); });
               return false;
             };
@@ -1282,24 +1296,24 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
           // already undefined when read, so materialising its otherwise-unspecified value as zero is valid and
           // prevents an inlined vendor temporary from making one launch depend on the width run immediately before it.
           if (C.isNVPTX() && !x.expr && !localArr && allocTy->isIntegerTy()) [[maybe_unused]]
-            const auto initialised = C.store(B, llvm::Constant::getNullValue(allocTy), stackPtr);
+            const auto *const initialised = B.CreateStore(llvm::Constant::getNullValue(allocTy), stackPtr);
           // inline Type::Arr needs a flat ptr slot (AMDGCN's 32-bit alloca AS overflows the 64-bit store); not on SPIR-V
           if (x.name.tpe.template is<Type::Arr>() && !C.isSpirv()) {
             llvm::Value *refSlot;
             if (localArr && C.AllocaAS != 0) {
               // LDS pointer slot needs a plain alloca, no addrspacecast: the cast blocks AMDGPU SROA from tracing the addrspace(3) global
-              const auto slotTy = B.getPtrTy(C.LocalAS);
+              auto *const slotTy = B.getPtrTy(C.LocalAS);
               auto *fn = B.GetInsertBlock()->getParent();
               auto &entry = fn->getEntryBlock();
               llvm::IRBuilder<> entryB(&entry, entry.getFirstNonPHIOrDbgOrAlloca());
               refSlot = entryB.CreateAlloca(slotTy, C.AllocaAS, nullptr, x.name.symbol + "_ref_ptr");
-            } else refSlot = C.allocaAS(B, B.getPtrTy(localArr ? C.LocalAS : 0u), C.AllocaAS, x.name.symbol + "_ref_ptr");
-            const auto _ = C.store(B, stackPtr, refSlot);
+            } else refSlot = C.allocaAS(B, B.getPtrTy(localArr ? C.LocalAS : 0U), C.AllocaAS, x.name.symbol + "_ref_ptr");
+            B.CreateStore(stackPtr, refSlot);
             stackPtr = refSlot;
           }
           // Rebind on same-name redeclaration (adjacent `for (int l = 0; ...)` loops);
           // `emplace` would keep the prior slot and the second loop would see the stale value.
-          if (auto it = stackVarPtrs.find(x.name.symbol); it != stackVarPtrs.end() && it->second.first != x.name.tpe) {
+          if (const auto it = stackVarPtrs.find(x.name.symbol); it != stackVarPtrs.end() && it->second.first != x.name.tpe) {
             throw BackendException("Re-declaration of " + x.name.symbol + " changes type from " + to_string(it->second.first) + " to "
                                    + to_string(x.name.tpe));
           }
@@ -1309,17 +1323,17 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
             // declaration.  Inlined local_accessor::operator[] creates several such aliases.  Initialising each
             // alias used to store poison at byte zero of polyc_dyn_shared; every work-item then raced with the
             // reduction's legitimate local[0] accesses.  Keep any RHS effects, but never write a zero-length view.
-            if (x.expr) auto _ = mkExprVal(*x.expr, x.name.symbol + "_var_rhs");
+            if (x.expr) const llvm::Value *_ = mkExprVal(*x.expr, x.name.symbol + "_var_rhs");
           } else if (x.expr && x.expr->tpe().is<Type::FnRef>()) {
             if (tpe->isPointerTy()) storeStubbedHandle(*this, tpe, stackPtr);
-            else auto _ = mkExprVal(*x.expr, x.name.symbol + "_var_rhs");
+            else const llvm::Value *_ = mkExprVal(*x.expr, x.name.symbol + "_var_rhs");
           } else if (x.expr) {
-            auto rhs = mkExprVal(*x.expr, x.name.symbol + "_var_rhs");
+            auto *rhs = mkExprVal(*x.expr, x.name.symbol + "_var_rhs");
             if (structByPtr() && (x.name.tpe.template is<Type::Struct>() || x.name.tpe.template is<Type::Arr>())) {
               copyStruct(stackPtr, rhs, x.name.tpe);
             } else {
               if (tpe->isPointerTy() && rhs->getType()->isPointerTy() && rhs->getType() != tpe) rhs = B.CreateAddrSpaceCast(rhs, tpe);
-              const auto _ = C.store(B, rhs, stackPtr); //
+              B.CreateStore(rhs, stackPtr);
             }
           } else if (x.name.tpe.template is<Type::Struct>() && !localArr) {
             // zero an uninitialised struct declaration: a ctor that sets only some members otherwise leaves the
@@ -1339,9 +1353,9 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
                                            + ") mismatch (" + repr(x) + ")");
         }
         if (lhs.tpe.is<Type::Unit0>()) return BlockKind::Normal;
-        auto rhs = mkExprVal(x.expr, qualified(lhs) + "_mut");
+        auto *rhs = mkExprVal(x.expr, qualified(lhs) + "_mut");
         if (lhs.tpe.is<Type::FnRef>()) return BlockKind::Normal;
-        const auto dst = lhs.steps.empty() ? findStackVar(lhs.root) : mkSelectPtr(lhs);
+        auto *const dst = lhs.steps.empty() ? findStackVar(lhs.root) : mkSelectPtr(lhs);
         // by-value aggregate: rhs is a pointer to the source, so copy contents rather than store the pointer.
         // an Arr behind a select path is inline [N x T] storage, so it copies on every target; only a step-less
         // Arr lhs is a local's ref-ptr slot, which rebinds by pointer as Stmt::Var does
@@ -1350,7 +1364,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
           copyStruct(dst, rhs, lhs.tpe);
           return BlockKind::Normal;
         }
-        const auto slotTpe = resolveType(lhs.tpe);
+        auto *const slotTpe = resolveType(lhs.tpe);
         auto *storedTpe = slotTpe;
         if (C.isSpirv() && lhs.tpe.template is<Type::Bool1>() && !lhs.steps.empty()) {
           storedTpe = llvm::Type::getInt8Ty(C.actual);
@@ -1360,7 +1374,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
           if (const auto *gep = llvm::dyn_cast<llvm::GetElementPtrInst>(dst)) storedTpe = gep->getResultElementType();
         if (storedTpe->isPointerTy() && rhs->getType()->isPointerTy() && rhs->getType() != storedTpe)
           rhs = B.CreateAddrSpaceCast(rhs, storedTpe);
-        const auto _ = C.store(B, rhs, dst);
+        B.CreateStore(rhs, dst);
         return BlockKind::Normal;
       },
       [&](const Stmt::Update &x) -> BlockKind {
@@ -1383,9 +1397,9 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         return BlockKind::Normal;
       },
       [&](const Stmt::While &x) -> BlockKind {
-        const auto loopTest = llvm::BasicBlock::Create(C.actual, "loop_test", &fn);
-        const auto loopBody = llvm::BasicBlock::Create(C.actual, "loop_body", &fn);
-        const auto loopExit = llvm::BasicBlock::Create(C.actual, "loop_exit", &fn);
+        auto *const loopTest = llvm::BasicBlock::Create(C.actual, "loop_test", &fn);
+        auto *const loopBody = llvm::BasicBlock::Create(C.actual, "loop_body", &fn);
+        auto *const loopExit = llvm::BasicBlock::Create(C.actual, "loop_exit", &fn);
         WhileCtx ctx{.exit = loopExit, .cont = loopTest};
         // lanes that enter a loop together leave it together, as on lockstep and structured-convergence targets;
         // a subgroup collective after a lane-divergent exit otherwise sees only the lanes that left first
@@ -1398,7 +1412,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         {
           B.SetInsertPoint(loopBody);
           auto kind = BlockKind::Normal;
-          for (auto &body : x.body) {
+          for (const auto &body : x.body) {
             kind = mkStmt(body, fn, {ctx});
             if (kind == BlockKind::Terminal) break;
           }
@@ -1414,10 +1428,10 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         return BlockKind::Normal;
       },
       [&](const Stmt::ForRange &x) -> BlockKind {
-        const auto loopTest = llvm::BasicBlock::Create(C.actual, "loop_test", &fn);
-        const auto loopBody = llvm::BasicBlock::Create(C.actual, "loop_body", &fn);
-        const auto loopStep = llvm::BasicBlock::Create(C.actual, "loop_step", &fn);
-        const auto loopExit = llvm::BasicBlock::Create(C.actual, "loop_exit", &fn);
+        auto *const loopTest = llvm::BasicBlock::Create(C.actual, "loop_test", &fn);
+        auto *const loopBody = llvm::BasicBlock::Create(C.actual, "loop_body", &fn);
+        auto *const loopStep = llvm::BasicBlock::Create(C.actual, "loop_step", &fn);
+        auto *const loopExit = llvm::BasicBlock::Create(C.actual, "loop_exit", &fn);
         const auto inductionSelect = Term::Select(x.induction, {}, x.induction.tpe);
         const auto inductionTerm = Term::Any(inductionSelect);
         static_cast<void>(mkStmt(Stmt::Var(x.induction, std::optional<Expr::Any>{}, /*isMutable*/ true), fn, whileCtx));
@@ -1432,7 +1446,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         {
           B.SetInsertPoint(loopBody);
           auto kind = BlockKind::Normal;
-          for (auto &body : x.body) {
+          for (const auto &body : x.body) {
             kind = mkStmt(body, fn, {ctx});
             if (kind == BlockKind::Terminal) break;
           }
@@ -1441,7 +1455,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
           if (stepped) B.SetInsertPoint(loopStep);
           else loopStep->eraseFromParent();
           if (stepped || kind != BlockKind::Terminal) {
-            [[maybe_unused]] auto _0 =
+            [[maybe_unused]] const auto _0 =
                 mkStmt(Stmt::Mut(inductionSelect, Expr::IntrOp(Intr::Add(inductionTerm, x.step, x.induction.tpe))), fn, {ctx});
             B.CreateBr(loopTest);
           }
@@ -1461,14 +1475,14 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         return BlockKind::Terminal;
       }, //
       [&](const Stmt::Cond &x) -> BlockKind {
-        const auto condTrue = llvm::BasicBlock::Create(C.actual, "cond_true", &fn);
-        const auto condFalse = llvm::BasicBlock::Create(C.actual, "cond_false", &fn);
-        const auto condExit = llvm::BasicBlock::Create(C.actual, "cond_exit", &fn);
+        auto *const condTrue = llvm::BasicBlock::Create(C.actual, "cond_true", &fn);
+        auto *const condFalse = llvm::BasicBlock::Create(C.actual, "cond_false", &fn);
+        auto *const condExit = llvm::BasicBlock::Create(C.actual, "cond_exit", &fn);
         condBr(B, mkTermVal(x.cond, "cond"), condTrue, condFalse);
         {
           B.SetInsertPoint(condTrue);
           auto kind = BlockKind::Normal;
-          for (auto &body : x.trueBr) {
+          for (const auto &body : x.trueBr) {
             kind = mkStmt(body, fn, whileCtx);
             if (kind == BlockKind::Terminal) break;
           }
@@ -1477,7 +1491,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         {
           B.SetInsertPoint(condFalse);
           auto kind = BlockKind::Normal;
-          for (auto &body : x.falseBr) {
+          for (const auto &body : x.falseBr) {
             kind = mkStmt(body, fn, whileCtx);
             if (kind == BlockKind::Terminal) break;
           }
@@ -1492,26 +1506,26 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         }
       },
       [&](const Stmt::Return &x) -> BlockKind {
-        if (auto rtnTpe = x.value.tpe(); rtnTpe.is<Type::Unit0>()) {
+        if (const auto rtnTpe = x.value.tpe(); rtnTpe.is<Type::Unit0>()) {
           static_cast<void>(mkExprVal(x.value, "return_unit"));
           B.CreateRetVoid();
         } else if (rtnTpe.is<Type::Nothing>()) {
           B.CreateUnreachable();
         } else if (currentSretParam && rtnTpe.is<Type::Struct>()) {
-          const auto val = mkExprVal(x.value, "return_sret_val");
+          auto *const val = mkExprVal(x.value, "return_sret_val");
           if (C.isVulkan()) {
             copyStruct(currentSretParam, val, rtnTpe); // val is a struct pointer (structByPtr)
           } else {
             const auto structInfo = structTypes.at(fqcn(rtnTpe.get<Type::Struct>()->name));
-            auto spill = C.allocaAS(B, structInfo.tpe, C.AllocaAS, "return_sret_spill");
-            auto _ = C.store(B, val, spill);
+            auto *spill = C.allocaAS(B, structInfo.tpe, C.AllocaAS, "return_sret_spill");
+            B.CreateStore(val, spill);
             const auto size = structInfo.layout.sizeInBytes;
             const auto align = structInfo.layout.alignment;
             B.CreateMemCpy(currentSretParam, llvm::MaybeAlign(align), spill, llvm::MaybeAlign(align), size);
           }
           B.CreateRetVoid();
         } else {
-          auto expr = mkExprVal(x.value, "return");
+          auto *expr = mkExprVal(x.value, "return");
           // Callable specialisation refines erased pointer values to FnRef while following them through forwarding
           // helpers. FnRef has no device-side representation, so retain the helper's declared pointer boundary.
           if (expr->getType() != fn.getReturnType() && llvm::isa<llvm::PoisonValue>(expr) && fn.getReturnType()->isPointerTy())
@@ -1567,9 +1581,11 @@ static auto createPrototype(CodeGen &cg, llvm::Module &mod, const Function &fn) 
   const bool useSret = shouldUseSret(cg, fn);
 
   // Structs are returned by-value (functionBoundary=false); other args travel as opaque pointers.
-  const auto rtnTpe = (fn.decl.rtn.is<Type::Unit0>() || useSret) ? llvm::Type::getVoidTy(cg.C.actual)
-                      : fn.decl.rtn.is<Type::Struct>()           ? cg.resolveType(fn.decl.rtn, false)
-                                                                 : cg.resolveType(fn.decl.rtn, true);
+  auto *const rtnTpe = [&]() -> llvm::Type * {
+    if (fn.decl.rtn.is<Type::Unit0>() || useSret) return llvm::Type::getVoidTy(cg.C.actual);
+    if (fn.decl.rtn.is<Type::Struct>()) return cg.resolveType(fn.decl.rtn, false);
+    return cg.resolveType(fn.decl.rtn, true);
+  }();
 
   auto argTys = argsNoUnit ^ map([&](const auto &arg) { return cg.resolveType(arg.named.tpe, true, offloadEntry); });
 
@@ -1816,8 +1832,8 @@ Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program, c
     for (const auto &[llvmFn, fn, argsNoUnit] : prototypes) {
       if (!fn.convention.is<CallConvention::OffloadEntry>()) continue;
       const auto exportConstant = [&](const std::string &suffix, const int64_t value) {
-        const auto _ = new llvm::GlobalVariable(M, B.getInt64Ty(), /*isConstant*/ true, llvm::GlobalValue::ExternalLinkage,
-                                                B.getInt64(value), llvmFn->getName().str() + suffix);
+        const auto *const _ = new llvm::GlobalVariable(M, B.getInt64Ty(), /*isConstant*/ true, llvm::GlobalValue::ExternalLinkage,
+                                                       B.getInt64(value), llvmFn->getName().str() + suffix);
       };
       exportConstant(program_meta::HostStaticLocalBytesSuffix, moduleStaticBytes);
       if (const auto abi = hostAbiOf(program, fn)) exportConstant(program_meta::HostAbiSuffix, *abi);
@@ -1868,12 +1884,12 @@ Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program, c
                          llvmArgValue = B.CreateAddrSpaceCast(llvmArgValue, slotTy);
                        }
                        auto stackPtr = C.allocaAS(B, slotTy, C.AllocaAS, arg.named.symbol + "_stack_ptr");
-                       auto _ = C.store(B, llvmArgValue, stackPtr);
+                       B.CreateStore(llvmArgValue, stackPtr);
                        return {arg.named.symbol, {arg.named.tpe, stackPtr}};
                      }) //
                    | to<Map>();
     try {
-      for (auto &stmt : fn.body)
+      for (const auto &stmt : fn.body)
         if (mkStmt(stmt, *llvmFn) == BlockKind::Terminal) break;
     } catch (const BackendException &error) {
       throw BackendException(fmt::format("{} while lowering function `{}`", error.what(), fqcn(fn.decl.name)));
@@ -1950,7 +1966,7 @@ ValPtr CodeGen::mkSignumVal(const AnyExpr &expr, const AnyTerm &x, const AnyType
   return unaryNumOp(
       expr, x, tpe,
       [&](const auto &v) -> ValPtr {
-        auto msb = v->getType()->getPrimitiveSizeInBits() - 1;
+        const auto msb = v->getType()->getPrimitiveSizeInBits() - 1;
         return B.CreateOr(B.CreateAShr(v, msb), B.CreateLShr(B.CreateNeg(v), msb));
       },
       [&](const auto &v) -> ValPtr {
@@ -1973,8 +1989,8 @@ static llvm::AtomicOrdering atomicOrdering(const MemOrder::Any &o) {
 // intentionally block the inference. Recover the original resource pointer for those operations so the
 // SPIR-V translator receives a legal StorageBuffer access instead of an unselectable address-space cast.
 static llvm::Value *vulkanResourcePointer(llvm::Value *ptr) {
-  auto resource = [](llvm::Value *candidate) -> llvm::Value * {
-    if (auto *cast = llvm::dyn_cast<llvm::AddrSpaceCastInst>(candidate))
+  const auto resource = [](llvm::Value *candidate) -> llvm::Value * {
+    if (const auto *cast = llvm::dyn_cast<llvm::AddrSpaceCastInst>(candidate))
       if (cast->getSrcAddressSpace() == 11) return cast->getOperand(0);
     return nullptr;
   };
@@ -1990,12 +2006,14 @@ static llvm::Value *vulkanResourcePointer(llvm::Value *ptr) {
     if (stored) return ptr;
     stored = store->getValueOperand();
   }
-  return stored ? (resource(stored) ? resource(stored) : ptr) : ptr;
+  if (!stored) return ptr;
+  if (auto *resourcePtr = resource(stored)) return resourcePtr;
+  return ptr;
 }
 
 NumericKind polyregion::backend::details::classifyNumeric(const AnyType &tpe) {
-  return {tpe.is<Type::Float16>() || tpe.is<Type::Float32>() || tpe.is<Type::Float64>(),
-          tpe.is<Type::IntS8>() || tpe.is<Type::IntS16>() || tpe.is<Type::IntS32>() || tpe.is<Type::IntS64>()};
+  return {.isFloat = tpe.is<Type::Float16>() || tpe.is<Type::Float32>() || tpe.is<Type::Float64>(),
+          .isSigned = tpe.is<Type::IntS8>() || tpe.is<Type::IntS16>() || tpe.is<Type::IntS32>() || tpe.is<Type::IntS64>()};
 }
 
 namespace {
@@ -2019,7 +2037,7 @@ ValPtr CodeGen::packAggregate(ValPtr value, llvm::Type *type, llvm::Align alignm
     // Aggregate stores do not define padding bytes. Initialise the complete
     // storage representation before viewing it as an atomic-width integer.
     B.CreateMemSet(slot, B.getInt8(0), B.getInt64(bytes), alignment);
-    const auto _ = C.store(B, value, slot);
+    B.CreateStore(value, slot);
   }
   auto *packed = B.CreateLoad(llvm::Type::getIntNTy(C.actual, bytes * 8), slot);
   packed->setAlignment(alignment);
@@ -2029,15 +2047,17 @@ ValPtr CodeGen::packAggregate(ValPtr value, llvm::Type *type, llvm::Align alignm
 ValPtr CodeGen::mkAtomicRMW(const Spec::GpuAtomicRMW &op, const std::string &scope) {
   const auto nk = classifyNumeric(op.value.tpe());
   using Op = llvm::AtomicRMWInst::BinOp;
-  const auto binop = op.op.match_total(                                                                   //
-      [&](const AtomicOp::Xchg &) { return Op::Xchg; },                                                   //
-      [&](const AtomicOp::Add &) { return nk.isFloat ? Op::FAdd : Op::Add; },                             //
-      [&](const AtomicOp::Sub &) { return nk.isFloat ? Op::FSub : Op::Sub; },                             //
-      [&](const AtomicOp::And &) { return Op::And; },                                                     //
-      [&](const AtomicOp::Or &) { return Op::Or; },                                                       //
-      [&](const AtomicOp::Xor &) { return Op::Xor; },                                                     //
-      [&](const AtomicOp::Min &) { return nk.isFloat ? Op::FMin : (nk.isSigned ? Op::Min : Op::UMin); },  //
-      [&](const AtomicOp::Max &) { return nk.isFloat ? Op::FMax : (nk.isSigned ? Op::Max : Op::UMax); }); //
+  const auto intMin = nk.isSigned ? Op::Min : Op::UMin;
+  const auto intMax = nk.isSigned ? Op::Max : Op::UMax;
+  const auto binop = op.op.match_total(                                       //
+      [&](const AtomicOp::Xchg &) { return Op::Xchg; },                       //
+      [&](const AtomicOp::Add &) { return nk.isFloat ? Op::FAdd : Op::Add; }, //
+      [&](const AtomicOp::Sub &) { return nk.isFloat ? Op::FSub : Op::Sub; }, //
+      [&](const AtomicOp::And &) { return Op::And; },                         //
+      [&](const AtomicOp::Or &) { return Op::Or; },                           //
+      [&](const AtomicOp::Xor &) { return Op::Xor; },                         //
+      [&](const AtomicOp::Min &) { return nk.isFloat ? Op::FMin : intMin; },  //
+      [&](const AtomicOp::Max &) { return nk.isFloat ? Op::FMax : intMax; }); //
   auto *ptr = mkTermVal(op.ptr);
   if (C.isVulkan()) ptr = vulkanResourcePointer(ptr);
   auto *value = mkTermVal(op.value);
@@ -2048,14 +2068,14 @@ ValPtr CodeGen::mkAtomicRMW(const Spec::GpuAtomicRMW &op, const std::string &sco
   // Aggregate atomic/volatile specs promise natural storage-width alignment even when the aggregate ABI alignment
   // is weaker. Vendor descriptors live in device allocations whose base and element stride satisfy that contract.
   const auto aggregateAlignment = aggregateAtomicLayout(M.getDataLayout(), valueType, "exchange").second;
-  const auto packed = packAggregate(value, valueType, aggregateAlignment, "atomic.pack");
+  auto *const packed = packAggregate(value, valueType, aggregateAlignment, "atomic.pack");
   auto *observed =
       B.CreateAtomicRMW(binop, ptr, packed, aggregateAlignment, atomicOrdering(op.order), C.actual.getOrInsertSyncScopeID(scope));
   auto *slot = C.allocaAS(B, valueType, C.AllocaAS, "atomic.unpack");
   llvm::cast<llvm::AllocaInst>(slot->stripPointerCasts())->setAlignment(aggregateAlignment);
   auto *store = B.CreateStore(observed, slot);
   store->setAlignment(aggregateAlignment);
-  return structByPtr() ? slot : C.load(B, slot, valueType);
+  return structByPtr() ? slot : B.CreateLoad(valueType, slot);
 }
 
 ValPtr CodeGen::mkAtomicCAS(const Spec::GpuAtomicCAS &op, const std::string &scope) {
@@ -2076,7 +2096,7 @@ ValPtr CodeGen::mkAtomicCAS(const Spec::GpuAtomicCAS &op, const std::string &sco
     llvm::cast<llvm::AllocaInst>(slot->stripPointerCasts())->setAlignment(aggregateAlignment);
     auto *store = B.CreateStore(observed, slot);
     store->setAlignment(aggregateAlignment);
-    return structByPtr() ? slot : C.load(B, slot, valueType);
+    return structByPtr() ? slot : B.CreateLoad(valueType, slot);
   }
   auto *exchange =
       B.CreateAtomicCmpXchg(ptr, expected, desired, llvm::MaybeAlign(), ordering,
@@ -2109,13 +2129,13 @@ ValPtr CodeGen::mkVolatileLoad(const Spec::GpuVolatileLoad &op) {
     llvm::cast<llvm::AllocaInst>(slot->stripPointerCasts())->setAlignment(alignment);
     auto *unpack = B.CreateStore(ld, slot);
     unpack->setAlignment(alignment);
-    return aggregateByPtr ? slot : C.load(B, slot, ty);
+    return aggregateByPtr ? slot : B.CreateLoad(ty, slot);
   }
   auto *ld = B.CreateLoad(ty, ptr);
   ld->setVolatile(true);
   if (aggregateByPtr) {
     auto *slot = C.allocaAS(B, ty, C.AllocaAS, "vld");
-    const auto _ = C.store(B, ld, slot);
+    B.CreateStore(ld, slot);
     return slot;
   }
   return ld;
@@ -2135,7 +2155,7 @@ ValPtr CodeGen::mkVolatileStore(const Spec::GpuVolatileStore &op) {
     st->setAlignment(alignment);
     return st;
   }
-  if (aggregateByPtr) val = C.load(B, val, ty);
+  if (aggregateByPtr) val = B.CreateLoad(ty, val);
   auto *st = B.CreateStore(val, ptr);
   st->setVolatile(true);
   return st;
@@ -2149,23 +2169,23 @@ ValPtr CodeGen::shuffleStage(llvm::Type *valTy, llvm::Type *bufTy, uint64_t word
   auto *srcPtr = C.allocaAS(B, stageTy, C.AllocaAS, tag + "_src");
   const auto stageAlign = llvm::Align(std::max<uint64_t>(4, M.getDataLayout().getABITypeAlign(valTy).value()));
   llvm::cast<llvm::AllocaInst>(srcPtr->stripPointerCasts())->setAlignment(stageAlign);
-  const auto _ = C.store(B, llvm::Constant::getNullValue(stageTy), srcPtr);
+  B.CreateStore(llvm::Constant::getNullValue(stageTy), srcPtr);
   const auto valueBytes = M.getDataLayout().getTypeStoreSize(valTy);
   if (byPtr) B.CreateMemCpy(srcPtr, stageAlign, srcVal, M.getDataLayout().getABITypeAlign(valTy), valueBytes);
   else {
-    const auto _ = C.store(B, srcVal, srcPtr);
+    B.CreateStore(srcVal, srcPtr);
   }
   auto *dstPtr = C.allocaAS(B, stageTy, C.AllocaAS, tag + "_dst");
   llvm::cast<llvm::AllocaInst>(dstPtr->stripPointerCasts())->setAlignment(stageAlign);
   for (uint64_t i = 0; i < words; ++i) {
     auto *idx = llvm::ConstantInt::get(i32Ty, i);
-    auto *word = C.load(B, B.CreateGEP(i32Ty, srcPtr, {idx}), i32Ty);
-    const auto _ = C.store(B, perWord(word), B.CreateGEP(i32Ty, dstPtr, {idx}));
+    auto *word = B.CreateLoad(i32Ty, B.CreateGEP(i32Ty, srcPtr, {idx}));
+    B.CreateStore(perWord(word), B.CreateGEP(i32Ty, dstPtr, {idx}));
   }
-  return C.load(B, dstPtr, valTy);
+  return B.CreateLoad(valTy, dstPtr);
 }
 
-LLVMBackend::LLVMBackend(const Options &options) : options(options) {}
+LLVMBackend::LLVMBackend(Options options) : options(std::move(options)) {}
 
 std::vector<StructLayout> LLVMBackend::resolveLayouts(const std::vector<StructDef> &structs) {
   return TargetedContext(options).resolveLayouts(structs) | values() | map([&](const auto &i) { return i.layout; }) | to_vector();
@@ -2190,13 +2210,13 @@ CompileResult LLVMBackend::compileProgram(const Program &program, const compilet
   if (compileOptions.target == Target::AMDGCN && opt != compiletime::OptLevel::O0 && hasSelectReuseUnion(rawLocalUnions))
     effectiveOpt = compiletime::OptLevel::O0;
   CodeGen cg(compileOptions, "program");
-  auto transformStart = compiler::nowMono();
+  const auto transformStart = compiler::nowMono();
   auto [maybeTransformErr, transformMsg] = cg.transform(program, rawLocalUnions);
-  CompileEvent ast2IR(compiler::nowMs(), compiler::elapsedNs(transformStart), "ast_to_llvm_ir", transformMsg, {});
+  const CompileEvent ast2IR(compiler::nowMs(), compiler::elapsedNs(transformStart), "ast_to_llvm_ir", transformMsg, {});
 
-  auto verifyStart = compiler::nowMono();
+  const auto verifyStart = compiler::nowMono();
   auto [maybeVerifyErr, verifyMsg] = llvmc::verifyModule(cg.M);
-  CompileEvent astOpt(compiler::nowMs(), compiler::elapsedNs(verifyStart), "llvm_ir_verify", verifyMsg, {});
+  const CompileEvent astOpt(compiler::nowMs(), compiler::elapsedNs(verifyStart), "llvm_ir_verify", verifyMsg, {});
 
   if (maybeTransformErr || maybeVerifyErr) {
     std::vector<std::string> errors;

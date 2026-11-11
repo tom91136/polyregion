@@ -124,8 +124,8 @@ struct Remapper {
                                            bool persistFunctionState = true);
 
     [[nodiscard]] std::shared_ptr<StructDef> findStruct(const std::string &name, const std::string &reason) const;
-    [[nodiscard]] bool emptyStruct(const StructDef &def);
-    [[nodiscard]] bool isEmpty(const Type::Struct &s);
+    [[nodiscard]] static bool emptyStruct(const StructDef &def);
+    [[nodiscard]] bool isEmpty(const Type::Struct &s) const;
 
     void push(const Stmt::Any &stmt);
     void push(const Vector<Stmt::Any> &xs);
@@ -142,18 +142,18 @@ struct Remapper {
   [[nodiscard]] std::string typeName(const Type::Any &tpe) const;
   [[nodiscard]] std::string nameOfRecord(const clang::RecordType *tpe, RemapContext &r) const;
   [[nodiscard]] Named namedOfDecl(const clang::NamedDecl *decl, const Type::Any &tpe) const;
-  [[nodiscard]] Term::Select selectPath(RemapContext &r, const Vector<Named> &prefix, const Named &leaf) const;
+  [[nodiscard]] static Term::Select selectPath(RemapContext &r, const Vector<Named> &prefix, const Named &leaf);
   [[nodiscard]] static Vector<Stmt::Any> boundElementBody(Vector<Stmt::Any> body, const Type::Any &rtn);
   [[nodiscard]] Pair<std::string, std::shared_ptr<Function>> handleCall(const clang::FunctionDecl *decl, RemapContext &r);
   [[nodiscard]] Type::Any handleType(clang::QualType qual, RemapContext &r) const;
-  [[nodiscard]] Expr::Any conform(RemapContext &r, const Expr::Any &expr, const Type::Any &targetTpe);
+  [[nodiscard]] static Expr::Any conform(RemapContext &r, const Expr::Any &expr, const Type::Any &targetTpe);
   [[nodiscard]] Expr::Any zeroInitialise(RemapContext &r, const Type::Any &tpe);
-  void recordExceptionCode(const clang::Stmt &stmt, const Named &code, RemapContext &r) const;
+  static void recordExceptionCode(const clang::Stmt &stmt, const Named &code, RemapContext &r);
   [[nodiscard]] Opt<Expr::Any> lowerSpecialCall(const clang::CallExpr &call, const clang::FunctionDecl &decl, RemapContext &r);
   [[nodiscard]] bool specialCallPreservesExceptionMetadata(const clang::CallExpr &call, const clang::FunctionDecl &decl) const;
   [[nodiscard]] Type::Any annotateLocalSpace(const clang::ValueDecl *decl, RemapContext &r) const;
   [[nodiscard]] std::shared_ptr<StructDef> handleRecord(const clang::RecordDecl *decl, RemapContext &r) const;
-  [[nodiscard]] Expr::Any handleExpr(const clang::Expr *expr, RemapContext &r);
+  [[nodiscard]] Expr::Any handleExpr(const clang::Expr *root, RemapContext &r);
   void handleStmt(const clang::Stmt *root, RemapContext &expr);
   // `downTo` is inclusive: an exit edge destroys every frame it leaves, innermost first
   void unwindCleanups(RemapContext &r, size_t downTo);

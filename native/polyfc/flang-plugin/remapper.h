@@ -50,7 +50,7 @@ struct Remapper {
   // user procedures translated to polyast (recursive callees survive as fir.call -> Invoke); by mangled name
   std::unordered_map<std::string, polyast::Function> userFuncs;
   void handleFunc(mlir::func::FuncOp funcOp);
-  polyast::Term::Select newVar(const std::variant<polyast::Expr::Any, polyast::Type::Any> &expr);
+  polyast::Term::Select newVar(const std::variant<polyast::Expr::Any, polyast::Type::Any> &x);
   polyast::Term::Any termOf(const polyast::Expr::Any &expr);
 
   Remapper(mlir::ModuleOp &M, mlir::DataLayout &L, mlir::Operation *perimeter, const std::vector<polyast::Named> &captureRoot);

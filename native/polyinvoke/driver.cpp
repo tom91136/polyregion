@@ -1,7 +1,13 @@
+#include <algorithm>
 #include <chrono>
+#include <cstdint>
+#include <cstdlib>
 #include <fstream>
+#include <memory>
+#include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "aspartame/all.hpp"
@@ -226,13 +232,13 @@ static uint8_t hsacoKernelSourcegfx803[]{
 
 };
 
-void run() {
+static void run() {
 
   using namespace polyregion::invoke;
 
   std::vector<std::unique_ptr<Platform>> rts;
 
-  for (auto backend : {Backend::RelocatableObject})
+  for (const auto backend : {Backend::RelocatableObject})
     if (auto platform = Platform::maybe(backend)) rts.emplace_back(std::move(platform));
 
   static std::vector<int32_t> xs;
@@ -271,24 +277,24 @@ void run() {
         if (!d->moduleLoaded("a")) {
           d->loadModule("a", src);
         }
-        auto size = sizeof(decltype(xs)::value_type) * xs.size();
+        const auto size = sizeof(decltype(xs)::value_type) * xs.size();
         auto ptr = d->mallocDevice(size, Access::RW);
-        q1->enqueueHostToDeviceAsync(xs.data(), ptr, 0, size, [&]() { fmt::print("[{}]  H->D ok\n", i); });
+        q1->enqueueHostToDeviceAsync(xs.data(), ptr, 0, size, [&] { fmt::print("[{}]  H->D ok\n", i); });
 
         int32_t x = 4;
 
-        ArgBuffer buffer({
+        const ArgBuffer buffer({
             {Type::Ptr, &ptr},
             {Type::IntS32, &x},
             {Type::Void, nullptr},
         });
 
-        q1->enqueueInvokeAsync("a", "lambda", buffer.types, buffer.data, {}, [&]() { fmt::print("[{}]  K 1 ok\n", i); });
+        q1->enqueueInvokeAsync("a", "lambda", buffer.types, buffer.data, {}, [&] { fmt::print("[{}]  K 1 ok\n", i); });
 
         x = 5;
 
-        q1->enqueueInvokeAsync("a", "lambda", buffer.types, buffer.data, {}, [&]() { fmt::print("[{}]  K 2 ok\n", i); });
-        q1->enqueueDeviceToHostAsync(ptr, 0, xs.data(), size, [&]() { fmt::print("[{}]  D->H ok, r= {}\n", i, xs | mk_string(",")); });
+        q1->enqueueInvokeAsync("a", "lambda", buffer.types, buffer.data, {}, [&] { fmt::print("[{}]  K 2 ok\n", i); });
+        q1->enqueueDeviceToHostAsync(ptr, 0, xs.data(), size, [&] { fmt::print("[{}]  D->H ok, r= {}\n", i, xs | mk_string(",")); });
         d->freeDevice(ptr);
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
       }

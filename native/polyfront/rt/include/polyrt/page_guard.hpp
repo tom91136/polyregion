@@ -60,7 +60,11 @@ inline bool protect(void *base, const size_t bytes, const Access access) {
   const DWORD flags = access == Access::None ? PAGE_NOACCESS : access == Access::Read ? PAGE_READONLY : PAGE_READWRITE;
   return VirtualProtect(base, bytes, flags, &previous) != 0;
 #else
-  const int flags = access == Access::None ? PROT_NONE : access == Access::Read ? PROT_READ : PROT_READ | PROT_WRITE;
+  const int flags = [&]() -> int {
+    if (access == Access::None) return PROT_NONE;
+    if (access == Access::Read) return PROT_READ;
+    return PROT_READ | PROT_WRITE;
+  }();
   return mprotect(base, bytes, flags) == 0;
 #endif
 }
@@ -129,7 +133,7 @@ static_assert(std::atomic<uintptr_t>::is_always_lock_free && std::atomic<uint8_t
               && std::atomic<uint64_t>::is_always_lock_free && std::atomic<FaultHandler>::is_always_lock_free);
 
 inline void relax() {
-#if defined(_WIN32)
+#ifdef _WIN32
   YieldProcessor();
 #elif defined(__x86_64__) || defined(__i386__)
   __builtin_ia32_pause();
@@ -181,7 +185,7 @@ inline void reportStall(const uintptr_t address) {
                    "resolver needs (e.g. a guarded buffer passed straight to a driver call), POLYRT_RESIDENT=0 disables residency\n";
   constexpr size_t digitsAt = sizeof("[PolyRT] still resolving a guarded page fault at 0x") - 1;
   for (size_t i = 0; i < 16; ++i)
-    message[digitsAt + i] = "0123456789abcdef"[(address >> (60 - 4 * i)) & 0xF];
+    message[digitsAt + i] = "0123456789abcdef"[(address >> (60 - (4 * i))) & 0xF];
   report(message, sizeof(message) - 1);
 }
 
@@ -219,9 +223,11 @@ inline void serve() {
     const auto h = handler.load(std::memory_order_acquire);
     const bool stale =
         ranges[r.slot.load(std::memory_order_relaxed)].epoch.load(std::memory_order_acquire) != r.epoch.load(std::memory_order_relaxed);
-    const auto result = stale ? Resolution::Gone
-                        : h   ? h(reinterpret_cast<void *>(r.address.load(std::memory_order_relaxed)))
-                              : Resolution::Declined;
+    const auto result = [&]() -> Resolution {
+      if (stale) return Resolution::Gone;
+      if (h) return h(reinterpret_cast<void *>(r.address.load(std::memory_order_relaxed)));
+      return Resolution::Declined;
+    }();
     r.result.store(static_cast<uint8_t>(result), std::memory_order_relaxed);
     r.state.store(Done, std::memory_order_release);
   }
@@ -297,7 +303,10 @@ inline void takeDefault(const int signal) {
 inline void forward(const int signal, siginfo_t *info, void *context) {
   const uintptr_t self = threadToken();
   for (const auto &f : forwarders)
-    if (f.load(std::memory_order_acquire) == self) return takeDefault(signal);
+    if (f.load(std::memory_order_acquire) == self) {
+      takeDefault(signal);
+      return;
+    }
   std::atomic<uintptr_t> *claimed = nullptr;
   for (auto &f : forwarders) {
     uintptr_t expected = 0;
@@ -306,7 +315,7 @@ inline void forward(const int signal, siginfo_t *info, void *context) {
       break;
     }
   }
-  auto &c = chain(signal);
+  const auto &c = chain(signal);
   const struct sigaction prior = c.slots[c.current.load(std::memory_order_acquire)];
   if ((prior.sa_flags & SA_SIGINFO) && prior.sa_sigaction && prior.sa_sigaction != onFault) prior.sa_sigaction(signal, info, context);
   else if (!(prior.sa_flags & SA_SIGINFO) && prior.sa_handler != SIG_DFL && prior.sa_handler != SIG_IGN) prior.sa_handler(signal);

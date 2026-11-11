@@ -1,6 +1,15 @@
 #include "polyinvoke/hip_platform.h"
 
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <string>
 #include <thread>
+#include <utility>
+#include <variant>
+#include <vector>
 
 #include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
@@ -15,7 +24,7 @@ static constexpr auto PREFIX = "HIP";
 
 #define CHECKED(f__)                                                                                                                       \
   do {                                                                                                                                     \
-    hipError_t result__ = (f__);                                                                                                           \
+    const hipError_t result__ = (f__);                                                                                                     \
     if (result__ != hipSuccess) {                                                                                                          \
       POLYINVOKE_FATAL(PREFIX, "%s (code=%u): %s", hipGetErrorName(result__), result__, hipGetErrorString(result__));                      \
     }                                                                                                                                      \
@@ -68,7 +77,7 @@ std::vector<std::unique_ptr<Device>> HipPlatform::enumerate() {
 
 HipDevice::HipDevice(int ordinal)
     : context(
-          [this]() {
+          [this] {
             POLYINVOKE_TRACE();
             hipCtx_t c;
             CHECKED(hipDevicePrimaryCtxRetain(&c, device));
@@ -241,7 +250,7 @@ HipDeviceQueue::HipDeviceQueue(const std::chrono::duration<int64_t> &timeout, de
 }
 HipDeviceQueue::~HipDeviceQueue() {
   POLYINVOKE_TRACE();
-  auto result = hipStreamDestroy(stream);
+  const auto result = hipStreamDestroy(stream);
   if (result == hipError_t::hipErrorContextIsDestroyed) return;
   CHECKED(result);
 }
@@ -295,8 +304,8 @@ void HipDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std
   POLYINVOKE_TRACE();
   if (types.back() != Type::Void)
     POLYINVOKE_FATAL(PREFIX, "Non-void return type not supported: %s", magic_enum::enum_name(types.back()).data());
-  auto fn = store.resolveFunction(moduleName, symbol, types);
-  auto grid = policy.global;
+  auto *fn = store.resolveFunction(moduleName, symbol, types);
+  const auto grid = policy.global;
   auto [block, sharedMem] = policy.local.value_or(std::pair{Dim3{}, 0});
   auto args = detail::argDataAsPointers(types, argData);
   CHECKED(hipModuleLaunchKernel(fn,                        //

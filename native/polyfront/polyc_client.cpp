@@ -1,9 +1,15 @@
 #include "polyfront/polyc_client.hpp"
 
+#include <cstdint>
 #include <cstdlib>
+#include <exception>
 #include <fstream>
+#include <ios>
 #include <optional>
+#include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/SmallString.h"
@@ -57,19 +63,19 @@ bool writeFile(const llvm::StringRef path, const std::vector<uint8_t> &bytes, st
 Checked<polyast::CompileBundle> invokeCompiler(const std::vector<uint8_t> &request, const std::string &explicitExecutable,
                                                const std::vector<std::string> &compileArgs) {
   const auto executable = clientExecutable(explicitExecutable);
-  if (executable.empty()) return {{}, {"cannot locate polyc package compiler"}};
+  if (executable.empty()) return {.value = {}, .errors = {"cannot locate polyc package compiler"}};
 
   llvm::SmallString<128> inputPath, outputPath, errorPath;
   if (const auto ec = llvm::sys::fs::createTemporaryFile("polyregion-package-in", "msgpack", inputPath))
-    return {{}, {"cannot create polyc package input: " + ec.message()}};
+    return {.value = {}, .errors = {"cannot create polyc package input: " + ec.message()}};
   if (const auto ec = llvm::sys::fs::createTemporaryFile("polyregion-package-out", "msgpack", outputPath)) {
     llvm::sys::fs::remove(inputPath);
-    return {{}, {"cannot create polyc package output: " + ec.message()}};
+    return {.value = {}, .errors = {"cannot create polyc package output: " + ec.message()}};
   }
   if (const auto ec = llvm::sys::fs::createTemporaryFile("polyregion-package-error", "txt", errorPath)) {
     llvm::sys::fs::remove(inputPath);
     llvm::sys::fs::remove(outputPath);
-    return {{}, {"cannot create polyc package diagnostic: " + ec.message()}};
+    return {.value = {}, .errors = {"cannot create polyc package diagnostic: " + ec.message()}};
   }
   const llvm::scope_exit cleanup([&] {
     llvm::sys::fs::remove(inputPath);
@@ -77,7 +83,7 @@ Checked<polyast::CompileBundle> invokeCompiler(const std::vector<uint8_t> &reque
     llvm::sys::fs::remove(errorPath);
   });
   std::string writeError;
-  if (!writeFile(inputPath, request, writeError)) return {{}, {std::move(writeError)}};
+  if (!writeFile(inputPath, request, writeError)) return {.value = {}, .errors = {std::move(writeError)}};
 
   std::vector<std::string> ownedArgs{"", "--polyc", "package", "compile"};
   ownedArgs.emplace_back(inputPath.str());
@@ -98,17 +104,17 @@ Checked<polyast::CompileBundle> invokeCompiler(const std::vector<uint8_t> &reque
     auto errors = diagnosticLines(std::move(diagnostic));
     if (!executionError.empty()) errors.emplace_back(std::move(executionError));
     if (errors.empty()) errors.emplace_back(fmt::format("polyc package compiler exited with code {}", code));
-    return {{}, std::move(errors)};
+    return {.value = {}, .errors = std::move(errors)};
   }
   const auto buffer = llvm::MemoryBuffer::getFile(outputPath);
-  if (!buffer) return {{}, {"cannot read polyc package result"}};
-  if ((*buffer)->getBufferSize() == 0) return {{}, {"polyc package compiler returned an empty successful result"}};
+  if (!buffer) return {.value = {}, .errors = {"cannot read polyc package result"}};
+  if ((*buffer)->getBufferSize() == 0) return {.value = {}, .errors = {"polyc package compiler returned an empty successful result"}};
   const auto *begin = reinterpret_cast<const uint8_t *>((*buffer)->getBufferStart());
   const auto *end = begin + (*buffer)->getBufferSize();
   try {
-    return {{polyast::compilebundle_from_msgpack(begin, end)}, {}};
+    return {.value = polyast::compilebundle_from_msgpack(begin, end), .errors = {}};
   } catch (const std::exception &error) {
-    return {{}, {std::string("cannot decode polyc package result: ") + error.what()}};
+    return {.value = {}, .errors = {std::string("cannot decode polyc package result: ") + error.what()}};
   }
 }
 
@@ -119,12 +125,12 @@ Checked<polyast::CompileBundle> compileProgram(const polyast::ProgramLinkRequest
                                                const std::vector<std::pair<compiletime::Target, std::string>> &deviceTargets,
                                                const std::optional<int> stackDepth, const std::vector<std::string> &archives) {
   const auto host = compiletime::TargetSpec::findByCodegen(hostTarget);
-  if (!host) return {{}, {fmt::format("unknown program host target {}", static_cast<int>(hostTarget))}};
+  if (!host) return {.value = {}, .errors = {fmt::format("unknown program host target {}", static_cast<int>(hostTarget))}};
   std::vector<std::string> args{"--target=" + std::string(host->canonical), "--arch=" + hostArch};
   std::string devices;
   for (const auto &[target, arch] : deviceTargets) {
     const auto device = compiletime::TargetSpec::findByCodegen(target);
-    if (!device) return {{}, {fmt::format("unknown program device target {}", static_cast<int>(target))}};
+    if (!device) return {.value = {}, .errors = {fmt::format("unknown program device target {}", static_cast<int>(target))}};
     if (!devices.empty()) devices += ',';
     devices += std::string(device->canonical) + "@" + arch;
   }

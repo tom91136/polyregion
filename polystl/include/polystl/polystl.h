@@ -8,7 +8,7 @@
 
 // XXX polystl-static bundles polyinvoke + LLVM Support; downstream linking goes through
 // polycpp at runtime so the Windows system imports must be auto-linked from every TU.
-#if defined(_MSC_VER)
+#ifdef _MSC_VER
   #pragma comment(lib, "Version.lib")
   #pragma comment(lib, "psapi.lib")
   #pragma comment(lib, "ntdll.lib")
@@ -25,6 +25,7 @@ POLYREGION_RT_PROTECT const polyregion::runtime::KernelBundle &__polyregion_offl
   // Default body: returns an empty bundle so callers (e.g. polystl::details::parallel_for)
   // skip kernel dispatch and fall through to the host path. The polycpp clang plugin replaces
   // this body in offload-enabled builds (POLYCPP_NO_REWRITE not set).
+  // NOLINTNEXTLINE(modernize-use-designated-initializers)
   static const polyregion::runtime::KernelBundle empty{"", 0, nullptr, 0, nullptr, 0, "", nullptr, nullptr, nullptr, false};
   return empty;
 }

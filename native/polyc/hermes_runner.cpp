@@ -1,6 +1,11 @@
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 
@@ -55,8 +60,8 @@ jsi::Function makeConsoleWrite(jsi::Runtime &rt, const char *name) {
 class StringBuffer final : public jsi::Buffer {
 public:
   explicit StringBuffer(std::string s) : s_(std::move(s)) {}
-  size_t size() const override { return s_.size(); }
-  const uint8_t *data() const override { return reinterpret_cast<const uint8_t *>(s_.data()); }
+  [[nodiscard]] size_t size() const override { return s_.size(); }
+  [[nodiscard]] const uint8_t *data() const override { return reinterpret_cast<const uint8_t *>(s_.data()); }
 
 private:
   std::string s_;
@@ -65,8 +70,8 @@ private:
 class VectorBuffer final : public jsi::Buffer {
 public:
   explicit VectorBuffer(Vector<uint8_t> v) : v_(std::move(v)) {}
-  size_t size() const override { return v_.size(); }
-  const uint8_t *data() const override { return v_.data(); }
+  [[nodiscard]] size_t size() const override { return v_.size(); }
+  [[nodiscard]] const uint8_t *data() const override { return v_.data(); }
 
 private:
   Vector<uint8_t> v_;
@@ -84,7 +89,7 @@ String formatException(const jsi::JSError &e) {
 }
 
 jsi::Value getExport(jsi::Runtime &rt, const char *name) {
-  auto exports = rt.global().getProperty(rt, "exports");
+  const auto exports = rt.global().getProperty(rt, "exports");
   if (!exports.isObject()) return jsi::Value::undefined();
   return exports.asObject(rt).getProperty(rt, name);
 }
@@ -92,15 +97,15 @@ jsi::Value getExport(jsi::Runtime &rt, const char *name) {
 bool hasExport(jsi::Runtime &rt, const char *name) { return !getExport(rt, name).isUndefined(); }
 
 bool hasFunctionExport(jsi::Runtime &rt, const char *name) {
-  auto value = getExport(rt, name);
+  const auto value = getExport(rt, name);
   return value.isObject() && value.asObject(rt).isFunction(rt);
 }
 
 // Invoke `exports.<name>()` and return the result, or undefined on missing.
 jsi::Value callExport(jsi::Runtime &rt, const char *name) {
-  auto fnVal = getExport(rt, name);
+  const auto fnVal = getExport(rt, name);
   if (!fnVal.isObject()) return jsi::Value::undefined();
-  auto obj = fnVal.asObject(rt);
+  const auto obj = fnVal.asObject(rt);
   if (!obj.isFunction(rt)) return jsi::Value::undefined();
   return obj.asFunction(rt).call(rt);
 }
@@ -110,8 +115,8 @@ jsi::Value callExport(jsi::Runtime &rt, const char *name) {
 JsPassRunner::JsPassRunner() : impl(std::make_unique<Impl>()) {
   impl->runtime = fbhm::makeHermesRuntime();
   auto &rt = *impl->runtime;
-  auto g = rt.global();
-  auto console = jsi::Object(rt);
+  const auto g = rt.global();
+  const auto console = jsi::Object(rt);
   for (const char *m : {"log", "error", "warn", "info", "debug"})
     console.setProperty(rt, m, makeConsoleWrite(rt, m));
   g.setProperty(rt, "console", console);
@@ -150,7 +155,7 @@ std::optional<int32_t> JsPassRunner::intExport(const std::string_view name, Stri
   auto &rt = *impl->runtime;
   try {
     const String exportName(name);
-    auto value = callExport(rt, exportName.c_str());
+    const auto value = callExport(rt, exportName.c_str());
     if (!value.isNumber()) {
       error = fmt::format("PolyPass JS: exports.{} returned a non-integer", name);
       return std::nullopt;
@@ -174,30 +179,30 @@ Vector<uint8_t> JsPassRunner::bytesExport(const std::string_view name, const Vec
   Vector<uint8_t> out;
   try {
     const String exportName(name);
-    auto fnValue = getExport(rt, exportName.c_str());
+    const auto fnValue = getExport(rt, exportName.c_str());
     if (!fnValue.isObject() || !fnValue.asObject(rt).isFunction(rt)) {
       error = fmt::format("PolyPass JS: exports.{} is not a function", name);
       return out;
     }
-    auto fn = fnValue.asObject(rt).asFunction(rt);
-    auto ctor = rt.global().getPropertyAsFunction(rt, "ArrayBuffer");
-    auto bufferValue = ctor.callAsConstructor(rt, {jsi::Value(static_cast<double>(input.size()))});
-    auto buffer = bufferValue.asObject(rt).getArrayBuffer(rt);
+    const auto fn = fnValue.asObject(rt).asFunction(rt);
+    const auto ctor = rt.global().getPropertyAsFunction(rt, "ArrayBuffer");
+    const auto bufferValue = ctor.callAsConstructor(rt, {jsi::Value(static_cast<double>(input.size()))});
+    const auto buffer = bufferValue.asObject(rt).getArrayBuffer(rt);
     if (!input.empty()) std::memcpy(buffer.data(rt), input.data(), input.size());
-    auto uint8Ctor = rt.global().getPropertyAsFunction(rt, "Uint8Array");
-    auto uint8 = uint8Ctor.callAsConstructor(rt, {jsi::Value(rt, bufferValue)});
-    auto result = fn.call(rt, {jsi::Value(rt, uint8)});
+    const auto uint8Ctor = rt.global().getPropertyAsFunction(rt, "Uint8Array");
+    const auto uint8 = uint8Ctor.callAsConstructor(rt, {jsi::Value(rt, bufferValue)});
+    const auto result = fn.call(rt, {jsi::Value(rt, uint8)});
     if (!result.isObject()) {
       error = fmt::format("{}: return value must be Uint8Array", name);
       return out;
     }
-    auto resultObject = result.asObject(rt);
-    auto resultBufferValue = resultObject.getProperty(rt, "buffer");
+    const auto resultObject = result.asObject(rt);
+    const auto resultBufferValue = resultObject.getProperty(rt, "buffer");
     if (!resultBufferValue.isObject() || !resultBufferValue.asObject(rt).isArrayBuffer(rt)) {
       error = fmt::format("{}: return value must be Uint8Array", name);
       return out;
     }
-    auto resultBuffer = resultBufferValue.asObject(rt).getArrayBuffer(rt);
+    const auto resultBuffer = resultBufferValue.asObject(rt).getArrayBuffer(rt);
     const auto offset = static_cast<size_t>(resultObject.getProperty(rt, "byteOffset").asNumber());
     const auto length = static_cast<size_t>(resultObject.getProperty(rt, "byteLength").asNumber());
     const auto capacity = resultBuffer.size(rt);
@@ -235,6 +240,7 @@ Vector<uint8_t> JsPassRunner::runPackage(const std::string_view operation, const
   return bytesExport(operation, request, error);
 }
 
+// NOLINTNEXTLINE(readability-make-member-function-const)
 String JsPassRunner::Impl::loadFromSource(std::string_view source, std::string_view moduleId) {
   auto &rt = *runtime;
   try {
@@ -244,8 +250,8 @@ String JsPassRunner::Impl::loadFromSource(std::string_view source, std::string_v
 
     if (auto cached = readJsCache(tag, source)) {
       try {
-        auto buf = std::make_shared<VectorBuffer>(std::move(*cached));
-        auto prepared = rt.prepareJavaScript(buf, String(moduleId));
+        const auto buf = std::make_shared<VectorBuffer>(std::move(*cached));
+        const auto prepared = rt.prepareJavaScript(buf, String(moduleId));
         rt.evaluatePreparedJavaScript(prepared);
         return {};
       } catch (const jsi::JSError &) {
@@ -256,8 +262,8 @@ String JsPassRunner::Impl::loadFromSource(std::string_view source, std::string_v
     std::string bc;
     if (!hermes::compileJS(String(source), String(moduleId), bc, /*optimize=*/true)) return "hermes::compileJS failed (syntax error)";
     writeJsCache(tag, source, reinterpret_cast<const uint8_t *>(bc.data()), bc.size());
-    auto buf = std::make_shared<StringBuffer>(std::move(bc));
-    auto prepared = rt.prepareJavaScript(buf, String(moduleId));
+    const auto buf = std::make_shared<StringBuffer>(std::move(bc));
+    const auto prepared = rt.prepareJavaScript(buf, String(moduleId));
     rt.evaluatePreparedJavaScript(prepared);
     return {};
   } catch (const jsi::JSError &e) {
@@ -284,36 +290,36 @@ String JsPassRunner::Impl::enumeratePasses() {
     if (!completePass && !completePackage) return "PolyPass JS: bundle exposes neither pass nor package capability";
     if (!completePass) return {};
 
-    auto abiVal = callExport(rt, abi::AbiVersion);
+    const auto abiVal = callExport(rt, abi::AbiVersion);
     if (!abiVal.isNumber()) return fmt::format("PolyPass JS: missing or non-numeric exports.{}()", abi::AbiVersion);
     const auto reported = static_cast<int64_t>(abiVal.asNumber());
     if (reported < 0 || static_cast<uint32_t>(reported) != POLYPASS_ABI_VERSION)
       return fmt::format("PolyPass ABI mismatch: plugin={} polyc={}", reported, POLYPASS_ABI_VERSION);
 
-    auto countVal = callExport(rt, abi::PassCount);
+    const auto countVal = callExport(rt, abi::PassCount);
     if (!countVal.isNumber()) return fmt::format("PolyPass JS: missing or non-numeric exports.{}()", abi::PassCount);
     const auto count = static_cast<int32_t>(countVal.asNumber());
 
-    auto nameFnVal = getExport(rt, abi::PassName);
+    const auto nameFnVal = getExport(rt, abi::PassName);
     if (!nameFnVal.isObject()) return fmt::format("PolyPass JS: exports.{} is not a function", abi::PassName);
-    auto nameObj = nameFnVal.asObject(rt);
+    const auto nameObj = nameFnVal.asObject(rt);
     if (!nameObj.isFunction(rt)) return fmt::format("PolyPass JS: exports.{} is not a function", abi::PassName);
-    auto nameFn = nameObj.asFunction(rt);
+    const auto nameFn = nameObj.asFunction(rt);
 
-    auto descrFnVal = getExport(rt, abi::PassDescr);
+    const auto descrFnVal = getExport(rt, abi::PassDescr);
     std::optional<jsi::Function> descrFn;
     if (descrFnVal.isObject()) {
-      auto descrObj = descrFnVal.asObject(rt);
+      const auto descrObj = descrFnVal.asObject(rt);
       if (descrObj.isFunction(rt)) descrFn = descrObj.asFunction(rt);
     }
 
     names.reserve(count);
     for (int32_t i = 0; i < count; ++i) {
-      auto rn = nameFn.call(rt, {jsi::Value(static_cast<double>(i))});
+      const auto rn = nameFn.call(rt, {jsi::Value(static_cast<double>(i))});
       if (!rn.isString()) return fmt::format("PolyPass JS: {}({}) returned non-string", abi::PassName, i);
       String nm = rn.asString(rt).utf8(rt);
       if (descrFn) {
-        auto rd = descrFn->call(rt, {jsi::Value(static_cast<double>(i))});
+        const auto rd = descrFn->call(rt, {jsi::Value(static_cast<double>(i))});
         if (rd.isString()) {
           String ds = rd.asString(rt).utf8(rt);
           if (!ds.empty()) descrs.emplace(nm, std::move(ds));
@@ -345,10 +351,10 @@ Vector<uint8_t> JsPassRunner::runPasses(const Vector<String> &steps, const Vecto
   auto &rt = *impl->runtime;
   Vector<uint8_t> out;
   try {
-    auto runFnVal = getExport(rt, abi::RunPasses);
+    const auto runFnVal = getExport(rt, abi::RunPasses);
     if (!runFnVal.isObject() || !runFnVal.asObject(rt).isFunction(rt))
       throw jsi::JSError(rt, fmt::format("PolyPass JS: exports.{} is not a function", abi::RunPasses));
-    auto runFn = runFnVal.asObject(rt).asFunction(rt);
+    const auto runFn = runFnVal.asObject(rt).asFunction(rt);
 
     auto stepsArr = jsi::Array(rt, steps.size());
     steps                                              //
@@ -357,28 +363,28 @@ Vector<uint8_t> JsPassRunner::runPasses(const Vector<String> &steps, const Vecto
             stepsArr.setValueAtIndex(rt, i, jsi::String::createFromUtf8(rt, s));
           });
 
-    auto ctor = rt.global().getPropertyAsFunction(rt, "ArrayBuffer");
-    auto abVal = ctor.callAsConstructor(rt, {jsi::Value(static_cast<double>(programBytes.size()))});
-    auto ab = abVal.asObject(rt).getArrayBuffer(rt);
+    const auto ctor = rt.global().getPropertyAsFunction(rt, "ArrayBuffer");
+    const auto abVal = ctor.callAsConstructor(rt, {jsi::Value(static_cast<double>(programBytes.size()))});
+    const auto ab = abVal.asObject(rt).getArrayBuffer(rt);
     if (!programBytes.empty()) std::memcpy(ab.data(rt), programBytes.data(), programBytes.size());
-    auto u8Ctor = rt.global().getPropertyAsFunction(rt, "Uint8Array");
-    auto u8 = u8Ctor.callAsConstructor(rt, {jsi::Value(rt, abVal)});
+    const auto u8Ctor = rt.global().getPropertyAsFunction(rt, "Uint8Array");
+    const auto u8 = u8Ctor.callAsConstructor(rt, {jsi::Value(rt, abVal)});
 
-    jsi::Value result = runFn.call(rt, {jsi::Value(rt, stepsArr), jsi::Value(rt, u8)});
+    const jsi::Value result = runFn.call(rt, {jsi::Value(rt, stepsArr), jsi::Value(rt, u8)});
 
     if (!result.isObject()) {
       error = "runPasses: return value must be Uint8Array";
       return out;
     }
-    auto resultObj = result.asObject(rt);
-    auto bufProp = resultObj.getProperty(rt, "buffer");
+    const auto resultObj = result.asObject(rt);
+    const auto bufProp = resultObj.getProperty(rt, "buffer");
     if (!bufProp.isObject() || !bufProp.asObject(rt).isArrayBuffer(rt)) {
       error = "runPasses: return value must be Uint8Array";
       return out;
     }
-    auto resAb = bufProp.asObject(rt).getArrayBuffer(rt);
-    size_t off = static_cast<size_t>(resultObj.getProperty(rt, "byteOffset").asNumber());
-    size_t len = static_cast<size_t>(resultObj.getProperty(rt, "byteLength").asNumber());
+    const auto resAb = bufProp.asObject(rt).getArrayBuffer(rt);
+    const size_t off = static_cast<size_t>(resultObj.getProperty(rt, "byteOffset").asNumber());
+    const size_t len = static_cast<size_t>(resultObj.getProperty(rt, "byteLength").asNumber());
     const size_t cap = resAb.size(rt);
     if (off > cap || len > cap - off) {
       error = "runPasses: typed-array bounds out of range";

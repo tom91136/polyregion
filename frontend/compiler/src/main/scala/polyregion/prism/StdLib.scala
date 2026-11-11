@@ -366,6 +366,8 @@ object StdLib {
     )
   )
 
+  final def Tables: PrismTables = PrismTables(Mirrors, Functions, StructDefs)
+
   final def Functions: Map[p.Signature, (p.Function, Set[p.StructDef])] =
     Mirrors
       .map(_._1)

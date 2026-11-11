@@ -1,5 +1,11 @@
 #include "parallel.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <vector>
+
 #include "aspartame/all.hpp"
 #include "fmt/core.h"
 
@@ -20,7 +26,7 @@ size_t gFreshId = 0;
 std::string fresh(const std::string &hint) { return fmt::format("#{}_{}", hint, ++gFreshId); }
 
 Term::Any letBind(Stmts &out, const std::string &hint, const Expr::Any &e) {
-  Named n(fresh(hint), e.tpe());
+  const Named n(fresh(hint), e.tpe());
   out.emplace_back(Stmt::Var(n, e, /*isMutable*/ false));
   return Term::Select(n, {}, n.tpe);
 }
@@ -153,7 +159,7 @@ Function parallel_ops::reduce(const std::string &fnName, const Named &capture, c
 
                Term::Any offset = letBind(body, "off", Expr::Alias(Term::IntS64Const(0)));
                std::vector<Named> localTargets;
-               for (auto &r : reductions) {
+               for (const auto &r : reductions) {
                  // Slot size must match ManagedPartialReduction::allocatePartialsAsync
                  // (typeSizeInBytes() * blockSize), or shared-memory access goes out of bounds
                  // for mixed primitive widths.

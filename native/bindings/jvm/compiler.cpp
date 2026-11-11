@@ -1,7 +1,10 @@
 #include "compiler.h"
 
+#include <cstdio>
 #include <cstdlib>
+#include <stdexcept>
 #include <string>
+#include <type_traits>
 
 #include "magic_enum/magic_enum.hpp"
 
@@ -63,8 +66,8 @@ static generated::Event::Instance toJni(JNIEnv *env, const polyast::CompileEvent
 }
 
 static cp::Options fromJni(JNIEnv *env, jobject options) {
-  auto opt = gen::Options::of(env).wrap(env, options);
-  auto targetOrdinal = opt.target(env);
+  const auto opt = gen::Options::of(env).wrap(env, options);
+  const auto targetOrdinal = opt.target(env);
   if (auto target = magic_enum::enum_cast<ct::Target>(targetOrdinal); target) {
     return {.target = *target, .arch = fromJni(env, opt.arch(env))};
   } else throw std::logic_error("Unknown target value: " + std::to_string(targetOrdinal));
@@ -87,7 +90,7 @@ jbyte Compiler::hostTarget0(JNIEnv *, jclass) {
 jstring Compiler::hostTriplet0(JNIEnv *env, jclass) { return toJni(env, polyregion::backend::llvmc::defaultHostTriple().str()); }
 
 jobjectArray Compiler::layoutOf0(JNIEnv *env, jclass, jbyteArray structDef, jobject options) {
-  return wrapException(env, EX, [&]() {
+  return wrapException(env, EX, [&] {
     auto layouts = cp::layoutOf(fromJni<char>(env, structDef), fromJni(env, options));
     return toJni(env, layouts, gen::Layout::of(env).clazz, [&](auto &s) { return toJni(env, s).instance; });
   });
@@ -95,10 +98,10 @@ jobjectArray Compiler::layoutOf0(JNIEnv *env, jclass, jbyteArray structDef, jobj
 
 jobject Compiler::compile0(JNIEnv *env, jclass, //
                            jbyteArray function, jboolean, jobject options, jbyte opt) {
-  return wrapException(env, EX, [&]() {
+  return wrapException(env, EX, [&] {
     auto c = cp::compile(fromJni<char>(env, function), fromJni(env, options), fromJni(env, opt));
     if (!c.binary) throw std::logic_error(c.messages);
-    auto bin = env->NewByteArray(jsize(c.binary->size()));
+    auto *bin = env->NewByteArray(jsize(c.binary->size()));
     env->SetByteArrayRegion(bin, 0, jsize(c.binary->size()), reinterpret_cast<jbyte *>(c.binary->data()));
     return gen::Compilation::of(env)(env,
                                      bin,                                                                                                //

@@ -1,6 +1,7 @@
 #include "libm.h"
 
 #include <cmath>
+#include <string>
 
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/DynamicLibrary.h"

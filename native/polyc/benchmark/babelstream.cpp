@@ -1,5 +1,11 @@
 #include <cstdio>
+#include <cstdlib>
+#include <functional>
+#include <stdexcept>
+#include <string>
 #include <thread>
+#include <utility>
+#include <vector>
 
 #include "aspartame/all.hpp"
 #include "fmt/format.h"
@@ -31,16 +37,19 @@ using namespace Spec;
 
 using namespace polyregion::polyast::dsl;
 
+namespace {
 struct StreamFunctions {
   Function copy, mul, add, triad, dot;
 };
+} // namespace
 
-StreamFunctions mkStreamFunctions(std::string suffix, Type::Any type, bool gpu = false) {
+static StreamFunctions mkStreamFunctions(std::string suffix, Type::Any type, bool gpu = false) {
   using Stmts = std::vector<Stmt::Any>;
-  static auto empty = [](Term::Any, Term::Any) -> Stmts { return {}; };
-  auto mkCpuStreamFn = [&](const std::string &name, std::vector<Arg> extraArgs, const std::function<Stmts(Term::Any, Term::Any)> &mkPrelude,
-                           const std::function<Stmts(Term::Any, Term::Any)> &mkLoopBody,
-                           const std::function<Stmts(Term::Any, Term::Any)> &mkEpilogue) {
+  static const auto empty = [](Term::Any, Term::Any) -> Stmts { return {}; };
+  const auto mkCpuStreamFn = [&](const std::string &name, std::vector<Arg> extraArgs,
+                                 const std::function<Stmts(Term::Any, Term::Any)> &mkPrelude,
+                                 const std::function<Stmts(Term::Any, Term::Any)> &mkLoopBody,
+                                 const std::function<Stmts(Term::Any, Term::Any)> &mkEpilogue) {
     std::vector<Arg> args = {"a"_(Ptr(type))(), "b"_(Ptr(type))(), "c"_(Ptr(type))()};
     if (!gpu) {
       // XXX polyc auto-prepends `__tid` for CPU offload-entry kernels; the user list omits it.
@@ -81,7 +90,7 @@ StreamFunctions mkStreamFunctions(std::string suffix, Type::Any type, bool gpu =
                     CallConvention::OffloadEntry())(stmts);
   };
 
-  auto copy = mkCpuStreamFn( //
+  const auto copy = mkCpuStreamFn( //
       "copy", {}, empty,
       [&](const auto &_, const auto &i) -> Stmts {
         return {
@@ -91,7 +100,7 @@ StreamFunctions mkStreamFunctions(std::string suffix, Type::Any type, bool gpu =
       },
       empty);
 
-  auto mul = mkCpuStreamFn( //
+  const auto mul = mkCpuStreamFn( //
       "mul", {"scalar"_(type)()}, empty,
       [&](const auto &_, const auto &i) -> Stmts {
         return {
@@ -102,7 +111,7 @@ StreamFunctions mkStreamFunctions(std::string suffix, Type::Any type, bool gpu =
       },
       empty);
 
-  auto add = mkCpuStreamFn( //
+  const auto add = mkCpuStreamFn( //
       "add", {}, empty,
       [&](const auto &_, const auto &i) -> Stmts {
         return {
@@ -114,7 +123,7 @@ StreamFunctions mkStreamFunctions(std::string suffix, Type::Any type, bool gpu =
       },
       empty);
 
-  auto triad = mkCpuStreamFn( //
+  const auto triad = mkCpuStreamFn( //
       "triad", {"scalar"_(type)()}, empty,
       [&](const auto &_, const auto &i) -> Stmts {
         return {
@@ -127,72 +136,73 @@ StreamFunctions mkStreamFunctions(std::string suffix, Type::Any type, bool gpu =
       },
       empty);
 
-  auto dot = !gpu ? //
-                 mkCpuStreamFn(
-                     "dot", {"sum"_(Ptr(type))()},
-                     [&](const auto &id, const auto &i) -> Stmts { //
-                       return {
-                           var("acc") = 0_(type) // mutable accumulator across iterations
-                       };
-                     },
-                     [&](const auto &id, const auto &i) -> Stmts {
-                       return {
-                           let("ai") = "a"_(Ptr(type))[i],                              // ai = a[i]
-                           let("bi") = "b"_(Ptr(type))[i],                              // bi = b[i]
-                           let("sumid") = "acc"_(type),                                 // sumid = acc
-                           let("r0") = call(Mul("ai"_(type), "bi"_(type), type)),       // r0 = ai * bi
-                           "acc"_(type) = call(Add("r0"_(type), "sumid"_(type), type)), // acc = r0 + sumid
+  const auto dot =
+      !gpu ? //
+          mkCpuStreamFn(
+              "dot", {"sum"_(Ptr(type))()},
+              [&](const auto &id, const auto &i) -> Stmts { //
+                return {
+                    var("acc") = 0_(type) // mutable accumulator across iterations
+                };
+              },
+              [&](const auto &id, const auto &i) -> Stmts {
+                return {
+                    let("ai") = "a"_(Ptr(type))[i],                              // ai = a[i]
+                    let("bi") = "b"_(Ptr(type))[i],                              // bi = b[i]
+                    let("sumid") = "acc"_(type),                                 // sumid = acc
+                    let("r0") = call(Mul("ai"_(type), "bi"_(type), type)),       // r0 = ai * bi
+                    "acc"_(type) = call(Add("r0"_(type), "sumid"_(type), type)), // acc = r0 + sumid
 
-                       };
-                     },
-                     [&](const auto &id, const auto &i) -> Stmts {
-                       return {
-                           "sum"_(Ptr(type))[id] = "acc"_(type) // sum[id] = acc
-                       };
-                     })
-                  : //
-                 mkCpuStreamFn(
-                     "dot", {"sum"_(Ptr(type))(), "wg_sum"_(Ptr(type, Local))(), "array_size"_(UInt)()}, empty,
-                     [&](const auto &local_i, const auto &i) -> Stmts {
-                       Stmts body;
-                       body.push_back(let("global_size") = call(GpuGlobalSize(0_(UInt))));
-                       body.push_back("wg_sum"_(Ptr(type, Local))[local_i] = 0_(type));
-                       body ^= concat(whileLoop({var("cont") = call(LogicLt("i"_(UInt), "array_size"_(UInt)))}, "cont"_(Bool),
-                                                {let("ai") = "a"_(Ptr(type))[i],                           // ai = a[i]
-                                                 let("bi") = "b"_(Ptr(type))[i],                           // bi = b[i]
-                                                 let("sumid") = "wg_sum"_(Ptr(type, Local))[local_i],      // sumid = sum[local_i]
-                                                 let("r0") = call(Mul("ai"_(type), "bi"_(type), type)),    // r0 = ai * bi
-                                                 let("r1") = call(Add("r0"_(type), "sumid"_(type), type)), // r1 = r0 + sumid
-                                                 "wg_sum"_(Ptr(type, Local))[local_i] = "r1"_(type),       // a[i] = bi
-                                                 ("i"_(UInt) = call(Add("i"_(UInt), "global_size"_(UInt), UInt)))})); // i += global_size
-                       body.push_back(var("offset") = call(GpuLocalSize(0_(UInt))));
-                       body.push_back("offset"_(UInt) = call(Div("offset"_(UInt), 2_(UInt), UInt))); // offset /= 2
-                       body ^= concat(whileLoop(
-                           {var("cont2") = call(LogicGt("offset"_(UInt), 0_(UInt)))}, "cont2"_(Bool),
-                           {
-                               let("_") = call(GpuBarrierLocal()), let("__cond_lt") = call(LogicLt("local_i"_(UInt), "offset"_(UInt))),
-                               Cond("__cond_lt"_(Bool), //
+                };
+              },
+              [&](const auto &id, const auto &i) -> Stmts {
+                return {
+                    "sum"_(Ptr(type))[id] = "acc"_(type) // sum[id] = acc
+                };
+              })
+           : //
+          mkCpuStreamFn(
+              "dot", {"sum"_(Ptr(type))(), "wg_sum"_(Ptr(type, Local))(), "array_size"_(UInt)()}, empty,
+              [&](const auto &local_i, const auto &i) -> Stmts {
+                Stmts body;
+                body.push_back(let("global_size") = call(GpuGlobalSize(0_(UInt))));
+                body.push_back("wg_sum"_(Ptr(type, Local))[local_i] = 0_(type));
+                body ^= concat(whileLoop({var("cont") = call(LogicLt("i"_(UInt), "array_size"_(UInt)))}, "cont"_(Bool),
+                                         {let("ai") = "a"_(Ptr(type))[i],                                      // ai = a[i]
+                                          let("bi") = "b"_(Ptr(type))[i],                                      // bi = b[i]
+                                          let("sumid") = "wg_sum"_(Ptr(type, Local))[local_i],                 // sumid = sum[local_i]
+                                          let("r0") = call(Mul("ai"_(type), "bi"_(type), type)),               // r0 = ai * bi
+                                          let("r1") = call(Add("r0"_(type), "sumid"_(type), type)),            // r1 = r0 + sumid
+                                          "wg_sum"_(Ptr(type, Local))[local_i] = "r1"_(type),                  // a[i] = bi
+                                          ("i"_(UInt) = call(Add("i"_(UInt), "global_size"_(UInt), UInt)))})); // i += global_size
+                body.push_back(var("offset") = call(GpuLocalSize(0_(UInt))));
+                body.push_back("offset"_(UInt) = call(Div("offset"_(UInt), 2_(UInt), UInt))); // offset /= 2
+                body ^= concat(
+                    whileLoop({var("cont2") = call(LogicGt("offset"_(UInt), 0_(UInt)))}, "cont2"_(Bool),
+                              {
+                                  let("_") = call(GpuBarrierLocal()), let("__cond_lt") = call(LogicLt("local_i"_(UInt), "offset"_(UInt))),
+                                  Cond("__cond_lt"_(Bool), //
+                                       {
+                                           let("new_offset") = call(Add("local_i"_(UInt), "offset"_(UInt), UInt)), // local_i + offset
+                                           let("wg_sum_old") = "wg_sum"_(Ptr(type, Local))[local_i],
+                                           let("wg_sum_at_offset") = "wg_sum"_(Ptr(type, Local))["new_offset"_(UInt)],
+                                           "wg_sum_at_offset"_(type) = call(Add("wg_sum_at_offset"_(type), "wg_sum_old"_(type), type)),
+                                           "wg_sum"_(Ptr(type, Local))[local_i] = "wg_sum_at_offset"_(type),
+                                       },
+                                       {}),
+                                  "offset"_(UInt) = call(Div("offset"_(UInt), 2_(UInt), UInt)) // offset /= 2
+                              }));
+                body.push_back(let("group_id") = call(GpuGroupIdx(0_(UInt))));
+                body.push_back(let("__cond_eq") = call(LogicEq("local_i"_(UInt), 0_(UInt))));
+                body.push_back(Cond("__cond_eq"_(Bool), //
                                     {
-                                        let("new_offset") = call(Add("local_i"_(UInt), "offset"_(UInt), UInt)), // local_i + offset
-                                        let("wg_sum_old") = "wg_sum"_(Ptr(type, Local))[local_i],
-                                        let("wg_sum_at_offset") = "wg_sum"_(Ptr(type, Local))["new_offset"_(UInt)],
-                                        "wg_sum_at_offset"_(type) = call(Add("wg_sum_at_offset"_(type), "wg_sum_old"_(type), type)),
-                                        "wg_sum"_(Ptr(type, Local))[local_i] = "wg_sum_at_offset"_(type),
+                                        let("wg_sum_old_1") = "wg_sum"_(Ptr(type, Local))[local_i],
+                                        "sum"_(Ptr(type))["group_id"_(UInt)] = "wg_sum_old_1"_(type),
                                     },
-                                    {}),
-                               "offset"_(UInt) = call(Div("offset"_(UInt), 2_(UInt), UInt)) // offset /= 2
-                           }));
-                       body.push_back(let("group_id") = call(GpuGroupIdx(0_(UInt))));
-                       body.push_back(let("__cond_eq") = call(LogicEq("local_i"_(UInt), 0_(UInt))));
-                       body.push_back(Cond("__cond_eq"_(Bool), //
-                                           {
-                                               let("wg_sum_old_1") = "wg_sum"_(Ptr(type, Local))[local_i],
-                                               "sum"_(Ptr(type))["group_id"_(UInt)] = "wg_sum_old_1"_(type),
-                                           },
-                                           {}));
-                       return body;
-                     },
-                     empty);
+                                    {}));
+                return body;
+              },
+              empty);
 
   //
 
@@ -202,7 +212,7 @@ StreamFunctions mkStreamFunctions(std::string suffix, Type::Any type, bool gpu =
   //  std::cout << repr(triad) << std::endl;
   //  std::cout << repr(dot) << std::endl;
 
-  return StreamFunctions{copy, mul, add, triad, dot};
+  return StreamFunctions{.copy = copy, .mul = mul, .add = add, .triad = triad, .dot = dot};
 }
 
 int main() {
@@ -219,9 +229,9 @@ int main() {
     const auto target = r.spec.codegen;
     const auto arch = r.arch;
 
-    auto cpu = backend == invoke::Backend::RelocatableObject || backend == invoke::Backend::SharedObject;
+    const auto cpu = backend == invoke::Backend::RelocatableObject || backend == invoke::Backend::SharedObject;
 
-    auto fns = mkStreamFunctions("_float", Float, !cpu);
+    const auto fns = mkStreamFunctions("_float", Float, !cpu);
 
     auto platform = polyregion::invoke::Platform::maybe(backend);
     if (!platform) throw std::runtime_error("Backend " + std::string(magic_enum::enum_name(backend)) + " failed to initialise");
@@ -230,20 +240,20 @@ int main() {
     {
 
       compiler::initialise();
-      auto compileOne = [&](const Function &fn) {
-        auto c = compiler::compile(program(fn), {target, arch}, compiletime::OptLevel::Ofast);
+      const auto compileOne = [&](const Function &fn) {
+        auto c = compiler::compile(program(fn), {.target = target, .arch = arch}, compiletime::OptLevel::Ofast);
         fmt::print(stderr, "{}\n", repr(c));
         std::fflush(stderr);
         if (!c.binary) throw std::logic_error("No binary produced for " + fn.decl.name.fqn.front());
         return std::string(reinterpret_cast<char *>(c.binary->data()), c.binary->size());
       };
-      auto images = stream::Kernels<std::string>{.copy = compileOne(fns.copy),
-                                                 .mul = compileOne(fns.mul),
-                                                 .add = compileOne(fns.add),
-                                                 .triad = compileOne(fns.triad),
-                                                 .dot = compileOne(fns.dot)};
+      const auto images = stream::Kernels<std::string>{.copy = compileOne(fns.copy),
+                                                       .mul = compileOne(fns.mul),
+                                                       .add = compileOne(fns.add),
+                                                       .triad = compileOne(fns.triad),
+                                                       .dot = compileOne(fns.dot)};
 
-      const auto relTolerance = 0.008f;
+      const auto relTolerance = 0.008F;
 
       for (auto &d : platform->enumerate()) {
 
@@ -256,30 +266,31 @@ int main() {
           if (isSpirvImage != hasSpirvKernel) continue;
         }
 
-        std::string suffix = "_float";
+        const std::string suffix = "_float";
 
         d->loadModule("stream_copy" + suffix, images.copy);
         d->loadModule("stream_mul" + suffix, images.mul);
         d->loadModule("stream_add" + suffix, images.add);
         d->loadModule("stream_triad" + suffix, images.triad);
         d->loadModule("stream_dot" + suffix, images.dot);
-        stream::Kernels<std::pair<std::string, std::string>> kernelSpecs = {.copy = {"stream_copy" + suffix, "stream_copy" + suffix},
-                                                                            .mul = {"stream_mul" + suffix, "stream_mul" + suffix},
-                                                                            .add = {"stream_add" + suffix, "stream_add" + suffix},
-                                                                            .triad = {"stream_triad" + suffix, "stream_triad" + suffix},
-                                                                            .dot = {"stream_dot" + suffix, "stream_dot" + suffix}};
+        const stream::Kernels<std::pair<std::string, std::string>> kernelSpecs = {
+            .copy = {"stream_copy" + suffix, "stream_copy" + suffix},
+            .mul = {"stream_mul" + suffix, "stream_mul" + suffix},
+            .add = {"stream_add" + suffix, "stream_add" + suffix},
+            .triad = {"stream_triad" + suffix, "stream_triad" + suffix},
+            .dot = {"stream_dot" + suffix, "stream_dot" + suffix}};
 
-        size_t size = 33554432;
-        size_t times = 100;
-        size_t groups = cpu ? std::thread::hardware_concurrency() : 256;
+        const size_t size = 33554432;
+        const size_t times = 100;
+        const size_t groups = cpu ? std::thread::hardware_concurrency() : 256;
 
-        auto fValidate = [](const auto &actual, const auto &tolerance) {
+        const auto fValidate = [](const auto &actual, const auto &tolerance) {
           if (actual >= tolerance) {
             fmt::print(stderr, "Tolerance ({}%) exceeded for array value delta: {}%\n", tolerance * 100, actual * 100);
           }
         };
 
-        auto fValidateSum = [=](const auto &actual) {
+        const auto fValidateSum = [=](const auto &actual) {
           if (actual >= relTolerance) {
             fmt::print(stderr, "Tolerance ({}%) exceeded for dot value delta: {}%\n", relTolerance * 100, actual * 100);
           }

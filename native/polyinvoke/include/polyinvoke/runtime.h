@@ -17,6 +17,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -65,7 +66,7 @@ inline constexpr auto OverReadPadFeature = "overread_pad";
 [[nodiscard]] inline size_t overReadPadBytes(const std::vector<std::string> &features) {
   const std::string prefix = std::string(OverReadPadFeature) + ":";
   for (const auto &f : features)
-    if (f.rfind(prefix, 0) == 0) return std::stoull(f.substr(prefix.size()));
+    if (f.rfind(prefix, 0) == 0) return std::stoull(f.substr(prefix.size())); // NOLINT(modernize-use-starts-ends-with)
   return 0;
 }
 
@@ -73,7 +74,7 @@ inline constexpr auto StorageAlignFeature = "storage_align";
 [[nodiscard]] inline size_t storageAlignBytes(const std::vector<std::string> &features) {
   const std::string prefix = std::string(StorageAlignFeature) + ":";
   for (const auto &f : features)
-    if (f.rfind(prefix, 0) == 0) return std::stoull(f.substr(prefix.size()));
+    if (f.rfind(prefix, 0) == 0) return std::stoull(f.substr(prefix.size())); // NOLINT(modernize-use-starts-ends-with)
   return 0;
 }
 
@@ -107,7 +108,7 @@ class LazyDroppable final {
   static_assert(std::is_invocable_r<void, Drop, T &>());
 
 public:
-  constexpr explicit LazyDroppable(Lift lift, Drop drop) : lift(lift), drop(drop) {}
+  constexpr explicit LazyDroppable(Lift lift, Drop drop) : lift(std::move(lift)), drop(std::move(drop)) {}
   LazyDroppable &operator=(const T &t) {
     value = t;
     return *this;
@@ -134,6 +135,7 @@ std::vector<void *> argDataAsPointers(const std::vector<Type> &types, std::vecto
 class CountingLatch final {
   std::mutex mutex;
   std::condition_variable cv;
+  // NOLINTNEXTLINE(readability-redundant-member-init)
   std::atomic_long pending{};
   std::chrono::duration<int64_t> timeout{};
 
@@ -160,13 +162,13 @@ template <typename T> class BlockingQueue {
 
 public:
   void terminate() {
-    std::unique_lock lock(mutex);
+    const std::unique_lock lock(mutex);
     shutdown = true;
     condition.notify_all();
   }
 
   void push(T item) {
-    std::unique_lock lock(mutex);
+    const std::unique_lock lock(mutex);
     queue.push(std::move(item));
     condition.notify_one();
   }
@@ -206,30 +208,30 @@ template <typename K, typename V> class CountedStore {
 
 public:
   std::pair<K, V &> store(V value) {
-    std::unique_lock writeLock(mutex);
+    const std::unique_lock writeLock(mutex);
     while (true) {
-      auto id = this->counter++;
-      if (auto it = allocations.find(id); it != allocations.end()) continue;
+      const auto id = this->counter++;
+      if (const auto it = allocations.find(id); it != allocations.end()) continue;
       else {
-        auto inserted = allocations.emplace_hint(it, id, std::move(value));
+        const auto inserted = allocations.emplace_hint(it, id, std::move(value));
         return {id, inserted->second};
       }
     }
   }
 
   std::optional<V> find(K key) {
-    std::shared_lock readLock(mutex);
-    if (auto it = allocations.find(key); it != allocations.end()) return std::optional{it->second};
+    const std::shared_lock readLock(mutex);
+    if (const auto it = allocations.find(key); it != allocations.end()) return std::optional{it->second};
     return {};
   }
 
   bool erase(K key) {
-    std::unique_lock writeLock(mutex);
+    const std::unique_lock writeLock(mutex);
     return allocations.erase(key) == 1;
   }
 
   bool empty() {
-    std::shared_lock readLock(mutex);
+    const std::shared_lock readLock(mutex);
     return allocations.empty();
   }
 };
@@ -279,8 +281,8 @@ public:
 
   uintptr_t reserve(size_t reserved, size_t committed, T value) {
     if (committed > reserved) throw std::invalid_argument("committed size exceeds the reserved size");
-    std::unique_lock lock(mutex);
-    const auto span = (reserved + Granularity - 1) / Granularity * Granularity + Granularity;
+    const std::unique_lock lock(mutex);
+    const auto span = (((reserved + Granularity - 1) / Granularity) * Granularity) + Granularity;
     if (reserved > (std::numeric_limits<uintptr_t>::max)() - next - Granularity) throw std::bad_alloc();
     const auto base = next;
     next += span;
@@ -289,7 +291,7 @@ public:
   }
 
   void commit(uintptr_t base, size_t committed, T value) {
-    std::unique_lock lock(mutex);
+    const std::unique_lock lock(mutex);
     const auto it = regions.find(base);
     if (it == regions.end()) throw std::out_of_range("commit of an unknown allocation");
     if (committed > it->second.reserved)
@@ -301,7 +303,7 @@ public:
   }
 
   std::optional<size_t> reservedSize(uintptr_t base) const {
-    std::shared_lock lock(mutex);
+    const std::shared_lock lock(mutex);
     const auto it = regions.find(base);
     return it == regions.end() ? std::nullopt : std::optional{it->second.reserved};
   }
@@ -314,7 +316,7 @@ public:
   }
 
   std::optional<Resolved> query(uintptr_t ptr) const {
-    std::shared_lock lock(mutex);
+    const std::shared_lock lock(mutex);
     const auto it = owner(ptr);
     if (it == regions.end()) return {};
     const auto offset = static_cast<size_t>(ptr - it->first);
@@ -327,7 +329,7 @@ public:
   }
 
   bool erase(uintptr_t base) {
-    std::unique_lock lock(mutex);
+    const std::unique_lock lock(mutex);
     return regions.erase(base) == 1;
   }
 
@@ -357,12 +359,13 @@ template <typename M, typename F> class ModuleStore {
   std::function<void(F)> dropFunction;
 
 public:
-  ModuleStore(const decltype(errorPrefix) errorPrefix,     //
-              const decltype(load) &load,                  //
-              const decltype(resolve) &resolve,            //
-              const decltype(dropModule) &dropModule = {}, //
-              const decltype(dropFunction) &dropFunction = {})
-      : errorPrefix(errorPrefix), load(load), resolve(resolve), dropModule(dropModule), dropFunction(dropFunction) {
+  ModuleStore(const decltype(errorPrefix) errorPrefix, //
+              decltype(load) load,                     //
+              decltype(resolve) resolve,               //
+              decltype(dropModule) dropModule = {},    //
+              decltype(dropFunction) dropFunction = {})
+      : errorPrefix(errorPrefix), load(std::move(load)), resolve(std::move(resolve)), dropModule(std::move(dropModule)),
+        dropFunction(std::move(dropFunction)) {
 
     static_assert(std::is_move_constructible_v<F> == std::is_move_constructible_v<M>,
                   "move constructible mismatch between Module (M) and Func (F)");
@@ -380,7 +383,7 @@ public:
   }
 
   void loadModule(const std::string &name, const std::string &image) {
-    if (auto it = modules.find(name); it != modules.end()) {
+    if (const auto it = modules.find(name); it != modules.end()) {
       POLYINVOKE_FATAL(errorPrefix, "Module named `%s` was already loaded", name.c_str());
     } else {
       modules.emplace_hint(it, name, LoadedModule{load(image), {}});
@@ -395,12 +398,12 @@ public:
   }
 
   F &resolveFunction(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types) {
-    auto moduleIt = modules.find(moduleName);
+    const auto moduleIt = modules.find(moduleName);
     if (moduleIt == modules.end()) POLYINVOKE_FATAL(errorPrefix, "No module named `%s` was loaded", moduleName.c_str());
     auto &[m, fnTable] = moduleIt->second;
-    if (auto it = fnTable.find(symbol); it != fnTable.end()) return it->second;
+    if (const auto it = fnTable.find(symbol); it != fnTable.end()) return it->second;
     else {
-      auto inserted = fnTable.emplace_hint(it, symbol, resolve(m, symbol, types));
+      const auto inserted = fnTable.emplace_hint(it, symbol, resolve(m, symbol, types));
       return inserted->second;
     }
   }
@@ -422,7 +425,9 @@ struct POLYREGION_EXPORT Dim3 {
 };
 
 struct POLYREGION_EXPORT Policy {
+  // NOLINTNEXTLINE(readability-redundant-member-init)
   POLYREGION_EXPORT Dim3 global{};
+  // NOLINTNEXTLINE(readability-redundant-member-init)
   POLYREGION_EXPORT std::optional<std::pair<Dim3, size_t>> local{};
 };
 
@@ -522,7 +527,7 @@ struct POLYREGION_EXPORT Device {
     return mallocDevice(count * sizeof(T), access);
   }
   template <typename... T> POLYREGION_EXPORT void freeAllDevice(T... ptrs) {
-    ([&]() { freeDevice(ptrs); }(), ...);
+    ([&] { freeDevice(ptrs); }(), ...);
   }
 
   template <typename T> [[nodiscard]] POLYREGION_EXPORT std::optional<T *> mallocSharedTyped(size_t count, Access access) {
@@ -532,7 +537,7 @@ struct POLYREGION_EXPORT Device {
     else return {};
   }
   template <typename... T> POLYREGION_EXPORT void freeAllShared(T... ptrs) {
-    ([&]() { freeShared(ptrs); }(), ...);
+    ([&] { freeShared(ptrs); }(), ...);
   }
 
   [[nodiscard]] virtual POLYREGION_EXPORT std::unique_ptr<DeviceQueue> createQueue(const std::chrono::duration<int64_t> &timeout) = 0;

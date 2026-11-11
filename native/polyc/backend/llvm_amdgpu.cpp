@@ -1,5 +1,9 @@
 #include "llvm_amdgpu.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <stdexcept>
+
 #include "llvm/IR/IntrinsicsAMDGPU.h"
 
 using namespace polyregion::backend::details;
@@ -37,25 +41,25 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &e
   // see llvm/libclc/amdgcn-amdhsa/lib/workitem/get_global_size.cl
   auto globalSizeU32 = [&](const size_t dim) -> ValPtr {
     if (dim >= 3) throw std::logic_error("Dim >= 3");
-    const auto i32Ty = cg.C.i32Ty();
-    const auto i32ptr = cg.B.CreatePointerCast(cg.intr0(llvm::Intrinsic::amdgcn_dispatch_ptr), llvm::PointerType::get(cg.C.actual, 0));
+    auto *const i32Ty = cg.C.i32Ty();
+    auto *const i32ptr = cg.B.CreatePointerCast(cg.intr0(llvm::Intrinsic::amdgcn_dispatch_ptr), llvm::PointerType::get(cg.C.actual, 0));
     // 127:96   grid_size_x;  (32*3+(0*32)==96)
     // 159:128  grid_size_y;  (32*3+(1*32)==128)
     // 191:160  grid_size_z;  (32*3+(2*32)==160)
-    const auto size = cg.B.CreateInBoundsGEP(i32Ty, i32ptr, llvm::ConstantInt::get(i32Ty, 3 + dim));
-    return cg.C.load(cg.B, size, i32Ty);
+    auto *const size = cg.B.CreateInBoundsGEP(i32Ty, i32ptr, llvm::ConstantInt::get(i32Ty, 3 + dim));
+    return cg.B.CreateLoad(i32Ty, size);
   };
 
   // see llvm/libclc/amdgcn-amdhsa/lib/workitem/get_local_size.cl
   auto localSizeU32 = [&](const size_t dim) -> ValPtr {
     if (dim >= 3) throw std::logic_error("Dim >= 3");
-    const auto i16Ty = llvm::Type::getInt16Ty(cg.C.actual);
-    const auto i16ptr = cg.B.CreatePointerCast(cg.intr0(llvm::Intrinsic::amdgcn_dispatch_ptr), llvm::PointerType::get(cg.C.actual, 0));
+    auto *const i16Ty = llvm::Type::getInt16Ty(cg.C.actual);
+    auto *const i16ptr = cg.B.CreatePointerCast(cg.intr0(llvm::Intrinsic::amdgcn_dispatch_ptr), llvm::PointerType::get(cg.C.actual, 0));
     // 47:32   workgroup_size_x (16*2+(0*16)==32)
     // 63:48   workgroup_size_y (16*2+(1*16)==48)
     // 79:64   workgroup_size_z (16*2+(2*16)==64)
-    const auto size = cg.B.CreateInBoundsGEP(i16Ty, i16ptr, llvm::ConstantInt::get(i16Ty, 2 + dim));
-    return cg.B.CreateIntCast(cg.C.load(cg.B, size, i16Ty), cg.C.i32Ty(), false);
+    auto *const size = cg.B.CreateInBoundsGEP(i16Ty, i16ptr, llvm::ConstantInt::get(i16Ty, 2 + dim));
+    return cg.B.CreateIntCast(cg.B.CreateLoad(i16Ty, size), cg.C.i32Ty(), false);
   };
 
   auto globalIdU32 = [&](const llvm::Intrinsic::ID workgroupId, const llvm::Intrinsic::ID workitemId, const size_t dim) -> ValPtr {
@@ -64,11 +68,11 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &e
 
   //  see llvm/libclc/amdgcn-amdhsa/lib/workitem/get_num_groups.cl
   auto numGroupsU32 = [&](const size_t dim) -> ValPtr {
-    const auto n = globalSizeU32(dim);
-    const auto d = localSizeU32(dim);
-    const auto q = cg.B.CreateUDiv(n, d);                                                        // q = n / d
-    const auto rem = cg.B.CreateZExt(cg.B.CreateICmpUGT(n, cg.B.CreateMul(q, d)), n->getType()); // ( (uint32t) (n > q*d) )
-    return cg.B.CreateAdd(q, rem);                                                               // q + rem
+    auto *const n = globalSizeU32(dim);
+    auto *const d = localSizeU32(dim);
+    auto *const q = cg.B.CreateUDiv(n, d);                                                        // q = n / d
+    auto *const rem = cg.B.CreateZExt(cg.B.CreateICmpUGT(n, cg.B.CreateMul(q, d)), n->getType()); // ( (uint32t) (n > q*d) )
+    return cg.B.CreateAdd(q, rem);                                                                // q + rem
   };
 
   auto dim3OrAssert = [&](const AnyTerm &dim, const ValPtr d0, const ValPtr d1, const ValPtr d2) {
@@ -82,7 +86,7 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &e
     return cg.B.CreateCall(llvm::Intrinsic::getOrInsertDeclaration(&cg.M, id, {}), args);
   };
   auto laneId = [&]() -> ValPtr {
-    auto negOne = llvm::ConstantInt::get(cg.C.i32Ty(), -1);
+    auto *negOne = llvm::ConstantInt::get(cg.C.i32Ty(), -1);
     return callIntr(llvm::Intrinsic::amdgcn_mbcnt_hi,
                     {negOne, callIntr(llvm::Intrinsic::amdgcn_mbcnt_lo, {negOne, llvm::ConstantInt::get(cg.C.i32Ty(), 0)})});
   };
@@ -94,15 +98,15 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &e
   auto shuffle = [&](char kind, const Term::Any &value, const Term::Any &arg, const Term::Any &bound, const Term::Any &mask,
                      const Type::Any &rtn) -> ValPtr {
     auto &B = cg.B;
-    auto i32Ty = cg.C.i32Ty();
-    auto valTy = cg.resolveType(rtn);
+    auto *i32Ty = cg.C.i32Ty();
+    auto *valTy = cg.resolveType(rtn);
     const uint64_t words = (cg.M.getDataLayout().getTypeAllocSize(valTy) + 3) / 4;
-    auto srcVal = cg.mkTermVal(value);
-    auto lid = laneId();
-    auto a = B.CreateIntCast(cg.mkTermVal(arg), i32Ty, false);
-    auto clamp = B.CreateIntCast(cg.mkTermVal(bound), i32Ty, false);
-    auto segmentBase = B.CreateAnd(lid, B.CreateNot(clamp));
-    auto segmentLast = B.CreateOr(segmentBase, clamp);
+    auto *srcVal = cg.mkTermVal(value);
+    auto *lid = laneId();
+    auto *a = B.CreateIntCast(cg.mkTermVal(arg), i32Ty, false);
+    auto *clamp = B.CreateIntCast(cg.mkTermVal(bound), i32Ty, false);
+    auto *segmentBase = B.CreateAnd(lid, B.CreateNot(clamp));
+    auto *segmentLast = B.CreateOr(segmentBase, clamp);
     ValPtr srcLane, inRange;
     switch (kind) {
       case 'd':
@@ -125,7 +129,7 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &e
     inRange = B.CreateAnd(inRange, B.CreateICmpULT(srcLane, cg.intr0(llvm::Intrinsic::amdgcn_wavefrontsize)));
     auto *maskV = B.CreateIntCast(cg.mkTermVal(mask), i32Ty, false);
     auto *active = activeMask();
-    auto *isAll = B.CreateICmpEQ(maskV, llvm::ConstantInt::get(i32Ty, 0xFFFFFFFFu));
+    auto *isAll = B.CreateICmpEQ(maskV, llvm::ConstantInt::get(i32Ty, 0xFFFFFFFFU));
     const auto member = [&](ValPtr lane) {
       const auto bits = active->getType()->getIntegerBitWidth();
       auto *bounded = B.CreateICmpULT(lane, llvm::ConstantInt::get(i32Ty, bits));
@@ -140,11 +144,11 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &e
     };
     inRange = B.CreateAnd(inRange, B.CreateAnd(member(lid), member(srcLane)));
     auto *safeSrcLane = B.CreateSelect(inRange, srcLane, lid);
-    auto index = B.CreateShl(safeSrcLane, llvm::ConstantInt::get(i32Ty, 2));
+    auto *index = B.CreateShl(safeSrcLane, llvm::ConstantInt::get(i32Ty, 2));
     // a pointer arg (aggregate passed by address) still returns the shuffled value, not dstPtr; the caller
     // stores into a value-typed slot, so returning the pointer writes pointer bits over the aggregate
     return cg.shuffleStage(valTy, valTy, words, srcVal, "shfl", [&](llvm::Value *word) -> llvm::Value * {
-      auto bp = callIntr(llvm::Intrinsic::amdgcn_ds_bpermute, {index, word});
+      auto *bp = callIntr(llvm::Intrinsic::amdgcn_ds_bpermute, {index, word});
       return B.CreateSelect(inRange, bp, word);
     });
   };
@@ -160,7 +164,7 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &e
   auto wgBarrier = [&]() -> ValPtr {
     const auto ws = cg.C.actual.getOrInsertSyncScopeID("workgroup");
     cg.B.CreateFence(llvm::AtomicOrdering::Release, ws);
-    auto b = cg.intr0(llvm::Intrinsic::amdgcn_s_barrier);
+    auto *b = cg.intr0(llvm::Intrinsic::amdgcn_s_barrier);
     cg.B.CreateFence(llvm::AtomicOrdering::Acquire, ws);
     return b;
   };
@@ -168,14 +172,14 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &e
     return cg.B.CreateCall(llvm::Intrinsic::getOrInsertDeclaration(&cg.M, llvm::Intrinsic::amdgcn_ballot, {cg.C.i64Ty()}), pred);
   };
   auto logicalWarpMask = [&](llvm::Value *wide) -> llvm::Value * {
-    auto *segment = cg.B.CreateAnd(laneId(), llvm::ConstantInt::get(cg.C.i32Ty(), ~31u));
+    auto *segment = cg.B.CreateAnd(laneId(), llvm::ConstantInt::get(cg.C.i32Ty(), ~31U));
     auto *shift = cg.B.CreateIntCast(segment, wide->getType(), false);
     return cg.B.CreateIntCast(cg.B.CreateLShr(wide, shift), cg.C.i32Ty(), false);
   };
   auto memberMask = [&](const Term::Any &mask) -> llvm::Value * {
     auto *requested = cg.B.CreateIntCast(cg.mkTermVal(mask), cg.C.i32Ty(), false);
     auto *active = logicalWarpMask(activeMask());
-    auto *isAll = cg.B.CreateICmpEQ(requested, llvm::ConstantInt::get(cg.C.i32Ty(), 0xFFFFFFFFu));
+    auto *isAll = cg.B.CreateICmpEQ(requested, llvm::ConstantInt::get(cg.C.i32Ty(), 0xFFFFFFFFU));
     return cg.B.CreateSelect(isAll, active, cg.B.CreateAnd(requested, active));
   };
 

@@ -21,7 +21,7 @@ using namespace aspartame;
 
 template <typename... S> inline std::string joinPath(llvm::StringRef x, const S &...xs) {
   llvm::SmallString<256> p(x);
-  auto appendOne = [&](llvm::StringRef s) {
+  const auto appendOne = [&](llvm::StringRef s) {
     // XXX skip empties: llvm::sys::path::append unconditionally inserts a separator before each non-null Twine.
     if (!s.empty()) llvm::sys::path::append(p, s);
   };
@@ -30,7 +30,7 @@ template <typename... S> inline std::string joinPath(llvm::StringRef x, const S 
 }
 
 inline std::string executableName(llvm::StringRef name) {
-#if defined(_WIN32)
+#ifdef _WIN32
   return name.str() + ".exe";
 #else
   return name.str();
@@ -38,7 +38,7 @@ inline std::string executableName(llvm::StringRef name) {
 }
 
 inline std::string staticLibraryName(llvm::StringRef name) {
-#if defined(_WIN32)
+#ifdef _WIN32
   return name.str() + ".lib";
 #else
   return "lib" + name.str() + ".a";
@@ -57,7 +57,7 @@ inline std::string resolveResourcePath(const std::string &execParentPath, const 
 // XXX clang aliases -lstdc++ to libc++ on macOS and stamps @rpath/libc++.1.dylib; the
 // bundled libc++ sits in the dist's main lib/, not under polyfc/lib or polycpp/lib.
 inline std::vector<std::string> appleDistLibcxxRpath(const std::string &execParentPath) {
-#if defined(__APPLE__)
+#ifdef __APPLE__
   return {fmt::format("-Wl,-rpath,{}", joinPath(execParentPath, "..", "lib"))};
 #else
   (void)execParentPath;
@@ -68,7 +68,7 @@ inline std::vector<std::string> appleDistLibcxxRpath(const std::string &execPare
 // XXX macOS: static-link our libc++ so we can see into the operators symbols; Apple's libc++ is a
 // prebuilt dylib and there is no static system libc++ to relink
 inline std::vector<std::string> appleDistLibcxxStatic(const std::string &distLibDir) {
-#if defined(__APPLE__)
+#ifdef __APPLE__
   return {"-nostdlib++", fmt::format("-Wl,-load_hidden,{}", joinPath(distLibDir, "libc++.a")),
           fmt::format("-Wl,-load_hidden,{}", joinPath(distLibDir, "libc++abi.a"))};
 #else
@@ -80,28 +80,28 @@ inline std::vector<std::string> appleDistLibcxxStatic(const std::string &distLib
 struct CliArgs {
 
   std::vector<const char *> data;
-  std::unordered_set<size_t> deleted{};
+  std::unordered_set<size_t> deleted;
   explicit CliArgs(const std::vector<const char *> &data) : data(data) {}
 
   bool has(const std::string &flag) const {
-    return data                                                                     //
-           | zip_with_index()                                                       //
-           | filter([&](const auto &, const auto &i) { return !deleted.count(i); }) //
-           | keys()                                                                 //
+    return data                                                                            //
+           | zip_with_index()                                                              //
+           | filter([&](const auto &, const auto &i) { return !(deleted ^ contains(i)); }) //
+           | keys()                                                                        //
            | exists([&](const auto &chars) { return chars == flag; });
   }
 
   bool has(const std::string &flag, size_t pos) const {
-    return data                                                                     //
-           | zip_with_index()                                                       //
-           | filter([&](const auto &, const auto &i) { return !deleted.count(i); }) //
+    return data                                                                            //
+           | zip_with_index()                                                              //
+           | filter([&](const auto &, const auto &i) { return !(deleted ^ contains(i)); }) //
            | exists([&](const auto &chars, const auto &i) { return chars == flag && i == pos; });
   }
 
   std::optional<std::string> get(const std::string &flag) const {
-    return data                                                                     //
-           | zip_with_index()                                                       //
-           | filter([&](const auto &, const auto &i) { return !deleted.count(i); }) //
+    return data                                                                            //
+           | zip_with_index()                                                              //
+           | filter([&](const auto &, const auto &i) { return !(deleted ^ contains(i)); }) //
            | collect_first([&](const auto &chars, const auto &i) -> std::optional<std::string> {
                if (const std::string arg = chars; arg == flag) {
                  if (i + 1 < data.size()) return data[i + 1];                                // -foo :: bar :: Nil
@@ -114,7 +114,7 @@ struct CliArgs {
   bool popBool(const std::string &flag) {
     const auto oldSize = deleted.size();
     data | zip_with_index<size_t>() | for_each([&](const auto &x, const auto &i) {
-      if (!deleted.count(i) && x == flag) deleted.insert(i);
+      if (!(deleted ^ contains(i)) && x == flag) deleted.insert(i);
     });
     return oldSize != deleted.size();
   }
@@ -122,7 +122,7 @@ struct CliArgs {
   std::optional<std::string> popValue(const std::string &flag) {
     std::optional<std::string> last;
     for (size_t i = 0; i < data.size(); ++i) {
-      if (deleted.count(i)) continue;
+      if (deleted ^ contains(i)) continue;
       if (const std::string arg = data[i]; arg == flag && i + 1 < data.size()) { // -foo :: bar :: Nil
         deleted.insert(i);
         deleted.insert(i + 1);
@@ -136,10 +136,10 @@ struct CliArgs {
   }
 
   std::vector<const char *> remaining() const {
-    return data                                                                     //
-           | zip_with_index()                                                       //
-           | filter([&](const auto &, const auto &i) { return !deleted.count(i); }) //
-           | keys()                                                                 //
+    return data                                                                            //
+           | zip_with_index()                                                              //
+           | filter([&](const auto &, const auto &i) { return !(deleted ^ contains(i)); }) //
+           | keys()                                                                        //
            | to_vector();
   }
 };
@@ -149,7 +149,7 @@ struct CliArgs {
 inline std::string resolveExternalDriver(CliArgs &args, const char *envVar, const std::string &coLocatedName,
                                          const std::string &execParentPath) {
   if (auto driverArg = args.popValue("--driver")) return *driverArg;
-  if (auto driverEnv = std::getenv(envVar)) return driverEnv;
+  if (const char *driverEnv = std::getenv(envVar)) return driverEnv;
   if (auto coLocated = joinPath(execParentPath, executableName(coLocatedName)); llvm::sys::fs::exists(coLocated)) return coLocated;
   return {};
 }
@@ -208,21 +208,21 @@ struct StdParOptions {
   enum class VerboseLevel : uint8_t { None = 0, Info = 1, Debug = 2 };
 
   static std::variant<std::string, LinkKind> parseLinkKind(const std::string &arg) {
-    if (auto v = arg ^ to_lower(); v == "static") return LinkKind::Static;
+    if (const auto v = arg ^ to_lower(); v == "static") return LinkKind::Static;
     else if (v == "dynamic") return LinkKind::Dynamic;
     else if (v == "disabled") return LinkKind::Disabled;
     return "Unknown link kind `" + arg + "`";
   }
 
   static std::variant<std::string, MemKind> parseMemKind(const std::string &arg) {
-    if (auto v = arg ^ to_lower(); v == "direct") return MemKind::Direct;
+    if (const auto v = arg ^ to_lower(); v == "direct") return MemKind::Direct;
     else if (v == "interpose") return MemKind::Interpose;
     else if (v == "reflect") return MemKind::Reflect;
     return "Unknown mem kind `" + arg + "`";
   }
 
   static std::variant<std::string, VerboseLevel> parseVerboseLevel(const std::string &arg) {
-    if (auto v = arg ^ to_lower(); v == "none") return VerboseLevel::None;
+    if (const auto v = arg ^ to_lower(); v == "none") return VerboseLevel::None;
     else if (v == "info") return VerboseLevel::Info;
     else if (v == "debug") return VerboseLevel::Debug;
     return "Unknown debug level `" + arg + "`";
@@ -230,14 +230,14 @@ struct StdParOptions {
 
   VerboseLevel verbose = VerboseLevel::None;
   bool noCompress = false;
-  std::string targets{};
+  std::string targets;
   MemKind mem = MemKind::Reflect;
   LinkKind rt = LinkKind::Static;
   LinkKind jit = LinkKind::Disabled;
-  std::optional<int> stackDepth = {};
-  std::string emitLibrary{};
-  std::string libraryPath{};
-  std::string libraryCapabilities{};
+  std::optional<int> stackDepth;
+  std::string emitLibrary;
+  std::string libraryPath;
+  std::string libraryCapabilities;
   bool requireOffload = false;
 
   static std::variant<std::vector<std::string>, std::optional<StdParOptions>> parse(CliArgs &args) {
@@ -258,7 +258,9 @@ struct StdParOptions {
     StdParOptions options;
     std::vector<std::string> errors;
 
-    auto markError = [&](const std::string &prefix) { return [&](const std::string &x) { errors.push_back("\"" + prefix + "\": " + x); }; };
+    const auto markError = [&](const std::string &prefix) {
+      return [&](const std::string &x) { errors.push_back("\"" + prefix + "\": " + x); };
+    };
 
     if (args.popBool(fStdParFlag)) {
       fStdPar = true;
@@ -321,7 +323,7 @@ struct StdParOptions {
 inline std::vector<std::string> staticArchiveLinkFlags([[maybe_unused]] const std::string &llvmLibPath,
                                                        [[maybe_unused]] bool needsCxxRuntime) {
   std::vector<std::string> out;
-#if defined(__APPLE__)
+#ifdef __APPLE__
   if (needsCxxRuntime) {
     // The LLVM dist also contains its build-time libc++ dylib, whose ABI
     // dependencies are not part of the PolyFC distribution. Prefer the SDK
@@ -329,15 +331,15 @@ inline std::vector<std::string> staticArchiveLinkFlags([[maybe_unused]] const st
     out ^= concat(std::vector<std::string>{"-L/usr/lib"});
   }
 #endif
-#if defined(POLYREGION_JIT_LLVM_DYLIB)
+#ifdef POLYREGION_JIT_LLVM_DYLIB
   out ^= concat(Driver::dynamicOriginLinkFlags(llvmLibPath, "LLVMpolyregion"));
 #endif
-#if defined(__APPLE__)
+#ifdef __APPLE__
   if (needsCxxRuntime) out ^= concat(std::vector<std::string>{"-lc++"});
 #elif !defined(_WIN32)
   if (needsCxxRuntime) out ^= concat(std::vector<std::string>{"-lstdc++", "-lm"});
 #endif
-#if defined(__linux__)
+#ifdef __linux__
   // Older glibc/sysroots keep pthread, dl and rt separate.
   out ^= concat(std::vector<std::string>{"-pthread", "-ldl", "-lrt"});
 #endif
@@ -376,7 +378,7 @@ inline std::vector<std::string> staticArchiveLinkFlags([[maybe_unused]] const st
 
 inline std::vector<std::string> staticRuntimeLinkFlags(const std::string &llvmLibPath, bool needsCxxRuntime) {
   auto out = staticArchiveLinkFlags(llvmLibPath, needsCxxRuntime);
-#if defined(__APPLE__)
+#ifdef __APPLE__
   out ^= append(std::string("-Wl,-framework,Metal,-framework,Foundation"));
 #endif
   return out;
@@ -388,7 +390,7 @@ inline std::vector<std::string> jitCompilerLinkFlags(StdParOptions::LinkKind jit
   namespace abi = polyregion::polyc_jit::abi;
   std::vector<std::string> out;
   const auto anchor = [] {
-#if defined(_WIN32)
+#ifdef _WIN32
     return std::vector<std::string>{"-Xlinker", fmt::format("/INCLUDE:{}", abi::Compile)};
 #elif defined(__APPLE__)
     return std::vector<std::string>{fmt::format("-Wl,-u,_{}", abi::Compile)};
@@ -399,7 +401,7 @@ inline std::vector<std::string> jitCompilerLinkFlags(StdParOptions::LinkKind jit
   switch (jit) {
     case StdParOptions::LinkKind::Dynamic: {
       out ^= concat(anchor());
-#if defined(_WIN32)
+#ifdef _WIN32
       out ^= concat(Driver::dynamicOriginLinkFlags(libsPath, "polyc-jit"));
 #else
       out ^= concat(Driver::dynamicOriginLinkFlags(libsPath, "polyc"));
@@ -409,7 +411,7 @@ inline std::vector<std::string> jitCompilerLinkFlags(StdParOptions::LinkKind jit
     case StdParOptions::LinkKind::Static: {
       out ^= concat(anchor());
       const std::vector<std::string> exports{abi::AbiVersion, abi::Compile, abi::LastError, abi::Free};
-#if defined(_WIN32)
+#ifdef _WIN32
       out ^= concat(exports ^ flat_map([](const auto &s) { return std::vector<std::string>{"-Xlinker", fmt::format("/EXPORT:{}", s)}; }));
 #elif defined(__APPLE__)
       out ^= concat(exports ^ map([](const auto &s) { return fmt::format("-Wl,-exported_symbol,_{}", s); }));
@@ -426,7 +428,7 @@ inline std::vector<std::string> jitCompilerLinkFlags(StdParOptions::LinkKind jit
 }
 
 inline std::vector<std::string> mkDelimitedEnvPaths(const char *env, std::optional<std::string> leading, const char separator) {
-  if (auto line = std::getenv(env); line) {
+  if (const char *line = std::getenv(env); line) {
     return std::string(line) ^ split(separator) ^ flat_map([&](const auto &path) {
              return leading ? std::vector<std::string>{*leading, path} : std::vector<std::string>{path};
            });
@@ -435,7 +437,7 @@ inline std::vector<std::string> mkDelimitedEnvPaths(const char *env, std::option
 }
 
 inline std::string dynamicLibSuffix() {
-#if defined(__linux__)
+#ifdef __linux__
   return "so";
 #elif defined(__APPLE__)
   return "dylib";
@@ -447,7 +449,7 @@ inline std::string dynamicLibSuffix() {
 }
 
 inline std::string staticLibSuffix() {
-#if defined(__linux__)
+#ifdef __linux__
   return "a";
 #elif defined(__APPLE__)
   return "a";

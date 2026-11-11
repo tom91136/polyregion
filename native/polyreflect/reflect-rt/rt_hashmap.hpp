@@ -24,11 +24,11 @@ template <typename K, typename V> class HashMap {
   using HashFunc = size_t (*)(const K &);
 
   static constexpr size_t MaxBuckets = 1ULL << 30;
-  static constexpr float DefaultLoadFactor = 0.75f;
+  static constexpr float DefaultLoadFactor = 0.75F;
   static constexpr size_t DefaultInitialBucketCount = 1024;
   static constexpr size_t GrowthFactorNum = 5, GrowthFactorDen = 2;
 
-  size_t _minBucketCount, _bucketCount, _size;
+  size_t _minBucketCount, _bucketCount, _size{0};
   float _loadFactor;
   HashFunc _hashFn;
   Bucket *_buckets;
@@ -42,7 +42,7 @@ template <typename K, typename V> class HashMap {
       Node *current = _buckets[i].head;
       while (current) {
         Node *next = current->next;
-        size_t idx = _hashFn(current->key) % count;
+        const size_t idx = _hashFn(current->key) % count;
         current->next = newBuckets[idx].head;
         newBuckets[idx].head = current;
         current = next;
@@ -56,7 +56,7 @@ template <typename K, typename V> class HashMap {
 public:
   __RT_ODR explicit HashMap(const HashFunc hash_func, const float loadFactor = DefaultLoadFactor,
                             const size_t initialBucketCount = DefaultInitialBucketCount)
-      : _minBucketCount(initialBucketCount), _bucketCount(initialBucketCount), _size(0), _loadFactor(loadFactor), _hashFn(hash_func),
+      : _minBucketCount(initialBucketCount), _bucketCount(initialBucketCount), _loadFactor(loadFactor), _hashFn(hash_func),
         _buckets(static_cast<Bucket *>(__RT_ALTERNATIVE(malloc)(_bucketCount * sizeof(Bucket)))) {
     for (size_t i = 0; i < _bucketCount; ++i)
       new (&_buckets[i]) Bucket();

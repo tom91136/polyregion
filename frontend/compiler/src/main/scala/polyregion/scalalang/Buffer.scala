@@ -34,8 +34,8 @@ object Buffer {
   }
 
   private inline def mkBuffer[A, B](
-      inline elementSize: Int,
-      inline dim: Int,
+      elementSize: Int,
+      dim: Int,
       inline mkSpecific: nio.ByteBuffer => A,
       inline mkCol: (nio.ByteBuffer, A) => B
   ) = {
@@ -193,7 +193,7 @@ object Buffer {
     override def update(idx: Int, elem: Boolean): Unit = buffer.put(idx, (if (elem) 1 else 0).toByte)
     override def apply(i: Int): Boolean                = buffer.get(i) != 0
     override def length: Int                           = buffer.capacity()
-    override def putAll(xs: Boolean*): this.type       = updateAll(this, xs: _*)
+    override def putAll(xs: Boolean*): this.type       = updateAll(this, xs*)
     override def copyToArray: Array[Boolean]           = this.toArray
     override def hashCode(): Int                       = Objects.hashCode(id)
     override def equals(other: Any): Boolean = other match {
@@ -211,7 +211,7 @@ object Buffer {
     override def update(idx: Int, elem: Unit): Unit = buffer.put(idx, 0.toByte)
     override def apply(i: Int): Unit                = { buffer.get(i); () }
     override def length: Int                        = buffer.capacity()
-    override def putAll(xs: Unit*): this.type       = updateAll(this, xs: _*)
+    override def putAll(xs: Unit*): this.type       = updateAll(this, xs*)
     override def copyToArray: Array[Unit]           = this.toArray
     override def hashCode(): Int                    = Objects.hashCode(id)
     override def equals(other: Any): Boolean = other match {
@@ -241,7 +241,7 @@ object Buffer {
     override def update(idx: Int, elem: A): Unit = S.encode(buffer, idx, elem)
     override def apply(i: Int): A                = S.decode(buffer, i)
     override def length: Int                     = buffer.capacity() / S.sizeInBytes
-    override def putAll(xs: A*): this.type       = updateAll(this, xs: _*)
+    override def putAll(xs: A*): this.type       = updateAll(this, xs*)
     override def copyToArray: Array[A]           = this.toArray
     override def hashCode(): Int                 = Objects.hashCode(id)
     override def equals(other: Any): Boolean = other match {
@@ -265,19 +265,19 @@ object Buffer {
       error("Unexpected element type: cannot instantiate Buffer with a type that isn't <: AnyVal or <: AnyRef)")
   }
 
-  private inline def eachN[A](inline n: Int, inline a: A)(inline f: (A, Int) => Unit): A = {
+  private inline def eachN[A](n: Int, a: A)(inline f: (A, Int) => Unit): A = {
     var i = 0
     while (i < n) { f(a, i); i += 1 }
     a
   }
 
-  inline def apply[A](inline ys: A*): Buffer[A] = ofDim[A](ys.size).putAll(ys*)
-  inline def empty[A]: Buffer[A]                = ofDim[A](0)
-  inline def from[A](inline ys: scala.collection.Seq[A]): Buffer[A] =
+  inline def apply[A](ys: A*): Buffer[A] = ofDim[A](ys.size).putAll(ys*)
+  inline def empty[A]: Buffer[A]         = ofDim[A](0)
+  inline def from[A](ys: scala.collection.Seq[A]): Buffer[A] =
     eachN(ys.size, ofDim[A](ys.size))((xs, i) => xs(i) = ys(i))
-  inline def fill[A](inline n: Int)(a: => A): Buffer[A] =
+  inline def fill[A](n: Int)(a: => A): Buffer[A] =
     eachN(n, ofDim[A](n))((xs, i) => xs(i) = a)
-  inline def tabulate[A](inline n: Int)(inline f: Int => A): Buffer[A] =
+  inline def tabulate[A](n: Int)(inline f: Int => A): Buffer[A] =
     eachN(n, ofDim[A](n))((xs, i) => xs(i) = f(i))
 
   inline def range[A](using inline num: Integral[A])(start: A, end: A, step: A): Buffer[A] = {

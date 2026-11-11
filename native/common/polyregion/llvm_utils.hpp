@@ -34,7 +34,7 @@ static bool isCPUTargetSupported(const std::string &CPU, //
     case Triple::ppc64le:
     case Triple::ppc64: return CPU == "native" || llvm::PPC::isValidCPU(CPU);
     case Triple::amdgcn: return llvm::AMDGPU::parseArchAMDGCN(CPU) != llvm::AMDGPU::GPUKind::GK_NONE;
-    case Triple::nvptx64: return CPU.rfind("sm_", 0) == 0;
+    case Triple::nvptx64: return CPU.starts_with("sm_");
 
     default: throw std::logic_error("Unexpected arch from triple:" + Triple::getArchTypeName(arch).str());
   }
@@ -45,7 +45,7 @@ static void collectCPUFeatures(const std::string &CPU,             //
                                std::vector<std::string> &drain) {
 
   using namespace llvm;
-  auto normaliseFeature = [](const std::vector<StringRef> &features, std::vector<std::string> &drain) {
+  const auto normaliseFeature = [](const std::vector<StringRef> &features, std::vector<std::string> &drain) {
     features                                                                              //
         | filter([](const auto &f) { return !f.empty() && f[0] != '-'; })                 //
         | map([](const auto &f) { return f[0] == '+' ? f.drop_front().str() : f.str(); }) //
@@ -89,7 +89,7 @@ static void collectCPUFeatures(const std::string &CPU,             //
     }
     case Triple::aarch64: {
       std::vector<StringRef> extensions;
-      if (auto a = AArch64::getArchForCpu(CPU); a) {
+      if (const auto *a = AArch64::getArchForCpu(CPU); a) {
         AArch64::getExtensionFeatures(a->DefaultExts, extensions);
         normaliseFeature(extensions, drain);
       }

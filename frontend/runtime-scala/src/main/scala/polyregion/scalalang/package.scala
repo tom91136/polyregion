@@ -2,13 +2,11 @@ package polyregion.scalalang
 
 import fansi.ErrorMode.Throw
 import polyregion.jvm.compiler.Options
-import polyregion.jvm.{Loader, compiler as cp, runtime as rt}
+import polyregion.jvm.{Loader, runtime as rt}
 
 import java.util.concurrent.TimeUnit
-import scala.compiletime.constValue
 import scala.reflect.ClassTag
 
-type Callback[A]   = Either[Throwable, A] => Unit
 type Suspend[F[_]] = [A] => (Callback[A] => Unit) => F[A]
 
 inline val DefaultQueueCapacity = 10000L
@@ -19,6 +17,7 @@ class Platform[F[_], T <: Target](r: rt.Platform, f: Suspend[F]) {
   inline def devices: Vector[Device[F, T]] = r.devices.map(d => Device[F, T](d, f)).toVector
 }
 
+@SuppressWarnings(Array("bonsai:duplicate-code"))
 trait JitOps[F[_], O](d: rt.Device.Queue, suspend: Suspend[F]) {
 
   inline def task[C <: O, A](inline f: => A): F[A] = suspend { cb =>
@@ -28,7 +27,8 @@ trait JitOps[F[_], O](d: rt.Device.Queue, suspend: Suspend[F]) {
       {
         case Left(e) => cb(Left(e))
         case Right(()) =>
-          try cb(Right(result(0)))
+          val value = result(0)
+          try cb(Right(value))
           catch { case e: Throwable => cb(Left(e)) }
       }
     ) { result(0) = f; () }
@@ -99,7 +99,8 @@ trait AotOps[F[_], B](q: rt.Device.Queue, suspend: Suspend[F]) {
       {
         case Left(e) => cb(Left(e))
         case Right(()) =>
-          try cb(Right(result(0)))
+          val value = result(0)
+          try cb(Right(value))
           catch { case e: Throwable => cb(Left(e)) }
       }
     ) { result(0) = f; () }
@@ -161,13 +162,13 @@ trait AotOps[F[_], B](q: rt.Device.Queue, suspend: Suspend[F]) {
 
 trait DeviceQueue[F[_]](d: rt.Device.Queue, f: Suspend[F]) {
 
-  inline def invalidate_(xs: AnyRef*): this.type = { d.invalidateAll(null, xs: _*); this }
-  inline def invalidate(xs: AnyRef*): F[Unit]    = f(cb => d.invalidateAll(() => cb(Right(())), xs: _*))
+  inline def invalidate_(xs: AnyRef*): this.type = { d.invalidateAll(null, xs*); this }
+  inline def invalidate(xs: AnyRef*): F[Unit]    = f(cb => d.invalidateAll(() => cb(Right(())), xs*))
 
   inline def sync: F[Unit] = f(cb => d.syncAll(() => cb(Right(()))))
 
-  inline def release_(xs: AnyRef*): this.type = { d.releaseAll(xs: _*); this }
-  inline def release(xs: AnyRef*): Unit       = d.releaseAll(xs: _*)
+  inline def release_(xs: AnyRef*): this.type = { d.releaseAll(xs*); this }
+  inline def release(xs: AnyRef*): Unit       = d.releaseAll(xs*)
 
   // inline def foreach(inline x: Int)
   // /*             */ (using inline o: O)
@@ -206,140 +207,8 @@ class AotDevice[F[_], T](d: rt.Device.Queue, f: Suspend[F]) extends AotOps[F, T]
 class Device[F[_], T <: Target](val underlying: rt.Device, f: Suspend[F]) {
   lazy val name: String                                 = underlying.name
   lazy val properties: Map[String, String]              = underlying.properties.map(p => p.key -> p.value).toMap
-  lazy val jit: JitDevice[F, Config[_ <: T, _]]         = JitDevice(underlying.createQueue(DefaultQueueCapacity), f)
-  lazy val aot: AotDevice[F, Config[_ <: T, _] | Tuple] = AotDevice(underlying.createQueue(DefaultQueueCapacity), f)
-}
-
-enum Opt(val value: cp.Opt) {
-  case O0    extends Opt(cp.Opt.O0)
-  case O1    extends Opt(cp.Opt.O1)
-  case O2    extends Opt(cp.Opt.O2)
-  case O3    extends Opt(cp.Opt.O3)
-  case Ofast extends Opt(cp.Opt.Ofast)
-}
-object Opt {
-  type O0    = Opt.O0.type
-  type O1    = Opt.O1.type
-  type O2    = Opt.O2.type
-  type O3    = Opt.O3.type
-  type Ofast = Opt.Ofast.type
-}
-
-sealed trait Target {
-  type Arch <: cp.Target & Singleton
-  type UArch <: String & Singleton
-  def arch: Arch
-  def uarch: String
-}
-
-object Target {
-
-  private object Aux {
-    import scala.compiletime.*
-    import scala.deriving.*
-
-    private type T[A <: String, U <: String] = Target { type Arch = A; type UArch = U }
-
-    transparent inline given deriveArchNames[A](using m: Mirror.Of[A]): Tuple = inline m match {
-      case _: Mirror.SumOf[A] => deriveSum[m.MirroredElemTypes]
-      case _: Mirror.ProductOf[A] =>
-        inline scala.compiletime.erasedValue[m.MirroredMonoType] match {
-          case _: T[arch, uarch] => constValue[arch] *: EmptyTuple
-          case _                 => EmptyTuple
-        }
-    }
-
-    private transparent inline def deriveSum[Xs <: Tuple]: Tuple = inline erasedValue[Xs] match {
-      case _: (T[arch, uarch] *: ts) => constValue[arch] *: deriveSum[ts]
-      case _: (t *: ts)              => deriveArchNames[t](using summonInline[Mirror.Of[t]]) ++ deriveSum[ts]
-      case _: EmptyTuple             => EmptyTuple
-    }
-
-  }
-
-  // final val ArchNames: Tuple = Aux.deriveArchNames[Target]
-
-  // val code = scala.compiletime.codeOf(Aux.deriveArchNames[Target])
-
-  import cp.Target as cpt
-  private transparent inline def valueOf[T <: Singleton: ValueOf] = scala.compiletime.summonInline[ValueOf[T]].value
-
-  type OpenCL_C = OpenCL_C.type
-  val OpenCL_C = new Target {
-    type Arch  = cp.Target.C_OpenCL1_1.type;
-    type UArch = "auto"
-    val arch  = valueOf[Arch]
-    val uarch = constValue[UArch]
-  }
-
-  sealed trait CPU extends Target
-  val Host = new CPU {
-    type Arch = cp.Target.LLVM_HOST.type; type UArch = "native"
-    val arch = valueOf[Arch]; val uarch = constValue[UArch]
-  }
-
-  private type SString = String & Singleton
-
-  case class X86[A <: SString](uarch: A) extends CPU {
-    type UArch = A; type Arch = cpt.LLVM_X86_64.type; val arch = valueOf[Arch]
-  }
-  case class AArch64[A <: SString](uarch: A) extends CPU {
-    type UArch = A; type Arch = cpt.LLVM_AARCH64.type; val arch = valueOf[Arch]
-  }
-  case class ARM[A <: SString](uarch: A) extends CPU {
-    type UArch = A; type Arch = cpt.LLVM_ARM.type; val arch = valueOf[Arch]
-  }
-  case class NVPTX64[A <: SString](uarch: A) extends Target {
-    type UArch = A; type Arch = cpt.LLVM_NVPTX64.type; val arch = valueOf[Arch]
-  }
-  case class AMDGCN[A <: SString](uarch: A) extends Target {
-    type UArch = A; type Arch = cpt.LLVM_AMDGCN.type; val arch = valueOf[Arch]
-  }
-  case class SPIRV64[A <: SString](uarch: A) extends Target {
-    type UArch = A; type Arch = cpt.LLVM_SPIRV64_KERNEL.type; val arch = valueOf[Arch]
-  }
-
-  object X86 {
-
-    final val Znver2 = X86("znver2")
-  }
-  object AArch64 {
-
-    final val AppleM1 = AArch64("apple-m1")
-    final val A64fx   = AArch64("a64fx")
-  }
-  object ARM {}
-
-  object NVPTX64 {
-
-    final val SM52 = NVPTX64("sm_52")
-    final val SM61 = NVPTX64("sm_61")
-    final val SM80 = NVPTX64("sm_80")
-  }
-  object AMDGCN {
-
-    final val gfx906 = AMDGCN("gfx906")
-    final val gfx803 = AMDGCN("gfx803")
-  }
-  object SPIRV64 {}
-
-}
-
-case class Config[T <: Target, O <: Opt](targets: List[(T, O)]) {
-  type Target = T
-  type Opt    = O
-
-  infix def ++(that: Config[T, O]) = Config(targets ++ that.targets)
-}
-object Config {
-  def apply[T <: Target, O <: Opt](opt: O, target: T*): Config[T, O] = Config(target.map(_ -> opt).toList)
-  def apply[T <: Target](target: T*): Config[T, Opt]                 = Config(Opt.O3, target: _*)
-}
-
-object Platforms {
-  val platforms = rt.Platforms.create()
-  sys.addShutdownHook(platforms.close())
-  export platforms.*
+  lazy val jit: JitDevice[F, Config[? <: T, ?]]         = JitDevice(underlying.createQueue(DefaultQueueCapacity), f)
+  lazy val aot: AotDevice[F, Config[? <: T, ?] | Tuple] = AotDevice(underlying.createQueue(DefaultQueueCapacity), f)
 }
 
 inline def liftCUDA[F[_]](lift: Suspend[F]): Platform[F, Target.NVPTX64[?]] = Platform(Platforms.CUDA(), lift)
@@ -355,6 +224,7 @@ object blocking {
 
   type Id[A] = A
 
+  @SuppressWarnings(Array("bonsai:unbounded-wait"))
   private val Latched: Suspend[Id] = [A] => { (cb: Callback[A] => Unit) =>
     val latch = CountDownLatch(1)
     val ref   = AtomicReference[Either[Throwable, A]]()
@@ -377,7 +247,7 @@ object future {
 
   import scala.concurrent.{Future, Promise}
   private val SuspendFuture: Suspend[Future] = [A] => { (cb: Callback[A] => Unit) =>
-    val p = Promise[A]
+    val p = Promise[A]()
     cb(e => p.tryComplete(e.toTry))
     p.future
   }

@@ -1,5 +1,12 @@
 #include "llvm_cpu.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <map>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "llvm/Analysis/ValueTracking.h"
 
 #include "aspartame/all.hpp"
@@ -261,7 +268,7 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
       [&](const Spec::GpuGroupExclusiveScan &) -> ValPtr { throw BackendException("Spec::GpuGroupExclusiveScan unsupported for CPU"); },
       [&](const Spec::RemoteLaunch &v) -> ValPtr {
         const auto count = v.args.size();
-        const auto zero = llvm::ConstantInt::get(i64, 0);
+        auto *const zero = llvm::ConstantInt::get(i64, 0);
         auto *argPointersType = llvm::ArrayType::get(ptr, count ? count : 1);
         auto *argTypesType = llvm::ArrayType::get(i8, count ? count : 1);
         auto *mirrorSizesType = llvm::ArrayType::get(sizeTy, count ? count : 1);
@@ -419,7 +426,7 @@ ValPtr CPUTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::MathOp &expr
         const auto inTpe = v.x.tpe();
         if (v.tpe.is<Type::Float16>() || v.tpe.is<Type::Float32>() || v.tpe.is<Type::Float64>())
           return cg.intr1(llvm::Intrinsic::round, v.tpe, v.x);
-        const auto rounded = cg.intr1(llvm::Intrinsic::round, inTpe, v.x);
+        auto *const rounded = cg.intr1(llvm::Intrinsic::round, inTpe, v.x);
         return cg.B.CreateFPToSI(rounded, cg.resolveType(v.tpe));
       },                                                                                             //
       [&](const Math::Ceil &v) -> ValPtr { return cg.intr1(llvm::Intrinsic::ceil, v.tpe, v.x); },    //

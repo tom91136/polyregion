@@ -68,6 +68,12 @@ object CppJniBindGen {
     case _                                       => "Object" // even string needs a upcast
   }
 
+  private def castJniGetter(t: Class[?], tpeName: String, getter: String): String = t match {
+    case s if s.getName == StringClass => s"reinterpret_cast<jstring>($getter)"
+    case a if a.isArray                => s"reinterpret_cast<$tpeName>($getter)"
+    case _                             => getter
+  }
+
   def safeCppNames(name: String): String = name match {
     case x @ ("delete" | "new") => s"${x}_" // TODO add more as they show up
     case x                      => x
@@ -115,10 +121,6 @@ object CppJniBindGen {
       .filter(cp)
       .sortBy(_.getParameterCount)
       .toList
-
-    publicFields.map { case (name, tpe) =>
-      s"""static jfieldID $name = env->GetFieldID(clazz, "$name", "${descriptor(tpe)}");"""
-    }
 
     val jniName = jniClassName(cls)
     val clsName = cls.getSimpleName
@@ -204,11 +206,7 @@ object CppJniBindGen {
             s"$cls::Instance $field(JNIEnv *env, const $cls& clazz) const;" ->
               s"$cls::Instance $clsName::Instance::$field(JNIEnv *env, const $cls& clazz_) const { return {clazz_, $getter}; }"
           case None =>
-            val value = tpe match {
-              case s if s.getName == StringClass => s"reinterpret_cast<jstring>($getter)"
-              case a if a.isArray                => s"reinterpret_cast<$tpeName>($getter)"
-              case _                             => getter
-            }
+            val value = castJniGetter(tpe, tpeName, getter)
 
             s"$tpeName $field(JNIEnv *env) const;" ->
               s"$tpeName $clsName::Instance::$field(JNIEnv *env) const { return $value; }"
@@ -237,11 +235,7 @@ object CppJniBindGen {
             case None =>
               val tpeName = jniTypeName(tpe)
 
-              val value = tpe match {
-                case s if s.getName == StringClass => s"reinterpret_cast<jstring>($getter)"
-                case a if a.isArray                => s"reinterpret_cast<$tpeName>($getter)"
-                case _                             => getter
-              }
+              val value = castJniGetter(tpe, tpeName, getter)
 
               val rtn     = if (isVoid(tpe)) "" else "return "
               val justArg = args.mkString(", ")
@@ -301,15 +295,19 @@ object CppJniBindGen {
       .filter(m => Modifier.isNative(m.getModifiers))
       .sortBy(m => descriptorSafe(m))
 
-    val registerEntries = nativeMethods.map(m =>
-      s"""{(char *)"${m.getName}", (char *)"${descriptor(m)}", (void *)&${safeCppNames(m.getName)}}"""
-    )
+    val registerEntries = nativeMethods.map { m =>
+      val name      = s"""const_cast<char *>("${m.getName}")"""
+      val signature = s"""const_cast<char *>("${descriptor(m)}")"""
+      val fnPtr     = s"reinterpret_cast<void *>(&${safeCppNames(m.getName)})"
+      s"{.name = $name, .signature = $signature, .fnPtr = $fnPtr}"
+    }
 
-    val constants = cls.getDeclaredFields
+    val constantDecls = List.newBuilder[String]
+    cls.getDeclaredFields
       .filter(f => Modifier.isStatic(f.getModifiers) && Modifier.isFinal(f.getModifiers))
       .filter(_.getType.isPrimitive)
       .sortBy(_.getName)
-      .map { f =>
+      .foreach { f =>
         f.setAccessible(true)
         val rhs = f.getType match {
           case x if x.equals(java.lang.Double.TYPE)    => s"${f.getDouble(null)}"
@@ -322,8 +320,9 @@ object CppJniBindGen {
           case x if x.equals(java.lang.Byte.TYPE)      => s"${f.getByte(null)}"
           case _                                       => ???
         }
-        s"static constexpr ${jniTypeName(f.getType)} ${safeCppNames(f.getName)} = $rhs"
+        constantDecls += s"static constexpr ${jniTypeName(f.getType)} ${safeCppNames(f.getName)} = $rhs"
       }
+    val constants = constantDecls.result()
 
     val prototypes = nativeMethods.map { m =>
       val self = if (Modifier.isStatic(m.getModifiers)) "jclass" else "jobject"

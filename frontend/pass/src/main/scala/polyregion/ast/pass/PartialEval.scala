@@ -50,7 +50,9 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
   override def apply(program: p.Program, log: Log): p.Program =
     if (canonicaliseAddresses) {
       val (entry, ec) =
-        program.entry.map(canonicaliseFn).map((function, count) => Some(function) -> count).getOrElse(None -> 0)
+        program.entry
+          .map(canonicaliseFn)
+          .fold[(Option[p.Function], Int)](None -> 0)((function, count) => Some(function) -> count)
       val (functions, fcs) = program.functions.map(canonicaliseFn).unzip
       val total            = ec + fcs.sum
       if (total > 0) log.info(s"canonicalised $total derived-pointer temp(s) to root-anchored accesses")
@@ -88,7 +90,7 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
   // write to that root without excluding `p` itself from ordinary pointer copy propagation.
   private def mutationInfo(statements: List[p.Stmt]): (Set[p.Named], Set[p.Named]) = {
     val refToRoots = statements.iterator.collect {
-      case p.Stmt.Var(name, Some(p.Expr.RefTo(that: p.Term.Select, None, _, _, _)), false) => name -> that.root
+      case p.Stmt.Var(name, Some(p.Expr.RefTo(lhs = that: p.Term.Select, idx = None)), false) => name -> that.root
     }.toMap
     statements.foldLeft(Set.empty[p.Named] -> Set.empty[p.Named]) {
       case ((mutated, reassigned), p.Stmt.Mut(p.Term.Select(name, steps, _), _)) =>
@@ -175,9 +177,9 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
   }
 
   private def isTerminator(s: p.Stmt): Boolean = s match {
-    case _: p.Stmt.Return | _: p.Stmt.Raise | p.Stmt.Rethrow | p.Stmt.Break | p.Stmt.Cont => true
-    case p.Stmt.Annotated(inner, _, _)                                                    => isTerminator(inner)
-    case _                                                                                => false
+    case p.Stmt.Return(_) | p.Stmt.Raise(_, _, _) | p.Stmt.Rethrow | p.Stmt.Break | p.Stmt.Cont => true
+    case p.Stmt.Annotated(inner, _, _)                                                          => isTerminator(inner)
+    case _                                                                                      => false
   }
 
   private def evalStmt(
@@ -190,18 +192,19 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
     case p.Stmt.Var(name, None, mut) => (p.Stmt.Var(name, None, mut) :: Nil, st)
     case p.Stmt.Var(name, Some(e), mut) =>
       val folded = evalExpr(e, st)
+      def bindAlias(kind: String, term: p.Term): St = {
+        log.info(s"$kind ${name.repr} = ${term.repr}")
+        st.bindVal(name, term)
+      }
       val st2 =
         if (mut) st
         else
           folded match {
-            case p.Expr.Alias(c) if !excluded.contains(name) && Fold.isConstTerm(c) =>
-              log.info(s"const-bind ${name.repr} = ${c.repr}")
-              st.bindVal(name, c)
+            case p.Expr.Alias(c) if !excluded.contains(name) && Fold.isConstTerm(c) => bindAlias("const-bind", c)
             case p.Expr.Alias(sel: p.Term.Select) if !excluded.contains(name) && !excluded.contains(sel.root) =>
-              log.info(s"copy-bind ${name.repr} = ${sel.repr}")
-              st.bindVal(name, sel)
+              bindAlias("copy-bind", sel)
             // a write through the pointer leaves its slot stable, so only a bare re-aim invalidates the bind
-            case p.Expr.RefTo(sel: p.Term.Select, None, _, _, _)
+            case p.Expr.RefTo(lhs = sel: p.Term.Select, idx = None)
                 if !reassigned.contains(name) &&
                   (!AddressRefinement.isPtr(sel.root.tpe) || !reassigned.contains(sel.root)) =>
               log.info(s"addr-bind ${name.repr} = &${sel.repr}")
@@ -337,7 +340,7 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
         case _ =>
           (steps, st.addrs.get(root)) match {
             case (p.PathStep.Deref :: rest, Some(a)) => p.Term.Select(a.root, a.steps ::: rest, tpe)
-            case (rest @ ((_: p.PathStep.Field) :: _), Some(a)) if AddressRefinement.isPtr(root.tpe) =>
+            case (rest @ (p.PathStep.Field(_) :: _), Some(a)) if AddressRefinement.isPtr(root.tpe) =>
               p.Term.Select(a.root, a.steps ::: rest, tpe)
             case _ => resolveCast(root, steps, tpe, st).getOrElse(t)
           }
@@ -367,8 +370,8 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
   // pure and dropping it also lets a no-longer-address-taken root become foldable next iteration; loads
   // (Index), Alloc, calls and Spec ops are conservatively retained
   private def isPure(e: p.Expr): Boolean = e match {
-    case _: p.Expr.Alias | _: p.Expr.IntrOp | _: p.Expr.MathOp | _: p.Expr.Cast | _: p.Expr.BitCast | _: p.Expr.RefTo |
-        _: p.Expr.OffsetOf | _: p.Expr.SizeOf =>
+    case p.Expr.Alias(_) | p.Expr.IntrOp(_) | p.Expr.MathOp(_) | p.Expr.Cast(_, _) | p.Expr.BitCast(_, _) |
+        p.Expr.RefTo(_, _, _, _, _) | p.Expr.OffsetOf(_, _) | p.Expr.SizeOf(_) =>
       true
     case _ => false
   }
@@ -403,27 +406,31 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
         case Some(ch @ (isMul, base, k, t)) =>
           val rhs = Fold
             .intTerm(t, k)
-            .map(kc => p.Expr.IntrOp(if (isMul) p.Intr.Mul(base, kc, t) else p.Intr.Add(base, kc, t)))
-            .getOrElse(p.Expr.IntrOp(op))
-          (p.Stmt.Var(n, Some(rhs), false), env + (n -> ch))
+            .fold(p.Expr.IntrOp(op))(kc =>
+              p.Expr.IntrOp(if (isMul) p.Intr.Mul(base, kc, t) else p.Intr.Add(base, kc, t))
+            )
+          (p.Stmt.Var(n, Some(rhs)), env + (n -> ch))
         case None => (s, env)
       }
     case p.Stmt.Var(_, Some(e), _) =>
-      e match { case _: p.Expr.Invoke | _: p.Expr.ForeignCall => (s, Map.empty); case _ => (s, env) }
-    case _: p.Stmt.Mut | _: p.Stmt.Update => (s, Map.empty)
-    case other                            => (other, env)
+      e match { case p.Expr.Invoke(_, _, _, _, _) | p.Expr.ForeignCall(_, _, _) => (s, Map.empty); case _ => (s, env) }
+    case p.Stmt.Mut(_, _) | p.Stmt.Update(_, _, _) => (s, Map.empty)
+    case other                                     => (other, env)
   }
 
   private def reassocOp(op: p.Intr, env: Map[p.Named, Chain]): Option[Chain] = op match {
-    case p.Intr.Add(a, b, t) if t.kind == p.Type.Kind.Integral => constOperand(false, a, b, t, env)
-    case p.Intr.Mul(a, b, t) if t.kind == p.Type.Kind.Integral => constOperand(true, a, b, t, env)
-    case p.Intr.Sub(a, b, t) if t.kind == p.Type.Kind.Integral => Fold.asLong(b).map(c => extend(false, a, -c, t, env))
-    case _                                                     => None
+    case p.Intr.Add(a, b, t) if t.kind == p.Type.Kind.Integral =>
+      constOperand(a, b).map { case (base, c) => extend(isMul = false, base, c, t, env) }
+    case p.Intr.Mul(a, b, t) if t.kind == p.Type.Kind.Integral =>
+      constOperand(a, b).map { case (base, c) => extend(isMul = true, base, c, t, env) }
+    case p.Intr.Sub(a, b, t) if t.kind == p.Type.Kind.Integral =>
+      Fold.asLong(b).map(c => extend(isMul = false, a, -c, t, env))
+    case _ => None
   }
-  private def constOperand(isMul: Boolean, a: p.Term, b: p.Term, t: p.Type, env: Map[p.Named, Chain]): Option[Chain] =
+  private def constOperand(a: p.Term, b: p.Term): Option[(p.Term, Long)] =
     (Fold.asLong(a), Fold.asLong(b)) match {
-      case (_, Some(c)) => Some(extend(isMul, a, c, t, env))
-      case (Some(c), _) => Some(extend(isMul, b, c, t, env))
+      case (_, Some(c)) => Some((a, c))
+      case (Some(c), _) => Some((b, c))
       case _            => None
     }
   private def extend(isMul: Boolean, base: p.Term, c: Long, t: p.Type, env: Map[p.Named, Chain]): Chain =
@@ -493,8 +500,9 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
         val (i2, av) = cseStmt(inner, avail, addrTaken); (p.Stmt.Annotated(i2, pos, c), av)
       case p.Stmt.Var(n, Some(e), false) if cseEligible(e) =>
         avail.get(e) match {
-          case Some((m, _)) => (p.Stmt.Var(n, Some(p.Expr.Alias(p.Term.Select(m, Nil, n.tpe))), false), avail)
-          case None         => (s, avail.add(e, n, selectRoots(e), addrTaken))
+          case Some((m, _)) =>
+            (p.Stmt.Var(n, Some(p.Expr.Alias(p.Term.Select(m, Nil, n.tpe)))), avail)
+          case None => (s, avail.add(e, n, selectRoots(e), addrTaken))
         }
       case _ =>
         val (root, aliased) = cseKill(s)
@@ -502,8 +510,8 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
     }
 
   private def cseEligible(e: p.Expr): Boolean = (e match {
-    case _: p.Expr.IntrOp | _: p.Expr.MathOp | _: p.Expr.Cast | _: p.Expr.BitCast | _: p.Expr.OffsetOf |
-        _: p.Expr.SizeOf =>
+    case p.Expr.IntrOp(_) | p.Expr.MathOp(_) | p.Expr.Cast(_, _) | p.Expr.BitCast(_, _) | p.Expr.OffsetOf(_, _) |
+        p.Expr.SizeOf(_) =>
       true
     case _ => false
   }) && !readsMemory(e)
@@ -522,7 +530,7 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
   }
   private def isMemStep(s: p.PathStep): Boolean = s match {
     case p.PathStep.Deref                             => true
-    case _: p.PathStep.Index | _: p.PathStep.IndexDyn => true
+    case p.PathStep.Index(_) | p.PathStep.IndexDyn(_) => true
     case _                                            => false
   }
 
@@ -536,8 +544,8 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
     case _                                              => (None, false)
   }
   private def isCall(e: p.Expr): Boolean = e match {
-    case _: p.Expr.Invoke | _: p.Expr.ForeignCall => true
-    case _                                        => false
+    case p.Expr.Invoke(_, _, _, _, _) | p.Expr.ForeignCall(_, _, _) => true
+    case _                                                          => false
   }
 
   // ---- address canonicalisation (canonicaliseAddresses=true): root-anchor derived-pointer temps back to
@@ -558,9 +566,9 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
   }
 
   private def isIdentityRef(idx: Option[p.Term], selTpe: p.Type): Boolean = (idx, selTpe) match {
-    case (None, _)                                                            => true
-    case (Some(p.Term.IntS64Const(0) | p.Term.IntU64Const(0)), _: p.Type.Ptr) => true
-    case _                                                                    => false
+    case (None, _)                                                               => true
+    case (Some(p.Term.IntS64Const(0) | p.Term.IntU64Const(0)), p.Type.Ptr(_, _)) => true
+    case _                                                                       => false
   }
 
   private def resolveFieldAliases(f: p.Function, reassigned: Set[String]): (p.Function, Int) = {
@@ -586,11 +594,7 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
           wholeValue(n.symbol, comp).fold(e: p.Expr)(p.Expr.Alias(_))
         case e => e
       }
-      val resolved = derefFolded.modifyAll[p.Term] {
-        case p.Term.Select(n, steps, t) if steps.nonEmpty && aliases.contains(n.symbol) =>
-          val (root, path) = aliases(n.symbol); p.Term.Select(root, path ::: steps, t)
-        case t => t
-      }
+      val resolved = derefFolded.modifyAll[p.Term](reroot(aliases.contains, aliases))
       val storeFolded = resolved.copy(body = mapStmtsRec(resolved.body) {
         case s @ p.Stmt.Update(p.Term.Select(n, Nil, _), idx, v) if isZeroConst(idx) =>
           wholeValue(n.symbol, v.tpe).fold(List(s))(w => List(p.Stmt.Mut(w, p.Expr.Alias(v))))
@@ -607,8 +611,10 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
   private def offsetIndex(base: p.Term, offset: p.Term): Option[p.Term] =
     constIntValue(base).zip(constIntValue(offset)).map((b, o) => if (b == 0) offset else p.Term.IntS64Const(b + o))
 
-  private def isArr(t: p.Type): Boolean    = t match { case _: p.Type.Arr => true; case _ => false }
-  private def isArrPtr(t: p.Type): Boolean = t match { case p.Type.Ptr(_: p.Type.Arr, _) => true; case _ => false }
+  private def isArr(t: p.Type): Boolean = t match { case p.Type.Arr(_, _, _) => true; case _ => false }
+  private def isArrPtr(t: p.Type): Boolean = t match {
+    case p.Type.Ptr(p.Type.Arr(_, _, _), _) => true; case _ => false
+  }
   private def peelArr(t: p.Type, n: Int): p.Type =
     if (n <= 0) t else t match { case p.Type.Arr(c, _, _) => peelArr(c, n - 1); case _ => t }
 
@@ -638,8 +644,8 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
         case p.Stmt.Var(n, Some(p.Expr.RefTo(p.Term.Select(b, Nil, bt), Some(idx), _, _, _)), _)
             if !reassigned(b.symbol) && !reassigned(n.symbol) =>
           bt match {
-            case _: p.Type.Arr => m + (n.symbol -> (b, List(idx)))
-            case p.Type.Ptr(_: p.Type.Arr, _) =>
+            case p.Type.Arr(_, _, _) => m + (n.symbol -> (b, List(idx)))
+            case p.Type.Ptr(p.Type.Arr(_, _, _), _) =>
               m.get(b.symbol).fold(m) { case (root, idxs) => m + (n.symbol -> (root, idxs :+ idx)) }
             case _ =>
               m.get(b.symbol)
@@ -684,6 +690,13 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
     )
   }
 
+  private def reroot(hit: String => Boolean, target: String => (p.Named, List[p.PathStep]))(term: p.Term): p.Term =
+    term match {
+      case p.Term.Select(n, steps, t) if steps.nonEmpty && hit(n.symbol) =>
+        val (root, path) = target(n.symbol); p.Term.Select(root, path ::: steps, t)
+      case _ => term
+    }
+
   // re-root `&b.fld[i]` (element address of an array-typed struct field) to the access chain `b.fld[i]`
   private def resolveArrayFieldIndex(f: p.Function, reassigned: Set[String]): (p.Function, Int) = {
     val chain = f.collectAll[p.Stmt].foldLeft(Map.empty[String, (p.Named, List[p.PathStep])]) { (m, s) =>
@@ -722,12 +735,7 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
             List(p.Stmt.Mut(rooted(n, v.tpe), p.Expr.Alias(v)))
           case _ => List(s)
         },
-      (drop, t) =>
-        t match {
-          case p.Term.Select(n, steps, tp) if steps.nonEmpty && drop(n.symbol) =>
-            val (root, path) = chain(n.symbol); p.Term.Select(root, path ::: steps, tp)
-          case _ => t
-        }
+      (drop, t) => reroot(drop, chain)(t)
     )
   }
 

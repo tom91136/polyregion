@@ -1,3 +1,15 @@
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
 #include "aspartame/all.hpp"
 #include "fmt/core.h"
 #include "magic_enum/magic_enum.hpp"
@@ -73,7 +85,10 @@ llvm::Type *TargetedContext::i64Ty() { return llvm::Type::getInt64Ty(actual); }
 TargetedContext::AS TargetedContext::addressSpace(const TypeSpace::Any &s) const {
   // SPIR-V Kernel keeps private in the Function AS: widening to Generic makes IGC's SIMD vectoriser
   // read private arrays as shared, not per-lane
-  const auto privateAS = spirvKernel ? AllocaAS : (GenericAS != 0 ? GenericAS : GlobalAS);
+  const auto privateAS = [&] {
+    if (spirvKernel) return AllocaAS;
+    return GenericAS != 0 ? GenericAS : GlobalAS;
+  }();
   // SPIR-V Kernel: an internal (non-kernel-arg) Global pointer is the "flat" pointer the body threads
   // through helpers. Map it to Generic so a Workgroup(local_accessor)->flat decay is a valid
   // OpPtrCastToGeneric and loads/stores dispatch to SLM. Workgroup and CrossWorkgroup are disjoint on
@@ -104,9 +119,9 @@ ValPtr TargetedContext::allocaAS(llvm::IRBuilder<> &B, llvm::Type *ty, const uns
   // shared memory) need their AS preserved -- coercing to default AS would have NVPTX emit
   // `st.b64` instead of `st.shared.b64` on the load.
   const auto preserveAS = ty->isPointerTy() && llvm::cast<llvm::PointerType>(ty)->getAddressSpace() != 0;
-  const auto allocaTy = (ty->isPointerTy() && GenericAS == 0 && !preserveAS) ? B.getPtrTy() : ty;
+  auto *const allocaTy = (ty->isPointerTy() && GenericAS == 0 && !preserveAS) ? B.getPtrTy() : ty;
   llvm::Value *stackPtr;
-  if (auto fn = B.GetInsertBlock() ? B.GetInsertBlock()->getParent() : nullptr) {
+  if (auto *fn = B.GetInsertBlock() ? B.GetInsertBlock()->getParent() : nullptr) {
     auto &entry = fn->getEntryBlock();
     llvm::IRBuilder<> entryB(&entry, entry.getFirstNonPHIOrDbgOrAlloca());
     stackPtr = entryB.CreateAlloca(allocaTy, AS, nullptr, key);
@@ -117,18 +132,12 @@ ValPtr TargetedContext::allocaAS(llvm::IRBuilder<> &B, llvm::Type *ty, const uns
   return AS != 0 ? B.CreateAddrSpaceCast(stackPtr, B.getPtrTy()) : stackPtr;
 }
 
-ValPtr TargetedContext::load(llvm::IRBuilder<> &B, const ValPtr rhs, llvm::Type *ty) const { return B.CreateLoad(ty, rhs); }
-
-ValPtr TargetedContext::store(llvm::IRBuilder<> &B, const ValPtr rhsVal, const ValPtr lhsPtr) const {
-  return B.CreateStore(rhsVal, lhsPtr);
-}
-
 ValPtr TargetedContext::sizeOf(llvm::IRBuilder<> &B, llvm::Type *ptrTpe) {
   // See http://nondot.org/sabre/LLVMNotes/SizeOf-OffsetOf-VariableSizedStructs.txt
   // We want:
   //   %SizePtr = getelementptr %T, %T* null, i32 1
   //   %Size = ptrtoint %T* %SizePtr to i32
-  const auto sizePtr = B.CreateGEP(                                         //
+  auto *const sizePtr = B.CreateGEP(                                        //
       ptrTpe,                                                               //
       llvm::ConstantPointerNull::get(llvm::PointerType::getUnqual(actual)), //
       llvm::ConstantInt::get(llvm::Type::getInt64Ty(actual), 1),            //
@@ -204,8 +213,8 @@ llvm::Type *TargetedContext::resolveType(const AnyType &tpe, const Map<std::stri
 StructInfo TargetedContext::resolveStruct(const StructDef &def, const Map<std::string, StructInfo> &structs) {
   const auto types = def.members ^ map([&](const auto &m) { return resolveType(m.tpe, structs); });
   const auto table = def.members | map([](const auto &m) { return m.symbol; }) | zip_with_index<size_t>() | to<Map>();
-  const auto tpe = llvm::StructType::create(actual, types, fqcn(def.name));
-  const auto structLayout = dataLayout.getStructLayout(tpe);
+  auto *const tpe = llvm::StructType::create(actual, types, fqcn(def.name));
+  const auto *const structLayout = dataLayout.getStructLayout(tpe);
   const StructLayout layout(/*name*/ fqcn(def.name),
                             /*sizeInBytes*/ structLayout->getSizeInBytes(),
                             /*alignment*/ static_cast<int64_t>(structLayout->getAlignment().value()),
@@ -288,7 +297,7 @@ Map<std::string, StructInfo> TargetedContext::resolveLayouts(const std::vector<S
   };
   // a member transitively holding a caller-flagged (isDiscontinuityName) struct gets its own region when its union
   // is de-aliased instead of sharing a byte range with the overlay
-  auto discMemo = std::make_shared<Map<std::string, bool>>();
+  const auto discMemo = std::make_shared<Map<std::string, bool>>();
   std::function<bool(const Type::Any &)> holdsDiscontinuity = [&, discMemo](const Type::Any &t) -> bool {
     if (const auto s = t.template get<Type::Struct>()) {
       const auto name = fqcn(s->name);

@@ -1,4 +1,8 @@
+#include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <string>
+#include <string_view>
 
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/ExprCXX.h"
@@ -31,7 +35,7 @@ static Opt<MatchedCall> addressOf(const clang::CallExpr &call, const clang::Func
       && decl.getBuiltinID() != clang::Builtin::BI__builtin_addressof)
     return {};
   const auto *value = call.getArg(0);
-  return MatchedCall{Lowering{[value](Remapper &self, Remapper::RemapContext &r) {
+  return MatchedCall{.lower = Lowering{[value](Remapper &self, Remapper::RemapContext &r) {
                        const auto lowered = self.handleExpr(value, r);
                        if (lowered.is<Expr::RefTo>()) return lowered;
                        const auto sourceTpe = self.handleType(value->getType(), r);
@@ -47,7 +51,7 @@ static Opt<MatchedCall> addressOf(const clang::CallExpr &call, const clang::Func
                            ^ get_or_else(TypeSpace::Private().widen());
                        return Expr::RefTo(*selected, {}, term.tpe(), space, Region::Opaque()).widen();
                      }},
-                     false};
+                     .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> errorCategory(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
@@ -57,10 +61,10 @@ static Opt<MatchedCall> errorCategory(const clang::CallExpr &call, const clang::
   const auto category = categories ^ get_maybe(decl.getNameAsString());
   if (!category) return {};
   const auto resultType = call.getType();
-  return MatchedCall{Lowering{[value = *category, resultType](Remapper &self, Remapper::RemapContext &r) {
+  return MatchedCall{.lower = Lowering{[value = *category, resultType](Remapper &self, Remapper::RemapContext &r) {
                        return Expr::Cast(Term::IntU64Const(value), self.handleType(resultType, r));
                      }},
-                     false};
+                     .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> makeErrorCode(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
@@ -68,14 +72,14 @@ static Opt<MatchedCall> makeErrorCode(const clang::CallExpr &call, const clang::
   const auto *value = call.getArg(0);
   const auto *expression = &call;
   const auto resultType = call.getType();
-  return MatchedCall{Lowering{[value, expression, resultType](Remapper &self, Remapper::RemapContext &r) {
-                       const auto evaluated = r.newVar(self.conform(r, self.handleExpr(value, r), Type::IntS32()));
+  return MatchedCall{.lower = Lowering{[value, expression, resultType](Remapper &self, Remapper::RemapContext &r) {
+                       const auto evaluated = r.newVar(Remapper::conform(r, self.handleExpr(value, r), Type::IntS32()));
                        const auto code = r.newName(Type::IntS32());
                        r.push(Stmt::Var(code, Expr::Alias(evaluated), /*isMutable*/ true));
-                       self.recordExceptionCode(*expression, code, r);
+                       Remapper::recordExceptionCode(*expression, code, r);
                        return self.zeroInitialise(r, self.handleType(resultType, r));
                      }},
-                     true};
+                     .preservesExceptionMetadata = true};
 }
 
 static Opt<MatchedCall> minMaxInitList(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
@@ -99,7 +103,7 @@ static Opt<MatchedCall> minMaxInitList(const clang::CallExpr &call, const clang:
 
   const auto maximum = name == "max";
   const auto resultType = call.getCallReturnType(decl.getASTContext());
-  return MatchedCall{Lowering{[values, maximum, resultType](Remapper &self, Remapper::RemapContext &r) {
+  return MatchedCall{.lower = Lowering{[values, maximum, resultType](Remapper &self, Remapper::RemapContext &r) {
                        const auto tpe = self.handleType(resultType, r);
                        const auto orderedNumeric = tpe.is<Type::Bool1>() || tpe.is<Type::Float16>() || tpe.is<Type::Float32>()
                                                    || tpe.is<Type::Float64>() || tpe.is<Type::IntU8>() || tpe.is<Type::IntU16>()
@@ -110,7 +114,7 @@ static Opt<MatchedCall> minMaxInitList(const clang::CallExpr &call, const clang:
                        elements.reserve(values->getNumInits());
                        for (unsigned i = 0; i < values->getNumInits(); ++i) {
                          const auto name = r.newName(tpe);
-                         r.push(Stmt::Var(name, self.conform(r, self.handleExpr(values->getInit(i), r), tpe), false));
+                         r.push(Stmt::Var(name, Remapper::conform(r, self.handleExpr(values->getInit(i), r), tpe), false));
                          elements.emplace_back(dsl::Select(Vector<Named>{}, name).widen());
                        }
                        const auto result = r.newName(tpe);
@@ -126,17 +130,17 @@ static Opt<MatchedCall> minMaxInitList(const clang::CallExpr &call, const clang:
                        }
                        return Expr::Alias(selected);
                      }},
-                     false};
+                     .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> byteMemcpy(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
   const auto name = decl.getQualifiedNameAsString();
   if ((name != "__builtin_memcpy" && name != "memcpy" && name != "::memcpy") || call.getNumArgs() != 3) return {};
   const auto *expression = &call;
-  return MatchedCall{Lowering{[expression](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+  return MatchedCall{.lower = Lowering{[expression](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
                        const auto destinationRaw = r.newVar(self.handleExpr(expression->getArg(0), r));
                        const auto sourceRaw = r.newVar(self.handleExpr(expression->getArg(1), r));
-                       const auto bytes = r.newVar(self.conform(r, self.handleExpr(expression->getArg(2), r), Type::IntU64()));
+                       const auto bytes = r.newVar(Remapper::conform(r, self.handleExpr(expression->getArg(2), r), Type::IntU64()));
                        const auto spaceOf = [](const Term::Any &term) {
                          return term.tpe().get<Type::Ptr>()
                                 ^ fold([](const auto &pointer) { return pointer.space; }, [] { return TypeSpace::Global().widen(); });
@@ -155,9 +159,9 @@ static Opt<MatchedCall> byteMemcpy(const clang::CallExpr &call, const clang::Fun
                          body.push(Stmt::Mut(Term::Select(index, {}, index.tpe), Expr::Alias(next)));
                          body.push(Stmt::Mut(Term::Select(condition, {}, condition.tpe), Expr::IntrOp(Intr::LogicLt(next, bytes))));
                        })));
-                       return self.conform(r, Expr::Alias(destinationRaw), self.handleType(expression->getType(), r));
+                       return Remapper::conform(r, Expr::Alias(destinationRaw), self.handleType(expression->getType(), r));
                      }},
-                     false};
+                     .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> hostAllocation(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
@@ -174,7 +178,7 @@ static Opt<MatchedCall> hostAllocation(const clang::CallExpr &call, const clang:
   const bool release = releaseName && (call.getNumArgs() == 1 || sizedDelete);
   if (!allocate && !release) return {};
   const auto *expression = &call;
-  return MatchedCall{Lowering{[expression, allocate, throwingNew](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+  return MatchedCall{.lower = Lowering{[expression, allocate, throwingNew](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
                        if (!self.emitPackageProgramMode) raise("Host allocation is only supported while emitting a package");
                        if (expression->getNumArgs() != 1 && !(!allocate && expression->getNumArgs() == 2))
                          raise("Aligned and nothrow host allocation calls are not supported");
@@ -190,13 +194,13 @@ static Opt<MatchedCall> hostAllocation(const clang::CallExpr &call, const clang:
                        (void)r.newVar(Expr::ForeignCall("polyrt_host_free", {raw}, Type::Unit0()));
                        return self.zeroInitialise(r, result);
                      }},
-                     false};
+                     .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> thrustNext(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
   if (decl.getQualifiedNameAsString() != "thrust::next" || call.getNumArgs() < 1 || call.getNumArgs() > 2) return {};
   const auto *expression = &call;
-  return MatchedCall{Lowering{[expression](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+  return MatchedCall{.lower = Lowering{[expression](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
                        const auto iterator = r.newVar(self.handleExpr(expression->getArg(0), r));
                        const auto pointer = iterator.tpe().get<Type::Ptr>();
                        if (!pointer) raise("thrust::next requires a pointer iterator");
@@ -204,7 +208,7 @@ static Opt<MatchedCall> thrustNext(const clang::CallExpr &call, const clang::Fun
                                                                          : r.newVar(Remapper::integralConstOfType(Type::IntS64(), 1));
                        return Expr::RefTo(termToSelect(iterator, r), offset, pointer->comp, pointer->space, Region::Opaque());
                      }},
-                     false};
+                     .preservesExceptionMetadata = false};
 }
 
 static const clang::CXXMethodDecl *findZeroArgumentMethod(const clang::CXXRecordDecl &record, const llvm::StringRef name) {
@@ -221,13 +225,13 @@ static const clang::CXXMethodDecl *findZeroArgumentMethod(const clang::CXXRecord
 static Opt<MatchedCall> standardVisit(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
   if (decl.getQualifiedNameAsString() != "std::visit") return {};
   if (call.getNumArgs() < 2)
-    return MatchedCall{Lowering{[](Remapper &, Remapper::RemapContext &) -> Expr::Any {
+    return MatchedCall{.lower = Lowering{[](Remapper &, Remapper::RemapContext &) -> Expr::Any {
                          raise("std::visit requires a visitor and at least one variant");
                        }},
-                       false};
+                       .preservesExceptionMetadata = false};
   const auto *expression = &call;
   return MatchedCall{
-      Lowering{[expression](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+      .lower = Lowering{[expression](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
         const auto *visitorExpression = expression->getArg(0);
         const auto *closure = visitorExpression->getType().getNonReferenceType()->getAsCXXRecordDecl();
         if (!closure || !closure->isLambda()) raise("std::visit requires a lambda visitor");
@@ -260,10 +264,10 @@ static Opt<MatchedCall> standardVisit(const clang::CallExpr &call, const clang::
           const auto variant = r.newVar(self.handleExpr(variantExpression, r));
           const auto [indexName, indexFunction] = self.handleCall(indexMethod, r);
           const auto indexType = self.handleType(indexMethod->getReturnType(), r);
-          const auto receiver = r.newVar(self.conform(r, referenceTerm(variant, r), indexFunction->decl.args.front().named.tpe));
+          const auto receiver = r.newVar(Remapper::conform(r, referenceTerm(variant, r), indexFunction->decl.args.front().named.tpe));
           const auto index =
               r.newVar(Expr::Invoke(Type::FnRef(Sym({indexName})), functionTypeArguments(indexFunction->decl), {}, {receiver}, indexType));
-          variants.emplace_back(Variant{index, indexType, alternatives});
+          variants.emplace_back(Variant{.index = index, .indexType = indexType, .alternatives = alternatives});
         }
         const auto visitor = r.newVar(self.handleExpr(visitorExpression, r));
         const auto resultType = self.handleType(expression->getType(), r);
@@ -292,7 +296,7 @@ static Opt<MatchedCall> standardVisit(const clang::CallExpr &call, const clang::
               bool same = true;
               for (unsigned i = 0; i < alternativeTypes.size(); ++i)
                 if (arguments->get(i).getKind() != clang::TemplateArgument::Type
-                    || !self.context.hasSameType(arguments->get(i).getAsType(), alternativeTypes[i])) {
+                    || !clang::ASTContext::hasSameType(arguments->get(i).getAsType(), alternativeTypes[i])) {
                   same = false;
                   break;
                 }
@@ -303,12 +307,13 @@ static Opt<MatchedCall> standardVisit(const clang::CallExpr &call, const clang::
             }
           if (!instantiation) raise("std::visit has no visitor instantiation for an alternative");
           const auto [operatorName, operatorFunction] = self.handleCall(instantiation, r);
-          Vector<Term::Any> arguments{r.newVar(self.conform(r, referenceTerm(visitor, r), operatorFunction->decl.args.front().named.tpe))};
+          Vector<Term::Any> arguments{
+              r.newVar(Remapper::conform(r, referenceTerm(visitor, r), operatorFunction->decl.args.front().named.tpe))};
           for (size_t i = 0; i < variants.size(); ++i) {
             const auto argumentType = operatorFunction->decl.args[i + 1].named.tpe;
             const auto structure = argumentType.get<Type::Struct>();
             if (!structure || !r.isEmpty(*structure)) raise("std::visit value-carrying alternatives require explicit extraction");
-            arguments.emplace_back(r.newVar(self.conform(r, Expr::Alias(Term::Poison(argumentType)), argumentType)));
+            arguments.emplace_back(r.newVar(Remapper::conform(r, Expr::Alias(Term::Poison(argumentType)), argumentType)));
           }
           const auto invocation =
               Expr::Invoke(Type::FnRef(Sym({operatorName})), functionTypeArguments(operatorFunction->decl), {}, arguments, resultType);
@@ -327,23 +332,23 @@ static Opt<MatchedCall> standardVisit(const clang::CallExpr &call, const clang::
         emit(0);
         return result ? Expr::Any(Expr::Alias(Term::Select(*result, {}, resultType))) : Expr::Any(Expr::Alias(Term::Poison(resultType)));
       }},
-      false};
+      .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> compilerBuiltin(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
   if (isTrapBuiltin(decl.getBuiltinID()))
-    return MatchedCall{Lowering{[](Remapper &, Remapper::RemapContext &r) -> Expr::Any {
+    return MatchedCall{.lower = Lowering{[](Remapper &, Remapper::RemapContext &r) -> Expr::Any {
                          (void)r.newVar(Expr::SpecOp(Spec::Assert(Term::IntU32Const(1330795077), Term::StringConst("trap"))));
                          return Expr::Alias(Term::Unit0Const());
                        }},
-                       false};
+                       .preservesExceptionMetadata = false};
   if (decl.getBuiltinID() != clang::Builtin::BI__builtin_constant_p) return {};
   const auto resultType = call.getType();
-  return MatchedCall{Lowering{[resultType](Remapper &self, Remapper::RemapContext &r) {
+  return MatchedCall{.lower = Lowering{[resultType](Remapper &self, Remapper::RemapContext &r) {
                        // A captured kernel argument is never a compile-time constant in PolyAST.
-                       return self.integralConstOfType(self.handleType(resultType, r), 0);
+                       return Remapper::integralConstOfType(self.handleType(resultType, r), 0);
                      }},
-                     false};
+                     .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> badVariantAccess(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
@@ -352,22 +357,22 @@ static Opt<MatchedCall> badVariantAccess(const clang::CallExpr &call, const clan
   // though both implementations unconditionally throw or abort.
   if ((name != "std::__throw_bad_variant_access" && name != "std::_Throw_bad_variant_access") || !call.getType()->isVoidType()) return {};
   const auto *expression = &call;
-  return MatchedCall{Lowering{[expression](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+  return MatchedCall{.lower = Lowering{[expression](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
                        (void)lowerArguments(*expression, self, r);
                        (void)r.newVar(
                            Expr::SpecOp(Spec::Assert(Term::IntU32Const(1330795077), Term::StringConst("std::bad_variant_access"))));
                        return Expr::Alias(Term::Unit0Const());
                      }},
-                     false};
+                     .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> singleThreaded(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
   if (call.getNumArgs() != 0 || decl.getQualifiedNameAsString() != "__gnu_cxx::__is_single_threaded") return {};
   const auto resultType = call.getType();
-  return MatchedCall{Lowering{[resultType](Remapper &self, Remapper::RemapContext &r) {
-                       return self.conform(r, Expr::Alias(Term::Bool1Const(true)), self.handleType(resultType, r));
+  return MatchedCall{.lower = Lowering{[resultType](Remapper &self, Remapper::RemapContext &r) {
+                       return Remapper::conform(r, Expr::Alias(Term::Bool1Const(true)), self.handleType(resultType, r));
                      }},
-                     false};
+                     .preservesExceptionMetadata = false};
 }
 
 static const clang::Expr *peelAssertArgument(const clang::Expr *expression) {
@@ -399,24 +404,32 @@ static Opt<int64_t> assertLineArgument(const clang::Expr *expression, const clan
   return evaluated.Val.getInt().getExtValue();
 }
 
+namespace {
 struct AssertArguments {
   int expression, file, line, function;
   std::string_view fallback;
 };
+} // namespace
 
 static Opt<AssertArguments> assertArguments(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
   const auto *identifier = decl.getIdentifier();
   if (!identifier || !call.getType()->isVoidType() || !decl.getDeclContext()->getRedeclContext()->isTranslationUnit()) return {};
   const auto name = identifier->getName();
   const auto arity = call.getNumArgs();
-  if (name == "__assert_fail" && arity == 4) return AssertArguments{0, 1, 2, 3, "Assertion failed."};
-  if (name == "__assert_perror_fail" && arity == 4) return AssertArguments{-1, 1, 2, 3, "Unexpected error."};
-  if (name == "__assert_rtn" && arity == 4) return AssertArguments{3, 1, 2, 0, "Assertion failed."};
-  if ((name == "_wassert" || name == "_assert") && arity == 3) return AssertArguments{0, 1, 2, -1, "Assertion failed."};
-  if (name == "__assert" && arity == 4) return AssertArguments{3, 1, 2, 0, "Assertion failed."};
+  if (name == "__assert_fail" && arity == 4)
+    return AssertArguments{.expression = 0, .file = 1, .line = 2, .function = 3, .fallback = "Assertion failed."};
+  if (name == "__assert_perror_fail" && arity == 4)
+    return AssertArguments{.expression = -1, .file = 1, .line = 2, .function = 3, .fallback = "Unexpected error."};
+  if (name == "__assert_rtn" && arity == 4)
+    return AssertArguments{.expression = 3, .file = 1, .line = 2, .function = 0, .fallback = "Assertion failed."};
+  if ((name == "_wassert" || name == "_assert") && arity == 3)
+    return AssertArguments{.expression = 0, .file = 1, .line = 2, .function = -1, .fallback = "Assertion failed."};
+  if (name == "__assert" && arity == 4)
+    return AssertArguments{.expression = 3, .file = 1, .line = 2, .function = 0, .fallback = "Assertion failed."};
   if (name == "__assert" && arity == 3)
-    return call.getArg(1)->getType()->isPointerType() ? AssertArguments{0, 1, 2, -1, "Assertion failed."}
-                                                      : AssertArguments{2, 0, 1, -1, "Assertion failed."};
+    return call.getArg(1)->getType()->isPointerType()
+               ? AssertArguments{.expression = 0, .file = 1, .line = 2, .function = -1, .fallback = "Assertion failed."}
+               : AssertArguments{.expression = 2, .file = 0, .line = 1, .function = -1, .fallback = "Assertion failed."};
   return {};
 }
 
@@ -441,24 +454,24 @@ static Opt<MatchedCall> platformAssert(const clang::CallExpr &call, const clang:
     const auto *argument = call.getArg(i);
     if (!assertTextArgument(argument) && !assertLineArgument(argument, context)) evaluated.emplace_back(argument);
   }
-  return MatchedCall{Lowering{[message, evaluated](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+  return MatchedCall{.lower = Lowering{[message, evaluated](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
                        for (const auto *argument : evaluated)
                          (void)r.newVar(self.handleExpr(argument, r));
                        (void)r.newVar(Expr::SpecOp(
                            Spec::Assert(Term::IntU32Const(static_cast<int32_t>(invoke::AssertCode::Assert)), Term::StringConst(message))));
                        return Expr::Alias(Term::Unit0Const());
                      }},
-                     false};
+                     .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> hostOnlyNoReturnSink(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
   if (!decl.isNoReturn() || decl.hasBody() || !call.getType()->isVoidType()) return {};
-  return MatchedCall{Lowering{[](Remapper &, Remapper::RemapContext &r) -> Expr::Any {
+  return MatchedCall{.lower = Lowering{[](Remapper &, Remapper::RemapContext &r) -> Expr::Any {
                        (void)r.newVar(Expr::SpecOp(
                            Spec::Assert(Term::IntU32Const(static_cast<int32_t>(invoke::AssertCode::Error)), Term::StringConst("abort"))));
                        return Expr::Alias(Term::Unit0Const());
                      }},
-                     false};
+                     .preservesExceptionMetadata = false};
 }
 
 Vector<CallPrism> corePrisms() {

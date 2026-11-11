@@ -103,18 +103,10 @@ object NativeBundle {
 
       val outBytes = plugin.runStepsMsgpack(collected.toVector, inBytes)
 
-      val outBuf = stdlib.malloc(outBytes.length.toCSize).asInstanceOf[Ptr[Byte]]
-      if (outBuf == null) {
+      if (copyToHeap(outBytes, outPtr, outLen) == null) {
         setError(s"PolyPass: malloc(${outBytes.length}) returned null")
         return PolyPassAbi.Status.AllocFailed
       }
-      var j = 0
-      while (j < outBytes.length) {
-        !(outBuf + j) = outBytes(j)
-        j += 1
-      }
-      !outPtr = outBuf
-      !outLen = outBytes.length.toCSize
       setError("")
       PolyPassAbi.Status.Ok
     } catch {
@@ -139,12 +131,9 @@ object NativeBundle {
     bytes
   }
 
-  private def writeBytes(bytes: Array[Byte], outPtr: Ptr[Ptr[Byte]], outLen: Ptr[CSize]): CInt = {
+  private def copyToHeap(bytes: Array[Byte], outPtr: Ptr[Ptr[Byte]], outLen: Ptr[CSize]): Ptr[Byte] = {
     val buffer = stdlib.malloc(bytes.length.toCSize).asInstanceOf[Ptr[Byte]]
-    if (buffer == null) {
-      setPackageError(s"PolyPackage: malloc(${bytes.length}) returned null")
-      PolyPackageAbi.Status.AllocFailed
-    } else {
+    if (buffer != null) {
       var i = 0
       while (i < bytes.length) {
         !(buffer + i) = bytes(i)
@@ -152,10 +141,18 @@ object NativeBundle {
       }
       !outPtr = buffer
       !outLen = bytes.length.toCSize
+    }
+    buffer
+  }
+
+  private def writeBytes(bytes: Array[Byte], outPtr: Ptr[Ptr[Byte]], outLen: Ptr[CSize]): CInt =
+    if (copyToHeap(bytes, outPtr, outLen) == null) {
+      setPackageError(s"PolyPackage: malloc(${bytes.length}) returned null")
+      PolyPackageAbi.Status.AllocFailed
+    } else {
       setPackageError("")
       PolyPackageAbi.Status.Ok
     }
-  }
 
   private def packageOperation[A: MsgPack.Codec, B: MsgPack.Codec](
       label: String,
@@ -164,49 +161,41 @@ object NativeBundle {
       outPtr: Ptr[Ptr[Byte]],
       outLen: Ptr[CSize]
   )(operation: A => Either[List[String], B]): CInt = {
-    val status = runPackageOperation[A, B](label, inPtr, inLen, outPtr, outLen)(operation)
+    val status: CInt =
+      try
+        MsgPack.decode[MsgPack.Versioned[A]](readBytes(inPtr, inLen)) match {
+          case Left(error) =>
+            setPackageError(s"PolyPackage $label: cannot decode request: ${error.getMessage}")
+            PolyPackageAbi.Status.Invalid
+          case Right(envelope) if envelope.hash != PolyPackageWireSchema.Hash =>
+            setPackageError(
+              s"PolyPackage $label: package-service wire hash differs: expected ${PolyPackageWireSchema.Hash}, got ${envelope.hash}"
+            )
+            PolyPackageAbi.Status.AbiMismatch
+          case Right(envelope) =>
+            val request = envelope.t
+            operation(request) match {
+              case Left(errors) =>
+                setPackageError(s"PolyPackage $label: ${errors.mkString("\n")}")
+                PolyPackageAbi.Status.Invalid
+              case Right(result) =>
+                writeBytes(MsgPack.encode(MsgPack.Versioned(PolyPackageWireSchema.Hash, result)), outPtr, outLen)
+            }
+        }
+      catch {
+        case error: Throwable =>
+          val sw = java.io.StringWriter()
+          error.printStackTrace(java.io.PrintWriter(sw))
+          setPackageError(
+            s"PolyPackage $label: ${error.getClass.getName}: ${Option(error.getMessage).getOrElse("<no message>")}\n${sw.toString}"
+          )
+          PolyPackageAbi.Status.Invalid
+      }
     releaseHeap()
     status
   }
 
   private def releaseHeap(): Unit = BoehmGC.GC_gcollect_and_unmap()
-
-  private def runPackageOperation[A: MsgPack.Codec, B: MsgPack.Codec](
-      label: String,
-      inPtr: Ptr[Byte],
-      inLen: CSize,
-      outPtr: Ptr[Ptr[Byte]],
-      outLen: Ptr[CSize]
-  )(operation: A => Either[List[String], B]): CInt =
-    try
-      MsgPack.decode[MsgPack.Versioned[A]](readBytes(inPtr, inLen)) match {
-        case Left(error) =>
-          setPackageError(s"PolyPackage $label: cannot decode request: ${error.getMessage}")
-          PolyPackageAbi.Status.Invalid
-        case Right(envelope) if envelope.hash != PolyPackageWireSchema.Hash =>
-          setPackageError(
-            s"PolyPackage $label: package-service wire hash differs: expected ${PolyPackageWireSchema.Hash}, got ${envelope.hash}"
-          )
-          PolyPackageAbi.Status.AbiMismatch
-        case Right(envelope) =>
-          val request = envelope.t
-          operation(request) match {
-            case Left(errors) =>
-              setPackageError(s"PolyPackage $label: ${errors.mkString("\n")}")
-              PolyPackageAbi.Status.Invalid
-            case Right(result) =>
-              writeBytes(MsgPack.encode(MsgPack.Versioned(PolyPackageWireSchema.Hash, result)), outPtr, outLen)
-          }
-      }
-    catch {
-      case error: Throwable =>
-        val sw = java.io.StringWriter()
-        error.printStackTrace(java.io.PrintWriter(sw))
-        setPackageError(
-          s"PolyPackage $label: ${error.getClass.getName}: ${Option(error.getMessage).getOrElse("<no message>")}\n${sw.toString}"
-        )
-        PolyPackageAbi.Status.Invalid
-    }
 
   @exported(PolyPackageAbi.AbiVersion.Name)
   def packageAbiVersion(): CUnsignedInt = PolyPackageAbi.Version.toUInt

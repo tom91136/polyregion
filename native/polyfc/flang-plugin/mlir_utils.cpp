@@ -1,5 +1,11 @@
 #include "mlir_utils.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <string>
+#include <vector>
+
 using namespace aspartame;
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -33,9 +39,9 @@ mlir::Value polyregion::polyfc::strConst(OpBuilder &B, ModuleOp &m, const std::s
   const auto saved = B.saveInsertionPoint();
   B.setInsertionPointToStart(m.getBody());
   const StringRef ref(value.c_str(), value.size() + (nullTerminate ? 1 : 0));
-  auto var = LLVM::GlobalOp::create(B, uLoc(B),                                          //
-                                    LLVM::LLVMArrayType::get(B.getI8Type(), ref.size()), //
-                                    true, LLVM::Linkage::Private, fmt::format("str_const_{}", ++id), B.getStringAttr(ref));
+  const auto var = LLVM::GlobalOp::create(B, uLoc(B),                                          //
+                                          LLVM::LLVMArrayType::get(B.getI8Type(), ref.size()), //
+                                          true, LLVM::Linkage::Private, fmt::format("str_const_{}", ++id), B.getStringAttr(ref));
   B.restoreInsertionPoint(saved);
   return LLVM::GEPOp::create(B, uLoc(B), ptrTy(B), B.getI8Type(), LLVM::AddressOfOp::create(B, uLoc(B), var),
                              ValueRange{intConst(B, i32Ty(B), 0)});

@@ -5,7 +5,7 @@
 namespace polyregion {
 
 constexpr std::string_view hostOs() {
-#if defined(_WIN32)
+#ifdef _WIN32
   return "windows";
 #elif defined(__APPLE__)
   return "darwin";

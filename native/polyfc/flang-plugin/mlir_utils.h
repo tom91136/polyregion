@@ -73,7 +73,7 @@ template <size_t N> struct AggregateMirror {
               static_assert(sizeof(T) == 0, "Unsupported field type");
             }
           }()) {}
-    Type widen() const { return type; }
+    [[nodiscard]] Type widen() const { return type; }
   };
 
   struct Global {
@@ -106,7 +106,7 @@ template <size_t N> struct AggregateMirror {
     }
   }
 
-  mutable std::optional<LLVM::LLVMStructType> cachedStructTy{};
+  mutable std::optional<LLVM::LLVMStructType> cachedStructTy;
 
   LLVM::LLVMStructType structTy() const {
     if (!cachedStructTy) cachedStructTy = LLVM::LLVMStructType::getNewIdentified(M.getContext(), typeName(), types());
@@ -135,7 +135,7 @@ template <size_t N> struct AggregateMirror {
     auto global = LLVM::GlobalOp::create(B, uLoc(B), LLVM::LLVMArrayType::get(ty, 1), false, LLVM::Linkage::Private,
                                          fmt::format("{}_arr_{}", typeName(), ++id), Attribute{});
     {
-      OpBuilder::InsertionGuard initGuard(B);
+      const OpBuilder::InsertionGuard initGuard(B);
       B.createBlock(&global.getRegion(), global.getRegion().end(), {}, {});
       B.setInsertionPointToEnd(&global.getRegion().back());
       const auto groups = f(B);
@@ -145,7 +145,7 @@ template <size_t N> struct AggregateMirror {
           groups                          //
               | zip_with_index<int64_t>() //
               | fold_left<Value>(LLVM::UndefOp::create(B, uLoc(B), arrayTy), [&](const auto &acc, const auto &group) {
-                  Value structInit =
+                  const Value structInit =
                       group.first                 //
                       | zip_with_index<int64_t>() //
                       | fold_left<Value>(LLVM::UndefOp::create(B, uLoc(B), ty), [&](const auto &acc, const auto &value) {

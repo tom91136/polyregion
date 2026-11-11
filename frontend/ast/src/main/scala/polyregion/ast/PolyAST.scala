@@ -27,6 +27,41 @@ object PolyAST {
   }
 
   object Type {
+    extension (space: Space) {
+      def canonicalName: String = space match {
+        case Space.Global   => ""
+        case Space.Local    => "^Local"
+        case Space.Private  => "^Private"
+        case Space.Constant => "^Constant"
+      }
+    }
+
+    extension (t: Type) {
+      def canonicalName: String = t match {
+        case Type.Struct(name, args) => s"${name.fqcn}<${args.map(_.canonicalName).mkString(",")}>"
+        case Type.Ptr(c, s)          => s"${c.canonicalName}*${s.canonicalName}"
+        case Type.Arr(c, l, s)       => s"${c.canonicalName}[$l]${s.canonicalName}"
+        case Type.Var(name, size)    => size.fold(s"#$name")(n => s"#$name:size=$n")
+        case Type.FnRef(name)        => s"&${name.fqcn}"
+        case Type.Exec(tv, args, rtn) =>
+          s"<${tv.map(_.canonicalName).mkString(",")}>(${args.map(_.canonicalName).mkString(",")}) => ${rtn.canonicalName}"
+        case Type.Float16 => "F16"
+        case Type.Float32 => "F32"
+        case Type.Float64 => "F64"
+        case Type.IntU8   => "U8"
+        case Type.IntU16  => "U16"
+        case Type.IntU32  => "U32"
+        case Type.IntU64  => "U64"
+        case Type.IntS8   => "I8"
+        case Type.IntS16  => "I16"
+        case Type.IntS32  => "I32"
+        case Type.IntS64  => "I64"
+        case Type.Nothing => "Nothing"
+        case Type.Unit0   => "Unit0"
+        case Type.Bool1   => "Bool1"
+      }
+    }
+
     enum Space derives MsgPack.Codec { case Global, Local, Private, Constant }
     enum Kind derives MsgPack.Codec  { case None, Ref, Integral, Fractional  }
   }
@@ -37,8 +72,7 @@ object PolyAST {
       pos: Option[SourcePosition] = None,
       source: Option[String] = None,
       inlinedFrom: Option[Sym] = None
-  ) extends NoIdentity
-      derives MsgPack.Codec
+  ) extends NoIdentity derives MsgPack.Codec
 
   case class Named(symbol: String, tpe: Type, origin: Origin = Origin()) derives MsgPack.Codec
 
@@ -137,9 +171,9 @@ object PolyAST {
       if (tpe == raised.tpe) sourceName == raised.sourceName
       else
         (tpe, raised.tpe) match {
-          case (_: Type.Ptr, Type.Ptr(Type.Nothing, Type.Space.Constant)) => true
-          case (caught: Type.Ptr, _: Type.Ptr)                            => convertible(raised.tpe, caught)
-          case _                                                          => convertible(raised.tpe, tpe)
+          case (Type.Ptr(_, _), Type.Ptr(Type.Nothing, Type.Space.Constant)) => true
+          case (caught: Type.Ptr, Type.Ptr(_, _))                            => convertible(raised.tpe, caught)
+          case _                                                             => convertible(raised.tpe, tpe)
         }
   }
 
@@ -341,6 +375,7 @@ object PolyAST {
     inline def GpuIndex          = List(Overload(List(Type.IntU32), Type.IntU32))
     inline def NullaryUnit       = List(Overload(List[Type](), Type.Unit0))
   }
+  @SuppressWarnings(Array("bonsai:common-factor"))
   enum Intr(val overloads: List[Overload], val terms: List[Term], val tpe: Type) derives MsgPack.Codec {
     case BNot(x: Term, rtn: Type)          extends Intr(Intr.UnaryUniformIntegral, List(x), rtn)
     case LogicNot(x: Term)                 extends Intr(Intr.BinaryUniformBool, List(x), Type.Bool1)
@@ -382,6 +417,7 @@ object PolyAST {
       Overload(List(Type.Float64, Type.Float64), Type.Float64)
     )
   }
+  @SuppressWarnings(Array("bonsai:common-factor"))
   enum Math(val overloads: List[Overload], val terms: List[Term], val tpe: Type) derives MsgPack.Codec {
     case Abs(x: Term, rtn: Type)            extends Math(Intr.BinaryUniformNumeric, List(x), rtn)
     case Sin(x: Term, rtn: Type)            extends Math(Math.UnaryUniformFractional, List(x), rtn)
@@ -943,7 +979,7 @@ object PolyAST {
   }
 
   extension (t: SourcePosition) {
-    def repr: String = s"${t.file}:${t.line}${t.col.map(c => s":$c").getOrElse("")}"
+    def repr: String = s"${t.file}:${t.line}${t.col.fold("")(c => s":$c")}"
   }
 
   extension (t: Type.Space) {
@@ -1162,10 +1198,10 @@ object PolyAST {
       case Expr.BitCast(from, as)     => s"(${from.repr}).bits[${as.repr}]"
       case Expr.Index(lhs, idx, comp) => s"(${lhs.repr}).index[${comp.repr}](${idx.repr})"
       case Expr.RefTo(lhs, idx, comp, space, region) =>
-        s"(${lhs.repr}).refTo[${comp.repr}, ${space.repr}${region.repr}](${idx.map(_.repr).getOrElse("")})"
+        s"(${lhs.repr}).refTo[${comp.repr}, ${space.repr}${region.repr}](${idx.fold("")(_.repr)})"
       case Expr.Alloc(comp, size, space, region) => s"alloc[${comp.repr}, ${space.repr}${region.repr}](${size.repr})"
       case Expr.Invoke(callee, tpeArgs, receiver, args, rtn) =>
-        s"${receiver.map(r => s"${r.repr}.").getOrElse("")}${callee.repr}<${tpeArgs.map(_.repr).mkString(",")}>(${args
+        s"${receiver.fold("")(r => s"${r.repr}.")}${callee.repr}<${tpeArgs.map(_.repr).mkString(",")}>(${args
             .map(_.repr)
             .mkString(", ")}): ${rtn.repr}"
       case Expr.ForeignCall(name, args, rtn) => s"$name(${args.map(_.repr).mkString(", ")}): ${rtn.repr}"
@@ -1177,7 +1213,7 @@ object PolyAST {
   extension (stmt: Stmt) {
     def repr: String = stmt match {
       case Stmt.Var(name, rhs, isMutable) =>
-        s"${if (isMutable) "var" else "val"} ${name.symbol}: ${name.tpe.repr} = ${rhs.map(_.repr).getOrElse("_")}"
+        s"${if (isMutable) "var" else "val"} ${name.symbol}: ${name.tpe.repr} = ${rhs.fold("_")(_.repr)}"
       case Stmt.Mut(name, expr)         => s"${name.repr} = ${expr.repr}"
       case Stmt.Update(lhs, idx, value) => s"(${lhs.repr}).update(${idx.repr}) = ${value.repr}"
       case Stmt.While(cond, body) =>
@@ -1197,7 +1233,7 @@ object PolyAST {
                   .indent(2)}\n${"}"}"
           }"
       case Stmt.Annotated(inner, pos, comment) =>
-        s"${inner.repr}${pos.map(p => s" /* ${p.repr} */").getOrElse("")}${comment.map(c => s" /* $c */").getOrElse("")}"
+        s"${inner.repr}${pos.fold("")(p => s" /* ${p.repr} */")}${comment.fold("")(c => s" /* $c */")}"
       case Stmt.Raise(value, exceptionKind, _) => s"raise ${value.repr} /* ${exceptionKind.sourceName} */"
       case Stmt.Rethrow                        => "rethrow"
       case Stmt.Try(body, handlers, fin) =>
@@ -1210,9 +1246,8 @@ object PolyAST {
 
   extension (h: Handler) {
     def repr: String =
-      s" catch (${h.binder.map(b => s"${b.symbol}: ").getOrElse("")}${h.caught.map(_.tpe.repr).getOrElse("_")}${h.caught
-          .map(x => s" /* ${x.sourceName} */")
-          .getOrElse("")}) ${"{"}\n${h.body
+      s" catch (${h.binder.fold("")(b => s"${b.symbol}: ")}${h.caught.fold("_")(_.tpe.repr)}${h.caught
+          .fold("")(x => s" /* ${x.sourceName} */")}) ${"{"}\n${h.body
           .map(_.repr)
           .mkString("\n")
           .indent(2)}\n${"}"}"
@@ -1220,9 +1255,8 @@ object PolyAST {
 
   extension (a: Arg) {
     def repr: String =
-      s"${a.named.symbol}: ${a.named.tpe.repr}${a.boundary.map(b => s" /* ${b.access.repr} ${b.extent.repr} */").getOrElse("")}${a.pos
-          .map(s => s" /* ${s.repr} */")
-          .getOrElse("")}"
+      s"${a.named.symbol}: ${a.named.tpe.repr}${a.boundary
+          .fold("")(b => s" /* ${b.access.repr} ${b.extent.repr} */")}${a.pos.fold("")(s => s" /* ${s.repr} */")}"
   }
 
   extension (a: Arg.Access) {
@@ -1281,7 +1315,7 @@ object PolyAST {
 
   extension (f: Signature) {
     def repr: String =
-      s"def ${f.receiver.map(r => s"${r.repr}.").getOrElse("")}${f.name.repr}<${f.tpeVars
+      s"def ${f.receiver.fold("")(r => s"${r.repr}.")}${f.name.repr}<${f.tpeVars
           .map(_.repr)
           .mkString(",")}>(${f.args.map(_.repr).mkString(", ")}): ${f.rtn.repr} /* mod=${f.moduleCaptures
           .map(_.repr)
@@ -1291,8 +1325,7 @@ object PolyAST {
   extension (f: Function) {
     def repr: String =
       s"${f.decl.repr} /* vis=${f.visibility.repr} fp=${f.fpMode.repr} convention=${f.convention.repr} implements=${f.implements
-          .map(_.repr)
-          .getOrElse("")} requires=${f.requiredCapabilities.mkString(",")} */ ${"{"}\n${f.body
+          .fold("")(_.repr)} requires=${f.requiredCapabilities.mkString(",")} */ ${"{"}\n${f.body
           .map(_.repr)
           .mkString("\n")
           .indent(2)}\n${"}"}"
@@ -1300,7 +1333,7 @@ object PolyAST {
 
   extension (f: FunctionDecl) {
     def repr: String =
-      s"def ${f.receiver.map(r => s"${r.repr}.").getOrElse("")}${f.name.repr}<${f.tpeVars.map(_.repr).mkString(",")}>(${f.args
+      s"def ${f.receiver.fold("")(r => s"${r.repr}.")}${f.name.repr}<${f.tpeVars.map(_.repr).mkString(",")}>(${f.args
           .map(_.repr)
           .mkString(", ")}): ${f.rtn.repr} /* affinity=${f.affinity.repr} mod=${f.moduleCaptures
           .map(_.repr)
@@ -1328,7 +1361,7 @@ object PolyAST {
 
   extension (s: Program) {
     def repr: String =
-      s"${s.defs.map(_.repr).mkString("\n")}\n${s.entry.map(_.repr).getOrElse("")}\n${s.functions.map(_.repr).mkString("\n")}"
+      s"${s.defs.map(_.repr).mkString("\n")}\n${s.entry.fold("")(_.repr)}\n${s.functions.map(_.repr).mkString("\n")}"
   }
 
   extension (l: StructLayout) {
@@ -1338,5 +1371,4 @@ object PolyAST {
           .mkString("\n")
           .indent(2)}\n${"}"}"
   }
-
 }

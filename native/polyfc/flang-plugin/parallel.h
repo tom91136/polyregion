@@ -9,11 +9,11 @@ struct SingleVarReduction {
   polyast::Term::Any init;
   polyast::Term::Select partialArray;
   std::function<polyast::Expr::Any(const polyast::Term::Any &, const polyast::Term::Any &)> binaryOp;
-  polyast::Stmt::Any partialVar() const;
-  polyast::Stmt::Any drainPartial(const polyast::Term::Select &lhs, const polyast::Term::Any &idx) const;
-  polyast::Stmt::Any drainPartial(const polyast::Term::Any &idx) const;
-  std::vector<polyast::Stmt::Any> applyPartial(const polyast::Term::Any &lhs, const polyast::Term::Any &idx) const;
-  std::vector<polyast::Stmt::Any> applyPartial(const polyast::Term::Any &idx) const;
+  [[nodiscard]] polyast::Stmt::Any partialVar() const;
+  [[nodiscard]] polyast::Stmt::Any drainPartial(const polyast::Term::Select &lhs, const polyast::Term::Any &idx) const;
+  [[nodiscard]] polyast::Stmt::Any drainPartial(const polyast::Term::Any &idx) const;
+  [[nodiscard]] std::vector<polyast::Stmt::Any> applyPartial(const polyast::Term::Any &lhs, const polyast::Term::Any &idx) const;
+  [[nodiscard]] std::vector<polyast::Stmt::Any> applyPartial(const polyast::Term::Any &idx) const;
 };
 
 struct CPUParams {

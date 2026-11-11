@@ -287,7 +287,7 @@ def printPass(pass: ProgramPass): ProgramPass = new ProgramPass {
     val sl = ctx.log.subLog(s"[${pass.name}]")
     sl.info("Structs", r.defs.map(_.repr)*)
     sl.info("Fns", r.functions.map(_.repr)*)
-    sl.info("Entry", r.entry.map(_.repr).getOrElse("<none>"))
+    sl.info("Entry", r.entry.fold("<none>")(_.repr))
     r
   }
 }

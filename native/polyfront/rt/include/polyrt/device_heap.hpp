@@ -42,7 +42,7 @@ private:
   std::set<std::pair<size_t, size_t>> freeBySize;
   std::map<size_t, size_t> used;
 
-  size_t blockSize(const size_t bytes) const {
+  [[nodiscard]] size_t blockSize(const size_t bytes) const {
     const auto padded = bytes + 1 + slack;
     if (padded < bytes) return std::numeric_limits<size_t>::max();
     const auto rounded = (padded + limits.alignment - 1) / limits.alignment * limits.alignment;
@@ -82,7 +82,7 @@ private:
                     counters.live.load(), liveBlocks, limits.maxBytes));
   }
 
-  size_t tailStart() const {
+  [[nodiscard]] size_t tailStart() const {
     const auto tail = freeByOffset.empty() ? freeByOffset.end() : std::prev(freeByOffset.end());
     return tail != freeByOffset.end() && tail->first + tail->second == committed ? tail->first : committed;
   }
@@ -190,12 +190,12 @@ public:
     addFree(offset, block);
   }
 
-  bool owns(const uintptr_t pointer) const { return base != 0 && pointer >= base && pointer - base < committed; }
-  uintptr_t handle() const { return base; }
-  size_t committedBytes() const { return committed; }
-  size_t liveBytes() const { return counters.live.load(); }
-  size_t blocks() const { return liveBlocks; }
-  size_t alignment() const { return limits.alignment; }
+  [[nodiscard]] bool owns(const uintptr_t pointer) const { return base != 0 && pointer >= base && pointer - base < committed; }
+  [[nodiscard]] uintptr_t handle() const { return base; }
+  [[nodiscard]] size_t committedBytes() const { return committed; }
+  [[nodiscard]] size_t liveBytes() const { return counters.live.load(); }
+  [[nodiscard]] size_t blocks() const { return liveBlocks; }
+  [[nodiscard]] size_t alignment() const { return limits.alignment; }
 };
 
 } // namespace polyregion::polyrt

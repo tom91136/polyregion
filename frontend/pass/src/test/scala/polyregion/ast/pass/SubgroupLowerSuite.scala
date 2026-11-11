@@ -50,8 +50,9 @@ class SubgroupLowerSuite extends munit.FunSuite {
     )
 
     assert(!specs(out).exists(_.isInstanceOf[p.Spec.GpuShuffleDown]))
+    val localArray = p.Type.Arr(f32, 256, p.Type.Space.Local)
     assert(out.entry.collectAll[p.Stmt].exists {
-      case p.Stmt.Var(name, None, _) => name.tpe == p.Type.Arr(f32, 256, p.Type.Space.Local)
+      case p.Stmt.Var(name, None, _) => name.tpe == localArray
       case _                         => false
     })
   }
@@ -145,8 +146,10 @@ class SubgroupLowerSuite extends munit.FunSuite {
     val out = SubgroupLower(width = 8, maxGroupSize = 256, lowerGroups = true)(program(entry(body = body)), NoopLog)
 
     assert(!specs(out).exists {
-      case _: p.Spec.GpuGroupReduce | _: p.Spec.GpuGroupInclusiveScan | _: p.Spec.GpuGroupExclusiveScan => true
-      case _                                                                                            => false
+      case p.Spec.GpuGroupReduce(_, _, _) | p.Spec.GpuGroupInclusiveScan(_, _, _) |
+          p.Spec.GpuGroupExclusiveScan(_, _, _) =>
+        true
+      case _ => false
     })
     assertEquals(localArrays(out).size, 2)
     assert(out.entry.collectAll[p.Expr].exists {
@@ -195,7 +198,7 @@ class SubgroupLowerSuite extends munit.FunSuite {
         .drop(index + 1)
         .collectFirst {
           case p.Stmt.Var(_, Some(p.Expr.SpecOp(p.Spec.GpuBarrierLocal)), _) => true
-          case _: p.Stmt.Update                                              => false
+          case p.Stmt.Update(_, _, _)                                        => false
         }
         .contains(true)
     })
@@ -221,7 +224,7 @@ class SubgroupLowerSuite extends munit.FunSuite {
         .drop(index + 1)
         .collectFirst {
           case p.Stmt.Var(_, Some(p.Expr.SpecOp(p.Spec.GpuBarrierLocal)), _) => true
-          case _: p.Stmt.Update                                              => false
+          case p.Stmt.Update(_, _, _)                                        => false
         }
         .contains(true)
     })
@@ -243,10 +246,12 @@ class SubgroupLowerSuite extends munit.FunSuite {
       p.Stmt.Var(named("barrier", p.Type.Unit0), Some(p.Expr.SpecOp(p.Spec.GpuSubgroupBarrier(mask)))),
       p.Stmt.Var(named("fence", p.Type.Unit0), Some(p.Expr.SpecOp(p.Spec.GpuFenceLocal)))
     )
-    val remaining = specs(run(program(entry(body = body)), 8, 256))
+    val remaining = specs(run(program(entry(body = body)), width = 8, maxGroupSize = 256))
 
     assert(!remaining.exists {
-      case _: p.Spec.GpuShuffleDown | _: p.Spec.GpuShuffleUp | _: p.Spec.GpuShuffleIdx | _: p.Spec.GpuShuffleXor => true
+      case p.Spec.GpuShuffleDown(_, _, _, _, _) | p.Spec.GpuShuffleUp(_, _, _, _, _) |
+          p.Spec.GpuShuffleIdx(_, _, _, _, _) | p.Spec.GpuShuffleXor(_, _, _, _, _) =>
+        true
       case _ => false
     })
     assert(!remaining.exists(_.isInstanceOf[p.Spec.GpuSubgroupBarrier]))
@@ -276,7 +281,8 @@ class SubgroupLowerSuite extends munit.FunSuite {
     val arrays = localArrays(run(program(entry(body = body), defs = List(pairDef)), 8, 256))
 
     assertEquals(arrays.size, 2)
-    assert(arrays.forall(_.tpe == p.Type.Arr(f32, 256, p.Type.Space.Local)))
+    val localArray = p.Type.Arr(f32, 256, p.Type.Space.Local)
+    assert(arrays.forall(_.tpe == localArray))
   }
 
   test("rejects masked barriers that a work-group barrier cannot emulate") {
@@ -284,7 +290,9 @@ class SubgroupLowerSuite extends munit.FunSuite {
       named("barrier", p.Type.Unit0),
       Some(p.Expr.SpecOp(p.Spec.GpuSubgroupBarrier(p.Term.IntU32Const(0xffff))))
     )
-    val error = intercept[IllegalArgumentException](run(program(entry(body = List(barrier))), 8, 256))
+    val error = intercept[IllegalArgumentException](
+      run(program(entry(body = List(barrier))), width = 8, maxGroupSize = 256)
+    )
     assert(error.getMessage.contains("Masked subgroup barriers"))
   }
 
@@ -327,7 +335,9 @@ class SubgroupLowerSuite extends munit.FunSuite {
       p.Term.Bool1Const(true),
       List(p.Stmt.Var(named("result", f32), Some(shuffle), isMutable = true))
     )
-    val error = intercept[IllegalArgumentException](run(program(entry(body = List(loop))), 8, 256))
+    val error = intercept[IllegalArgumentException](
+      run(program(entry(body = List(loop))), width = 8, maxGroupSize = 256)
+    )
     assert(error.getMessage.contains("whole-workgroup-uniform participation"), error.getMessage)
   }
 
@@ -364,8 +374,8 @@ class SubgroupLowerSuite extends munit.FunSuite {
 
     assert(localArrays(out).isEmpty)
     assert(!specs(out).exists {
-      case _: p.Spec.GpuShuffleDown | _: p.Spec.GpuVoteAny | _: p.Spec.GpuVoteAll | _: p.Spec.GpuBallot |
-          _: p.Spec.GpuSubgroupBarrier | p.Spec.GpuBarrierLocal =>
+      case p.Spec.GpuShuffleDown(_, _, _, _, _) | p.Spec.GpuVoteAny(_, _) | p.Spec.GpuVoteAll(_, _) |
+          p.Spec.GpuBallot(_, _) | p.Spec.GpuSubgroupBarrier(_) | p.Spec.GpuBarrierLocal =>
         true
       case _ => false
     })
@@ -395,16 +405,16 @@ class SubgroupLowerSuite extends munit.FunSuite {
     )
 
     assert(out.entry.collectAll[p.Expr].exists {
-      case p.Expr.IntrOp(_: p.Intr.LogicAnd) => true
-      case _                                 => false
+      case p.Expr.IntrOp(p.Intr.LogicAnd(_, _)) => true
+      case _                                    => false
     })
     assert(out.entry.collectAll[p.Expr].exists {
-      case p.Expr.IntrOp(_: p.Intr.LogicOr) => true
-      case _                                => false
+      case p.Expr.IntrOp(p.Intr.LogicOr(_, _)) => true
+      case _                                   => false
     })
     assert(out.entry.collectAll[p.Expr].exists {
-      case p.Expr.IntrOp(_: p.Intr.LogicEq) => true
-      case _                                => false
+      case p.Expr.IntrOp(p.Intr.LogicEq(_, _)) => true
+      case _                                   => false
     })
   }
 
@@ -432,7 +442,9 @@ class SubgroupLowerSuite extends munit.FunSuite {
       List(p.Stmt.Var(named("result", f32), Some(call))),
       Nil
     )
-    val error = intercept[IllegalArgumentException](run(program(entry(body = List(conditional)), List(helper)), 8, 256))
+    val error = intercept[IllegalArgumentException](
+      run(program(entry(body = List(conditional)), List(helper)), width = 8, maxGroupSize = 256)
+    )
     assert(error.getMessage.contains("conditional control flow"), error.getMessage)
   }
 
@@ -517,7 +529,7 @@ class SubgroupLowerSuite extends munit.FunSuite {
       NoopLog
     )
 
-    assert(out.entry.collectAll[p.Stmt].exists(_ == p.Stmt.Break))
+    assert(out.entry.collectAll[p.Stmt].contains(p.Stmt.Break))
     assert(!specs(out).exists(_.isInstanceOf[p.Spec.GpuGroupReduce]))
   }
 
@@ -535,7 +547,7 @@ class SubgroupLowerSuite extends munit.FunSuite {
         )
       )
     )
-    val error = intercept[IllegalArgumentException](run(program(entry(body = body)), 8, 256))
+    val error = intercept[IllegalArgumentException](run(program(entry(body = body)), width = 8, maxGroupSize = 256))
     assert(error.getMessage.contains("early exit"), error.getMessage)
   }
 
@@ -547,14 +559,14 @@ class SubgroupLowerSuite extends munit.FunSuite {
       p.Stmt.Var(named("all", p.Type.Bool1), Some(p.Expr.SpecOp(p.Spec.GpuVoteAll(mask, selectT(predicate))))),
       p.Stmt.Var(named("ballot", u32), Some(p.Expr.SpecOp(p.Spec.GpuBallot(mask, selectT(predicate)))))
     )
-    val out   = run(program(entry(body = body)), 8, 256)
+    val out   = run(program(entry(body = body)), width = 8, maxGroupSize = 256)
     val types = localArrays(out).map(_.tpe).toSet
 
     assertEquals(localArrays(out).size, 1)
     assertEquals(types, Set[p.Type](p.Type.Arr(p.Type.IntU32, 256, p.Type.Space.Local)))
     assert(!specs(out).exists {
-      case _: p.Spec.GpuVoteAny | _: p.Spec.GpuVoteAll | _: p.Spec.GpuBallot => true
-      case _                                                                 => false
+      case p.Spec.GpuVoteAny(_, _) | p.Spec.GpuVoteAll(_, _) | p.Spec.GpuBallot(_, _) => true
+      case _                                                                          => false
     })
     assertEquals(out.entry.collectAll[p.Stmt].count(_.isInstanceOf[p.Stmt.ForRange]), 3)
   }
@@ -627,6 +639,6 @@ class SubgroupLowerSuite extends munit.FunSuite {
       )
     )
 
-    assertEquals(run(input, 8, 256), run(input, 8, 256))
+    assertEquals(run(input, width = 8, maxGroupSize = 256), run(input, width = 8, maxGroupSize = 256))
   }
 }

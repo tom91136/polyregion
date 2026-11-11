@@ -219,11 +219,9 @@ object LBM {
       val u8 = uX - uY
 
       val uSqOverX2cSq = uSq / x2cSq
-      val w0Density    = w0 * density
       val w1Density    = w1 * density
       val w2Density    = w2 * density
 
-      val dEqu0 = w0Density * (1f - uSqOverX2cSq)
       val dEqu1 = w1Density * (1f + u1 / cSq + (u1 * u1) / x2cSqcSq - uSqOverX2cSq)
       val dEqu2 = w1Density * (1f + u2 / cSq + (u2 * u2) / x2cSqcSq - uSqOverX2cSq)
       val dEqu3 = w1Density * (1f + u3 / cSq + (u3 * u3) / x2cSqcSq - uSqOverX2cSq)
@@ -233,7 +231,10 @@ object LBM {
       val dEqu7 = w2Density * (1f + u7 / cSq + (u7 * u7) / x2cSqcSq - uSqOverX2cSq)
       val dEqu8 = w2Density * (1f + u8 / cSq + (u8 * u8) / x2cSqcSq - uSqOverX2cSq)
 
-      if (!obs) buffer(x, y).s0 = spd_0 + param.omega * (dEqu0 - spd_0)
+      if (!obs) {
+        val dEqu0 = w0 * density * (1f - uSqOverX2cSq)
+        buffer(x, y).s0 = spd_0 + param.omega * (dEqu0 - spd_0)
+      }
       buffer(x, y).s1 = if (obs) spd_3 else spd_1 + param.omega * (dEqu1 - spd_1)
       buffer(x, y).s2 = if (obs) spd_4 else spd_2 + param.omega * (dEqu2 - spd_2)
       buffer(x, y).s3 = if (obs) spd_1 else spd_3 + param.omega * (dEqu3 - spd_3)

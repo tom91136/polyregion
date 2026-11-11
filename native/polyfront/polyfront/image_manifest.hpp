@@ -22,7 +22,7 @@ inline nlohmann::json imageJson(const runtime::PlatformKind kind, const runtime:
 }
 
 inline void recordImages(const std::string &module, const nlohmann::json &images) {
-  const auto path = std::getenv(env::PolyfrontImageManifest);
+  const char *const path = std::getenv(env::PolyfrontImageManifest);
   if (!path || !*path) return;
   std::error_code ec;
   llvm::raw_fd_ostream out(path, ec, llvm::sys::fs::CD_OpenAlways, llvm::sys::fs::FA_Write,

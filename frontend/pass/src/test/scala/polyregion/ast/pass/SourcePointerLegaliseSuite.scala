@@ -590,10 +590,11 @@ class SourcePointerLegaliseSuite extends munit.FunSuite {
       )
     )
 
-    val out = SourcePointerLegalise()(program(kernel, Nil, List(holderDef)), NoopLog).entry.required
+    val localPtr = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Local)
+    val out      = SourcePointerLegalise()(program(kernel, Nil, List(holderDef)), NoopLog).entry.required
     assert(out.collectAll[p.Stmt].exists {
       case p.Stmt.Var(name, _, _) if name.symbol == loaded.symbol =>
-        name.tpe == p.Type.Ptr(p.Type.IntS32, p.Type.Space.Local)
+        name.tpe == localPtr
       case _ => false
     })
   }

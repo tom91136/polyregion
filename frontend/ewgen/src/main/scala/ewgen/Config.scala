@@ -8,6 +8,7 @@ object Config {
       rootSubdir: Option[String] = None
   )
 
+  @SuppressWarnings(Array("bonsai:constant-field"))
   case class Group(
       name: String,
       source: Source,

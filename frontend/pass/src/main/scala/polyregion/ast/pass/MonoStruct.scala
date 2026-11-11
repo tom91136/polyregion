@@ -34,17 +34,8 @@ object MonoStruct extends BoundaryPass[Map[p.Sym, p.Sym]] {
         throw IllegalArgumentException(
           s"struct `${struct.name.repr}` type-argument count differs: expected ${sdef.tpeVars.size}, got ${struct.args.size}"
         )
-      val table = sdef.tpeVars.map(_.name).zip(struct.args).toMap
-      def subst(t: p.Type, env: Map[String, p.Type] = table): p.Type = t match {
-        case variable @ p.Type.Var(name, _)  => env.getOrElse(name, variable)
-        case p.Type.Struct(name, args)       => p.Type.Struct(name, args.map(subst(_, env)))
-        case p.Type.Ptr(comp, space)         => p.Type.Ptr(subst(comp, env), space)
-        case p.Type.Arr(comp, length, space) => p.Type.Arr(subst(comp, env), length, space)
-        case p.Type.Exec(tpeVars, args, rtn) =>
-          val nested = env -- tpeVars.map(_.name)
-          p.Type.Exec(tpeVars, args.map(subst(_, nested)), subst(rtn, nested))
-        case x => x
-      }
+      val table                    = sdef.tpeVars.map(_.name).zip(struct.args).toMap
+      def subst(t: p.Type): p.Type = Binders.substType(t, table)
       def substStruct(struct: p.Type.Struct): p.Type.Struct = subst(struct) match {
         case result: p.Type.Struct => result
         case _ => throw AssertionError(s"struct substitution changed ${struct.repr} to a non-struct type")
@@ -121,11 +112,13 @@ object MonoStruct extends BoundaryPass[Map[p.Sym, p.Sym]] {
         val byRenamed                      = replacementTable.get(withRenamedArgs)
         val byName =
           if (byOriginal.isDefined || byRenamed.isDefined) None
-          else
+          else {
+            val argCount = newArgs.size
             replacementsByName.getOrElse(name, Nil).collectFirst {
-              case (key, sdef) if key.args.size == newArgs.size && key.args.map(doReplacement) == newArgs =>
+              case (key, sdef) if key.args.size == argCount && key.args.map(doReplacement) == newArgs =>
                 sdef
             }
+          }
         byOriginal.orElse(byRenamed).orElse(byName) match {
           case Some(sdef) => p.Type.Struct(sdef.name, Nil)
           case None       => withRenamedArgs

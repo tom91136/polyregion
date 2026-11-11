@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -18,6 +19,8 @@
 #include "polyregion/enums.h"
 
 #include "export.h"
+
+// NOLINTBEGIN(modernize-use-designated-initializers)
 
 #ifdef __clang__
   #define POLYREGION_RT_PROTECT [[clang::annotate(POLYREFLECT_RT_PROTECT_ANNOTATION)]]
@@ -147,7 +150,7 @@ struct POLYREGION_EXPORT TargetSpec {
   }
 
   POLYREGION_RT_PROTECT static std::optional<TargetSpec> findByName(std::string_view name) {
-    auto eq = [](std::string_view a, std::string_view b) {
+    const auto eq = [](std::string_view a, std::string_view b) {
       if (a.size() != b.size()) return false;
       for (size_t i = 0; i < a.size(); ++i) {
         char x = a[i], y = b[i];
@@ -177,11 +180,11 @@ struct POLYREGION_EXPORT TargetSpec::ParsedRef {
 // `[<compile_target>@<arch> !] <runtime_platform>@<name_glob>` note the compile prefix is optional;
 // without `!`  the whole string is the runtime selector
 POLYREGION_RT_PROTECT inline std::optional<TargetSpec::ParsedRef> TargetSpec::parse(std::string_view input) {
-  auto bang = input.find('!');
-  auto sel = (bang == std::string_view::npos) ? input : input.substr(bang + 1);
-  auto at = sel.find('@');
-  auto head = (at == std::string_view::npos) ? sel : sel.substr(0, at);
-  auto glob = (at == std::string_view::npos) ? std::string_view{} : sel.substr(at + 1);
+  const auto bang = input.find('!');
+  const auto sel = (bang == std::string_view::npos) ? input : input.substr(bang + 1);
+  const auto at = sel.find('@');
+  const auto head = (at == std::string_view::npos) ? sel : sel.substr(0, at);
+  const auto glob = (at == std::string_view::npos) ? std::string_view{} : sel.substr(at + 1);
   if (auto s = findByName(head)) return ParsedRef{*s, std::string(glob)};
   return std::nullopt;
 }
@@ -204,6 +207,7 @@ inline constexpr std::array<std::string_view, 8> DeviceGatedFeatures{"fp64",    
                                                                      "storage16", "uniform8", "uniform16", SystemPagingFeature};
 
 POLYREGION_RT_PROTECT inline bool deviceGatedFeature(const std::string_view feature) {
+  // NOLINTNEXTLINE(readability-use-anyofallof)
   for (const auto gated : DeviceGatedFeatures)
     if (gated == feature) return true;
   return false;
@@ -242,7 +246,7 @@ POLYREGION_RT_PROTECT static std::pair<std::vector<size_t>, size_t> std140Scalar
     off = (off + a - 1) / a * a;
     offsets[i] = off;
     off += memberSizes[i];
-    if (a > maxAlign) maxAlign = a;
+    maxAlign = std::max(a, maxAlign);
   }
   return {std::move(offsets), (off + maxAlign - 1) / maxAlign * maxAlign};
 }
@@ -414,7 +418,7 @@ struct TypeLayout {
               "        { .name = \"%s\", .offsetInBytes = %zuULL, .sizeInBytes = %zuULL, .ptrIndirection = %zuULL, .componentSize = "
               "%zuULL, .type = (%s), resolver = %p }",
               m.name, m.offsetInBytes, m.sizeInBytes, m.ptrIndirection, m.componentSize, m.type ? m.type->name : "???",
-              (void *)(m.resolvePtrSizeInBytes));
+              reinterpret_cast<void *>(m.resolvePtrSizeInBytes));
       if (i + 1 < memberCount) fprintf(fd, ",");
       fprintf(fd, "\n");
     }
@@ -473,3 +477,5 @@ template <> struct std::hash<polyregion::compiletime::Target> {
     return static_cast<std::underlying_type_t<polyregion::compiletime::Target>>(t);
   }
 };
+
+// NOLINTEND(modernize-use-designated-initializers)

@@ -9,6 +9,8 @@
 #include "polyinvoke/runtime.h"
 #include "polyregion/concurrency_utils.hpp"
 
+// NOLINTBEGIN(modernize-use-designated-initializers)
+
 namespace polyregion::stream {
 
 using namespace aspartame;
@@ -27,7 +29,7 @@ template <typename N> constexpr std::tuple<N, N, N, N> expectedResult(size_t tim
     goldC = goldA;
     goldB = scalar * goldC;
     goldC = goldA + goldB;
-    goldA = goldB + scalar * goldC;
+    goldA = goldB + (scalar * goldC);
   }
   goldSum += goldA * goldB * size;
   return {goldA, goldB, goldC, goldSum};
@@ -51,7 +53,7 @@ void validate(size_t size, size_t times, FValidate fValidate, FValidateSum fVali
     return (xs | map([&](const auto &x) { return std::fabs(x - expected); }) | sum()) / xs.size();
   };
   auto eps = std::numeric_limits<T>::epsilon() * 100.0;
-  auto check = [&](const char *name, const std::vector<T> &xs, T expected) {
+  const auto check = [&](const char *name, const std::vector<T> &xs, T expected) {
     const auto err = error(xs, expected);
     if (!(err < eps)) {
       size_t bad = 0, shown = 0;
@@ -68,7 +70,7 @@ void validate(size_t size, size_t times, FValidate fValidate, FValidateSum fVali
   check("a", a, expectedA);
   check("b", b, expectedB);
   check("c", c, expectedC);
-  auto reducedSum = sums ^ sum();
+  const auto reducedSum = sums ^ sum();
   fValidateSum(std::fabs((reducedSum - expectedSum) / expectedSum));
 }
 
@@ -82,7 +84,7 @@ void renderElapsed(std::string title, Type tpe, size_t size, size_t times, const
                                        .triad = static_cast<double>(3 * sizeof(T) * size) / 1000 / 1000, //
                                        .dot = static_cast<double>(2 * sizeof(T) * size) / 1000 / 1000};
 
-  auto bandwidth = [&](const auto &f) { return *f(sizesMB) / *(*f(elapsed) ^ min()); };
+  const auto bandwidth = [&](const auto &f) { return *f(sizesMB) / *(*f(elapsed) ^ min()); };
 
   fmt::print(stderr,
              "===BabelStream ({})===\n"
@@ -91,7 +93,7 @@ void renderElapsed(std::string title, Type tpe, size_t size, size_t times, const
              "Array size: {:.3f} MB (={:.3f} GB)\n"
              "Total size: {:.3f} MB (={:.3f} GB)\n",
              title, times, magic_enum::enum_name(tpe), sizesMB.copy / 2, sizesMB.copy / 2 / 1000, sizesMB.triad, sizesMB.triad / 1000);
-  for (auto &ln : extraLines)
+  for (const auto &ln : extraLines)
     fmt::print(stderr, "{}\n", ln);
 
   fmt::print(stderr,
@@ -119,24 +121,24 @@ Kernels<std::vector<double>> dispatch(Type tpe, size_t size, size_t times, size_
       .triad = std::vector<double>(times),
       .dot = std::vector<double>(times),
   };
-  auto invoke = [&](const auto &acc, const std::pair<std::string, std::string> &spec, const Policy &policy, const ArgBuffer &buffer) {
+  const auto invoke = [&](const auto &acc, const std::pair<std::string, std::string> &spec, const Policy &policy, const ArgBuffer &buffer) {
     return [&](const auto &h) {
       auto _buffer = buffer;
       if (threaded) _buffer.prepend({{Type::IntS64, nullptr}, {Type::Ptr, &begins_d}, {Type::Ptr, &ends_d}});
 
-      auto t1 = std::chrono::high_resolution_clock::now();
-      q.enqueueInvokeAsync(spec.first, spec.second, _buffer, policy, [&, t1]() {
-        auto t2 = std::chrono::high_resolution_clock::now();
+      const auto t1 = std::chrono::high_resolution_clock::now();
+      q.enqueueInvokeAsync(spec.first, spec.second, _buffer, policy, [&, t1] {
+        const auto t2 = std::chrono::high_resolution_clock::now();
         acc(elapsed, std::chrono::duration_cast<std::chrono::duration<double>>(t2 - t1).count());
         h();
       });
     };
   };
 
-  Policy forPolicy = threaded ? Policy{{groups, 1, 1}, {}} //
-                              : Policy{{size / groups, 1, 1}, {{{groups, 1, 1}, {}}}};
-  Policy dotPolicy = threaded ? Policy{{groups, 1, 1}, {}} //
-                              : Policy{{sumGroups, 1, 1}, {{{groups, 1, 1}, sizeof(T) * groups}}};
+  const Policy forPolicy = threaded ? Policy{{groups, 1, 1}, {}} //
+                                    : Policy{{size / groups, 1, 1}, {{{groups, 1, 1}, {}}}};
+  const Policy dotPolicy = threaded ? Policy{{groups, 1, 1}, {}} //
+                                    : Policy{{sumGroups, 1, 1}, {{{groups, 1, 1}, sizeof(T) * groups}}};
   // G=256 * L=2
 
   for (size_t i = 0; i < times; i++) {
@@ -188,7 +190,7 @@ void runStream(Type tpe, size_t size, size_t times, size_t groups, const std::st
   std::vector<T> c(size, StartC<T>);
   std::vector<T> sum(sumGroups, {});
 
-  auto h2dT1 = std::chrono::high_resolution_clock::now();
+  const auto h2dT1 = std::chrono::high_resolution_clock::now();
   {
     waitAllN([&, begin = begin, end = end](const auto &h) {
       if (threaded) {
@@ -201,19 +203,19 @@ void runStream(Type tpe, size_t size, size_t times, size_t groups, const std::st
       q->enqueueHostToDeviceAsyncTyped(sum.data(), sum_d, sumGroups, h());
     });
   }
-  auto h2dT2 = std::chrono::high_resolution_clock::now();
-  auto h2dElapsed = std::chrono::duration_cast<std::chrono::duration<double>>(h2dT2 - h2dT1).count();
+  const auto h2dT2 = std::chrono::high_resolution_clock::now();
+  const auto h2dElapsed = std::chrono::duration_cast<std::chrono::duration<double>>(h2dT2 - h2dT1).count();
 
-  auto elapsed = dispatch<T>(tpe, size, times, groups, threaded, *q, specs, sumGroups,
-                             reinterpret_cast<void *>(begins_d), //
-                             reinterpret_cast<void *>(ends_d),   //
-                             reinterpret_cast<void *>(a_d),      //
-                             reinterpret_cast<void *>(b_d),      //
-                             reinterpret_cast<void *>(c_d),      //
-                             reinterpret_cast<void *>(sum_d)     //
+  const auto elapsed = dispatch<T>(tpe, size, times, groups, threaded, *q, specs, sumGroups,
+                                   reinterpret_cast<void *>(begins_d), //
+                                   reinterpret_cast<void *>(ends_d),   //
+                                   reinterpret_cast<void *>(a_d),      //
+                                   reinterpret_cast<void *>(b_d),      //
+                                   reinterpret_cast<void *>(c_d),      //
+                                   reinterpret_cast<void *>(sum_d)     //
   );
 
-  auto d2hT1 = std::chrono::high_resolution_clock::now();
+  const auto d2hT1 = std::chrono::high_resolution_clock::now();
   {
     waitAllN([&](const auto &h) {
       q->enqueueDeviceToHostAsyncTyped(a_d, a.data(), size, h());
@@ -222,8 +224,8 @@ void runStream(Type tpe, size_t size, size_t times, size_t groups, const std::st
       q->enqueueDeviceToHostAsyncTyped(sum_d, sum.data(), sumGroups, h());
     });
   }
-  auto d2hT2 = std::chrono::high_resolution_clock::now();
-  auto d2hElapsed = std::chrono::duration_cast<std::chrono::duration<double>>(d2hT2 - d2hT1).count();
+  const auto d2hT2 = std::chrono::high_resolution_clock::now();
+  const auto d2hElapsed = std::chrono::duration_cast<std::chrono::duration<double>>(d2hT2 - d2hT1).count();
 
   d.freeAllDevice(a_d, b_d, c_d, sum_d);
   if (threaded) d.freeAllDevice(begins_d, ends_d);
@@ -247,17 +249,27 @@ void runStreamShared(Type tpe, size_t size, size_t times, size_t groups, const s
     fmt::print(stderr, "shared allocation unsupported for device: {}, skipping...\n", d.name());
     return;
   }
-  bool threaded = kind == PlatformKind::HostThreaded;
+  const bool threaded = kind == PlatformKind::HostThreaded;
 
   auto [begin, end] = splitStaticExclusive<int64_t>(0, static_cast<int64_t>(size), static_cast<int64_t>(groups));
-  auto begins_d = threaded ? *d.mallocSharedTyped<int64_t>(begin.size(), Access::RO) : nullptr;
-  auto ends_d = threaded ? *d.mallocSharedTyped<int64_t>(end.size(), Access::RO) : nullptr;
-  auto sumGroups = threaded ? groups : 256;
+  auto begins_o = threaded ? d.mallocSharedTyped<int64_t>(begin.size(), Access::RO) : std::optional<int64_t *>{nullptr};
+  auto ends_o = threaded ? d.mallocSharedTyped<int64_t>(end.size(), Access::RO) : std::optional<int64_t *>{nullptr};
+  const auto sumGroups = threaded ? groups : 256;
 
-  auto a_d = *d.mallocSharedTyped<T>(size, Access::RW);
-  auto b_d = *d.mallocSharedTyped<T>(size, Access::RW);
-  auto c_d = *d.mallocSharedTyped<T>(size, Access::RW);
-  auto sum_d = *d.mallocSharedTyped<T>(sumGroups, Access::RW);
+  auto a_o = d.mallocSharedTyped<T>(size, Access::RW);
+  auto b_o = d.mallocSharedTyped<T>(size, Access::RW);
+  auto c_o = d.mallocSharedTyped<T>(size, Access::RW);
+  auto sum_o = d.mallocSharedTyped<T>(sumGroups, Access::RW);
+  if (!begins_o || !ends_o || !a_o || !b_o || !c_o || !sum_o) {
+    const auto release = [&](const auto &p) {
+      if (p && *p) d.freeShared(*p);
+    };
+    release(begins_o), release(ends_o), release(a_o), release(b_o), release(c_o), release(sum_o);
+    fmt::print(stderr, "shared allocation of {} elements failed for device: {}, skipping...\n", size, d.name());
+    return;
+  }
+  auto begins_d = *begins_o, ends_d = *ends_o;
+  auto a_d = *a_o, b_d = *b_o, c_d = *c_o, sum_d = *sum_o;
 
   auto q = d.createQueue(std::chrono::seconds(10));
 
@@ -266,7 +278,7 @@ void runStreamShared(Type tpe, size_t size, size_t times, size_t groups, const s
   std::vector<T> c(size, StartC<T>);
   std::vector<T> sum(sumGroups, {});
 
-  auto h2dT1 = std::chrono::high_resolution_clock::now();
+  const auto h2dT1 = std::chrono::high_resolution_clock::now();
   {
     if (threaded) {
       std::memcpy(begins_d, begin.data(), begin.size() * sizeof(int64_t));
@@ -277,20 +289,20 @@ void runStreamShared(Type tpe, size_t size, size_t times, size_t groups, const s
     std::memcpy(c_d, c.data(), size * sizeof(T));
     std::memcpy(sum_d, sum.data(), sumGroups * sizeof(T));
   }
-  auto h2dT2 = std::chrono::high_resolution_clock::now();
-  auto h2dElapsed = std::chrono::duration_cast<std::chrono::duration<double>>(h2dT2 - h2dT1).count();
+  const auto h2dT2 = std::chrono::high_resolution_clock::now();
+  const auto h2dElapsed = std::chrono::duration_cast<std::chrono::duration<double>>(h2dT2 - h2dT1).count();
 
-  auto elapsed = dispatch<T>(tpe, size, times, groups, threaded, *q, specs, sumGroups, begins_d, ends_d, a_d, b_d, c_d, sum_d);
+  const auto elapsed = dispatch<T>(tpe, size, times, groups, threaded, *q, specs, sumGroups, begins_d, ends_d, a_d, b_d, c_d, sum_d);
 
-  auto d2hT1 = std::chrono::high_resolution_clock::now();
+  const auto d2hT1 = std::chrono::high_resolution_clock::now();
   {
     std::memcpy(a.data(), a_d, size * sizeof(T));
     std::memcpy(b.data(), b_d, size * sizeof(T));
     std::memcpy(c.data(), c_d, size * sizeof(T));
     std::memcpy(sum.data(), sum_d, sumGroups * sizeof(T));
   }
-  auto d2hT2 = std::chrono::high_resolution_clock::now();
-  auto d2hElapsed = std::chrono::duration_cast<std::chrono::duration<double>>(d2hT2 - d2hT1).count();
+  const auto d2hT2 = std::chrono::high_resolution_clock::now();
+  const auto d2hElapsed = std::chrono::duration_cast<std::chrono::duration<double>>(d2hT2 - d2hT1).count();
 
   d.freeAllShared(a_d, b_d, c_d, sum_d);
   if (threaded) d.freeAllShared(begins_d, ends_d);
@@ -303,3 +315,5 @@ void runStreamShared(Type tpe, size_t size, size_t times, size_t groups, const s
   }
 }
 } // namespace polyregion::stream
+
+// NOLINTEND(modernize-use-designated-initializers)

@@ -18,8 +18,7 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
           Some(
             p.Expr
               .Invoke(p.Type.FnRef(kernel.name), Nil, Some(callCapture.getOrElse(selectT(capture))), Nil, p.Type.Unit0)
-          ),
-          isMutable = false
+          )
         ),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       ),
@@ -112,8 +111,7 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
               List(p.Term.IntU32Const(7), selectT(capture)),
               p.Type.Unit0
             )
-          ),
-          isMutable = false
+          )
         ),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       ),
@@ -161,8 +159,7 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
         p.Stmt.Var(capture, None, isMutable = true),
         p.Stmt.Var(
           fired,
-          Some(p.Expr.Invoke(p.Type.FnRef(kernel.name), Nil, None, List(selectT(capture)), p.Type.Unit0)),
-          isMutable = false
+          Some(p.Expr.Invoke(p.Type.FnRef(kernel.name), Nil, None, List(selectT(capture)), p.Type.Unit0))
         ),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       ),

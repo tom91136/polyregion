@@ -1,5 +1,7 @@
 package polyregion
 
+import polyregion.ast.PolyAST
+
 import scala.annotation.targetName
 import scala.quoted.Expr
 import scala.quoted.Quotes
@@ -13,6 +15,12 @@ package object prism {
       (Quotes, Expr[A], Expr[B]) => Expr[Unit]
   )
   type Prism = (polyregion.ast.PolyAST.Mirror, TermPrism[Any, Any])
+
+  final case class PrismTables(
+      mirrors: List[Prism],
+      functions: Map[PolyAST.Signature, (PolyAST.Function, Set[PolyAST.StructDef])],
+      structDefs: Map[PolyAST.Sym, PolyAST.StructDef]
+  )
 
   class WitnessK[A <: Any, B <: Any](
       val f: Tuple.Elem[TermPrism[A, B], 0],

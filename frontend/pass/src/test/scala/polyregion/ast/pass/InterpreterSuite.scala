@@ -4,6 +4,7 @@ import polyregion.ast.PolyAST as p
 import polyregion.ast.Interpreter
 import polyregion.ast.Interpreter.V
 
+@SuppressWarnings(Array("bonsai:loop-boxing"))
 class InterpreterSuite extends munit.FunSuite {
   import PassTest.*
 
@@ -23,11 +24,16 @@ class InterpreterSuite extends munit.FunSuite {
   private def mul(a: p.Term, b: p.Term, t: p.Type = i32)        = p.Expr.IntrOp(p.Intr.Mul(a, b, t))
   private def alias(t: p.Term)                                  = p.Expr.Alias(t)
 
+  @FunctionalInterface
+  private trait Setup { def apply(vm: Interpreter.Vm): Long }
+  @FunctionalInterface
+  private trait Observe[A] { def apply(vm: Interpreter.Vm, cap: Long): A }
+
   private def differential[A](
       in: p.Program,
       capT: p.Type,
       pass: p.Program => p.Program
-  )(setup: Interpreter.Vm => Long)(observe: (Interpreter.Vm, Long) => A): (A, A) = {
+  )(setup: Setup)(observe: Observe[A]): (A, A) = {
     val capPtr = p.Type.Ptr(capT, g)
     val vmD    = Interpreter.Vm(in)
     val capD   = setup(vmD)
@@ -48,7 +54,7 @@ class InterpreterSuite extends munit.FunSuite {
   }
 
   // capture {result, xs, n}; kernel sums xs[0..n) into *result. xs = [1,2,3,4] -> 10.0
-  private def sumOverXs: (p.Program, p.Type, Interpreter.Vm => Long, (Interpreter.Vm, Long) => V) = {
+  private def sumOverXs: (p.Program, p.Type, Setup, Observe[V]) = {
     val f32p    = p.Type.Ptr(f32, g)
     val capName = sym("Capture")
     val capT    = p.Type.Struct(capName, Nil)
@@ -558,11 +564,10 @@ class InterpreterSuite extends munit.FunSuite {
     val body = List(
       p.Stmt.Var(acc, Some(p.Expr.Alias(p.Term.Float32Const(0f))), isMutable = true),
       p.Stmt.Var(pv, Some(p.Expr.Alias(p.Term.Select(thisN, List(p.PathStep.Field("head")), nodeP))), isMutable = true),
-      p.Stmt.Var(v1, Some(p.Expr.Cast(p.Term.Select(pv, Nil, nodeP), i64)), isMutable = false),
+      p.Stmt.Var(v1, Some(p.Expr.Cast(p.Term.Select(pv, Nil, nodeP), i64))),
       p.Stmt.Var(
         v2,
-        Some(p.Expr.IntrOp(p.Intr.LogicNeq(p.Term.Select(v1, Nil, i64), p.Term.IntS64Const(0)))),
-        isMutable = false
+        Some(p.Expr.IntrOp(p.Intr.LogicNeq(p.Term.Select(v1, Nil, i64), p.Term.IntS64Const(0))))
       ),
       p.Stmt.Var(v3, Some(p.Expr.Alias(p.Term.Select(v2, Nil, p.Type.Bool1))), isMutable = true),
       p.Stmt.While(
@@ -575,18 +580,16 @@ class InterpreterSuite extends munit.FunSuite {
           // double the node value in place to exercise read_graph write-back
           p.Stmt.Var(
             nv,
-            Some(mul(p.Term.Select(pv, List(p.PathStep.Field("value")), f32), p.Term.Float32Const(2f), f32)),
-            isMutable = false
+            Some(mul(p.Term.Select(pv, List(p.PathStep.Field("value")), f32), p.Term.Float32Const(2f), f32))
           ),
           p.Stmt
             .Mut(p.Term.Select(pv, List(p.PathStep.Field("value")), f32), p.Expr.Alias(p.Term.Select(nv, Nil, f32))),
           p.Stmt
             .Mut(p.Term.Select(pv, Nil, nodeP), p.Expr.Alias(p.Term.Select(pv, List(p.PathStep.Field("next")), nodeP))),
-          p.Stmt.Var(v5, Some(p.Expr.Cast(p.Term.Select(pv, Nil, nodeP), i64)), isMutable = false),
+          p.Stmt.Var(v5, Some(p.Expr.Cast(p.Term.Select(pv, Nil, nodeP), i64))),
           p.Stmt.Var(
             v6,
-            Some(p.Expr.IntrOp(p.Intr.LogicNeq(p.Term.Select(v5, Nil, i64), p.Term.IntS64Const(0)))),
-            isMutable = false
+            Some(p.Expr.IntrOp(p.Intr.LogicNeq(p.Term.Select(v5, Nil, i64), p.Term.IntS64Const(0))))
           ),
           p.Stmt.Mut(p.Term.Select(v3, Nil, p.Type.Bool1), p.Expr.Alias(p.Term.Select(v6, Nil, p.Type.Bool1)))
         )

@@ -1093,7 +1093,7 @@ struct POLYREGION_EXPORT None : TypeKind::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const TypeKind::None &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const TypeKind::None &) const;
-  None() noexcept;
+  None();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -1129,7 +1129,7 @@ struct POLYREGION_EXPORT Ref : TypeKind::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const TypeKind::Ref &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const TypeKind::Ref &) const;
-  Ref() noexcept;
+  Ref();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -1165,7 +1165,7 @@ struct POLYREGION_EXPORT Integral : TypeKind::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const TypeKind::Integral &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const TypeKind::Integral &) const;
-  Integral() noexcept;
+  Integral();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -1201,7 +1201,7 @@ struct POLYREGION_EXPORT Fractional : TypeKind::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const TypeKind::Fractional &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const TypeKind::Fractional &) const;
-  Fractional() noexcept;
+  Fractional();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -1249,7 +1249,7 @@ struct POLYREGION_EXPORT Global : TypeSpace::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const TypeSpace::Global &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const TypeSpace::Global &) const;
-  Global() noexcept;
+  Global();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -1285,7 +1285,7 @@ struct POLYREGION_EXPORT Local : TypeSpace::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const TypeSpace::Local &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const TypeSpace::Local &) const;
-  Local() noexcept;
+  Local();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -1321,7 +1321,7 @@ struct POLYREGION_EXPORT Private : TypeSpace::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const TypeSpace::Private &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const TypeSpace::Private &) const;
-  Private() noexcept;
+  Private();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -1357,7 +1357,7 @@ struct POLYREGION_EXPORT Constant : TypeSpace::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const TypeSpace::Constant &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const TypeSpace::Constant &) const;
-  Constant() noexcept;
+  Constant();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -2189,7 +2189,7 @@ struct POLYREGION_EXPORT Deref : PathStep::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const PathStep::Deref &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const PathStep::Deref &) const;
-  Deref() noexcept;
+  Deref();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -2353,7 +2353,7 @@ struct POLYREGION_EXPORT Opaque : Region::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Region::Opaque &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Region::Opaque &) const;
-  Opaque() noexcept;
+  Opaque();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -3700,7 +3700,7 @@ struct POLYREGION_EXPORT Xchg : AtomicOp::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const AtomicOp::Xchg &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const AtomicOp::Xchg &) const;
-  Xchg() noexcept;
+  Xchg();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -3736,7 +3736,7 @@ struct POLYREGION_EXPORT Add : AtomicOp::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const AtomicOp::Add &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const AtomicOp::Add &) const;
-  Add() noexcept;
+  Add();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -3772,7 +3772,7 @@ struct POLYREGION_EXPORT Sub : AtomicOp::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const AtomicOp::Sub &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const AtomicOp::Sub &) const;
-  Sub() noexcept;
+  Sub();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -3808,7 +3808,7 @@ struct POLYREGION_EXPORT And : AtomicOp::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const AtomicOp::And &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const AtomicOp::And &) const;
-  And() noexcept;
+  And();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -3844,7 +3844,7 @@ struct POLYREGION_EXPORT Or : AtomicOp::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const AtomicOp::Or &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const AtomicOp::Or &) const;
-  Or() noexcept;
+  Or();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -3880,7 +3880,7 @@ struct POLYREGION_EXPORT Xor : AtomicOp::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const AtomicOp::Xor &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const AtomicOp::Xor &) const;
-  Xor() noexcept;
+  Xor();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -3916,7 +3916,7 @@ struct POLYREGION_EXPORT Min : AtomicOp::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const AtomicOp::Min &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const AtomicOp::Min &) const;
-  Min() noexcept;
+  Min();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -3952,7 +3952,7 @@ struct POLYREGION_EXPORT Max : AtomicOp::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const AtomicOp::Max &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const AtomicOp::Max &) const;
-  Max() noexcept;
+  Max();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -4000,7 +4000,7 @@ struct POLYREGION_EXPORT Subgroup : MemScope::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const MemScope::Subgroup &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const MemScope::Subgroup &) const;
-  Subgroup() noexcept;
+  Subgroup();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -4036,7 +4036,7 @@ struct POLYREGION_EXPORT Workgroup : MemScope::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const MemScope::Workgroup &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const MemScope::Workgroup &) const;
-  Workgroup() noexcept;
+  Workgroup();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -4072,7 +4072,7 @@ struct POLYREGION_EXPORT Device : MemScope::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const MemScope::Device &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const MemScope::Device &) const;
-  Device() noexcept;
+  Device();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -4108,7 +4108,7 @@ struct POLYREGION_EXPORT System : MemScope::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const MemScope::System &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const MemScope::System &) const;
-  System() noexcept;
+  System();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -4156,7 +4156,7 @@ struct POLYREGION_EXPORT Relaxed : MemOrder::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const MemOrder::Relaxed &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const MemOrder::Relaxed &) const;
-  Relaxed() noexcept;
+  Relaxed();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -4192,7 +4192,7 @@ struct POLYREGION_EXPORT Acquire : MemOrder::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const MemOrder::Acquire &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const MemOrder::Acquire &) const;
-  Acquire() noexcept;
+  Acquire();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -4228,7 +4228,7 @@ struct POLYREGION_EXPORT Release : MemOrder::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const MemOrder::Release &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const MemOrder::Release &) const;
-  Release() noexcept;
+  Release();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -4264,7 +4264,7 @@ struct POLYREGION_EXPORT AcqRel : MemOrder::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const MemOrder::AcqRel &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const MemOrder::AcqRel &) const;
-  AcqRel() noexcept;
+  AcqRel();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -4300,7 +4300,7 @@ struct POLYREGION_EXPORT SeqCst : MemOrder::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const MemOrder::SeqCst &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const MemOrder::SeqCst &) const;
-  SeqCst() noexcept;
+  SeqCst();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -4348,7 +4348,7 @@ struct POLYREGION_EXPORT LocalToRemote : Direction::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Direction::LocalToRemote &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Direction::LocalToRemote &) const;
-  LocalToRemote() noexcept;
+  LocalToRemote();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -4384,7 +4384,7 @@ struct POLYREGION_EXPORT RemoteToLocal : Direction::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Direction::RemoteToLocal &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Direction::RemoteToLocal &) const;
-  RemoteToLocal() noexcept;
+  RemoteToLocal();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -4420,7 +4420,7 @@ struct POLYREGION_EXPORT RemoteToRemote : Direction::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Direction::RemoteToRemote &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Direction::RemoteToRemote &) const;
-  RemoteToRemote() noexcept;
+  RemoteToRemote();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -8425,7 +8425,7 @@ struct POLYREGION_EXPORT Break : Stmt::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Stmt::Break &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Stmt::Break &) const;
-  Break() noexcept;
+  Break();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -8461,7 +8461,7 @@ struct POLYREGION_EXPORT Cont : Stmt::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Stmt::Cont &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Stmt::Cont &) const;
-  Cont() noexcept;
+  Cont();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -8757,7 +8757,7 @@ struct POLYREGION_EXPORT Rethrow : Stmt::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Stmt::Rethrow &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Stmt::Rethrow &) const;
-  Rethrow() noexcept;
+  Rethrow();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -8888,7 +8888,7 @@ struct POLYREGION_EXPORT Internal : FunctionVisibility::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const FunctionVisibility::Internal &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const FunctionVisibility::Internal &) const;
-  Internal() noexcept;
+  Internal();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -8924,7 +8924,7 @@ struct POLYREGION_EXPORT Exported : FunctionVisibility::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const FunctionVisibility::Exported &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const FunctionVisibility::Exported &) const;
-  Exported() noexcept;
+  Exported();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -8972,7 +8972,7 @@ struct POLYREGION_EXPORT Relaxed : FunctionFpMode::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const FunctionFpMode::Relaxed &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const FunctionFpMode::Relaxed &) const;
-  Relaxed() noexcept;
+  Relaxed();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -9008,7 +9008,7 @@ struct POLYREGION_EXPORT Strict : FunctionFpMode::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const FunctionFpMode::Strict &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const FunctionFpMode::Strict &) const;
-  Strict() noexcept;
+  Strict();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -9056,7 +9056,7 @@ struct POLYREGION_EXPORT Offload : FunctionAffinity::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const FunctionAffinity::Offload &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const FunctionAffinity::Offload &) const;
-  Offload() noexcept;
+  Offload();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -9092,7 +9092,7 @@ struct POLYREGION_EXPORT Host : FunctionAffinity::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const FunctionAffinity::Host &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const FunctionAffinity::Host &) const;
-  Host() noexcept;
+  Host();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -9140,7 +9140,7 @@ struct POLYREGION_EXPORT Read : ArgAccess::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const ArgAccess::Read &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const ArgAccess::Read &) const;
-  Read() noexcept;
+  Read();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -9176,7 +9176,7 @@ struct POLYREGION_EXPORT Write : ArgAccess::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const ArgAccess::Write &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const ArgAccess::Write &) const;
-  Write() noexcept;
+  Write();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -9212,7 +9212,7 @@ struct POLYREGION_EXPORT ReadWrite : ArgAccess::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const ArgAccess::ReadWrite &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const ArgAccess::ReadWrite &) const;
-  ReadWrite() noexcept;
+  ReadWrite();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -9777,7 +9777,7 @@ struct POLYREGION_EXPORT RegularCall : CallConvention::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const CallConvention::RegularCall &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const CallConvention::RegularCall &) const;
-  RegularCall() noexcept;
+  RegularCall();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -9813,7 +9813,7 @@ struct POLYREGION_EXPORT OffloadEntry : CallConvention::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const CallConvention::OffloadEntry &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const CallConvention::OffloadEntry &) const;
-  OffloadEntry() noexcept;
+  OffloadEntry();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -10052,7 +10052,7 @@ struct POLYREGION_EXPORT Initial : PassPhase::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const PassPhase::Initial &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const PassPhase::Initial &) const;
-  Initial() noexcept;
+  Initial();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -10088,7 +10088,7 @@ struct POLYREGION_EXPORT PostMono : PassPhase::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const PassPhase::PostMono &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const PassPhase::PostMono &) const;
-  PostMono() noexcept;
+  PostMono();
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -12970,7 +12970,7 @@ template <typename T> struct hash<std::vector<T>> {
   std::size_t operator()(std::vector<T> const &xs) const noexcept {
     std::size_t seed = xs.size();
     for (auto &x : xs) {
-      seed ^= std::hash<T>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+      seed ^= std::hash<T>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
     }
     return seed;
   }
@@ -12980,7 +12980,7 @@ template <typename T> struct hash<std::set<T>> {
   std::size_t operator()(std::set<T> const &xs) const noexcept {
     std::size_t seed = xs.size();
     for (auto &x : xs) {
-      seed ^= std::hash<T>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+      seed ^= std::hash<T>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
     }
     return seed;
   }

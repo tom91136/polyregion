@@ -7,7 +7,7 @@ import scala.collection.mutable
 
 object Support {
 
-  inline def splitStatic(inline range: Range)(inline n: Int): Seq[Range] =
+  inline def splitStatic(range: Range)(n: Int): Seq[Range] =
     if (range.isEmpty) Seq()
     else if (n == 1) Seq(range)
     else if (range.size < n) range.map(n => n to n)

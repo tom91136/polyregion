@@ -63,7 +63,7 @@ class PackageServiceSuite extends munit.FunSuite {
     def launcher(decl: p.FunctionDecl, target: p.Sym, tpeArgs: List[p.Type]) = function(
       decl,
       List(
-        p.Stmt.Var(p.Named("launch", p.Type.Unit0), Some(launch(target, tpeArgs)), isMutable = false),
+        p.Stmt.Var(p.Named("launch", p.Type.Unit0), Some(launch(target, tpeArgs))),
         unitReturn.head
       )
     )
@@ -103,7 +103,8 @@ class PackageServiceSuite extends munit.FunSuite {
       Specialisation.monomorphicName(secondKernelName, List(p.Type.IntS32))
     )
     assertEquals(targets.toSet, expectedTargets)
-    targets.foreach(target => assertEquals(functions.count(_.name == target), 1))
+    val functionCounts = functions.groupMapReduce(_.name)(_ => 1)(_ + _)
+    targets.foreach(target => assertEquals(functionCounts.getOrElse(target, 0), 1))
   }
 
   private def linkPointerCapture(logicalAddressing: Boolean) = {
@@ -154,14 +155,14 @@ class PackageServiceSuite extends munit.FunSuite {
     val implementation = function(
       publicDecl.copy(name = p.Sym("implementation.fill")),
       List(
-        p.Stmt.Var(raw, Some(p.Expr.SpecOp(p.Spec.RemoteAlloc(context, p.Term.IntU64Const(4)))), isMutable = false),
-        p.Stmt.Var(data, Some(p.Expr.Cast(p.Term.Select(raw, Nil, raw.tpe), data.tpe)), isMutable = false),
+        p.Stmt.Var(raw, Some(p.Expr.SpecOp(p.Spec.RemoteAlloc(context, p.Term.IntU64Const(4))))),
+        p.Stmt.Var(data, Some(p.Expr.Cast(p.Term.Select(raw, Nil, raw.tpe), data.tpe))),
         p.Stmt.Var(capture, None, isMutable = true),
         p.Stmt.Mut(
           p.Term.Select(capture, List(p.PathStep.Field("data")), data.tpe),
           p.Expr.Alias(p.Term.Select(data, Nil, data.tpe))
         ),
-        p.Stmt.Var(p.Named("launch", p.Type.Unit0), Some(p.Expr.SpecOp(launch)), isMutable = false),
+        p.Stmt.Var(p.Named("launch", p.Type.Unit0), Some(p.Expr.SpecOp(launch))),
         unitReturn.head
       ),
       implements = Some(publicName),
@@ -226,8 +227,7 @@ class PackageServiceSuite extends munit.FunSuite {
       List(
         p.Stmt.Var(
           p.Named("handle", p.Type.FnRef(deviceName)),
-          Some(p.Expr.Alias(p.Term.Poison(p.Type.FnRef(deviceName)))),
-          isMutable = false
+          Some(p.Expr.Alias(p.Term.Poison(p.Type.FnRef(deviceName))))
         ),
         unitReturn.head
       ),
@@ -315,7 +315,7 @@ class PackageServiceSuite extends munit.FunSuite {
       function(
         decl,
         List(
-          p.Stmt.Var(p.Named("value", p.Type.IntS32), Some(p.Expr.Alias(p.Term.IntS32Const(value))), false),
+          p.Stmt.Var(p.Named("value", p.Type.IntS32), Some(p.Expr.Alias(p.Term.IntS32Const(value)))),
           unitReturn.head
         )
       )
@@ -326,8 +326,7 @@ class PackageServiceSuite extends munit.FunSuite {
       List(
         p.Stmt.Var(
           p.Named("call", p.Type.Unit0),
-          Some(p.Expr.Invoke(p.Type.FnRef(helperName), Nil, None, Nil, p.Type.Unit0)),
-          false
+          Some(p.Expr.Invoke(p.Type.FnRef(helperName), Nil, None, Nil, p.Type.Unit0))
         ),
         unitReturn.head
       ),
@@ -380,8 +379,7 @@ class PackageServiceSuite extends munit.FunSuite {
       List(
         p.Stmt.Var(
           p.Named("call", p.Type.Unit0),
-          Some(p.Expr.Invoke(p.Type.FnRef(helperName), Nil, None, Nil, p.Type.Unit0)),
-          false
+          Some(p.Expr.Invoke(p.Type.FnRef(helperName), Nil, None, Nil, p.Type.Unit0))
         ),
         unitReturn.head
       ),
@@ -917,7 +915,7 @@ class PackageServiceSuite extends munit.FunSuite {
     val resultType = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global)
     val harvested = public.copy(
       name = p.Sym("implementation.increment"),
-      args = public.args :+ p.Arg(p.Named("out", resultType), None),
+      args = public.args :+ p.Arg(p.Named("out", resultType)),
       rtn = p.Type.Unit0
     )
     val implementation = function(harvested, implements = Some(name))
@@ -1201,8 +1199,7 @@ class PackageServiceSuite extends munit.FunSuite {
             Nil
           )
         )
-      ),
-      isMutable = false
+      )
     )
     val callable = callableImplementation(p.Sym("implementation.apply"), name)
     val value    = callable.decl.args.head.named

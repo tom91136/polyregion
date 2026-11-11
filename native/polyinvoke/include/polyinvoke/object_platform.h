@@ -60,11 +60,11 @@ protected:
     const size_t hw = hostConcurrency();
     const size_t workers = std::min(N, hw);
     const size_t chunk = (N + workers - 1) / workers;
-    auto pending = std::make_shared<std::atomic_size_t>(workers);
+    const auto pending = std::make_shared<std::atomic_size_t>(workers);
     for (size_t w = 0; w < workers; ++w) {
       const size_t begin = w * chunk;
       const size_t end = std::min(N, begin + chunk);
-      std::thread([begin, end, cb, f, pending]() {
+      std::thread([begin, end, cb, f, pending] {
         for (size_t tid = begin; tid < end; ++tid)
           f(tid);
         if (--*pending == 0 && cb) (*cb)();
@@ -72,8 +72,8 @@ protected:
     }
   }
 
-  void launchHost(const char *prefix, const Policy &policy, uint64_t abiAddr, uint64_t staticLocalBytesAddr, const MaybeCallback &cb,
-                  std::function<void(size_t)> task);
+  static void launchHost(const char *prefix, const Policy &policy, uint64_t abiAddr, uint64_t staticLocalBytesAddr, const MaybeCallback &cb,
+                         std::function<void(size_t)> task);
 
 public:
   POLYREGION_EXPORT explicit ObjectDeviceQueue(const std::chrono::duration<int64_t> &timeout);
@@ -118,7 +118,7 @@ class POLYREGION_EXPORT RelocatableDevice final : public ObjectDevice {
   std::unique_ptr<llvm::jitlink::JITLinkMemoryManager> jitMemMgr;
   llvm::orc::JITDylib *processJD = nullptr; // borrowed; owned by es
   char globalPrefix = '\0';
-  details::ObjectModules objects = {};
+  details::ObjectModules objects;
   std::shared_mutex mutex;
 
 public:

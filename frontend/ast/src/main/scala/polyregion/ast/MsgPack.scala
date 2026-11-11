@@ -369,8 +369,7 @@ object MsgPack {
       case 0xcb =>
         val d = java.lang.Double.longBitsToDouble(i64())
         val f = d.toFloat
-        if (java.lang.Double.isNaN(d)) f
-        else if (f.toDouble == d) f
+        if (java.lang.Double.isNaN(d) || f.toDouble == d) f
         else fail(s"Float64 to Float32 conversion with loss of precision: $d")
       case m => fail(s"Expected Float32/Float64, got ${markerName(m)}")
     }
@@ -553,35 +552,30 @@ object MsgPack {
       )
     }
 
-    private trait SumCase {
-      def arity: Int
-      def encodeFields(w: Writer, x: Any): Unit
-      def decodeFields(r: Reader, fieldCount: Int): Any
-    }
-
-    private def mkSumCase[A](m: Mirror.ProductOf[A], codecs: Array[Codec[?]]): SumCase =
-      new SumCase {
-        def arity: Int = codecs.length
-        def encodeFields(w: Writer, x: Any): Unit = {
-          val p = x.asInstanceOf[Product]
-          var i = 0
-          while (i < codecs.length) {
-            codecs(i).asInstanceOf[Codec[Any]].encode(w, p.productElement(i))
-            i += 1
-          }
-        }
-        def decodeFields(r: Reader, n: Int): Any = {
-          if (n != codecs.length)
-            throw MsgPackException(s"Expected sum case with ${codecs.length} field(s), got $n")
-          val arr = new Array[Any](codecs.length)
-          var i   = 0
-          while (i < codecs.length) {
-            arr(i) = codecs(i).decode(r)
-            i += 1
-          }
-          m.fromProduct(Tuple.fromArray(arr))
+    private final class SumCase(m: Mirror.Product, codecs: Array[Codec[?]]) {
+      def arity: Int = codecs.length
+      def encodeFields(w: Writer, x: Any): Unit = {
+        val p = x.asInstanceOf[Product]
+        var i = 0
+        while (i < codecs.length) {
+          codecs(i).asInstanceOf[Codec[Any]].encode(w, p.productElement(i))
+          i += 1
         }
       }
+      def decodeFields(r: Reader, n: Int): Any = {
+        if (n != codecs.length)
+          throw MsgPackException(s"Expected sum case with ${codecs.length} field(s), got $n")
+        val arr = new Array[Any](codecs.length)
+        var i   = 0
+        while (i < codecs.length) {
+          arr(i) = codecs(i).decode(r)
+          i += 1
+        }
+        m.fromProduct(Tuple.fromArray(arr))
+      }
+    }
+
+    private def mkSumCase[A](m: Mirror.ProductOf[A], codecs: Array[Codec[?]]): SumCase = new SumCase(m, codecs)
 
     private inline def summonCodecs[T <: Tuple]: Array[Codec[?]] = inline erasedValue[T] match {
       case _: EmptyTuple => Array.empty
@@ -723,8 +717,8 @@ object MsgPack {
     try {
       val r = Reader(xs)
       val a = summon[Decoder[A]].decode(r)
-      if (!r.isAtEnd) throw MsgPackException(s"Trailing bytes after MessagePack value at byte ${r.offset}")
-      Right(a)
+      if (r.isAtEnd) Right(a)
+      else Left(MsgPackException(s"Trailing bytes after MessagePack value at byte ${r.offset}"))
     } catch {
       case e: Exception => Left(e)
     }
@@ -736,9 +730,9 @@ object MsgPack {
     try {
       val r = Reader(xs)
       val n = r.readArrayHeader()
-      if (n != 3) throw MsgPackException(s"Expected interned envelope array of size 3, got $n")
+      if (n != 3) return Left(MsgPackException(s"Expected interned envelope array of size 3, got $n"))
       val magic = r.readInt32()
-      if (magic != InternedMagic) throw MsgPackException(s"Bad interned envelope magic: $magic")
+      if (magic != InternedMagic) return Left(MsgPackException(s"Bad interned envelope magic: $magic"))
       val tableSize = r.readArrayHeader()
       val table     = new Array[String](tableSize)
       var i         = 0
@@ -748,8 +742,8 @@ object MsgPack {
       }
       r.setStringTable(table)
       val a = summon[Decoder[A]].decode(r)
-      if (!r.isAtEnd) throw MsgPackException(s"Trailing bytes after MessagePack value at byte ${r.offset}")
-      Right(a)
+      if (r.isAtEnd) Right(a)
+      else Left(MsgPackException(s"Trailing bytes after MessagePack value at byte ${r.offset}"))
     } catch {
       case e: Exception => Left(e)
     }

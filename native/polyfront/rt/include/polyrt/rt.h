@@ -32,6 +32,7 @@ using invoke::ModuleFormat;
 using invoke::PlatformKind;
 
 struct HeapCounters {
+  // NOLINTNEXTLINE(readability-redundant-member-init)
   std::atomic<uint64_t> live{}, committed{}, growths{};
 };
 
@@ -55,6 +56,7 @@ struct ExecutionContext {
   std::vector<uintptr_t> errorBlocks;
 
   struct Counters {
+    // NOLINTNEXTLINE(readability-redundant-member-init)
     std::atomic<uint64_t> launches{}, arenaLaunches{}, arenaWindowMoves{}, d2dCopies{}, h2dCopies{}, d2hCopies{}, waits{}, remoteMallocs{};
   } counters;
   HeapCounters heapCounters;

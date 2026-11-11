@@ -1,7 +1,18 @@
 #include "remapper.h"
 
+#include <algorithm>
 #include <cctype>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <iterator>
+#include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <tuple>
 #include <utility>
+#include <vector>
 
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/CXXInheritance.h"
@@ -42,11 +53,13 @@ const static std::string CapturedThis = "#captured_this";
 const static llvm::StringLiteral TypeVariableAnnotation = "polyregion_type_variable:";
 const static llvm::StringLiteral CallableVariableAnnotation = "polyregion_callable_variable:";
 
+namespace {
 struct VariableMarker {
   std::string name;
   bool callable;
   std::optional<int32_t> exactSizeInBytes;
 };
+} // namespace
 
 [[nodiscard]] static Opt<VariableMarker> variableMarker(const clang::RecordDecl *record) {
   Opt<VariableMarker> found;
@@ -69,7 +82,7 @@ struct VariableMarker {
         payload = payload.take_front(offset);
       }
       if (payload.empty() || payload.contains(':')) raise("Invalid PolyAST variable annotation: " + value.str());
-      return VariableMarker{payload.str(), callable, exactSizeInBytes};
+      return VariableMarker{.name = payload.str(), .callable = callable, .exactSizeInBytes = exactSizeInBytes};
     };
     const auto marker = parse(TypeVariableAnnotation, false) ^ or_else([&] { return parse(CallableVariableAnnotation, true); });
     if (!marker) continue;
@@ -97,17 +110,17 @@ struct VariableMarker {
 
 [[nodiscard]] static bool isDiscardedValue(const clang::Expr &expression, clang::ASTContext &context) {
   std::function<bool(const clang::Stmt &)> check = [&](const clang::Stmt &statement) {
-    for (const auto &parent : context.getParents(statement)) {
-      if (parent.get<clang::CompoundStmt>()) return true;
-      if (const auto *cast = parent.get<clang::CastExpr>(); cast && cast->getCastKind() == clang::CK_ToVoid) return true;
-      const auto *wrapper = parent.get<clang::Stmt>();
-      if (wrapper
-          && (llvm::isa<clang::ParenExpr>(wrapper) || llvm::isa<clang::ExprWithCleanups>(wrapper)
-              || llvm::isa<clang::MaterializeTemporaryExpr>(wrapper) || llvm::isa<clang::CXXBindTemporaryExpr>(wrapper)
-              || llvm::isa<clang::ImplicitCastExpr>(wrapper)))
-        if (check(*wrapper)) return true;
-    }
-    return false;
+    const auto parents = context.getParents(statement);
+    return llvm::ArrayRef(parents.begin(), parents.end()) ^ exists([&](const clang::DynTypedNode &parent) {
+             if (parent.get<clang::CompoundStmt>()) return true;
+             if (const auto *cast = parent.get<clang::CastExpr>(); cast && cast->getCastKind() == clang::CK_ToVoid) return true;
+             const auto *wrapper = parent.get<clang::Stmt>();
+             return wrapper
+                    && (llvm::isa<clang::ParenExpr>(wrapper) || llvm::isa<clang::ExprWithCleanups>(wrapper)
+                        || llvm::isa<clang::MaterializeTemporaryExpr>(wrapper) || llvm::isa<clang::CXXBindTemporaryExpr>(wrapper)
+                        || llvm::isa<clang::ImplicitCastExpr>(wrapper))
+                    && check(*wrapper);
+           });
   };
   return check(expression);
 }
@@ -227,7 +240,7 @@ struct VariableMarker {
     };
   };
   const auto selectWithInheritance = [&](const Named &base, const Named &member) {
-    auto expand = [&](const Type::Struct &s) -> std::pair<Vector<Named>, Named> {
+    const auto expand = [&](const Type::Struct &s) -> std::pair<Vector<Named>, Named> {
       const auto owner = r.findStruct(fqcn(s.name), "select");
       const auto resolve = [&](const bool allowUnqualified) -> Opt<std::pair<Vector<Named>, Named>> {
         const auto matches = memberSymbolMatches(member, allowUnqualified);
@@ -284,14 +297,14 @@ struct VariableMarker {
   return dsl::Select(Vector<Named>(path.begin(), path.end() - 1), path.back());
 }
 
-Term::Select Remapper::selectPath(RemapContext &r, const Vector<Named> &prefix, const Named &leaf) const { return select(r, prefix, leaf); }
+Term::Select Remapper::selectPath(RemapContext &r, const Vector<Named> &prefix, const Named &leaf) { return select(r, prefix, leaf); }
 
 static void defaultInitialiseStruct(Remapper::RemapContext &r, const Type::Struct &tpe, const Named &root) {
   if (auto def = r.structs ^ get_maybe(fqcn(tpe.name))) {
     // An empty struct has no source-level member to select. Backend struct allocation owns the synthetic placeholder
     // byte, including when this type appears as a nested empty base.
-    if (r.emptyStruct(**def)) return;
-    for (auto &named : (*def)->members) {
+    if (Remapper::RemapContext::emptyStruct(**def)) return;
+    for (const auto &named : (*def)->members) {
       if (named.tpe.template is<Type::Struct>()) continue;
       if (const auto arr = named.tpe.template get<Type::Arr>()) {
         // In-struct array storage (e.g. std::array<T,N>::_M_elems is `T[N]`); defaultValue would
@@ -383,9 +396,7 @@ static Opt<Term::Any> findCharacterPointer(Remapper::RemapContext &r, const Term
 
 static bool supportedStdStringLayout(const clang::CXXRecordDecl *record) {
   if (!record) return false;
-  for (const auto *field : record->fields())
-    if (field->getName() == "_M_dataplus") return true;
-  return false;
+  return record->fields() ^ exists([](const clang::FieldDecl *field) { return field->getName() == "_M_dataplus"; });
 }
 
 static void copyExceptionMessageInto(Remapper::RemapContext &r, const Term::Any &source, const Named &message) {
@@ -531,7 +542,7 @@ bool Remapper::RemapContext::emptyStruct(const StructDef &def) {
   return def.members ^ forall([&](const auto &m) { return m == EmptyStructMarker; });
 }
 
-bool Remapper::RemapContext::isEmpty(const Type::Struct &s) {
+bool Remapper::RemapContext::isEmpty(const Type::Struct &s) const {
   return structs ^ get_maybe(fqcn(s.name)) ^ exists([&](const auto &def) { return def && emptyStruct(*def); });
 }
 
@@ -548,7 +559,7 @@ Term::Any Remapper::RemapContext::newVar(const Expr::Any &expr) {
 
 Named Remapper::RemapContext::newVar(const Type::Any &tpe) {
   auto name = newName(tpe);
-  auto var = Stmt::Var(name, std::optional<Expr::Any>{}, /*isMutable*/ true);
+  const auto var = Stmt::Var(name, std::optional<Expr::Any>{}, /*isMutable*/ true);
   stmts.push_back(var);
   return name;
 }
@@ -626,7 +637,7 @@ static constexpr bool isTrapBuiltin(unsigned id) {
   }
 }
 
-[[nodiscard]] static bool hostOnlyStub(const clang::FunctionDecl &decl, const std::string &name, clang::ASTContext &context) {
+[[nodiscard]] static bool hostOnlyStub(const clang::FunctionDecl &decl, const std::string &name, const clang::ASTContext &context) {
   const auto stdOwned = name.starts_with("std::") || name.starts_with("__gnu_cxx::");
   const auto oneDplOwned = name.starts_with("oneapi::dpl::");
   static const Vector<std::string_view> streamMarkers = {"basic_ostream",   "basic_istream",    "basic_ios",
@@ -671,7 +682,7 @@ static Term::Select seedSelect(Remapper::RemapContext &r, const Expr::Any &expr)
 
 static Opt<Type::Any> appendBaseSteps(const Remapper &self, Remapper::RemapContext &r, Vector<PathStep::Any> &steps, Type::Any current,
                                       clang::CastExpr::path_const_iterator begin, clang::CastExpr::path_const_iterator end) {
-  for (auto it = begin; it != end; ++it) {
+  for (const auto *it = begin; it != end; ++it) {
     const auto base = self.handleType((*it)->getType(), r).get<Type::Struct>();
     if (!base || r.isEmpty(*base)) return {};
     steps.emplace_back(PathStep::Field(fmt::format("{}_{}", polyregion::conventions::BaseFieldPrefix, fqcn(base->name))));
@@ -688,14 +699,14 @@ static Expr::Any adjustBasePointer(const Remapper &self, Remapper::RemapContext 
     return Expr::Alias(Term::NullPtrConst(targetPtr->comp, targetPtr->space, Region::Opaque()));
   const auto source = r.newVar(sourceExpr);
   auto sourceQual = cast.getSubExpr()->getType().getNonReferenceType();
-  if (const auto pointer = sourceQual->getAs<clang::PointerType>()) sourceQual = pointer->getPointeeType().getNonReferenceType();
+  if (const auto *const pointer = sourceQual->getAs<clang::PointerType>()) sourceQual = pointer->getPointeeType().getNonReferenceType();
   auto *currentRecord = sourceQual->getAsCXXRecordDecl();
   if (!currentRecord) return Expr::Cast(source, targetTpe);
   currentRecord = currentRecord->getDefinition() ? currentRecord->getDefinition() : currentRecord;
   auto adjust = [&](Remapper::RemapContext &r_) {
     auto current = source;
-    auto *record = currentRecord;
-    for (auto it = cast.path_begin(); it != cast.path_end(); ++it) {
+    const clang::CXXRecordDecl *record = currentRecord;
+    for (const auto *it = cast.path_begin(); it != cast.path_end(); ++it) {
       auto *baseRecord = (*it)->getType()->getAsCXXRecordDecl();
       const auto base = self.handleType((*it)->getType(), r_).template get<Type::Struct>();
       if (!baseRecord || !base) return r_.newVar(Expr::Cast(current, targetTpe));
@@ -760,7 +771,7 @@ std::string polyregion::polystl::declName(const clang::NamedDecl *decl) {
   return fmt::format("{:016x}", llvm::xxh3_64bits(llvm::StringRef(value.data(), value.size())));
 }
 
-static std::string anonymousRecordIdentity(const clang::RecordDecl &record, clang::ASTContext &context, const Remapper &remapper,
+static std::string anonymousRecordIdentity(const clang::RecordDecl &record, const clang::ASTContext &context, const Remapper &remapper,
                                            Remapper::RemapContext &r) {
   return remapper.nameOfRecord(
       context.getTypeDeclType(clang::ElaboratedTypeKeyword::None, std::nullopt, &record)->getAs<clang::RecordType>(), r);
@@ -785,12 +796,18 @@ static void collectAnonymousRecordIdentities(const clang::QualType type, clang::
     }
     return;
   }
-  if (const auto *pointer = canonical->getAs<clang::PointerType>())
-    return collectAnonymousRecordIdentities(pointer->getPointeeType(), context, remapper, r, result);
-  if (const auto *reference = canonical->getAs<clang::ReferenceType>())
-    return collectAnonymousRecordIdentities(reference->getPointeeType(), context, remapper, r, result);
-  if (const auto *array = canonical->getAsArrayTypeUnsafe())
-    return collectAnonymousRecordIdentities(array->getElementType(), context, remapper, r, result);
+  if (const auto *pointer = canonical->getAs<clang::PointerType>()) {
+    collectAnonymousRecordIdentities(pointer->getPointeeType(), context, remapper, r, result);
+    return;
+  }
+  if (const auto *reference = canonical->getAs<clang::ReferenceType>()) {
+    collectAnonymousRecordIdentities(reference->getPointeeType(), context, remapper, r, result);
+    return;
+  }
+  if (const auto *array = canonical->getAsArrayTypeUnsafe()) {
+    collectAnonymousRecordIdentities(array->getElementType(), context, remapper, r, result);
+    return;
+  }
   if (const auto *function = canonical->getAs<clang::FunctionProtoType>()) {
     for (const auto parameter : function->getParamTypes())
       collectAnonymousRecordIdentities(parameter, context, remapper, r, result);
@@ -867,7 +884,7 @@ Expr::Any Remapper::conform(RemapContext &r, const Expr::Any &expr, const Type::
   auto exprAlias = expr.get<Expr::Alias>();
   auto exprIndex = expr.get<Expr::Index>();
   std::optional<Term::Select> rhsSelectTermOpt = exprAlias ? exprAlias->ref.template get<Term::Select>() : std::optional<Term::Select>{};
-  auto rhsSelectTerm = rhsSelectTermOpt ? &*rhsSelectTermOpt : nullptr;
+  const Term::Select *rhsSelectTerm = rhsSelectTermOpt ? &*rhsSelectTermOpt : nullptr;
   if (tgtPtrTpe && tgtPtrTpe->comp == rhsTpe) {
     // Bind an lvalue reference to its existing slot, or materialise a prvalue into a temporary
     // slot first. The latter matters for pointer prvalues bound to T*&&: an opaque Ptr<T> ->
@@ -901,7 +918,7 @@ Expr::Any Remapper::conform(RemapContext &r, const Expr::Any &expr, const Type::
     // Handle decay
     //   int &rhs = /* */;
     //   int lhs = rhs; // lhs = rhs[0];
-    auto idxTerm = r.newVar(Remapper::integralConstOfType(Type::IntS64(), 0));
+    const auto idxTerm = r.newVar(Remapper::integralConstOfType(Type::IntS64(), 0));
     return Expr::Index(r.newVar(expr), idxTerm, targetTpe);
   } else if (rhsPtrTpe && tgtPtrTpe) {
     if (const auto refTo = expr.get<Expr::RefTo>(); refTo && rhsPtrTpe->comp == tgtPtrTpe->comp) return refTo->withSpace(tgtPtrTpe->space);
@@ -915,7 +932,7 @@ Expr::Any Remapper::conform(RemapContext &r, const Expr::Any &expr, const Type::
             Vector<PathStep::Any> steps = rhsSelectTerm->steps;
             for (const auto &s : chain)
               steps.emplace_back(PathStep::Field(baseMember(*s).symbol));
-            auto extended = Term::Select(rhsSelectTerm->root, steps, tgtStruct->widen());
+            const auto extended = Term::Select(rhsSelectTerm->root, steps, tgtStruct->widen());
             return Expr::RefTo(extended, {}, tgtStruct->widen(), tgtPtrTpe->space, Region::Opaque());
           }
         }
@@ -978,7 +995,7 @@ Named Remapper::namedOfDecl(const clang::NamedDecl *decl, const Type::Any &tpe) 
 }
 Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::FunctionDecl *decl, RemapContext &r) {
   // use the defining decl: a fwd decl (for mutual recursion) has its own ParmVarDecls, so sig and body disagree
-  if (const auto def = decl->getDefinition()) decl = def;
+  if (const auto *const def = decl->getDefinition()) decl = def;
   const auto l = getLocation(decl->getLocation(), context);
   const auto stableKernelIdentity =
       diagnosticName(decl, context) + "#" + decl->getType().getCanonicalType().getAsString(context.getPrintingPolicy());
@@ -1028,24 +1045,24 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
   Opt<Arg> receiver{};
   std::shared_ptr<StructDef> parent{};
 
-  auto receiverType = [&](const clang::CXXRecordDecl *record) {
-    const auto canonical = record->getCanonicalDecl();
+  const auto receiverType = [&](const clang::CXXRecordDecl *record) {
+    const auto *const canonical = record->getCanonicalDecl();
     const auto nestedLambda =
         record->isLambda() && r.entryCapture && canonical != r.entryCapture && !(r.globalCaptures ^ contains(canonical));
     const auto space = nestedLambda ? TypeSpace::Private().widen() : TypeSpace::Global().widen();
     return Type::Ptr(handleType(context.getCanonicalTagType(record), r), space).widen();
   };
 
-  if (auto ctor = llvm::dyn_cast<clang::CXXConstructorDecl>(decl)) {
-    auto record = ctor->getParent();
+  if (const auto *ctor = llvm::dyn_cast<clang::CXXConstructorDecl>(decl)) {
+    const auto *record = ctor->getParent();
     receiver = Arg(Named(This, receiverType(record)), {});
     parent = handleRecord(record, r);
-  } else if (auto dtor = llvm::dyn_cast<clang::CXXDestructorDecl>(decl)) {
-    auto record = dtor->getParent();
+  } else if (const auto *dtor = llvm::dyn_cast<clang::CXXDestructorDecl>(decl)) {
+    const auto *record = dtor->getParent();
     receiver = Arg(Named(This, receiverType(record)), {});
     parent = handleRecord(record, r);
-  } else if (auto method = llvm::dyn_cast<clang::CXXMethodDecl>(decl); method && method->isInstance()) {
-    auto record = method->getParent();
+  } else if (const auto *method = llvm::dyn_cast<clang::CXXMethodDecl>(decl); method && method->isInstance()) {
+    const auto *record = method->getParent();
     receiver = Arg(Named(This, receiverType(record)), {});
     parent = handleRecord(record, r);
   }
@@ -1101,7 +1118,7 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
                                        CallConvention::RegularCall());
   r.functions.emplace(name, fn);
 
-  auto fnBody = r.scoped(
+  const auto fnBody = r.scoped(
       [&](auto &r) {
         r.function = decl;
         if (hostStub) return;
@@ -1177,12 +1194,12 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
 #undef POLYC_BINARY_INTR
 
           case clang::Builtin::NotBuiltin:
-            if (const auto ctor = llvm::dyn_cast<clang::CXXConstructorDecl>(decl)) {
+            if (const auto *const ctor = llvm::dyn_cast<clang::CXXConstructorDecl>(decl)) {
               if (const auto instancePtr = receiver->named.tpe.get<Type::Ptr>()) {
                 if (const auto structTpe = instancePtr->comp.get<Type::Struct>()) {
-                  for (auto init : ctor->inits()) { // handle CXXCtorInitializer here
+                  for (const clang::CXXCtorInitializer *init : ctor->inits()) { // handle CXXCtorInitializer here
                     if (init->isAnyMemberInitializer()) {
-                      auto fieldNamed = [&](const clang::FieldDecl *field) {
+                      const auto fieldNamed = [&](const clang::FieldDecl *field) {
                         const auto owner = handleType(context.getCanonicalTagType(field->getParent()), r).template get<Type::Struct>();
                         if (!owner) raise("Field owner is not a struct: " + field->getNameAsString());
                         return Named(fieldSymbolName(field, fqcn(owner->name)), annotateLocalSpace(field, r));
@@ -1190,7 +1207,7 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
                       // an anonymous struct/union member initialises indirectly, so the leaf is reached through every
                       // enclosing anonymous record rather than named on the ctor's own struct
                       const auto chain = [&]() -> Vector<const clang::FieldDecl *> {
-                        if (const auto direct = init->getMember()) return {direct};
+                        if (const clang::FieldDecl *const direct = init->getMember()) return {direct};
                         return init->getIndirectMember()->chain() | collect([](const auto &d) -> Opt<const clang::FieldDecl *> {
                                  if (const auto f = llvm::dyn_cast<clang::FieldDecl>(d)) return f;
                                  return {};
@@ -1200,9 +1217,9 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
                       const auto leaf = fieldNamed(chain.back());
                       const auto tpe = leaf.tpe;
                       const auto prefix = chain | take(chain.size() - 1) | map(fieldNamed) | prepend(receiver->named) | to_vector();
-                      auto member = select(r, prefix, leaf);
+                      const auto member = select(r, prefix, leaf);
                       const clang::Expr *memberInit = init->getInit();
-                      while (const auto next = transparentExceptionExpr(memberInit))
+                      while (const auto *const next = transparentExceptionExpr(memberInit))
                         memberInit = next;
                       if (const auto arr = tpe.template get<Type::Arr>()) {
                         if (llvm::isa<clang::CXXConstructExpr>(memberInit)) {
@@ -1229,31 +1246,31 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
                       auto baseDef = baseStruct ? r.structs ^ get_maybe(fqcn(baseStruct->name)) : Opt<std::shared_ptr<StructDef>>{};
                       if (baseDef && r.emptyStruct(**baseDef)) {
                       } else {
-                        auto chainedCtorStmts = r.scoped(
+                        const auto chainedCtorStmts = r.scoped(
                             [&](auto &r) {
-                              if (const auto inh = llvm::dyn_cast<clang::CXXInheritedCtorInitExpr>(init->getInit())) {
+                              if (const auto *const inh = llvm::dyn_cast<clang::CXXInheritedCtorInitExpr>(init->getInit())) {
                                 // `using Base::Base;`: forward this synthesised ctor's `args` to the
                                 // inherited base ctor (none are on the node); conform bridges Derived*->Base*
                                 const auto [baseName, baseFn] = handleCall(inh->getConstructor(), r);
                                 if (baseFn->decl.args.size() == args.size() + 1 && receiver) {
-                                  auto thisArg = r.newVar(
+                                  const auto thisArg = r.newVar(
                                       conform(r, Expr::Alias(select(r, {}, receiver->named)), baseFn->decl.args.front().named.tpe));
                                   Vector<Term::Any> fwd;
                                   fwd.reserve(args.size());
                                   for (size_t i = 0; i < args.size(); ++i)
                                     fwd.emplace_back(r.newVar(
                                         conform(r, Expr::Alias(select(r, {}, args[i].named)), baseFn->decl.args[i + 1].named.tpe)));
-                                  auto _ = r.newVar(Expr::Invoke(Type::FnRef(Sym({baseName})), {}, {},
-                                                                 Vector<Term::Any>{thisArg} ^ concat(fwd), Type::Unit0()));
+                                  const auto _ = r.newVar(Expr::Invoke(Type::FnRef(Sym({baseName})), {}, {},
+                                                                       Vector<Term::Any>{thisArg} ^ concat(fwd), Type::Unit0()));
                                 }
                               } else if (baseStruct) {
                                 const clang::Expr *baseInit = init->getInit()->IgnoreImplicit();
                                 while (true) {
-                                  if (const auto materialised = llvm::dyn_cast<clang::MaterializeTemporaryExpr>(baseInit)) {
+                                  if (const auto *const materialised = llvm::dyn_cast<clang::MaterializeTemporaryExpr>(baseInit)) {
                                     baseInit = materialised->getSubExpr()->IgnoreImplicit();
                                     continue;
                                   }
-                                  if (const auto bound = llvm::dyn_cast<clang::CXXBindTemporaryExpr>(baseInit)) {
+                                  if (const auto *const bound = llvm::dyn_cast<clang::CXXBindTemporaryExpr>(baseInit)) {
                                     baseInit = bound->getSubExpr()->IgnoreImplicit();
                                     continue;
                                   }
@@ -1272,7 +1289,7 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
                                   (void)r.newVar(handleExpr(init->getInit(), r));
                                   r.constructInto.reset();
                                 } else {
-                                  auto _ = r.newVar(handleExpr(init->getInit(), r));
+                                  const auto _ = r.newVar(handleExpr(init->getInit(), r));
                                 }
                               }
                             },
@@ -1280,7 +1297,8 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
                         r.push(chainedCtorStmts);
                       }
                     } else if (init->isDelegatingInitializer()) {
-                      r.push(r.scoped([&](auto &r) { auto _ = r.newVar(handleExpr(init->getInit(), r)); }, true, rtnType, parent, true));
+                      r.push(
+                          r.scoped([&](auto &r) { const auto _ = r.newVar(handleExpr(init->getInit(), r)); }, true, rtnType, parent, true));
                     } else raise("Unknown initializer type!");
                   }
                   if (parent && parent->isUnion && !parent->members.empty() && args.size() == 1 && ctor->isDefaulted()
@@ -1318,7 +1336,7 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
                 raise(fmt::format("constructor `{}` receiver is not an instance pointer type: {}", decl->getQualifiedNameAsString(),
                                   repr(receiver->named.tpe)));
             } else {
-              const auto method = llvm::dyn_cast<clang::CXXMethodDecl>(decl);
+              const auto *const method = llvm::dyn_cast<clang::CXXMethodDecl>(decl);
               const bool defaultedAssignment = method && method->isDefaulted() && method->isTrivial()
                                                && (method->isCopyAssignmentOperator() || method->isMoveAssignmentOperator())
                                                && args.size() == 1;
@@ -1339,12 +1357,12 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
                 r.push(Stmt::Return(Expr::Alias(select(r, {}, receiver->named))));
               } else {
                 if (defaultedAssignment && parent) {
-                  auto thisPtr = ptrTo(Type::Struct(parent->name, {}));
+                  const auto thisPtr = ptrTo(Type::Struct(parent->name, {}));
                   // Defaulted assignment has an empty body for empty structs (only the placeholder byte) and for
                   // unions (Clang elides the member-wise copy), so copy the canonical storage member explicitly.
                   if (r.emptyStruct(*parent)) {
-                    auto thisRef = select(r, {Named(This, thisPtr)}, EmptyStructMarker);
-                    auto rhsRef = select(r, {args[0].named}, EmptyStructMarker);
+                    const auto thisRef = select(r, {Named(This, thisPtr)}, EmptyStructMarker);
+                    const auto rhsRef = select(r, {args[0].named}, EmptyStructMarker);
                     r.push(Stmt::Mut(thisRef, Expr::Alias(rhsRef)));
                   } else if (parent->isUnion && !parent->members.empty()) {
                     copyUnionStorage(r, Named(This, thisPtr), args[0].named, parent->members.front());
@@ -1408,7 +1426,7 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
   // by-copy nested lambda can be cached first with Private reference captures even though the
   // enclosing entry stores it in the global argument arena.
   if (const auto *lambda = llvm::dyn_cast<clang::CXXRecordDecl>(decl); lambda && lambda->isLambda()) {
-    const auto canonical = lambda->getCanonicalDecl();
+    const auto *const canonical = lambda->getCanonicalDecl();
     const auto globalCapture = canonical == r.entryCapture || (r.globalCaptures ^ contains(canonical));
     if (globalCapture) {
       r.globalCaptures.emplace(canonical);
@@ -1425,16 +1443,25 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
   std::function<void(const clang::TemplateArgument &)> collectTemplateArgument;
   std::function<void(clang::QualType)> collectType = [&](clang::QualType qual) {
     const auto type = qual.getDesugaredType(context);
-    if (const auto pointer = type->getAs<clang::PointerType>()) return collectType(pointer->getPointeeType());
-    if (const auto reference = type->getAs<clang::ReferenceType>()) return collectType(reference->getPointeeType());
-    if (const auto array = context.getAsArrayType(type)) return collectType(array->getElementType());
-    const auto record = type->getAs<clang::RecordType>();
+    if (const auto *const pointer = type->getAs<clang::PointerType>()) {
+      collectType(pointer->getPointeeType());
+      return;
+    }
+    if (const auto *const reference = type->getAs<clang::ReferenceType>()) {
+      collectType(reference->getPointeeType());
+      return;
+    }
+    if (const auto *const array = context.getAsArrayType(type)) {
+      collectType(array->getElementType());
+      return;
+    }
+    const auto *const record = type->getAs<clang::RecordType>();
     if (!record) return;
     if (const auto marker = variableMarker(record->getDecl())) {
       const auto variable = registerVariableMarker(*marker, r);
       if (!(templateVariables ^ contains(variable))) templateVariables.emplace_back(variable);
     }
-    if (const auto specialization = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(record->getDecl()))
+    if (const auto *const specialization = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(record->getDecl()))
       for (const auto &argument : specialization->getTemplateArgs().asArray())
         collectTemplateArgument(argument);
   };
@@ -1444,7 +1471,7 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
       for (const auto &element : argument.pack_elements())
         collectTemplateArgument(element);
   };
-  if (const auto specialization = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(decl))
+  if (const auto *const specialization = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(decl))
     for (const auto &argument : specialization->getTemplateArgs().asArray())
       collectTemplateArgument(argument);
 
@@ -1461,15 +1488,16 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
   // a forward-declared record stays opaque: only pointers to it are legal and bases()/layout would read garbage. the
   // member-less layout is still registered, otherwise a `Fwd*` member carries a null TypeLayout that the reflect
   // runtime dereferences when mirroring a non-null pointee
-  const auto def = decl->getDefinition();
+  const clang::RecordDecl *const def = decl->getDefinition();
   if (!def) {
     r.layouts.emplace(name, std::make_shared<StructLayout>(name, 1, 1, Vector<StructLayoutMember>{}));
     return stub;
   }
   decl = def;
 
-  auto resolveStruct = [&](const Vector<std::pair<std::shared_ptr<StructDef>, std::pair<size_t, size_t>>> &parents,
-                           const Vector<StructLayoutMember> &members, const Vector<std::shared_ptr<StructDef>> &catchableParents = {}) {
+  const auto resolveStruct = [&](const Vector<std::pair<std::shared_ptr<StructDef>, std::pair<size_t, size_t>>> &parents,
+                                 const Vector<StructLayoutMember> &members,
+                                 const Vector<std::shared_ptr<StructDef>> &catchableParents = {}) {
     // For C/C++ sizeof(type{}) == 1
     // However, compilers are allowed to do https://en.cppreference.com/w/cpp/language/ebo
     //    struct N{};
@@ -1492,9 +1520,9 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
     // For actual members, skip all EB classes so that EBO works
     const auto inherited =
         parents | map([&](const auto &p, const auto &offsetAndSize) {
-          auto original = baseMember(*p);
-          if (!r.emptyStruct(*p)) return std::pair{original, offsetAndSize};
-          auto e = get_or_emplace(r.structs, Empty, [](const auto &k) {
+          const auto original = baseMember(*p);
+          if (!Remapper::RemapContext::emptyStruct(*p)) return std::pair{original, offsetAndSize};
+          const auto e = get_or_emplace(r.structs, Empty, [](const auto &k) {
             return std::make_shared<StructDef>(Sym({k}), std::vector<Type::Var>{}, Vector<Named>{}, std::vector<Type::Struct>{}, false);
           });
           return std::pair{Named(original.symbol, Type::Struct(e->name, {})), offsetAndSize};
@@ -1520,18 +1548,18 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
                     : inherited | keys() | concat(members | map([](const auto &m) { return m.name; })) | to_vector(),
         catchableParents ^ map([](const auto &p) { return Type::Struct(p->name, std::vector<Type::Any>{}); }),
         /*isUnion*/ decl->isUnion());
-    const auto layout = std::make_shared<StructLayout>(                            //
-        name,                                                                      //
-        sizeInBytes,                                                               //
-        alignmentInBytes,                                                          //
-        inherited                                                                  //
-            | map([&](const auto &named, const auto &offsetAndSize) {              //
-                auto [offset, size] = offsetAndSize;                               //
-                auto isEBO = offset == 0 && size == 1 && alignmentInBytes != 1;    //
-                return StructLayoutMember(named, offset, isEBO ? size_t{} : size); //
-              })                                                                   //
-            | concat(members)                                                      //
-            | to_vector());                                                        //
+    const auto layout = std::make_shared<StructLayout>(                               //
+        name,                                                                         //
+        sizeInBytes,                                                                  //
+        alignmentInBytes,                                                             //
+        inherited                                                                     //
+            | map([&](const auto &named, const auto &offsetAndSize) {                 //
+                auto [offset, size] = offsetAndSize;                                  //
+                const auto isEBO = offset == 0 && size == 1 && alignmentInBytes != 1; //
+                return StructLayoutMember(named, offset, isEBO ? size_t{} : size);    //
+              })                                                                      //
+            | concat(members)                                                         //
+            | to_vector());                                                           //
 
     r.layouts.emplace(name, layout);
     return stub;
@@ -1543,15 +1571,15 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
                               context.getTypeSizeInChars(decl->getType()).getQuantity()}; //
   };
 
-  auto resolveFields = [&] {
-    auto emptyStruct = [&] {
+  const auto resolveFields = [&] {
+    const auto emptyStruct = [&] {
       return get_or_emplace(r.structs, Empty, [](const auto &k) {
         return std::make_shared<StructDef>(Sym({k}), std::vector<Type::Var>{}, Vector<Named>{}, std::vector<Type::Struct>{}, false);
       });
     };
     Vector<StructLayoutMember> all;
     Map<std::string, size_t> bitfieldStorageIndices;
-    for (auto *field : decl->fields()) {
+    for (const clang::FieldDecl *field : decl->fields()) {
       const auto fieldName = fieldSymbolName(field, name);
       if (!field->isBitField()) {
         if (field->isZeroSize(context)) {
@@ -1563,7 +1591,7 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
       }
       const auto bitWidth = static_cast<uint64_t>(field->getBitWidthValue());
       if (bitWidth == 0) continue;
-      const auto fieldBitOffset = static_cast<uint64_t>(context.getFieldOffset(field));
+      const auto fieldBitOffset = context.getFieldOffset(field);
       const auto storageSizeBytes = static_cast<uint64_t>(context.getTypeSizeInChars(field->getType()).getQuantity());
       const auto storageSizeBits = storageSizeBytes * 8;
       const auto storageOffsetBytes = (fieldBitOffset / storageSizeBits) * storageSizeBytes;
@@ -1577,8 +1605,10 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
         bitfieldStorageIndices.emplace(storageKey, index);
         return index;
       }();
-      r.bitFields.emplace(fieldName, Remapper::BitFieldInfo{all[storageIndex].name, handleType(field->getType(), r),
-                                                            fieldBitOffset - storageOffsetBytes * 8, bitWidth});
+      r.bitFields.emplace(fieldName, Remapper::BitFieldInfo{.storage = all[storageIndex].name,
+                                                            .valueTpe = handleType(field->getType(), r),
+                                                            .bitOffset = fieldBitOffset - (storageOffsetBytes * 8),
+                                                            .bitWidth = bitWidth});
     }
     // XXX largest member first = canonical storage spanning the whole union
     if (decl->isUnion() && all.size() > 1) {
@@ -1588,7 +1618,7 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
     return all;
   };
 
-  if (const auto cxxRecord = llvm::dyn_cast<clang::CXXRecordDecl>(decl)) {
+  if (const auto *const cxxRecord = llvm::dyn_cast<clang::CXXRecordDecl>(decl)) {
     if (cxxRecord->getNumVBases() != 0) {
       if (!emitPackageProgramMode)
         raise(fmt::format("Unsupported virtual base in {} at {} (a shared base subobject has no place in the flattened record layout)",
@@ -1599,7 +1629,7 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
       return resolveStruct({}, {StructLayoutMember(blob, 0, static_cast<int64_t>(sizeInBytes))});
     }
 
-    auto resolveBases = [&](const auto &bases) {
+    const auto resolveBases = [&](const auto &bases) {
       return bases | collect([&](const auto &cls) -> Opt<std::pair<std::shared_ptr<StructDef>, std::pair<size_t, size_t>>> {
                if (auto baseRecordTpe = llvm::dyn_cast<clang::RecordType>(cls.getType().getDesugaredType(context))) {
                  if (auto cxxBaseDecl = llvm::dyn_cast<clang::CXXRecordDecl>(baseRecordTpe->getDecl())) {
@@ -1638,7 +1668,7 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
 
     if (!cxxRecord->isLambda()) return resolveStruct(parents, resolveFields(), catchableParents);
     else {
-      const auto canonical = cxxRecord->getCanonicalDecl();
+      const auto *const canonical = cxxRecord->getCanonicalDecl();
       const auto globalCapture = canonical == r.entryCapture || (r.globalCaptures ^ contains(canonical));
       if (globalCapture) r.globalCaptures.emplace(canonical);
       const auto members =
@@ -1685,7 +1715,7 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
 
 std::string Remapper::nameOfRecord(const clang::RecordType *tpe, RemapContext &r) const {
   if (!tpe) return "<null>";
-  auto specName = [&](const clang::ClassTemplateSpecializationDecl *spec) {
+  const auto specName = [&](const clang::ClassTemplateSpecializationDecl *spec) {
     auto name = spec->getQualifiedNameAsString();
     bool erasedCallableSignature = false;
     std::function<void(const clang::TemplateArgument &)> appendArgument = [&](const clang::TemplateArgument &arg) {
@@ -1695,7 +1725,7 @@ std::string Remapper::nameOfRecord(const clang::RecordType *tpe, RemapContext &r
         case clang::TemplateArgument::Type: {
           const auto modelled = handleType(arg.getAsType(), r);
           name += typeName(modelled);
-          if (const auto record = arg.getAsType().getNonReferenceType()->getAsCXXRecordDecl())
+          if (const auto *const record = arg.getAsType().getNonReferenceType()->getAsCXXRecordDecl())
             if (const auto marker = variableMarker(record); marker && marker->callable) erasedCallableSignature = true;
           break;
         }
@@ -1718,7 +1748,7 @@ std::string Remapper::nameOfRecord(const clang::RecordType *tpe, RemapContext &r
       name += "_" + hashSuffix(diagnosticName(spec, context));
     return name;
   };
-  if (const auto spec = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(tpe->getDecl())) {
+  if (const auto *const spec = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(tpe->getDecl())) {
     return specName(spec);
   } else if (auto name = tpe->getDecl()->getNameAsString();
              name.empty()) { // some decl don't have names (lambdas/anonymous records), so synthesise
@@ -1759,16 +1789,16 @@ std::string Remapper::nameOfRecord(const clang::RecordType *tpe, RemapContext &r
         out.flush();
         nested += "#" + hashSuffix(full);
       }
-      if (const auto enc = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(dc)) return specName(enc) + "::" + nested;
-      if (const auto rd = llvm::dyn_cast<clang::RecordDecl>(dc); rd && !rd->getName().empty())
+      if (const auto *const enc = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(dc)) return specName(enc) + "::" + nested;
+      if (const auto *const rd = llvm::dyn_cast<clang::RecordDecl>(dc); rd && !rd->getName().empty())
         nested = rd->getNameAsString() + "::" + nested;
     }
     return nested;
   } else {
     std::string nested = name;
     for (const clang::DeclContext *dc = tpe->getDecl()->getDeclContext(); dc; dc = dc->getParent()) {
-      if (const auto enc = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(dc)) return specName(enc) + "::" + nested;
-      if (const auto rd = llvm::dyn_cast<clang::RecordDecl>(dc); rd && !rd->getName().empty())
+      if (const auto *const enc = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(dc)) return specName(enc) + "::" + nested;
+      if (const auto *const rd = llvm::dyn_cast<clang::RecordDecl>(dc); rd && !rd->getName().empty())
         nested = rd->getNameAsString() + "::" + nested;
     }
     return name;
@@ -1810,7 +1840,7 @@ Type::Any Remapper::handleType(clang::QualType qual, RemapContext &r) const {
     return Type::Ptr(tpe, pointee.isNull() ? TypeSpace::Global().widen() : spaceOf(pointee));
   };
 
-  auto desugared = qual.getDesugaredType(context);
+  const auto desugared = qual.getDesugaredType(context);
   auto result = llvm_shared::visitDyn<Type::Any>(
       desugared,                                        //
       [&](const clang::BuiltinType *tpe) -> Type::Any { // char|short|int|long
@@ -1883,17 +1913,17 @@ Type::Any Remapper::handleType(clang::QualType qual, RemapContext &r) const {
 [[nodiscard]] static bool destroysByBodyAlone(const clang::CXXRecordDecl *rd) {
   for (const auto &base : rd->bases())
     if (!destroysWithoutEffect(base.getType()->getAsCXXRecordDecl())) return false;
-  for (const auto *field : rd->fields())
-    if (!destroysWithoutEffect(field->getType()->getBaseElementTypeUnsafe()->getAsCXXRecordDecl())) return false;
-  return true;
+  return rd->fields() ^ forall([](const clang::FieldDecl *field) {
+           return destroysWithoutEffect(field->getType()->getBaseElementTypeUnsafe()->getAsCXXRecordDecl());
+         });
 }
 
 [[nodiscard]] static bool destroysWithoutEffect(const clang::CXXRecordDecl *rd) {
   if (!rd) return true;
   if (rd->hasTrivialDestructor()) return true;
-  const auto dtor = rd->getDestructor();
+  const auto *const dtor = rd->getDestructor();
   if (!dtor) return false;
-  const auto body = llvm::dyn_cast_if_present<clang::CompoundStmt>(dtor->getBody());
+  const auto *const body = llvm::dyn_cast_if_present<clang::CompoundStmt>(dtor->getBody());
   if (!body || !body->body_empty()) return false;
   return destroysByBodyAlone(rd);
 }
@@ -1915,8 +1945,8 @@ Type::Any Remapper::handleType(clang::QualType qual, RemapContext &r) const {
 
 [[nodiscard]] static bool charPointer(const clang::Expr *expr) {
   const auto tpe = expr->getType();
-  if (const auto ptr = tpe->getAs<clang::PointerType>()) return ptr->getPointeeType()->isCharType();
-  if (const auto arr = tpe->getAsArrayTypeUnsafe()) return arr->getElementType()->isCharType();
+  if (const auto *const ptr = tpe->getAs<clang::PointerType>()) return ptr->getPointeeType()->isCharType();
+  if (const auto *const arr = tpe->getAsArrayTypeUnsafe()) return arr->getElementType()->isCharType();
   return false;
 }
 
@@ -1942,25 +1972,25 @@ Type::Any Remapper::handleType(clang::QualType qual, RemapContext &r) const {
 }
 
 [[nodiscard]] static bool catchesRecord(const clang::CXXCatchStmt *handler, const clang::CXXRecordDecl *record) {
-  const auto decl = handler->getExceptionDecl();
+  const clang::VarDecl *const decl = handler->getExceptionDecl();
   if (!decl) return true;
-  const auto caught = decl->getType().getNonReferenceType()->getAsCXXRecordDecl();
+  const auto *const caught = decl->getType().getNonReferenceType()->getAsCXXRecordDecl();
   return caught && recordDerivesFrom(record, caught);
 }
 
 [[nodiscard]] static bool carriesComposedStdExceptionWhat(const clang::Expr *expr, Set<const clang::VarDecl *> &seen) {
-  while (const auto next = transparentExceptionExpr(expr))
+  while (const auto *const next = transparentExceptionExpr(expr))
     expr = next;
-  const auto record = expr->getType().getNonReferenceType()->getAsCXXRecordDecl();
+  const auto *const record = expr->getType().getNonReferenceType()->getAsCXXRecordDecl();
   if (derivesStdExceptionNamed(record, "system_error")) return true;
-  if (const auto ref = llvm::dyn_cast<clang::DeclRefExpr>(expr))
-    if (const auto var = llvm::dyn_cast<clang::VarDecl>(ref->getDecl()); var && var->hasInit() && seen.insert(var).second)
+  if (const auto *const ref = llvm::dyn_cast<clang::DeclRefExpr>(expr))
+    if (const auto *const var = llvm::dyn_cast<clang::VarDecl>(ref->getDecl()); var && var->hasInit() && seen.insert(var).second)
       return carriesComposedStdExceptionWhat(var->getInit(), seen);
-  if (const auto conditional = llvm::dyn_cast<clang::AbstractConditionalOperator>(expr))
+  if (const auto *const conditional = llvm::dyn_cast<clang::AbstractConditionalOperator>(expr))
     return carriesComposedStdExceptionWhat(conditional->getTrueExpr(), seen)
            || carriesComposedStdExceptionWhat(conditional->getFalseExpr(), seen);
-  if (const auto construct = llvm::dyn_cast<clang::CXXConstructExpr>(expr))
-    for (const auto arg : construct->arguments())
+  if (const auto *const construct = llvm::dyn_cast<clang::CXXConstructExpr>(expr))
+    for (const auto *const arg : construct->arguments())
       if (derivesStdException(arg->getType().getNonReferenceType()->getAsCXXRecordDecl()) && carriesComposedStdExceptionWhat(arg, seen))
         return true;
   return false;
@@ -1976,17 +2006,17 @@ static void mergeComposedStdExceptions(ComposedStdExceptions &into, const Compos
                                                                          Set<const clang::FunctionDecl *> &recursion) {
   if (!stmt) return {};
   ComposedStdExceptions result;
-  if (const auto thrown = llvm::dyn_cast<clang::CXXThrowExpr>(stmt)) {
-    const auto value = thrown->getSubExpr();
+  if (const auto *const thrown = llvm::dyn_cast<clang::CXXThrowExpr>(stmt)) {
+    const auto *const value = thrown->getSubExpr();
     if (!value) return rethrows;
     Set<const clang::VarDecl *> seen;
     if (carriesComposedStdExceptionWhat(value, seen))
-      if (const auto record = value->getType().getNonReferenceType()->getAsCXXRecordDecl()) result.insert(record);
+      if (const auto *const record = value->getType().getNonReferenceType()->getAsCXXRecordDecl()) result.insert(record);
   }
-  if (const auto tried = llvm::dyn_cast<clang::CXXTryStmt>(stmt)) {
+  if (const auto *const tried = llvm::dyn_cast<clang::CXXTryStmt>(stmt)) {
     auto pending = mayThrowComposedStdExceptions(tried->getTryBlock(), rethrows, recursion);
     for (unsigned i = 0; i < tried->getNumHandlers(); ++i) {
-      const auto handler = tried->getHandler(i);
+      const auto *const handler = tried->getHandler(i);
       ComposedStdExceptions received;
       for (auto it = pending.begin(); it != pending.end();) {
         if (catchesRecord(handler, *it)) {
@@ -1999,14 +2029,14 @@ static void mergeComposedStdExceptions(ComposedStdExceptions &into, const Compos
     mergeComposedStdExceptions(result, pending);
     return result;
   }
-  if (const auto call = llvm::dyn_cast<clang::CallExpr>(stmt)) {
-    const auto callee = call->getDirectCallee();
+  if (const auto *const call = llvm::dyn_cast<clang::CallExpr>(stmt)) {
+    const auto *const callee = call->getDirectCallee();
     if (callee && callee->hasBody() && recursion.insert(callee).second) {
       mergeComposedStdExceptions(result, mayThrowComposedStdExceptions(callee->getBody(), {}, recursion));
       recursion.erase(callee);
     }
   }
-  for (const auto child : stmt->children())
+  for (const auto *const child : stmt->children())
     mergeComposedStdExceptions(result, mayThrowComposedStdExceptions(child, rethrows, recursion));
   return result;
 }
@@ -2042,21 +2072,21 @@ static void mergeComposedStdExceptions(ComposedStdExceptions &into, const Compos
   return fmt::format("#exception_expr_{:x}", reinterpret_cast<uintptr_t>(stmt));
 }
 
-void Remapper::recordExceptionCode(const clang::Stmt &stmt, const Named &code, RemapContext &r) const {
+void Remapper::recordExceptionCode(const clang::Stmt &stmt, const Named &code, RemapContext &r) {
   r.exceptionCodes.emplace(exceptionMetadataKey(&stmt), code);
 }
 
 [[nodiscard]] static const clang::Expr *transparentExceptionExpr(const clang::Stmt *stmt) {
-  if (const auto x = llvm::dyn_cast<clang::ParenExpr>(stmt)) return x->getSubExpr();
-  if (const auto x = llvm::dyn_cast<clang::ExprWithCleanups>(stmt)) return x->getSubExpr();
-  if (const auto x = llvm::dyn_cast<clang::MaterializeTemporaryExpr>(stmt)) return x->getSubExpr();
-  if (const auto x = llvm::dyn_cast<clang::CXXBindTemporaryExpr>(stmt)) return x->getSubExpr();
-  if (const auto x = llvm::dyn_cast<clang::ImplicitCastExpr>(stmt)) return x->getSubExpr();
-  if (const auto x = llvm::dyn_cast<clang::CXXFunctionalCastExpr>(stmt)) return x->getSubExpr();
-  if (const auto x = llvm::dyn_cast<clang::CXXDefaultArgExpr>(stmt)) return x->getExpr();
-  if (const auto x = llvm::dyn_cast<clang::CXXDefaultInitExpr>(stmt)) return x->getExpr();
-  if (const auto x = llvm::dyn_cast<clang::ConstantExpr>(stmt)) return x->getSubExpr();
-  if (const auto x = llvm::dyn_cast<clang::OpaqueValueExpr>(stmt)) return x->getSourceExpr();
+  if (const auto *const x = llvm::dyn_cast<clang::ParenExpr>(stmt)) return x->getSubExpr();
+  if (const auto *const x = llvm::dyn_cast<clang::ExprWithCleanups>(stmt)) return x->getSubExpr();
+  if (const auto *const x = llvm::dyn_cast<clang::MaterializeTemporaryExpr>(stmt)) return x->getSubExpr();
+  if (const auto *const x = llvm::dyn_cast<clang::CXXBindTemporaryExpr>(stmt)) return x->getSubExpr();
+  if (const auto *const x = llvm::dyn_cast<clang::ImplicitCastExpr>(stmt)) return x->getSubExpr();
+  if (const auto *const x = llvm::dyn_cast<clang::CXXFunctionalCastExpr>(stmt)) return x->getSubExpr();
+  if (const auto *const x = llvm::dyn_cast<clang::CXXDefaultArgExpr>(stmt)) return x->getExpr();
+  if (const auto *const x = llvm::dyn_cast<clang::CXXDefaultInitExpr>(stmt)) return x->getExpr();
+  if (const auto *const x = llvm::dyn_cast<clang::ConstantExpr>(stmt)) return x->getSubExpr();
+  if (const auto *const x = llvm::dyn_cast<clang::OpaqueValueExpr>(stmt)) return x->getSourceExpr();
   return nullptr;
 }
 
@@ -2077,7 +2107,7 @@ void Remapper::recordExceptionCode(const clang::Stmt &stmt, const Named &code, R
 [[nodiscard]] static const clang::MaterializeTemporaryExpr *lifetimeExtendedTemporary(const clang::VarDecl *var) {
   const clang::Stmt *current = var ? var->getInit() : nullptr;
   while (current) {
-    if (const auto materialised = llvm::dyn_cast<clang::MaterializeTemporaryExpr>(current);
+    if (const auto *const materialised = llvm::dyn_cast<clang::MaterializeTemporaryExpr>(current);
         materialised && materialised->getExtendingDecl() == var)
       return materialised;
     current = transparentExceptionExpr(current);
@@ -2086,7 +2116,7 @@ void Remapper::recordExceptionCode(const clang::Stmt &stmt, const Named &code, R
 }
 
 [[nodiscard]] static bool identityExceptionWrapper(const clang::CallExpr *call) {
-  const auto callee = call ? call->getDirectCallee() : nullptr;
+  const auto *const callee = call ? call->getDirectCallee() : nullptr;
   if (!callee || call->getNumArgs() != 1) return false;
   const auto id = static_cast<clang::Builtin::ID>(callee->getBuiltinID());
   return id == clang::Builtin::BImove || id == clang::Builtin::BIforward;
@@ -2095,10 +2125,10 @@ void Remapper::recordExceptionCode(const clang::Stmt &stmt, const Named &code, R
 [[nodiscard]] static Opt<Named> findExceptionMetadata(const clang::Stmt *stmt, const Map<std::string, Named> &metadata) {
   while (stmt) {
     if (const auto it = metadata.find(exceptionMetadataKey(stmt)); it != metadata.end()) return it->second;
-    if (const auto ref = llvm::dyn_cast<clang::DeclRefExpr>(stmt))
-      if (const auto var = llvm::dyn_cast<clang::VarDecl>(ref->getDecl()))
+    if (const auto *const ref = llvm::dyn_cast<clang::DeclRefExpr>(stmt))
+      if (const auto *const var = llvm::dyn_cast<clang::VarDecl>(ref->getDecl()))
         if (const auto it = metadata.find(declName(var)); it != metadata.end()) return it->second;
-    if (const auto call = llvm::dyn_cast<clang::CallExpr>(stmt); identityExceptionWrapper(call)) {
+    if (const auto *const call = llvm::dyn_cast<clang::CallExpr>(stmt); identityExceptionWrapper(call)) {
       stmt = call->getArg(0);
       continue;
     }
@@ -2113,11 +2143,11 @@ void Remapper::recordExceptionCode(const clang::Stmt &stmt, const Named &code, R
 }
 
 [[nodiscard]] static const clang::CallExpr *unsupportedExceptionMetadataCall(const Remapper &self, const clang::Expr *expr) {
-  while (const auto next = transparentExceptionExpr(expr))
+  while (const auto *const next = transparentExceptionExpr(expr))
     expr = next;
-  const auto call = llvm::dyn_cast<clang::CallExpr>(expr);
+  const auto *const call = llvm::dyn_cast<clang::CallExpr>(expr);
   if (!call) return nullptr;
-  const auto callee = call->getDirectCallee();
+  const auto *const callee = call->getDirectCallee();
   if (identityExceptionWrapper(call)) return nullptr;
   if (callee && self.specialCallPreservesExceptionMetadata(*call, *callee)) return nullptr;
   if (returnsErrorCode(llvm::dyn_cast_or_null<clang::CXXMethodDecl>(callee))) return nullptr;
@@ -2126,18 +2156,18 @@ void Remapper::recordExceptionCode(const clang::Stmt &stmt, const Named &code, R
 
 [[nodiscard]] static const clang::Expr *throwValue(const clang::Expr *expr) {
   while (true) {
-    if (const auto x = llvm::dyn_cast<clang::ParenExpr>(expr)) expr = x->getSubExpr();
-    else if (const auto x = llvm::dyn_cast<clang::ExprWithCleanups>(expr)) expr = x->getSubExpr();
-    else if (const auto x = llvm::dyn_cast<clang::MaterializeTemporaryExpr>(expr)) expr = x->getSubExpr();
-    else if (const auto x = llvm::dyn_cast<clang::CXXFunctionalCastExpr>(expr)) expr = x->getSubExpr();
-    else if (const auto x = llvm::dyn_cast<clang::CXXBindTemporaryExpr>(expr)) expr = x->getSubExpr();
+    if (const auto *const x = llvm::dyn_cast<clang::ParenExpr>(expr)) expr = x->getSubExpr();
+    else if (const auto *const x = llvm::dyn_cast<clang::ExprWithCleanups>(expr)) expr = x->getSubExpr();
+    else if (const auto *const x = llvm::dyn_cast<clang::MaterializeTemporaryExpr>(expr)) expr = x->getSubExpr();
+    else if (const auto *const x = llvm::dyn_cast<clang::CXXFunctionalCastExpr>(expr)) expr = x->getSubExpr();
+    else if (const auto *const x = llvm::dyn_cast<clang::CXXBindTemporaryExpr>(expr)) expr = x->getSubExpr();
     else return expr;
   }
 }
 
 [[nodiscard]] static std::string exceptionSourceName(clang::QualType type) {
   const auto canonical = type.getNonReferenceType().getCanonicalType().getUnqualifiedType();
-  if (const auto pointer = canonical->getAs<clang::PointerType>()) return exceptionSourceName(pointer->getPointeeType()) + " *";
+  if (const auto *const pointer = canonical->getAs<clang::PointerType>()) return exceptionSourceName(pointer->getPointeeType()) + " *";
   if (const auto *tag = canonical->getAsTagDecl()) {
     const auto name = tag->getQualifiedNameAsString();
     if (!name.empty()) return name;
@@ -2147,7 +2177,7 @@ void Remapper::recordExceptionCode(const clang::Stmt &stmt, const Named &code, R
 
 [[nodiscard]] static bool hasCvQualifiedPointee(clang::QualType type) {
   auto current = type.getNonReferenceType().getCanonicalType().getUnqualifiedType();
-  while (const auto pointer = current->getAs<clang::PointerType>()) {
+  while (const auto *const pointer = current->getAs<clang::PointerType>()) {
     const auto pointee = pointer->getPointeeType().getCanonicalType();
     if (pointee.isConstQualified() || pointee.isVolatileQualified()) return true;
     current = pointee.getUnqualifiedType();
@@ -2163,14 +2193,14 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
 
   auto termToSel = [&r](const Term::Any &t) -> Term::Select {
     if (auto s = t.template get<Term::Select>()) return *s;
-    auto bound = r.newVar(Expr::Alias(t));
+    const auto bound = r.newVar(Expr::Alias(t));
     if (auto s = bound.template get<Term::Select>()) return *s;
     return Term::Select(Named("_invalid_select", t.tpe()), {}, t.tpe());
   };
 
   auto deref = [&r](const Term::Any &term) -> Expr::Any {
     if (const auto arrTpe = term.tpe().get<Type::Ptr>()) {
-      auto idx = r.newVar(integralConstOfType(Type::IntS64(), 0));
+      const auto idx = r.newVar(integralConstOfType(Type::IntS64(), 0));
       return Expr::Index(term, idx, arrTpe->comp);
     }
     return Expr::Alias(term);
@@ -2184,14 +2214,14 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
   };
 
   auto sourceRecord = [](const clang::Expr *expr) {
-    while (const auto next = transparentExceptionExpr(expr))
+    while (const auto *const next = transparentExceptionExpr(expr))
       expr = next;
     return expr->getType().getNonReferenceType()->getAsCXXRecordDecl();
   };
 
   auto lowerTrackedAssignment = [&](const clang::Expr *call, const clang::Expr *receiverExpr, const clang::Expr *sourceExpr,
                                     const clang::CXXMethodDecl *method, clang::QualType returnType) -> Opt<Expr::Any> {
-    const auto owner = method->getParent();
+    const auto *const owner = method->getParent();
     const bool errorCode = stdRecordNamed(owner, "error_code");
     if (!errorCode && !derivesStdException(owner)) return {};
     if (!errorCode && !isStdExceptionRecord(owner) && (!hasOnlyInheritedStdExceptionState(owner) || method->isUserProvided()))
@@ -2264,8 +2294,8 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
 
   auto resolveMemberAccess = [&](const clang::MemberExpr *expr, const Expr::Any &baseExpr) -> MemberAccess {
     const auto chain = [&]() -> Vector<const clang::FieldDecl *> {
-      if (const auto field = llvm::dyn_cast<clang::FieldDecl>(expr->getMemberDecl())) return {field};
-      if (const auto indirect = llvm::dyn_cast<clang::IndirectFieldDecl>(expr->getMemberDecl()))
+      if (const auto *const field = llvm::dyn_cast<clang::FieldDecl>(expr->getMemberDecl())) return {field};
+      if (const auto *const indirect = llvm::dyn_cast<clang::IndirectFieldDecl>(expr->getMemberDecl()))
         return indirect->chain() | collect([](const auto &decl) -> Opt<const clang::FieldDecl *> {
                  if (const auto field = llvm::dyn_cast<clang::FieldDecl>(decl)) return field;
                  return {};
@@ -2286,7 +2316,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       return Named(fieldSymbolName(field, fieldOwnerName(field)), annotateLocalSpace(field, r));
     };
 
-    auto storageNamed = [&](const clang::FieldDecl *field) {
+    const auto storageNamed = [&](const clang::FieldDecl *field) {
       auto source = sourceNamed(field);
       if (auto info = r.bitFields ^ get_maybe(source.symbol)) return info->storage;
       return source;
@@ -2304,19 +2334,19 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                   | prepend(rootSel->root) //
                   | to_vector();
     } else {
-      auto baseVar = Stmt::Var(r.newName(baseExpr.tpe()), baseExpr, /*isMutable*/ false);
+      const auto baseVar = Stmt::Var(r.newName(baseExpr.tpe()), baseExpr, /*isMutable*/ false);
       r.push(baseVar);
       namesPath = {baseVar.name};
     }
 
-    const auto finalField = chain.back();
+    const auto *const finalField = chain.back();
     const auto prefix = namesPath | concat(chain | take(chain.size() - 1) | map(storageNamed)) | to_vector();
 
     const auto source = sourceNamed(finalField);
     if (auto info = r.bitFields ^ get_maybe(source.symbol)) {
-      return MemberAccess{prefix, info->storage, *info};
+      return MemberAccess{.prefix = prefix, .storage = info->storage, .bitField = *info};
     }
-    return MemberAccess{prefix, storageNamed(finalField), {}};
+    return MemberAccess{.prefix = prefix, .storage = storageNamed(finalField), .bitField = {}};
   };
 
   auto storeBitField = [&](const MemberAccess &access, const Term::Any &value) -> Term::Any {
@@ -2330,7 +2360,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
     const auto keptMask = r.newVar(integralConstOfType(storageTpe, clearMaskBits));
     const auto kept = r.newVar(Expr::IntrOp(Intr::BAnd(storageSel, keptMask, storageTpe)));
 
-    auto narrowed = value.tpe() == storageTpe ? value : r.newVar(Expr::Cast(value, storageTpe));
+    const auto narrowed = value.tpe() == storageTpe ? value : r.newVar(Expr::Cast(value, storageTpe));
     const auto valueMask = r.newVar(integralConstOfType(storageTpe, maskForWidth(info.bitWidth, storageBits)));
     Term::Any fieldValue = r.newVar(Expr::IntrOp(Intr::BAnd(narrowed, valueMask, storageTpe)));
     if (info.bitOffset != 0) {
@@ -2345,7 +2375,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
   auto assign = [&r, termToSel](const Term::Any &lhs, const Term::Any &rhs, const bool pointerRebind = false) -> Term::Any {
     const auto lhsArrTpe = lhs.tpe().get<Type::Ptr>();
     const auto rhsArrTpe = rhs.tpe().get<Type::Ptr>();
-    auto lhsSel = termToSel(lhs);
+    const auto lhsSel = termToSel(lhs);
     if (lhsArrTpe && rhsArrTpe && *lhsArrTpe == *rhsArrTpe) {
       if (pointerRebind) {
         // A C++ pointer-valued lhs rebinds. Lowered class/array lvalues also use Ptr, but assign through them.
@@ -2355,10 +2385,10 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         r.push(Stmt::Update(lhsSel, zero, r.newVar(Expr::Index(rhs, zero, lhsArrTpe->comp))));
       }
     } else if (lhsArrTpe && lhsArrTpe->comp == rhs.tpe()) {
-      auto idxLhs = r.newVar(integralConstOfType(Type::IntS64(), 0));
+      const auto idxLhs = r.newVar(integralConstOfType(Type::IntS64(), 0));
       r.push(Stmt::Update(lhsSel, idxLhs, rhs));
     } else if (rhsArrTpe && lhs.tpe() == rhsArrTpe->comp) {
-      auto idxR = r.newVar(integralConstOfType(Type::IntS64(), 0));
+      const auto idxR = r.newVar(integralConstOfType(Type::IntS64(), 0));
       r.push(Stmt::Mut(lhsSel, Expr::Index(rhs, idxR, lhs.tpe())));
     } else if (const auto rhsArr = rhs.tpe().get<Type::Arr>(); rhsArr && lhsArrTpe && lhsArrTpe->comp == rhsArr->comp) {
       // An array assigned to a pointer decays to its first element.
@@ -2456,8 +2486,8 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       // otherwise dropping the binding would drop the temporary's destructor call.
       [&](const clang::CXXBindTemporaryExpr *expr) -> Expr::Any {
         const bool transferredToLocal = r.boundTemporaryType
-                                        && context.hasSameType(expr->getType().getCanonicalType().getNonReferenceType(),
-                                                               r.boundTemporaryType->getCanonicalType().getNonReferenceType());
+                                        && clang::ASTContext::hasSameType(expr->getType().getCanonicalType().getNonReferenceType(),
+                                                                          r.boundTemporaryType->getCanonicalType().getNonReferenceType());
         const bool effectful = !destroysWithoutEffect(expr->getType()->getAsCXXRecordDecl());
         if (transferredToLocal || !effectful) return handleExpr(expr->getSubExpr(), r);
         if (r.cleanups.empty())
@@ -2469,7 +2499,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         const clang::Expr *initialiser = expr->getSubExpr();
         while (const auto *next = transparentExceptionExpr(initialiser))
           initialiser = next;
-        const auto directConstruct = llvm::dyn_cast<clang::CXXConstructExpr>(initialiser);
+        const auto *const directConstruct = llvm::dyn_cast<clang::CXXConstructExpr>(initialiser);
         const auto previousBoundTemporaryType = r.boundTemporaryType;
         r.boundTemporaryType = expr->getType();
         if (directConstruct && tpe.is<Type::Struct>()) {
@@ -2483,7 +2513,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           r.push(Stmt::Var(temporary, value, /*isMutable*/ true));
         }
         r.boundTemporaryType = previousBoundTemporaryType;
-        r.cleanups.back().emplace_back(Cleanup{expr->getType(), temporary});
+        r.cleanups.back().emplace_back(Cleanup{.type = expr->getType(), .instance = temporary});
         return Expr::Alias(select(r, {}, temporary).widen());
       },
       [&](const clang::CXXNewExpr *expr) -> Expr::Any {
@@ -2545,7 +2575,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           const auto allocation = r.newName(Type::Ptr(allocatedTpe, TypeSpace::Global()));
           r.push(Stmt::Var(allocation, Expr::Cast(raw, allocation.tpe), /*isMutable*/ false));
           if (const auto *init = expr->getInitializer()) {
-            auto initialise = r.scoped([&](RemapContext &ri) {
+            const auto initialise = r.scoped([&](RemapContext &ri) {
               if (allocatedTpe.is<Type::Struct>()) {
                 const auto previous = ri.constructInto;
                 ri.constructInto = allocation;
@@ -2557,7 +2587,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                 ri.push(Stmt::Update(select(ri, {}, allocation), Term::IntS64Const(0), value));
               }
             });
-            auto release = r.scoped([&](RemapContext &ri) {
+            const auto release = r.scoped([&](RemapContext &ri) {
               const auto pointer = ri.newVar(Expr::Cast(select(ri, {}, allocation), Type::Ptr(Type::IntS8(), TypeSpace::Global())));
               (void)ri.newVar(Expr::ForeignCall("polyrt_host_free", {pointer}, Type::Unit0()));
               ri.push(Stmt::Rethrow());
@@ -2578,19 +2608,19 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           r.constructInto.reset();
           const auto allocated = destination.value_or(r.newVar(tpe));
           defaultInitialiseStruct(r, *structTpe, allocated);
-          auto initialiseMember = [&](const Term::Select &member, const Type::Any &memberTpe, const clang::Expr *init) {
+          const auto initialiseMember = [&](const Term::Select &member, const Type::Any &memberTpe, const clang::Expr *init) {
             const clang::Expr *core = init;
             bool defaultMemberInit = false;
             while (true) {
-              if (const auto defaultInit = llvm::dyn_cast<clang::CXXDefaultInitExpr>(core)) {
+              if (const auto *const defaultInit = llvm::dyn_cast<clang::CXXDefaultInitExpr>(core)) {
                 defaultMemberInit = true;
                 core = defaultInit->getExpr();
                 break;
               }
-              if (const auto next = transparentExceptionExpr(core)) core = next;
+              if (const auto *const next = transparentExceptionExpr(core)) core = next;
               else break;
             }
-            auto lowerInit = [&]() {
+            const auto lowerInit = [&] {
               const auto previousThis = r.aggregateThis;
               if (defaultMemberInit) r.aggregateThis = allocated;
               auto lowered = handleExpr(init, r);
@@ -2607,15 +2637,15 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
               r.constructInto = previous;
             } else r.push(Stmt::Mut(member, conform(r, lowerInit(), memberTpe)));
           };
-          if (const auto rd = expr->getType()->getAsRecordDecl()) {
+          if (auto *const rd = expr->getType()->getAsRecordDecl()) {
             unsigned i = 0;
-            if (const auto cxx = llvm::dyn_cast<clang::CXXRecordDecl>(rd)) {
+            if (auto *const cxx = llvm::dyn_cast<clang::CXXRecordDecl>(rd)) {
               for (const auto &base : cxx->bases()) {
                 if (i >= expr->getNumInits()) break;
                 const auto *init = expr->getInit(i++);
                 const auto baseDef = handleRecord(base.getType()->getAsCXXRecordDecl(), r);
                 // Empty bases carry no observable state and may use the synthetic #empty storage type for EBO.
-                if (r.emptyStruct(*baseDef) || llvm::isa<clang::ImplicitValueInitExpr>(init)) continue;
+                if (Remapper::RemapContext::emptyStruct(*baseDef) || llvm::isa<clang::ImplicitValueInitExpr>(init)) continue;
                 const auto btpe = handleType(base.getType(), r);
                 initialiseMember(select(r, {allocated}, baseMember(*baseDef)), btpe, init);
               }
@@ -2627,7 +2657,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
               const auto ftpe = annotateLocalSpace(field, r);
               const auto member = select(r, {allocated}, Named(fieldSymbolName(field, fqcn(structTpe->name)), ftpe));
               if (const auto arrTpe = ftpe.get<Type::Arr>()) {
-                if (const auto elems = llvm::dyn_cast<clang::InitListExpr>(init)) {
+                if (const auto *const elems = llvm::dyn_cast<clang::InitListExpr>(init)) {
                   initArray(member, *arrTpe, elems);
                   continue;
                 }
@@ -2682,7 +2712,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       },
       [&](const clang::CXXThrowExpr *expr) -> Expr::Any {
         const auto loc = expr->getBeginLoc().printToString(context.getSourceManager());
-        const auto sub = expr->getSubExpr();
+        const auto *const sub = expr->getSubExpr();
         if (!sub) {
           if (!r.inCatch) raise(fmt::format("Unsupported rethrow at {} (it is not inside a handler)", loc));
           unwindCleanups(r, r.tryFrame);
@@ -2694,14 +2724,14 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         if (thrown->isFunctionPointerType())
           raise(fmt::format("Unsupported function pointer exception at {} (function addresses are not representable in PolyAST)", loc));
         const auto thrownTpe = handleType(thrown, r);
-        const auto source = throwValue(sub);
+        const auto *const source = throwValue(sub);
         // The handler owns a directly-thrown prvalue. Bypass Clang's source-scope lifetime wrappers.
         auto lowered = handleExpr(source, r);
         if (const auto refTo = lowered.get<Expr::RefTo>();
             refTo && thrownTpe.is<Type::Ptr>() && storageSpace(refTo->lhs).is<TypeSpace::Private>())
           lowered = Expr::Cast(r.newVar(refTo->withSpace(TypeSpace::Private())), thrownTpe);
         const auto value = r.newVar(conform(r, lowered, thrownTpe));
-        const auto record = thrown->getAsCXXRecordDecl();
+        const auto *const record = thrown->getAsCXXRecordDecl();
         if (derivesStdException(record)) {
           const auto stored = findExceptionMetadata(source, r.exceptionWhats);
           if (!stored) raise(fmt::format("Unsupported thrown standard exception without metadata: {}", pretty_string(source, context)));
@@ -2732,7 +2762,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           const auto pointerType = pointer.tpe().get<Type::Ptr>();
           if (!pointerType) raise("Package delete operand did not lower to a pointer");
           const auto pointee = expr->getArgument()->getType()->getPointeeType();
-          const auto record = pointee.isNull() ? nullptr : pointee->getAsCXXRecordDecl();
+          const auto *const record = pointee.isNull() ? nullptr : pointee->getAsCXXRecordDecl();
           if (!record || record->getQualifiedNameAsString().find("std::_Sp_counted_") == std::string::npos
               || !record->hasTrivialDestructor())
             raise("Package delete is only supported for host-only shared-control scaffolding");
@@ -2810,8 +2840,8 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                                                              })))) {
               return sourceExpr;
             } else if (const auto ptrTpe = sourceExpr.tpe().get<Type::Ptr>(); ptrTpe && sameTypeShape(targetTpe, ptrTpe->comp)) {
-              auto base = r.newVar(sourceExpr);
-              auto idx = r.newVar(integralConstOfType(Type::IntS64(), 0));
+              const auto base = r.newVar(sourceExpr);
+              const auto idx = r.newVar(integralConstOfType(Type::IntS64(), 0));
               return Expr::Index(base, idx, ptrTpe->comp);
             } else if (const auto src = sourceExpr.tpe().get<Type::Ptr>(), dst = targetTpe.get<Type::Ptr>();
                        src && dst && sameTypeShape(src->comp, dst->comp)) {
@@ -2888,21 +2918,21 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           // Materialise the implicit `x != 0` / `p != null`: polyc's LLVM backend requires `i1`
           // for branches and would otherwise assert "May only branch on boolean predicates".
           case clang::CK_IntegralToBoolean: {
-            auto z = r.newVar(integralConstOfType(sourceExpr.tpe(), 0));
+            const auto z = r.newVar(integralConstOfType(sourceExpr.tpe(), 0));
             return Expr::IntrOp(Intr::LogicNeq(r.newVar(sourceExpr), z));
           }
           case clang::CK_FloatingToBoolean: {
-            auto z = r.newVar(Remapper::floatConstOfType(sourceExpr.tpe(), 0.0));
+            const auto z = r.newVar(Remapper::floatConstOfType(sourceExpr.tpe(), 0.0));
             return Expr::IntrOp(Intr::LogicNeq(r.newVar(sourceExpr), z));
           }
           case clang::CK_PointerToBoolean: {
             const auto srcTpe = sourceExpr.tpe();
             if (srcTpe.is<Type::Ptr>()) {
-              auto z = r.newVar(integralConstOfType(Type::IntS64(), 0));
-              auto cast = r.newVar(Expr::Cast(r.newVar(sourceExpr), Type::IntS64()));
+              const auto z = r.newVar(integralConstOfType(Type::IntS64(), 0));
+              const auto cast = r.newVar(Expr::Cast(r.newVar(sourceExpr), Type::IntS64()));
               return Expr::IntrOp(Intr::LogicNeq(cast, z));
             }
-            auto z = r.newVar(integralConstOfType(srcTpe, 0));
+            const auto z = r.newVar(integralConstOfType(srcTpe, 0));
             return Expr::IntrOp(Intr::LogicNeq(r.newVar(sourceExpr), z));
           }
           case clang::CK_ToVoid:
@@ -3104,12 +3134,12 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       },
       // `__func__` carries its expansion as a StringLiteral; unexpanded (dependent) forms have none
       [&](const clang::PredefinedExpr *stmt) -> Expr::Any {
-        const auto name = stmt->getFunctionName();
+        const auto *const name = stmt->getFunctionName();
         return name ? handleExpr(name, r) : failExpr();
       },
       [&](const clang::FloatingLiteral *stmt) -> Expr::Any {
         const auto apFloat = stmt->getValue();
-        if (auto builtin = llvm::dyn_cast<clang::BuiltinType>(stmt->getType().getDesugaredType(context))) {
+        if (const auto *builtin = llvm::dyn_cast<clang::BuiltinType>(stmt->getType().getDesugaredType(context))) {
           switch (builtin->getKind()) {
             case clang::BuiltinType::Float: return Expr::Alias(Term::Float32Const(apFloat.convertToFloat()));
             case clang::BuiltinType::Double: return Expr::Alias(Term::Float64Const(apFloat.convertToDouble()));
@@ -3119,7 +3149,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         return Expr::Alias(Term::IntS64Const(0));
       },
       [&](const clang::AbstractConditionalOperator *expr) -> Expr::Any { // covers a?b:c and a?:c
-        const auto record = expr->getType().getNonReferenceType()->getAsCXXRecordDecl();
+        const auto *const record = expr->getType().getNonReferenceType()->getAsCXXRecordDecl();
         const auto valueTpe = handleType(expr->getType(), r);
         // A conditional whose arms are glvalues is itself a glvalue. Preserve the selected
         // storage address so a returned reference cannot point at this function's dead stack slot.
@@ -3171,15 +3201,15 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           }
           return conform(r_, e, lhs.tpe);
         };
-        auto condTerm = r.newVar(handleExpr(expr->getCond(), r));
-        auto trueArm = r.scoped([&](auto &r_) { r_.push(Stmt::Mut(lhs, arm(r_, expr->getTrueExpr()))); });
-        auto falseArm = r.scoped([&](auto &r_) { r_.push(Stmt::Mut(lhs, arm(r_, expr->getFalseExpr()))); });
+        const auto condTerm = r.newVar(handleExpr(expr->getCond(), r));
+        const auto trueArm = r.scoped([&](auto &r_) { r_.push(Stmt::Mut(lhs, arm(r_, expr->getTrueExpr()))); });
+        const auto falseArm = r.scoped([&](auto &r_) { r_.push(Stmt::Mut(lhs, arm(r_, expr->getFalseExpr()))); });
         r.push(Stmt::Cond(condTerm, trueArm, falseArm));
         return Expr::Alias(lhs);
       },
       [&](const clang::DeclRefExpr *expr) -> Expr::Any {
-        const auto decl = expr->getDecl();
-        if (const auto binding = llvm::dyn_cast<clang::BindingDecl>(decl)) return handleExpr(binding->getBinding(), r);
+        const auto *const decl = expr->getDecl();
+        if (const auto *const binding = llvm::dyn_cast<clang::BindingDecl>(decl)) return handleExpr(binding->getBinding(), r);
         if (const auto *declaredKernel = llvm::dyn_cast<clang::FunctionDecl>(decl);
             declaredKernel && declaredKernel->hasAttr<clang::CUDAGlobalAttr>()) {
           const auto *kernel = context.getLangOpts().HIP ? call_prism::resolveHipKernel(*declaredKernel) : declaredKernel;
@@ -3200,15 +3230,15 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         const auto actual = handleType(expr->getType(), r);
         const auto refDeclName = declName(decl);
 
-        if (const auto ec = llvm::dyn_cast<clang::EnumConstantDecl>(decl)) {
+        if (const auto *const ec = llvm::dyn_cast<clang::EnumConstantDecl>(decl)) {
           const clang::Expr *initializer = ec->getInitExpr();
           while (initializer) {
             initializer = initializer->IgnoreParenImpCasts();
-            if (const auto constant = llvm::dyn_cast<clang::ConstantExpr>(initializer)) {
+            if (const auto *const constant = llvm::dyn_cast<clang::ConstantExpr>(initializer)) {
               initializer = constant->getSubExpr();
               continue;
             }
-            if (const auto size = llvm::dyn_cast<clang::UnaryExprOrTypeTraitExpr>(initializer);
+            if (const auto *const size = llvm::dyn_cast<clang::UnaryExprOrTypeTraitExpr>(initializer);
                 size && size->getKind() == clang::UETT_SizeOf)
               return conform(r, handleExpr(size, r), actual);
             break;
@@ -3233,7 +3263,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
 
         // Inline namespace-scope constexpr / const-init refs; otherwise we'd Select an unbound
         // name and polyc would reject it. Locals stay on the normal stack-lookup path.
-        if (auto var = llvm::dyn_cast<clang::VarDecl>(decl); var && !var->isLocalVarDeclOrParm()) {
+        if (const auto *var = llvm::dyn_cast<clang::VarDecl>(decl); var && !var->isLocalVarDeclOrParm()) {
           const bool isConstantInit = var->isConstexpr() || var->getType().isConstQualified();
           if (isConstantInit) {
             const auto tpe = handleType(var->getType(), r);
@@ -3336,7 +3366,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         } else if (auto arrTpe = baseExpr.tpe().get<Type::Arr>(); arrTpe) {
           if (arrTpe->comp == exprTpe) {
             return Expr::RefTo(r.newVar(baseExpr), idxExpr, exprTpe, arrTpe->space, Region::Opaque());
-          } else if (primitiveSize(arrTpe->comp) == 1u && (primitiveSize(exprTpe) || exprTpe.is<Type::Struct>())) {
+          } else if (primitiveSize(arrTpe->comp) == 1U && (primitiveSize(exprTpe) || exprTpe.is<Type::Struct>())) {
             // Reinterpreting a byte array as typed storage scales the element index in bytes. In
             // particular, CUB overlays typed TempStorage on `__shared__ char[]`; retaining the
             // array's Local space here is what makes the backend emit shared-memory accesses.
@@ -3374,7 +3404,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         const auto exprTpe = handleType(expr->getType(), r);
 
         // pointer inc/dec rebases the pointer; the scalar path below would step the pointee instead
-        auto ptrStep = [&](const int64_t delta, const bool snapshot) -> std::optional<Term::Any> {
+        const auto ptrStep = [&](const int64_t delta, const bool snapshot) -> std::optional<Term::Any> {
           const auto resolved = pointerLValue(lhs, exprTpe);
           if (!resolved) return {};
           const auto &[current, indirect] = *resolved;
@@ -3392,37 +3422,37 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         switch (expr->getOpcode()) {
           case clang::UO_PostInc: {
             if (const auto stepped = ptrStep(1, /*snapshot*/ true)) return Expr::Alias(*stepped);
-            auto one = r.newVar(integralConstOfType(exprTpe, 1));
+            const auto one = r.newVar(integralConstOfType(exprTpe, 1));
             // snapshot into its own binding; newVar would alias the lvalue in-place and read the bumped value
             const auto oldName = r.newName(exprTpe);
             r.push(Stmt::Var(oldName, deref(lhs), /*isMutable*/ false));
             const auto derefL = select(r, {}, oldName).widen();
-            auto bumped = r.newVar(Expr::IntrOp(Intr::Add(derefL, one, exprTpe)));
+            const auto bumped = r.newVar(Expr::IntrOp(Intr::Add(derefL, one, exprTpe)));
             assign(lhs, bumped);
             return Expr::Alias(derefL);
           }
           case clang::UO_PostDec: {
             if (const auto stepped = ptrStep(-1, /*snapshot*/ true)) return Expr::Alias(*stepped);
-            auto one = r.newVar(integralConstOfType(exprTpe, 1));
+            const auto one = r.newVar(integralConstOfType(exprTpe, 1));
             const auto oldName = r.newName(exprTpe);
             r.push(Stmt::Var(oldName, deref(lhs), /*isMutable*/ false));
             const auto derefL = select(r, {}, oldName).widen();
-            auto bumped = r.newVar(Expr::IntrOp(Intr::Sub(derefL, one, exprTpe)));
+            const auto bumped = r.newVar(Expr::IntrOp(Intr::Sub(derefL, one, exprTpe)));
             assign(lhs, bumped);
             return Expr::Alias(derefL);
           }
           case clang::UO_PreInc: {
             if (const auto stepped = ptrStep(1, /*snapshot*/ false)) return Expr::Alias(*stepped);
-            auto one = r.newVar(integralConstOfType(exprTpe, 1));
-            auto derefL = r.newVar(deref(lhs));
-            auto bumped = r.newVar(Expr::IntrOp(Intr::Add(derefL, one, exprTpe)));
+            const auto one = r.newVar(integralConstOfType(exprTpe, 1));
+            const auto derefL = r.newVar(deref(lhs));
+            const auto bumped = r.newVar(Expr::IntrOp(Intr::Add(derefL, one, exprTpe)));
             return Expr::Alias(assign(lhs, bumped));
           }
           case clang::UO_PreDec: {
             if (const auto stepped = ptrStep(-1, /*snapshot*/ false)) return Expr::Alias(*stepped);
-            auto one = r.newVar(integralConstOfType(exprTpe, 1));
-            auto derefL = r.newVar(deref(lhs));
-            auto bumped = r.newVar(Expr::IntrOp(Intr::Sub(derefL, one, exprTpe)));
+            const auto one = r.newVar(integralConstOfType(exprTpe, 1));
+            const auto derefL = r.newVar(deref(lhs));
+            const auto bumped = r.newVar(Expr::IntrOp(Intr::Sub(derefL, one, exprTpe)));
             return Expr::Alias(assign(lhs, bumped));
           }
           case clang::UO_AddrOf: raise("unreachable address-of lowering");
@@ -3456,7 +3486,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       [&](const clang::BinaryOperator *expr) -> Expr::Any {
         // Here we're just dealing with the builtin operators, overloaded operators will be a clang::CXXOperatorCallExpr.
         if (expr->getOpcode() == clang::BO_Assign) {
-          if (auto *lhsMember = llvm::dyn_cast<clang::MemberExpr>(expr->getLHS()->IgnoreParens())) {
+          if (const auto *lhsMember = llvm::dyn_cast<clang::MemberExpr>(expr->getLHS()->IgnoreParens())) {
             const auto baseExpr = handleExpr(lhsMember->getBase(), r);
             const auto access = resolveMemberAccess(lhsMember, baseExpr);
             if (access.bitField) {
@@ -3473,9 +3503,9 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           const bool conjunction = opcode == clang::BO_LAnd;
           const auto result = select(r, {}, r.newVar(handleType(expr->getType(), r)));
           const auto condition = r.newVar(conform(r, handleExpr(expr->getLHS(), r), Type::Bool1()));
-          auto rhsArm = r.scoped(
+          const auto rhsArm = r.scoped(
               [&](auto &nested) { nested.push(Stmt::Mut(result, conform(nested, handleExpr(expr->getRHS(), nested), result.tpe))); });
-          auto shortArm = r.scoped([&](auto &nested) {
+          const auto shortArm = r.scoped([&](auto &nested) {
             nested.push(Stmt::Mut(result, conform(nested, Expr::Alias(Term::Bool1Const(!conjunction)), result.tpe)));
           });
           r.push(conjunction ? Stmt::Cond(condition, rhsArm, shortArm) : Stmt::Cond(condition, shortArm, rhsArm));
@@ -3498,20 +3528,20 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
 
         // pointer relations compare addresses, not pointees; the compare intrinsics need an integral, unsigned for address order
         const auto addrRel = lhs.tpe().is<Type::Ptr>() || rhs.tpe().is<Type::Ptr>();
-        auto rl = [&]() -> Term::Any { return addrRel ? r.newVar(Expr::Cast(lhs, Type::IntU64())) : dl(); };
-        auto rr = [&]() -> Term::Any { return addrRel ? r.newVar(Expr::Cast(rhs, Type::IntU64())) : dr(); };
+        const auto rl = [&]() -> Term::Any { return addrRel ? r.newVar(Expr::Cast(lhs, Type::IntU64())) : dl(); };
+        const auto rr = [&]() -> Term::Any { return addrRel ? r.newVar(Expr::Cast(rhs, Type::IntU64())) : dr(); };
 
         const auto compTpe = clang::isa<clang::CompoundAssignOperator>(expr)
                                  ? handleType(clang::cast<clang::CompoundAssignOperator>(expr)->getComputationResultType(), r)
                                  : tpe_;
-        auto cl = [&]() -> Term::Any { return r.newVar(conform(r, Expr::Alias(dl()), compTpe)); };
-        auto cr = [&]() -> Term::Any { return r.newVar(conform(r, Expr::Alias(dr()), compTpe)); };
+        const auto cl = [&]() -> Term::Any { return r.newVar(conform(r, Expr::Alias(dl()), compTpe)); };
+        const auto cr = [&]() -> Term::Any { return r.newVar(conform(r, Expr::Alias(dr()), compTpe)); };
 
-        auto opAssign = [&](const Intr::Any &op) -> Term::Any {
-          auto v = r.newVar(Expr::IntrOp(op));
-          auto stored = r.newVar(conform(r, Expr::Alias(v), tpe_)); // narrow the computation type back to the LHS type
+        const auto opAssign = [&](const Intr::Any &op) -> Term::Any {
+          const auto v = r.newVar(Expr::IntrOp(op));
+          const auto stored = r.newVar(conform(r, Expr::Alias(v), tpe_)); // narrow the computation type back to the LHS type
           if (lhs.tpe().is<Type::Ptr>()) {
-            auto z = r.newVar(integralConstOfType(Type::IntS64(), 0));
+            const auto z = r.newVar(integralConstOfType(Type::IntS64(), 0));
             r.push(Stmt::Update(termToSel(lhs), z, stored));
           } else {
             r.push(Stmt::Mut(termToSel(lhs), Expr::Alias(stored)));
@@ -3536,13 +3566,13 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
               return Expr::RefTo(termToSel(lhs), negativeIdx, rtnPtr->comp, lhsPtr->space, Region::Opaque());
             } else if (const auto lhsPtr = lhs.tpe().get<Type::Ptr>(); lhsPtr && rhs.tpe().is<Type::Ptr>()) {
               const auto i64 = Type::IntS64();
-              auto lhsInt = r.newVar(Expr::Cast(lhs, i64));
-              auto rhsInt = r.newVar(Expr::Cast(rhs, i64));
-              auto byteDiff = r.newVar(Expr::IntrOp(Intr::Sub(lhsInt, rhsInt, i64)));
+              const auto lhsInt = r.newVar(Expr::Cast(lhs, i64));
+              const auto rhsInt = r.newVar(Expr::Cast(rhs, i64));
+              const auto byteDiff = r.newVar(Expr::IntrOp(Intr::Sub(lhsInt, rhsInt, i64)));
               // void*/incomplete pointees report size 0; clang treats as 1.
               const auto elemBytes = context.getTypeSizeInChars(expr->getLHS()->getType()->getPointeeType()).getQuantity();
-              auto elemSz = r.newVar(integralConstOfType(i64, elemBytes ? elemBytes : 1));
-              auto elemDiff = r.newVar(Expr::IntrOp(Intr::Div(byteDiff, elemSz, i64)));
+              const auto elemSz = r.newVar(integralConstOfType(i64, elemBytes ? elemBytes : 1));
+              const auto elemDiff = r.newVar(Expr::IntrOp(Intr::Div(byteDiff, elemSz, i64)));
               return Expr::Cast(elemDiff, tpe_);
             } else {
               return Expr::IntrOp(Intr::Sub(dl(), dr(), tpe_));
@@ -3587,7 +3617,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
             }
           case clang::BO_SubAssign:
             if (tpe_.is<Type::Ptr>()) {
-              auto negativeIdx = r.newVar(Expr::IntrOp(Intr::Neg(rhs, rhs.tpe())));
+              const auto negativeIdx = r.newVar(Expr::IntrOp(Intr::Neg(rhs, rhs.tpe())));
               if (const auto rebased = rebasePointer(lhs, negativeIdx, tpe_)) return Expr::Alias(*rebased);
             }
             return Expr::Alias(opAssign(Intr::Sub(cl(), cr(), compTpe)));
@@ -3609,7 +3639,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         defaultInitialiseStruct(r, *structTpe, instance);
         const auto def = r.findStruct(fqcn(structTpe->name), "lambda captures");
         for (auto &&[capture, init] : expr->getLambdaClass()->captures() | zip(expr->capture_inits())) {
-          const auto var = capture.getCapturedVar();
+          auto *const var = capture.getCapturedVar();
           if (!var && !capture.capturesThis()) continue;
           const auto name = var ? lambdaCaptureName(expr->getLambdaClass(), var) : CapturedThis;
           const auto field = def->members ^ find([&](const auto &m) { return m.symbol == name; });
@@ -3647,7 +3677,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         const auto arrayDestination = r.constructArrayInto;
         r.constructArrayInto.reset();
         const auto ctorTpe = handleType(expr->getType(), r);
-        const auto record = expr->getType()->getAsCXXRecordDecl();
+        const auto *const record = expr->getType()->getAsCXXRecordDecl();
         const auto customStdException = derivesStdException(record) && !isStdExceptionRecord(record);
         const auto inheritedStdState =
             customStdException && expr->getConstructor()->isInheritingConstructor() && hasOnlyInheritedStdExceptionState(record);
@@ -3686,11 +3716,11 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           if (!tpe) raise("Standard exception constructor resulted in a non-struct type: " + repr(ctorTpe));
           const auto allocated = r.newVar(ctorTpe);
           defaultInitialiseStruct(r, *tpe, allocated);
-          auto lowerStringMessage = [&](const clang::Expr *arg) -> Term::Any {
+          const auto lowerStringMessage = [&](const clang::Expr *arg) -> Term::Any {
             const clang::Expr *core = arg;
-            while (const auto next = transparentExceptionExpr(core))
+            while (const auto *const next = transparentExceptionExpr(core))
               core = next;
-            if (const auto ctor = llvm::dyn_cast<clang::CXXConstructExpr>(core)) {
+            if (const auto *const ctor = llvm::dyn_cast<clang::CXXConstructExpr>(core)) {
               Opt<Term::Any> text;
               Opt<Term::Any> count;
               for (const auto *part : ctor->arguments()) {
@@ -3715,7 +3745,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           Vector<Term::Any> evaluated;
           evaluated.reserve(expr->getNumArgs());
           for (const auto *arg : expr->arguments()) {
-            const auto argRecord = arg->getType().getNonReferenceType()->getAsCXXRecordDecl();
+            const auto *const argRecord = arg->getType().getNonReferenceType()->getAsCXXRecordDecl();
             if (derivesStdException(argRecord) || stdRecordNamed(argRecord, "error_code"))
               if (const auto *call = unsupportedExceptionMetadataCall(*this, arg))
                 raise(
@@ -3728,7 +3758,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           bool incompleteMessage = false;
           for (size_t i = 0; i < expr->getNumArgs(); ++i) {
             const auto *arg = expr->getArg(i);
-            const auto argRecord = arg->getType().getNonReferenceType()->getAsCXXRecordDecl();
+            const auto *const argRecord = arg->getType().getNonReferenceType()->getAsCXXRecordDecl();
             if (derivesStdException(argRecord)) {
               if (stdExceptionNamed(record, "exception")) {
                 message = Term::StringConst("std::exception");
@@ -3779,11 +3809,11 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           if (expr->requiresZeroInitialization()) return zeroInitialise(r, ctorTpe);
           if (expr->getNumArgs() == 1) {
             const clang::Expr *argument = expr->getArg(0)->IgnoreImplicit();
-            while (const auto construct = llvm::dyn_cast<clang::CXXConstructExpr>(argument)) {
+            while (const auto *const construct = llvm::dyn_cast<clang::CXXConstructExpr>(argument)) {
               if (construct->getNumArgs() != 1) break;
               argument = construct->getArg(0)->IgnoreImplicit();
             }
-            if (const auto lambda = llvm::dyn_cast<clang::LambdaExpr>(argument)) {
+            if (const auto *const lambda = llvm::dyn_cast<clang::LambdaExpr>(argument)) {
               if (lambda->getLambdaClass()->capture_size() != 0) raise("Capturing lambdas cannot be stored in package callable variables");
               const auto [operatorName, operatorFunction] = handleCall(lambda->getCallOperator(), r);
               operatorFunction->decl.affinity = FunctionAffinity::Offload();
@@ -3810,30 +3840,29 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           } else {
           }
 
-          auto instance = destination ? [&]() -> Expr::Any {
-            if (expr->requiresZeroInitialization()) defaultInitialiseStruct(r, *tpe, *destination);
-            if (destination->tpe.template is<Type::Ptr>()) return Expr::Alias(select(r, {}, *destination));
-            return Expr::RefTo(select(r, {}, *destination), {}, ctorTpe, storageSpace(select(r, {}, *destination)), Region::Opaque());
-          }()
-              : r.parent &&r.ctorChain //
-              ? [&]() -> Expr::Any {
-                  Named instance(This, ptrTo(Type::Struct(r.parent->name, {})));
-                  defaultInitialiseStruct(r, *tpe, instance);
-                  return Expr::Alias(select(r, {}, instance));
-                }()
-              : [&]() -> Expr::Any {
-                  auto allocated = r.newVar(ctorTpe);
-                  defaultInitialiseStruct(r, *tpe, allocated);
-                  return Expr::RefTo(select(r, {}, allocated), {}, ctorTpe, TypeSpace::Global(), Region::Opaque());
-                }();
+          auto instance = [&]() -> Expr::Any {
+            if (destination) {
+              if (expr->requiresZeroInitialization()) defaultInitialiseStruct(r, *tpe, *destination);
+              if (destination->tpe.template is<Type::Ptr>()) return Expr::Alias(select(r, {}, *destination));
+              return Expr::RefTo(select(r, {}, *destination), {}, ctorTpe, storageSpace(select(r, {}, *destination)), Region::Opaque());
+            }
+            if (r.parent && r.ctorChain) {
+              const Named parentInstance(This, ptrTo(Type::Struct(r.parent->name, {})));
+              defaultInitialiseStruct(r, *tpe, parentInstance);
+              return Expr::Alias(select(r, {}, parentInstance));
+            }
+            const auto allocated = r.newVar(ctorTpe);
+            defaultInitialiseStruct(r, *tpe, allocated);
+            return Expr::RefTo(select(r, {}, allocated), {}, ctorTpe, TypeSpace::Global(), Region::Opaque());
+          }();
 
           Vector<Term::Any> ivArgs;
           ivArgs.reserve(expr->getNumArgs());
           for (size_t i = 0; i < expr->getNumArgs(); ++i)
             ivArgs.emplace_back(r.newVar(conform(r, handleExpr(expr->getArg(i), r), fn->decl.args[i + 1].named.tpe)));
-          auto thisArg = r.newVar(conform(r, instance, fn->decl.args.front().named.tpe));
-          auto _ = r.newVar(Expr::Invoke(Type::FnRef(Sym({name})), std::vector<Type::Any>{}, std::optional<Term::Any>{},
-                                         std::vector<Term::Any>{thisArg} ^ concat(ivArgs), Type::Unit0()));
+          const auto thisArg = r.newVar(conform(r, instance, fn->decl.args.front().named.tpe));
+          const auto _ = r.newVar(Expr::Invoke(Type::FnRef(Sym({name})), std::vector<Type::Any>{}, std::optional<Term::Any>{},
+                                               std::vector<Term::Any>{thisArg} ^ concat(ivArgs), Type::Unit0()));
           if (defaultStdBase) {
             const auto stored = copyExceptionMessage(r, Term::StringConst("std::exception"));
             r.exceptionWhats.emplace(exceptionMetadataKey(expr), stored);
@@ -3852,9 +3881,9 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
             ivArgs.reserve(expr->getNumArgs());
             for (size_t j = 0; j < expr->getNumArgs(); ++j)
               ivArgs.emplace_back(r.newVar(conform(r, handleExpr(expr->getArg(j), r), fn->decl.args[j + 1].named.tpe)));
-            auto thisArg = r.newVar(conform(r, Expr::Alias(select(r, {}, element)), fn->decl.args.front().named.tpe));
-            auto _ = r.newVar(Expr::Invoke(Type::FnRef(Sym({name})), std::vector<Type::Any>{}, std::optional<Term::Any>{},
-                                           std::vector<Term::Any>{thisArg} ^ concat(ivArgs), Type::Unit0()));
+            const auto thisArg = r.newVar(conform(r, Expr::Alias(select(r, {}, element)), fn->decl.args.front().named.tpe));
+            const auto _ = r.newVar(Expr::Invoke(Type::FnRef(Sym({name})), std::vector<Type::Any>{}, std::optional<Term::Any>{},
+                                                 std::vector<Term::Any>{thisArg} ^ concat(ivArgs), Type::Unit0()));
           }
           return Expr::Any(Expr::Alias(target.widen()));
         } else {
@@ -3862,7 +3891,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         }
       },
       [&](const clang::CXXMemberCallExpr *expr) -> Expr::Any { // instance.method(...)
-        const auto calleeFn = expr->getCalleeDecl() ? expr->getCalleeDecl()->getAsFunction() : nullptr;
+        const auto *const calleeFn = expr->getCalleeDecl() ? expr->getCalleeDecl()->getAsFunction() : nullptr;
         if (!calleeFn) raise(fmt::format("Member call with no resolvable callee: {}", pretty_string(expr, context)));
         if (emitPackageProgramMode)
           if (const auto *method = llvm::dyn_cast<clang::CXXMethodDecl>(calleeFn);
@@ -3885,22 +3914,22 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
               }())
             raise(fmt::format("Virtual shared-control dispatch is not supported in package programs: {}", pretty_string(expr, context)));
         if (const auto lowered = lowerSpecialCall(*expr, *calleeFn, r)) return *lowered;
-        if (const auto method = llvm::dyn_cast<clang::CXXMethodDecl>(calleeFn);
+        if (const auto *const method = llvm::dyn_cast<clang::CXXMethodDecl>(calleeFn);
             method && (method->isCopyAssignmentOperator() || method->isMoveAssignmentOperator()) && expr->getNumArgs() == 1)
           if (const auto lowered = lowerTrackedAssignment(expr, expr->getImplicitObjectArgument(), expr->getArg(0), method,
                                                           expr->getCallReturnType(context)))
             return *lowered;
-        if (const auto method = llvm::dyn_cast<clang::CXXMethodDecl>(calleeFn);
+        if (const auto *const method = llvm::dyn_cast<clang::CXXMethodDecl>(calleeFn);
             method && stdExceptionNamed(method->getParent(), "filesystem_error")
             && (method->getNameAsString() == "path1" || method->getNameAsString() == "path2"))
           raise(fmt::format("Unsupported std::filesystem_error::{} exception observer", method->getNameAsString()));
-        if (const auto method = llvm::dyn_cast<clang::CXXMethodDecl>(calleeFn);
+        if (const auto *const method = llvm::dyn_cast<clang::CXXMethodDecl>(calleeFn);
             method && stdRecordNamed(method->getParent(), "error_code") && method->getNameAsString() != "value")
           raise(fmt::format("Unsupported std::error_code::{} exception observer (only value() is represented)", method->getNameAsString()));
-        if (const auto method = llvm::dyn_cast<clang::CXXMethodDecl>(calleeFn);
+        if (const auto *const method = llvm::dyn_cast<clang::CXXMethodDecl>(calleeFn);
             method && method->getNameAsString() == "what" && isStdExceptionRecord(method->getParent())) {
           (void)r.newVar(handleExpr(expr->getImplicitObjectArgument(), r));
-          if (const auto member = llvm::dyn_cast<clang::MemberExpr>(expr->getCallee()->IgnoreParenImpCasts());
+          if (const auto *const member = llvm::dyn_cast<clang::MemberExpr>(expr->getCallee()->IgnoreParenImpCasts());
               member && !member->performsVirtualDispatch(context.getLangOpts()) && stdExceptionNamed(method->getParent(), "exception")) {
             const auto what = copyExceptionMessage(r, Term::StringConst("std::exception"));
             return conform(r, exceptionMessagePointer(what), handleType(expr->getType(), r));
@@ -3912,14 +3941,14 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           if (what) return conform(r, exceptionMessagePointer(*what), handleType(expr->getType(), r));
           raise(fmt::format("Unsupported standard exception observer without object metadata: {}", pretty_string(expr, context)));
         }
-        if (const auto method = llvm::dyn_cast<clang::CXXMethodDecl>(calleeFn);
+        if (const auto *const method = llvm::dyn_cast<clang::CXXMethodDecl>(calleeFn);
             method && method->getNameAsString() == "code" && stdExceptionNamed(method->getParent(), "regex_error")) {
           (void)r.newVar(handleExpr(expr->getImplicitObjectArgument(), r));
           if (const auto code = findExceptionMetadata(expr->getImplicitObjectArgument(), r.exceptionCodes))
             return Expr::Alias(select(r, {}, *code));
           raise(fmt::format("Unsupported standard exception observer without object metadata: {}", pretty_string(expr, context)));
         }
-        if (const auto method = llvm::dyn_cast<clang::CXXMethodDecl>(calleeFn); returnsErrorCode(method)) {
+        if (const auto *const method = llvm::dyn_cast<clang::CXXMethodDecl>(calleeFn); returnsErrorCode(method)) {
           (void)r.newVar(handleExpr(expr->getImplicitObjectArgument(), r));
           const auto state = findExceptionMetadata(expr->getImplicitObjectArgument(), r.exceptionCodes);
           if (!state)
@@ -3927,7 +3956,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           r.exceptionCodes.emplace(exceptionMetadataKey(expr), *state);
           return zeroInitialise(r, handleType(expr->getType(), r));
         }
-        if (const auto method = llvm::dyn_cast<clang::CXXMethodDecl>(calleeFn);
+        if (const auto *const method = llvm::dyn_cast<clang::CXXMethodDecl>(calleeFn);
             method && method->getNameAsString() == "value" && stdRecordNamed(method->getParent(), "error_code")) {
           (void)r.newVar(handleExpr(expr->getImplicitObjectArgument(), r));
           if (const auto state = findExceptionMetadata(expr->getImplicitObjectArgument(), r.exceptionCodes))
@@ -3953,12 +3982,12 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                                        });
         if (!actualReceiverTpe) raise("No actual receiver type in member call");
 
-        auto recvTerm = r.newVar(conform(r, ref(receiver), *actualReceiverTpe));
+        const auto recvTerm = r.newVar(conform(r, ref(receiver), *actualReceiverTpe));
         return Expr::Invoke(Type::FnRef(Sym({name})), std::vector<Type::Any>{}, std::optional<Term::Any>{}, ivArgs ^ prepend(recvTerm),
                             fn->decl.rtn);
       },
       [&](const clang::CXXOperatorCallExpr *expr) -> Expr::Any {
-        const auto calleeFn = expr->getCalleeDecl() ? expr->getCalleeDecl()->getAsFunction() : nullptr;
+        const auto *const calleeFn = expr->getCalleeDecl() ? expr->getCalleeDecl()->getAsFunction() : nullptr;
         if (const auto receiverType =
                 handleType(expr->getArg(0)->IgnoreImpCasts()->getType().getNonReferenceType(), r).template get<Type::Var>()) {
           if (expr->getOperator() == clang::OO_Equal && expr->getNumArgs() == 2) {
@@ -3985,7 +4014,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         }
         if (!calleeFn) raise(fmt::format("Operator call with no resolvable callee: {}", pretty_string(expr, context)));
         if (const auto lowered = lowerSpecialCall(*expr, *calleeFn, r)) return *lowered;
-        const auto operatorMethod = llvm::dyn_cast<clang::CXXMethodDecl>(calleeFn);
+        const auto *const operatorMethod = llvm::dyn_cast<clang::CXXMethodDecl>(calleeFn);
         if (expr->getOperator() == clang::OO_Equal && expr->getNumArgs() == 2 && operatorMethod)
           if (const auto lowered =
                   lowerTrackedAssignment(expr, expr->getArg(0), expr->getArg(1), operatorMethod, expr->getCallReturnType(context)))
@@ -3994,7 +4023,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
 
         if (fn->decl.args.size() != expr->getNumArgs())
           raise("Arg count mismatch, expected " + std::to_string(fn->decl.args.size()) + " but was " + std::to_string(expr->getNumArgs()));
-        auto receiver = r.newVar(handleExpr(expr->getArg(0), r));
+        const auto receiver = r.newVar(handleExpr(expr->getArg(0), r));
         // Arg 0 is the receiver (handled above); explicit args line up with declaration args directly.
         Vector<Term::Any> ivArgs;
         ivArgs.reserve(expr->getNumArgs() - 1);
@@ -4008,7 +4037,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                                          return {};
                                        });
         const auto recvTpe = actualReceiverTpe ? *actualReceiverTpe : fn->decl.args[0].named.tpe;
-        auto recvTerm = r.newVar(conform(r, ref(receiver), recvTpe));
+        const auto recvTerm = r.newVar(conform(r, ref(receiver), recvTpe));
         return Expr::Invoke(Type::FnRef(Sym({name})), std::vector<Type::Any>{}, std::optional<Term::Any>{}, ivArgs ^ prepend(recvTerm),
                             fn->decl.rtn);
       },
@@ -4020,7 +4049,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         Opt<uint64_t> requiredBlockSize;
         if (declaredKernel && declaredKernel->hasAttr<clang::CUDAGlobalAttr>()) {
           const auto *kernel = context.getLangOpts().HIP ? call_prism::resolveHipKernel(*declaredKernel) : declaredKernel;
-          auto lowered = handleCall(kernel, r);
+          const auto lowered = handleCall(kernel, r);
           function = lowered.second;
           function->decl.affinity = FunctionAffinity::Offload();
           function->convention = CallConvention::OffloadEntry();
@@ -4054,7 +4083,11 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
               indirect = type.has_value();
             }
           if (!type) return index == 0 ? value : Term::Any(Term::IntU32Const(1));
-          const std::string_view axis = index == 0 ? "x" : index == 1 ? "y" : "z";
+          const std::string_view axis = [&]() -> std::string_view {
+            if (index == 0) return "x";
+            if (index == 1) return "y";
+            return "z";
+          }();
           const auto definition = r.findStruct(fqcn(type->name), "launch dimension");
           const auto member = definition->members ^ find([&](const auto &candidate) {
                                 const std::string_view symbol = candidate.symbol;
@@ -4104,7 +4137,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       [&](const clang::CallExpr *expr) -> Expr::Any { //  method(...)
         if (llvm::isa<clang::CXXPseudoDestructorExpr>(expr->getCallee()->IgnoreParenImpCasts()))
           return Expr::Any(Expr::Alias(Term::Unit0Const()));
-        const auto target = expr->getCalleeDecl() ? expr->getCalleeDecl()->getAsFunction() : nullptr;
+        const auto *const target = expr->getCalleeDecl() ? expr->getCalleeDecl()->getAsFunction() : nullptr;
         if (!target) raise(fmt::format("Call with no resolvable callee: {}", pretty_string(expr, context)));
         if (emitPackageProgramMode && target->isInStdNamespace() && target->getName() == "get_deleter") {
           if (!isDiscardedValue(*expr, context)) raise("A package std::get_deleter result cannot be represented");
@@ -4199,7 +4232,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       },
       [&](const clang::Expr *) { return failExpr(); });
   if (result) {
-    auto expected = handleType(root->getType(), r);
+    const auto expected = handleType(root->getType(), r);
     return *result;
   } else {
     raise("no");
@@ -4215,34 +4248,26 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
 [[nodiscard]] static bool continuesEnclosingLoop(const clang::Stmt *stmt) {
   if (!stmt || llvm::isa<clang::Expr, clang::ForStmt, clang::CXXForRangeStmt, clang::WhileStmt, clang::DoStmt>(stmt)) return false;
   if (llvm::isa<clang::ContinueStmt>(stmt)) return true;
-  for (const auto child : stmt->children())
-    if (continuesEnclosingLoop(child)) return true;
-  return false;
+  return stmt->children() ^ exists([](const clang::Stmt *child) { return continuesEnclosingLoop(child); });
 }
 
 [[nodiscard]] static bool breaksEnclosingLoop(const clang::Stmt *stmt) {
   if (!stmt || llvm::isa<clang::Expr, clang::ForStmt, clang::CXXForRangeStmt, clang::WhileStmt, clang::DoStmt, clang::SwitchStmt>(stmt))
     return false;
   if (llvm::isa<clang::BreakStmt>(stmt)) return true;
-  for (const auto child : stmt->children())
-    if (breaksEnclosingLoop(child)) return true;
-  return false;
+  return stmt->children() ^ exists([](const clang::Stmt *child) { return breaksEnclosingLoop(child); });
 }
 
 [[nodiscard]] static bool hasAbruptCatchExit(const clang::Stmt *stmt) {
   if (!stmt || llvm::isa<clang::LambdaExpr>(stmt)) return false;
   if (llvm::isa<clang::ReturnStmt, clang::CXXThrowExpr>(stmt)) return true;
-  for (const auto *child : stmt->children())
-    if (hasAbruptCatchExit(child)) return true;
-  return false;
+  return stmt->children() ^ exists([](const clang::Stmt *child) { return hasAbruptCatchExit(child); });
 }
 
 [[nodiscard]] static bool mayExitArrayInitialiser(const clang::Stmt *stmt) {
   if (!stmt || llvm::isa<clang::LambdaExpr>(stmt)) return false;
   if (llvm::isa<clang::CallExpr, clang::CXXConstructExpr, clang::CXXThrowExpr>(stmt)) return true;
-  for (const auto *child : stmt->children())
-    if (mayExitArrayInitialiser(child)) return true;
-  return false;
+  return stmt->children() ^ exists([](const clang::Stmt *child) { return mayExitArrayInitialiser(child); });
 }
 
 void Remapper::unwindCleanups(Remapper::RemapContext &r, const size_t downTo) {
@@ -4254,7 +4279,7 @@ void Remapper::unwindCleanups(Remapper::RemapContext &r, const size_t downTo) {
 }
 
 void Remapper::destroyValue(RemapContext &r, const clang::QualType type, const Term::Select &instance) {
-  if (const auto array = context.getAsConstantArrayType(type)) {
+  if (const auto *const array = context.getAsConstantArrayType(type)) {
     for (uint64_t element = array->getSize().getZExtValue(); element-- > 0;) {
       auto steps = instance.steps;
       steps.emplace_back(PathStep::Index(static_cast<int32_t>(element)));
@@ -4268,7 +4293,7 @@ void Remapper::destroyValue(RemapContext &r, const clang::QualType type, const T
 
 void Remapper::destroyRecord(RemapContext &r, const clang::CXXRecordDecl *record, const Term::Select &instance) {
   if (!record || record->hasTrivialDestructor() || isStdExceptionRecord(record)) return;
-  if (const auto dtor = record->getDestructor(); dtor && dtor->getBody()) {
+  if (const auto *const dtor = record->getDestructor(); dtor && dtor->getBody()) {
     const auto [name, fn] = handleCall(dtor, r);
     const auto self = r.newVar(conform(r, Expr::Alias(instance), fn->decl.args.front().named.tpe));
     (void)r.newVar(Expr::Invoke(Type::FnRef(Sym({name})), {}, {}, {self}, Type::Unit0()));
@@ -4276,16 +4301,16 @@ void Remapper::destroyRecord(RemapContext &r, const clang::CXXRecordDecl *record
   if (record->isUnion()) return;
   const auto fields = record->fields() | to_vector();
   for (const auto *field : fields ^ reverse()) {
-    const auto memberRecord = field->getType()->getBaseElementTypeUnsafe()->getAsCXXRecordDecl();
+    const auto *const memberRecord = field->getType()->getBaseElementTypeUnsafe()->getAsCXXRecordDecl();
     if (!memberRecord || memberRecord->hasTrivialDestructor()) continue;
     auto steps = instance.steps;
     const auto owner = handleRecord(record, r);
     steps.emplace_back(PathStep::Field(fieldSymbolName(field, fqcn(owner->name))));
     destroyValue(r, field->getType(), Term::Select(instance.root, steps, handleType(field->getType(), r)));
   }
-  for (auto base = record->bases_end(); base != record->bases_begin();) {
+  for (const auto *base = record->bases_end(); base != record->bases_begin();) {
     --base;
-    const auto baseRecord = base->getType()->getAsCXXRecordDecl();
+    const auto *const baseRecord = base->getType()->getAsCXXRecordDecl();
     if (!baseRecord || baseRecord->hasTrivialDestructor()) continue;
     const auto baseDef = handleRecord(baseRecord, r);
     auto steps = instance.steps;
@@ -4344,7 +4369,7 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
     // a tail per `continue` is a second backedge; LLVM splits the loop and SPIR-V then mis-names the continue target
     const bool wrapBody = continuesEnclosingLoop(bodyStmt);
     const bool wrapBreaks = wrapBody && breaksEnclosingLoop(bodyStmt);
-    auto body = r.scoped(
+    const auto body = r.scoped(
         [&](auto &rb) {
           rb.loopFrame = rb.cleanups.size();
           preBody(rb);
@@ -4384,7 +4409,7 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
     whileLoopWith([&](RemapContext &r2) { return cond ? handleExpr(cond, r2) : Expr::Any(Expr::Alias(Term::Bool1Const(true))); },
                   [&](RemapContext &rb) { handleHeaderStmt(preBodyStmt, rb); }, bodyStmt,
                   [&](RemapContext &rc) {
-                    if (incExpr) auto _ = rc.newVar(handleExpr(incExpr, rc));
+                    if (incExpr) const auto _ = rc.newVar(handleExpr(incExpr, rc));
                   },
                   seed);
   };
@@ -4393,19 +4418,19 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
       root, //
       [&](const clang::CompoundStmt *stmt) {
         r.cleanups.emplace_back();
-        for (auto s : stmt->body())
+        for (const clang::Stmt *s : stmt->body())
           handleStmt(s, r);
         if (!terminated(r.stmts)) unwindCleanups(r, r.cleanups.size() - 1);
         r.cleanups.pop_back();
       },
       [&](const clang::DeclStmt *stmt) {
-        for (auto decl : stmt->decls()) {
+        for (auto *decl : stmt->decls()) {
 
-          auto createInit = [&r](const auto &tpe, const Type::Any &comp) -> Opt<Expr::Any> {
+          const auto createInit = [&r](const auto &tpe, const Type::Any &comp) -> Opt<Expr::Any> {
             if (auto ptrTpe = comp.get<Type::Ptr>(); ptrTpe) {
               if (auto constArrTpe = llvm::dyn_cast<clang::ConstantArrayType>(tpe); constArrTpe) {
-                auto lit = constArrTpe->getSize().getLimitedValue();
-                auto sz = r.newVar(integralConstOfType(Type::IntS64(), lit));
+                const auto lit = constArrTpe->getSize().getLimitedValue();
+                const auto sz = r.newVar(integralConstOfType(Type::IntS64(), lit));
                 return Expr::Alloc(ptrTpe->comp, sz, TypeSpace::Global(), Region::Opaque());
               }
             }
@@ -4413,16 +4438,16 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
             return {};
           };
 
-          if (auto var = llvm::dyn_cast<clang::VarDecl>(decl)) {
+          if (auto *var = llvm::dyn_cast<clang::VarDecl>(decl)) {
             auto name = Named(declName(var), annotateLocalSpace(var, r));
             r.valueTypes.emplace(var, name.tpe);
             if (var->hasAttr<clang::CUDASharedAttr>()) {
               r.push(Stmt::Var(name, std::optional<Expr::Any>{}, /*isMutable*/ true));
               continue;
             }
-            const auto lifetimeExtended = lifetimeExtendedTemporary(var);
+            const auto *const lifetimeExtended = lifetimeExtendedTemporary(var);
             Opt<Cleanup> cleanup;
-            if (const auto rd = var->getType()->getBaseElementTypeUnsafe()->getAsCXXRecordDecl();
+            if (const auto *const rd = var->getType()->getBaseElementTypeUnsafe()->getAsCXXRecordDecl();
                 rd && !isStdExceptionRecord(rd) && !destroysWithoutEffect(rd) && (!var->getType()->isReferenceType() || lifetimeExtended)) {
               const auto reject = [&](const std::string &why) {
                 raise(fmt::format("Unsupported local {} of type {} at {} ({}, so its destructor's effects would be lost)", declName(var),
@@ -4430,20 +4455,20 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
               };
               if (!var->isLocalVarDecl() || var->isStaticLocal()) reject("its lifetime is not the enclosing scope");
               if (r.cleanupsSuspended || r.cleanups.empty()) reject("it is not declared directly in a block");
-              const auto dtor = rd->getDestructor();
+              const auto *const dtor = rd->getDestructor();
               if (!dtor) reject("its destructor is not resolvable");
               if (dtor->isUserProvided() && !dtor->getBody()) reject("its destructor body is unavailable");
               if (rd->isLambda()) reject("captured-object destruction is not represented by ordinary record fields");
               if (var->getType()->isArrayType()) {
-                const auto array = context.getAsConstantArrayType(var->getType());
+                const auto *const array = context.getAsConstantArrayType(var->getType());
                 if (!array) reject("it is not a fixed-size array");
                 if (array->getElementType()->isArrayType()) reject("multidimensional destruction is not yet supported");
-                const auto init = llvm::dyn_cast_if_present<clang::InitListExpr>(var->getInit());
+                const auto *const init = llvm::dyn_cast_if_present<clang::InitListExpr>(var->getInit());
                 if (!rd->isAggregate() || !init || init->hasArrayFiller() || init->getNumInits() != array->getSize().getZExtValue())
                   reject("only fully initialised arrays of aggregate elements are supported");
                 if (mayExitArrayInitialiser(init)) reject("element initialisation may exit before the array cleanup is active");
               }
-              cleanup = Cleanup{var->getType(), name};
+              cleanup = Cleanup{.type = var->getType(), .instance = name};
             }
             Opt<Expr::Any> pointerInit;
             if (var->hasInit() && name.tpe.is<Type::Ptr>() && !llvm::isa<clang::InitListExpr>(var->getInit())) {
@@ -4470,25 +4495,25 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
               pointerInit = lowered;
             }
             r.valueTypes.insert_or_assign(var, name.tpe);
-            auto initList = llvm::dyn_cast_if_present<clang::InitListExpr>(var->getInit());
+            auto *initList = llvm::dyn_cast_if_present<clang::InitListExpr>(var->getInit());
             const clang::Expr *directInit = var->getInit();
             while (directInit)
-              if (const auto next = transparentExceptionExpr(directInit)) directInit = next;
+              if (const auto *const next = transparentExceptionExpr(directInit)) directInit = next;
               else break;
-            const auto directConstruct = llvm::dyn_cast_if_present<clang::CXXConstructExpr>(directInit);
-            const auto directConstructRecord = directConstruct ? directConstruct->getType()->getAsCXXRecordDecl() : nullptr;
+            const auto *const directConstruct = llvm::dyn_cast_if_present<clang::CXXConstructExpr>(directInit);
+            const auto *const directConstructRecord = directConstruct ? directConstruct->getType()->getAsCXXRecordDecl() : nullptr;
             const auto directlyConstructible =
                 directConstruct && !derivesStdException(directConstructRecord) && !stdRecordNamed(directConstructRecord, "error_code");
             if (initList && var->getType()->isArrayType() && !name.tpe.is<Type::Struct>()) {
-              auto initExpr = createInit(var->getType(), name.tpe);
+              const auto initExpr = createInit(var->getType(), name.tpe);
               r.push(Stmt::Var(name, initExpr, /*isMutable*/ true));
-              if (auto cArr = llvm::dyn_cast<clang::ConstantArrayType>(var->getType()); cArr && initList->hasArrayFiller()) {
+              if (const auto *cArr = llvm::dyn_cast<clang::ConstantArrayType>(var->getType()); cArr && initList->hasArrayFiller()) {
                 for (size_t i = 0; i < initList->getNumInits(); ++i) {
-                  auto idx = r.newVar(Expr::Alias(Term::IntU64Const(i)));
-                  auto val = r.newVar(handleExpr(initList->getInit(i), r));
+                  const auto idx = r.newVar(Expr::Alias(Term::IntU64Const(i)));
+                  const auto val = r.newVar(handleExpr(initList->getInit(i), r));
                   r.push(Stmt::Update(select(r, {}, name), idx, val));
                 }
-                auto compTpe = handleType(cArr->getElementType(), r);
+                const auto compTpe = handleType(cArr->getElementType(), r);
                 const auto begin = static_cast<uint64_t>(initList->getNumInits());
                 const auto end = cArr->getSize().getLimitedValue();
                 if (begin < end) {
@@ -4510,8 +4535,8 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
               } else {
                 if (initList->hasArrayFiller()) raise("array initialiser cannot have fillers while having unknown size");
                 for (size_t i = 0; i < initList->getNumInits(); ++i) {
-                  auto idx = r.newVar(Expr::Alias(Term::IntU64Const(i)));
-                  auto val = r.newVar(handleExpr(initList->getInit(i), r));
+                  const auto idx = r.newVar(Expr::Alias(Term::IntU64Const(i)));
+                  const auto val = r.newVar(handleExpr(initList->getInit(i), r));
                   r.push(Stmt::Update(select(r, {}, name), idx, val));
                 }
               }
@@ -4549,8 +4574,8 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
               r.push(Stmt::Var(name, std::optional<Expr::Any>{}, isMutable));
             }
 
-            if (const auto rd = var->getType().getNonReferenceType()->getAsCXXRecordDecl(); derivesStdException(rd)) {
-              const auto source = var->getInit();
+            if (const auto *const rd = var->getType().getNonReferenceType()->getAsCXXRecordDecl(); derivesStdException(rd)) {
+              auto *const source = var->getInit();
               const auto storedWhat = findExceptionMetadata(source, r.exceptionWhats);
               if (source && !storedWhat)
                 raise(fmt::format("Unsupported standard exception value without metadata: {}", pretty_string(source, context)));
@@ -4580,8 +4605,8 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
               }
             }
 
-            if (const auto rd = var->getType().getNonReferenceType()->getAsCXXRecordDecl(); stdRecordNamed(rd, "error_code")) {
-              const auto source = var->getInit();
+            if (const auto *const rd = var->getType().getNonReferenceType()->getAsCXXRecordDecl(); stdRecordNamed(rd, "error_code")) {
+              auto *const source = var->getInit();
               const auto storedCode = findExceptionMetadata(source, r.exceptionCodes);
               if (source && !storedCode)
                 raise(fmt::format("Unsupported std::error_code value without metadata: {}", pretty_string(source, context)));
@@ -4595,9 +4620,9 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
               }
             }
 
-            if (const auto decomp = llvm::dyn_cast<clang::DecompositionDecl>(var)) {
-              for (const auto binding : decomp->bindings())
-                if (const auto holding = binding->getHoldingVar()) {
+            if (const auto *const decomp = llvm::dyn_cast<clang::DecompositionDecl>(var)) {
+              for (const clang::BindingDecl *const binding : decomp->bindings())
+                if (auto *const holding = binding->getHoldingVar()) {
                   const auto holdingName = Named(declName(holding), annotateLocalSpace(holding, r));
                   r.push(Stmt::Var(holdingName, conform(r, handleExpr(holding->getInit(), r), holdingName.tpe), /*isMutable*/ true));
                 }
@@ -4609,7 +4634,7 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
       [&](const clang::IfStmt *stmt) {
         if (stmt->hasInitStorage()) handleHeaderStmt(stmt->getInit(), r);
         if (stmt->hasVarStorage()) handleHeaderStmt(stmt->getConditionVariableDeclStmt(), r);
-        auto condTerm = r.newVar(handleExpr(stmt->getCond(), r));
+        const auto condTerm = r.newVar(handleExpr(stmt->getCond(), r));
         r.push(Stmt::Cond(condTerm, //
                           r.scoped([&](auto &r_) { handleStmt(stmt->getThen(), r_); }, {}, {}, {}, true),
                           r.scoped([&](auto &r_) { handleStmt(stmt->getElse(), r_); }, {}, {}, {}, true)));
@@ -4656,7 +4681,7 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
       },
       [&](const clang::WhileStmt *stmt) { whileLoop(stmt->getCond(), nullptr, stmt->getBody(), nullptr); },
       [&](const clang::ReturnStmt *stmt) {
-        const auto rv = stmt->getRetValue();
+        const auto *const rv = stmt->getRetValue();
         const auto previousBoundTemporaryType = r.boundTemporaryType;
         if (rv && rv->getType().getNonReferenceType()->getAsCXXRecordDecl()) r.boundTemporaryType = rv->getType();
         const auto value = [&]() -> Expr::Any {
@@ -4698,8 +4723,8 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
         const auto cond = r.newVar(handleExpr(stmt->getCond(), r));
         Map<const clang::Stmt *, Term::Any> matches;
         Opt<Term::Any> anyMatch;
-        for (auto sc = stmt->getSwitchCaseList(); sc; sc = sc->getNextSwitchCase())
-          if (const auto cs = llvm::dyn_cast<clang::CaseStmt>(sc)) {
+        for (const auto *sc = stmt->getSwitchCaseList(); sc; sc = sc->getNextSwitchCase())
+          if (const auto *const cs = llvm::dyn_cast<clang::CaseStmt>(sc)) {
             if (cs->getRHS()) raise(fmt::format("Unsupported case range at {}", loc(cs)));
             const auto m = r.newVar(Expr::IntrOp(Intr::LogicEq(cond, r.newVar(conform(r, handleExpr(cs->getLHS(), r), cond.tpe())))));
             matches.emplace(cs, m);
@@ -4710,10 +4735,10 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
         const Stmt::Any setStarted = Stmt::Mut(startedSel, Expr::Alias(Term::Bool1Const(true)));
         const Term::Any noMatch = anyMatch ? r.newVar(Expr::IntrOp(Intr::LogicNot(*anyMatch))) : Term::Bool1Const(true);
         std::function<void(const clang::Stmt *, RemapContext &)> emit = [&](const clang::Stmt *s, RemapContext &rc) {
-          if (const auto cs = llvm::dyn_cast<clang::CaseStmt>(s)) {
+          if (const auto *const cs = llvm::dyn_cast<clang::CaseStmt>(s)) {
             rc.push(Stmt::Cond(matches.at(cs), {setStarted}, {}));
             emit(cs->getSubStmt(), rc);
-          } else if (const auto ds = llvm::dyn_cast<clang::DefaultStmt>(s)) {
+          } else if (const auto *const ds = llvm::dyn_cast<clang::DefaultStmt>(s)) {
             rc.push(Stmt::Cond(noMatch, {setStarted}, {}));
             emit(ds->getSubStmt(), rc);
           } else rc.push(Stmt::Cond(startedSel, rc.scoped([&](auto &r_) { handleStmt(s, r_); }), {}));
@@ -4726,8 +4751,8 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
           r_.cleanupsSuspended = true;
           r_.onBreak.push_back([](RemapContext &rc) { rc.push(Stmt::Break()); });
           r_.push(Stmt::Var(started, Expr::Alias(Term::Bool1Const(false)), /*isMutable*/ true));
-          if (const auto body = llvm::dyn_cast<clang::CompoundStmt>(stmt->getBody())) {
-            for (const auto child : body->body())
+          if (const auto *const body = llvm::dyn_cast<clang::CompoundStmt>(stmt->getBody())) {
+            for (const clang::Stmt *const child : body->body())
               emit(child, r_);
           } else emit(stmt->getBody(), r_);
           r_.push(Stmt::Mut(onceSel, Expr::Alias(Term::Bool1Const(false))));
@@ -4744,14 +4769,14 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
             raise(fmt::format("Unsupported cv-qualified pointer exception at {}", loc));
           }
         auto composedWhats = mayThrowComposedStdExceptions(stmt->getTryBlock());
-        auto body = r.scoped([&](RemapContext &rb) {
+        const auto body = r.scoped([&](RemapContext &rb) {
           rb.tryFrame = rb.cleanups.size();
           handleStmt(stmt->getTryBlock(), rb);
         });
         // a handler body sits outside its own try, so a raise from it targets the enclosing tryFrame
         Vector<Handler> handlers;
         for (unsigned i = 0; i < stmt->getNumHandlers(); ++i) {
-          const auto handler = stmt->getHandler(i);
+          const auto *const handler = stmt->getHandler(i);
           bool handlerComposedWhat = false;
           for (auto it = composedWhats.begin(); it != composedWhats.end();) {
             if (catchesRecord(handler, *it)) {
@@ -4759,7 +4784,7 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
               it = composedWhats.erase(it);
             } else ++it;
           }
-          const auto decl = handler->getExceptionDecl();
+          auto *const decl = handler->getExceptionDecl();
           Opt<ExceptionKind> caughtKind;
           Opt<Named> binder;
           const clang::CXXRecordDecl *valueRecord = nullptr;
@@ -4775,7 +4800,7 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
             caughtKind = ExceptionKind(tpe, exceptionSourceName(caught));
             const auto binderTpe = handleType(decl->getType(), r);
             binder = decl->getName().empty() ? r.newName(binderTpe) : Named(declName(decl), binderTpe);
-            if (const auto rd = caught->getAsCXXRecordDecl(); needsManagedException(rd)) {
+            if (const auto *const rd = caught->getAsCXXRecordDecl(); needsManagedException(rd)) {
               const auto loc = handler->getBeginLoc().printToString(context.getSourceManager());
               if (!decl->getType()->isReferenceType()) {
                 if (!rd->hasTrivialCopyConstructor())
@@ -4802,7 +4827,8 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
             handleStmt(handler->getHandlerBlock(), rh);
           });
           if (valueRecord && binder) {
-            auto cleanup = r.scoped([&](RemapContext &rh) { destroyRecord(rh, valueRecord, Term::Select(*binder, {}, binder->tpe)); });
+            const auto cleanup =
+                r.scoped([&](RemapContext &rh) { destroyRecord(rh, valueRecord, Term::Select(*binder, {}, binder->tpe)); });
             handlerBody = {Stmt::Try(handlerBody, {}, cleanup)};
           }
           handlers.emplace_back(caughtKind, binder, handlerBody);
@@ -4949,7 +4975,7 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
           const auto predicate =
               r.newVar(Expr::IntrOp(nonzeroPredicate ? Intr::Any(Intr::LogicNeq(masked, r.newVar(integralConstOfType(type, 0))))
                                                      : Intr::Any(Intr::LogicEq(masked, bit))));
-          const auto ballot = r.newVar(conform(r, Expr::SpecOp(Spec::GpuBallot(Term::IntU32Const(0xffffffffu), predicate)), type));
+          const auto ballot = r.newVar(conform(r, Expr::SpecOp(Spec::GpuBallot(Term::IntU32Const(0xffffffffU), predicate)), type));
           const auto inverse = r.newVar(Expr::IntrOp(Intr::BNot(ballot, type)));
           const auto result = r.newName(type);
           r.push(Stmt::Var(result, Expr::Alias(inverse), true));
@@ -4961,7 +4987,7 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
                           pretty_string(stmt, context)));
       },
       [&](const clang::Expr *stmt) { // Freestanding expressions for side-effects (e.g i++;)
-        auto _ = r.newVar(handleExpr(stmt, r));
+        const auto _ = r.newVar(handleExpr(stmt, r));
       },
       [&](const clang::Stmt *stmt) {
         raise(fmt::format("Unhandled stmt {} at {}", stmt->getStmtClassName(),

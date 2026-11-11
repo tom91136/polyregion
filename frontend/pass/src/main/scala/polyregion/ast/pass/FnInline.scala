@@ -2,6 +2,7 @@ package polyregion.ast.pass
 
 import polyregion.ast.{PolyAST as p, *, given}
 import polyregion.ast.Traversal.*
+import polyregion.ast.pass.TypeOps.sameType
 
 // inlines every Invoke reachable from entry to a fixed point (the result Program has no functions):
 // the callee body is type-substituted, alpha-renamed, its params bound to the call args, and spliced
@@ -22,41 +23,6 @@ object FnInline extends ProgramPass {
 
   private type OverloadLut = Map[(p.Sym, Int), List[p.Function]]
 
-  private def sameType(left: p.Type, right: p.Type): Boolean = {
-    def loop(
-        x: p.Type,
-        y: p.Type,
-        xBound: Map[String, Int],
-        yBound: Map[String, Int],
-        depth: Int
-    ): Boolean = (x, y) match {
-      case (p.Type.Nothing, _) | (_, p.Type.Nothing) => true
-      case (p.Type.Var(xName, _), p.Type.Var(yName, _)) =>
-        (xBound.get(xName), yBound.get(yName)) match {
-          case (Some(xId), Some(yId)) => xId == yId
-          case (None, None)           => xName == yName
-          case _                      => false
-        }
-      case (p.Type.Struct(xName, xArgs), p.Type.Struct(yName, yArgs)) =>
-        xName == yName && xArgs.size == yArgs.size &&
-        xArgs.zip(yArgs).forall((a, b) => loop(a, b, xBound, yBound, depth))
-      case (p.Type.Ptr(xComp, xSpace), p.Type.Ptr(yComp, ySpace)) =>
-        xSpace == ySpace && loop(xComp, yComp, xBound, yBound, depth)
-      case (p.Type.Arr(xComp, xLength, xSpace), p.Type.Arr(yComp, yLength, ySpace)) =>
-        xLength == yLength && xSpace == ySpace && loop(xComp, yComp, xBound, yBound, depth)
-      case (p.Type.Exec(xVars, xArgs, xRtn), p.Type.Exec(yVars, yArgs, yRtn)) =>
-        val ids       = xVars.indices.map(depth + _)
-        val nestedX   = xBound ++ xVars.map(_.name).zip(ids)
-        val nestedY   = yBound ++ yVars.map(_.name).zip(ids)
-        val nestedEnd = depth + xVars.size
-        xVars.size == yVars.size && xArgs.size == yArgs.size &&
-        xArgs.zip(yArgs).forall((a, b) => loop(a, b, nestedX, nestedY, nestedEnd)) &&
-        loop(xRtn, yRtn, nestedX, nestedY, nestedEnd)
-      case _ => x == y
-    }
-    loop(left, right, Map.empty, Map.empty, 0)
-  }
-
   private def flatParams(f: p.Function): List[p.Type] =
     f.moduleCaptures.map(_.named.tpe) ++ f.termCaptures.map(_.named.tpe) ++ f.args.map(_.named.tpe)
 
@@ -75,35 +41,6 @@ object FnInline extends ProgramPass {
 
   private val ExecBinderPrefix = "#fn_inline_exec#"
 
-  private def protectExecBinders(tpe: p.Type): p.Type = {
-    def rename(t: p.Type, env: Map[String, String]): p.Type = t match {
-      case variable @ p.Type.Var(name, _)  => variable.copy(name = env.getOrElse(name, name))
-      case p.Type.Struct(name, args)       => p.Type.Struct(name, args.map(rename(_, env)))
-      case p.Type.Ptr(comp, space)         => p.Type.Ptr(rename(comp, env), space)
-      case p.Type.Arr(comp, length, space) => p.Type.Arr(rename(comp, env), length, space)
-      case p.Type.Exec(vars, args, rtn) =>
-        val nested = env -- vars.map(_.name)
-        p.Type.Exec(vars, args.map(rename(_, nested)), rename(rtn, nested))
-      case other => other
-    }
-    tpe match {
-      case p.Type.Exec(vars, args, rtn) if !vars.forall(_.name.startsWith(ExecBinderPrefix)) =>
-        val renamed: List[p.Type.Var] =
-          vars.map(variable => p.Type.Var(ExecBinderPrefix + variable.name, variable.exactSizeInBytes))
-        val env = vars.map(_.name).zip(renamed.map(_.name)).toMap
-        p.Type.Exec(renamed, args.map(rename(_, env)), rename(rtn, env))
-      case other => other
-    }
-  }
-
-  private def unprotectExecBinders(tpe: p.Type): p.Type = tpe match {
-    case variable @ p.Type.Var(name, _) if name.startsWith(ExecBinderPrefix) =>
-      variable.copy(name = name.stripPrefix(ExecBinderPrefix))
-    case p.Type.Exec(vars, args, rtn) =>
-      p.Type.Exec(vars.map(variable => variable.copy(name = variable.name.stripPrefix(ExecBinderPrefix))), args, rtn)
-    case other => other
-  }
-
   private def substTerms(tree: p.Function, table: Map[p.Named, p.Term]): p.Function =
     tree.modifyAll[p.Term] {
       case p.Term.Select(root, steps, tpe) =>
@@ -116,6 +53,8 @@ object FnInline extends ProgramPass {
       case x => x
     }
 
+  private val exceptionSuffixes = List(p.Conventions.ExceptionWhatSuffix, p.Conventions.ExceptionCodeSuffix)
+
   private def renameAll(f: p.Function, ctr: java.util.concurrent.atomic.AtomicLong): p.Function = {
     val id      = ctr.incrementAndGet()
     val renamed = scala.collection.mutable.HashMap.empty[String, String]
@@ -123,7 +62,7 @@ object FnInline extends ProgramPass {
       n.symbol == p.Conventions.ExceptionValue || n.symbol == p.Conventions.ExceptionWhat ||
         n.symbol == p.Conventions.ExceptionCode
     def renameSymbol(symbol: String): String =
-      List(p.Conventions.ExceptionWhatSuffix, p.Conventions.ExceptionCodeSuffix).find(symbol.endsWith) match {
+      exceptionSuffixes.find(symbol.endsWith) match {
         case Some(suffix) => renameSymbol(symbol.dropRight(suffix.length)) + suffix
         case None         => renamed.getOrElseUpdate(symbol, s"_inline_${id}_${renamed.size}")
       }
@@ -138,12 +77,7 @@ object FnInline extends ProgramPass {
         case p.Term.Select(root, steps, tpe)                              => p.Term.Select(rename(root), steps, tpe)
         case x                                                            => x
       }
-      .modifyAll[p.Stmt] {
-        case p.Stmt.Var(n, expr, isMutable)         => p.Stmt.Var(rename(n), expr, isMutable)
-        case p.Stmt.ForRange(i, lb, ub, step, body) => p.Stmt.ForRange(rename(i), lb, ub, step, body)
-        case p.Stmt.Try(b, hs, fin) => p.Stmt.Try(b, hs.map(h => h.copy(binder = h.binder.map(rename))), fin)
-        case x                      => x
-      }
+      .modifyAll[p.Stmt](Binders.renameBinders(rename))
     p.Function(
       f.decl.copy(
         receiver = f.receiver.map(arg => arg.copy(rename(arg.named))),
@@ -171,12 +105,12 @@ object FnInline extends ProgramPass {
       if (table.isEmpty) f
       else
         f
-          .modifyAll[p.Type](protectExecBinders)
+          .modifyAll[p.Type](Binders.protectExec(ExecBinderPrefix))
           .modifyAll[p.Type](_.mapLeaf {
             case p.Type.Var(name, _) if table.contains(name) => table(name)
             case x                                           => x
           })
-          .modifyAll[p.Type](unprotectExecBinders)
+          .modifyAll[p.Type](Binders.unprotectExec(ExecBinderPrefix))
     val renamed = renameAll(typed, ctr)
 
     // ivk.args is the flattened (moduleCaptures ::: termCaptures ::: args) per Compiler.patchIvk.
@@ -203,15 +137,18 @@ object FnInline extends ProgramPass {
         root
       }
       .toSet
-    val moduleCaptureNames = renamed.moduleCaptures.map(_.named).toSet
-    val mutableLocals = parameters.collect {
-      case (name, value) if mutableParameters.contains(name) =>
+    val moduleCaptureNames   = renamed.moduleCaptures.map(_.named).toSet
+    val mutableLocalsBuilder = List.newBuilder[(p.Named, (p.Named, p.Stmt.Var))]
+    parameters.foreach { (name, value) =>
+      if (mutableParameters.contains(name)) {
         val local =
           if (moduleCaptureNames(name)) p.Named(s"_inline_${ctr.incrementAndGet()}_${name.symbol}", name.tpe)
           else name
-        name -> (local, p.Stmt.Var(local, Some(p.Expr.Alias(value)), isMutable = true))
+        mutableLocalsBuilder += name -> (local, p.Stmt.Var(local, Some(p.Expr.Alias(value)), isMutable = true))
+      }
     }
-    val bindings = mutableLocals.map(_._2._2)
+    val mutableLocals = mutableLocalsBuilder.result()
+    val bindings      = mutableLocals.map(_._2._2)
     val substTable = parameters.filterNot((name, _) => mutableParameters.contains(name)).toMap ++
       mutableLocals.map { case (original, (local, _)) => original -> p.Term.Select(local, Nil, local.tpe) }
     val substituted = substTerms(renamed, substTable)
@@ -324,15 +261,17 @@ object FnInline extends ProgramPass {
         if (varToTpeLut.isEmpty) f.signature
         else
           f.signature
-            .modifyAll[p.Type](protectExecBinders)
+            .modifyAll[p.Type](Binders.protectExec(ExecBinderPrefix))
             .modifyAll[p.Type](_.mapLeaf {
               case v @ p.Type.Var(n, _) => varToTpeLut.getOrElse(n, v)
               case x                    => x
             })
-            .modifyAll[p.Type](unprotectExecBinders)
+            .modifyAll[p.Type](Binders.unprotectExec(ExecBinderPrefix))
       val flatSigParams = sig.moduleCaptures ++ sig.termCaptures ++ sig.args
       sig.receiver.size == ivk.receiver.size &&
-      sig.receiver.zip(ivk.receiver).forall((expected, actual) => argumentMatches(expected, actual, false)) &&
+      sig.receiver
+        .zip(ivk.receiver)
+        .forall((expected, actual) => argumentMatches(expected, actual, allowErasedCallable = false)) &&
       flatSigParams
         .zip(ivk.args)
         .forall((expected, actual) => argumentMatches(expected, actual, allowErasedCallable)) &&
@@ -404,7 +343,7 @@ object FnInline extends ProgramPass {
     case p.Stmt.Mut(name, e) =>
       val (newE, prepend, caps) = inlineExpr(e, overloads, ctr, active)
       (prepend :+ p.Stmt.Mut(name, newE), caps)
-    case _: p.Stmt.Update => (List(stmt), Nil)
+    case p.Stmt.Update(_, _, _) => (List(stmt), Nil)
     case p.Stmt.Return(e) =>
       val (newE, prepend, caps) = inlineExpr(e, overloads, ctr, active)
       (prepend :+ p.Stmt.Return(newE), caps)

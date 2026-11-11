@@ -28,6 +28,24 @@ import polyregion.ast.Traversal.*
 // an entry reaching this pass must be fully lowered: no calls, exceptions, assertions, remote operations or group
 // collectives, and barriers only in the `var _ = barrier()` form
 object GroupFission extends ProgramPass {
+  import GroupVocabulary.{
+    Base,
+    Global,
+    GroupId,
+    Groups,
+    Lanes,
+    Lid,
+    Prepared,
+    U32,
+    addressOfOwn,
+    isBarrier,
+    ownStorage,
+    params,
+    renameRoots,
+    sel,
+    spec,
+    u32
+  }
 
   override def phase: p.Pass.Phase = p.Pass.Phase.PostMono
 
@@ -37,29 +55,12 @@ object GroupFission extends ProgramPass {
     case Group extends Abi(2)
   }
 
-  private val U32 = p.Type.IntU32
-
-  private[pass] val Lanes   = p.Named("#gf_lanes", U32)
-  private[pass] val GroupId = p.Named("#gf_group", U32)
-  private[pass] val Base    = p.Named("#gf_base", U32)
-  private[pass] val Groups  = p.Named("#gf_groups", U32)
-  private[pass] val Global  = p.Named("#gf_global", U32)
-  private[pass] val Lid     = p.Named("#gf_lid", U32)
-  private val Exit          = p.Named("#gf_exit", p.Type.Bool1)
-  private val Reserved      = List(Lanes, GroupId, Base, Groups, Global, Lid, Exit)
-
-  private[pass] def sel(n: p.Named): p.Term.Select = p.Term.Select(n, Nil, n.tpe)
-  private[pass] def u32(v: Int): p.Term            = p.Term.IntU32Const(v)
-  private[pass] def spec(op: p.Spec): p.Expr       = p.Expr.SpecOp(op)
+  private val Exit     = p.Named("#gf_exit", p.Type.Bool1)
+  private val Reserved = List(Lanes, GroupId, Base, Groups, Global, Lid, Exit)
 
   private def constructName(x: Any): String = x match {
     case product: Product => product.productPrefix
     case other            => other.toString
-  }
-
-  private[pass] def isBarrier(op: p.Spec): Boolean = op match {
-    case p.Spec.GpuBarrierGlobal | p.Spec.GpuBarrierLocal | p.Spec.GpuBarrierAll => true
-    case _                                                                       => false
   }
 
   private def checkInvariants(entry: p.Function): Unit = {
@@ -71,12 +72,13 @@ object GroupFission extends ProgramPass {
     }
     val exprs = entry.collectAll[p.Expr]
     exprs.foreach {
-      case _: p.Expr.Invoke => fail("Expr.Invoke")
+      case p.Expr.Invoke(_, _, _, _, _) => fail("Expr.Invoke")
       case p.Expr.SpecOp(op) =>
         op match {
-          case _: p.Spec.Assert | _: p.Spec.GpuGroupReduce | _: p.Spec.GpuGroupInclusiveScan |
-              _: p.Spec.GpuGroupExclusiveScan | _: p.Spec.RemoteLaunch | _: p.Spec.RemoteAlloc |
-              _: p.Spec.RemoteTempAlloc | _: p.Spec.RemoteFree | _: p.Spec.RemoteMemcpy | _: p.Spec.RemoteSync =>
+          case p.Spec.Assert(_, _) | p.Spec.GpuGroupReduce(_, _, _) | p.Spec.GpuGroupInclusiveScan(_, _, _) |
+              p.Spec.GpuGroupExclusiveScan(_, _, _) | p.Spec.RemoteLaunch(_, _, _, _, _, _, _, _, _, _, _) |
+              p.Spec.RemoteAlloc(_, _) | p.Spec.RemoteTempAlloc(_, _) | p.Spec.RemoteFree(_, _) |
+              p.Spec.RemoteMemcpy(_, _, _, _, _) | p.Spec.RemoteSync(_) =>
             fail(s"Spec.${constructName(op)}")
           case _ => ()
         }
@@ -104,11 +106,11 @@ object GroupFission extends ProgramPass {
   private def observesGroup(entry: p.Function): Boolean =
     entry.collectAll[p.Expr].exists {
       case p.Expr
-            .SpecOp(_: p.Spec.GpuLocalIdx | _: p.Spec.GpuLocalSize | _: p.Spec.GpuGroupIdx | _: p.Spec.GpuGroupSize) =>
+            .SpecOp(p.Spec.GpuLocalIdx(_) | p.Spec.GpuLocalSize(_) | p.Spec.GpuGroupIdx(_) | p.Spec.GpuGroupSize(_)) =>
         true
-      case p.Expr.Alloc(_, _, p.Type.Space.Local, _)    => true
-      case p.Expr.RefTo(_, _, _, p.Type.Space.Local, _) => true
-      case _                                            => false
+      case p.Expr.Alloc(space = p.Type.Space.Local) => true
+      case p.Expr.RefTo(space = p.Type.Space.Local) => true
+      case _                                        => false
     } || entry.collectAll[p.Type].exists {
       case p.Type.Ptr(_, p.Type.Space.Local) => true
       case tpe                               => isLocalArray(tpe)
@@ -165,12 +167,14 @@ object GroupFission extends ProgramPass {
         }
 
     def block(stmts: List[p.Stmt], env: Env): List[p.Stmt] = {
-      var scope = env
-      stmts.map { s =>
+      var scope   = env
+      val renamed = List.newBuilder[p.Stmt]
+      stmts.foreach { s =>
         val (out, next) = stmt(s, scope)
         scope = next
-        out
+        renamed += out
       }
+      renamed.result()
     }
 
     def stmt(s: p.Stmt, env: Env): (p.Stmt, Env) = s match {
@@ -201,15 +205,19 @@ object GroupFission extends ProgramPass {
 
   private def hoistLocals(body: List[p.Stmt]): (List[p.Stmt], List[p.Stmt]) = {
     val hoisted = List.newBuilder[p.Stmt]
-    def go(stmts: List[p.Stmt]): List[p.Stmt] = stmts.flatMap {
-      case p.Stmt.Var(n, init, mut) if isLocalArray(n.tpe) =>
-        hoisted += p.Stmt.Var(n, None, mut)
-        init.map(p.Stmt.Mut(sel(n), _)).toList
-      case p.Stmt.Cond(c, t, f)                  => List(p.Stmt.Cond(c, go(t), go(f)))
-      case p.Stmt.While(c, b)                    => List(p.Stmt.While(c, go(b)))
-      case p.Stmt.ForRange(i, lb, ub, st, b)     => List(p.Stmt.ForRange(i, lb, ub, st, go(b)))
-      case p.Stmt.Annotated(inner, pos, comment) => go(List(inner)).map(p.Stmt.Annotated(_, pos, comment))
-      case other                                 => List(other)
+    def go(stmts: List[p.Stmt]): List[p.Stmt] = {
+      val out = List.newBuilder[p.Stmt]
+      stmts.foreach {
+        case p.Stmt.Var(n, init, mut) if isLocalArray(n.tpe) =>
+          hoisted += p.Stmt.Var(n, None, mut)
+          out ++= init.map(p.Stmt.Mut(sel(n), _))
+        case p.Stmt.Cond(c, t, f)                  => out += p.Stmt.Cond(c, go(t), go(f))
+        case p.Stmt.While(c, b)                    => out += p.Stmt.While(c, go(b))
+        case p.Stmt.ForRange(i, lb, ub, st, b)     => out += p.Stmt.ForRange(i, lb, ub, st, go(b))
+        case p.Stmt.Annotated(inner, pos, comment) => out ++= go(List(inner)).map(p.Stmt.Annotated(_, pos, comment))
+        case other                                 => out += other
+      }
+      out.result()
     }
     val rest = go(body)
     (hoisted.result(), rest)
@@ -255,7 +263,7 @@ object GroupFission extends ProgramPass {
   private def laneBody(body: List[p.Stmt]): List[p.Stmt] = {
     var discards = 0L
     def onReturn(e: p.Expr): List[p.Stmt] = e match {
-      case _: p.Expr.Alias => Nil
+      case p.Expr.Alias(_) => Nil
       case other =>
         discards += 1
         List(p.Stmt.Var(p.Named(s"#gf_ret_$discards", p.Type.Unit0), Some(other)))
@@ -271,47 +279,6 @@ object GroupFission extends ProgramPass {
       p.Stmt.Var(Exit, Some(p.Expr.Alias(p.Term.Bool1Const(false))), isMutable = true) ::
         ReturnUnwind(stmts, exit, onReturn, () => p.Named(s"#gf_pending_${discards}", p.Type.Bool1)) ::: tail
     }
-  }
-
-  private[pass] def params(entry: p.Function): List[p.Named] =
-    (entry.receiver.toList ::: entry.args ::: entry.moduleCaptures ::: entry.termCaptures).map(_.named)
-
-  private[pass] def renameRoots[A](a: A, env: Map[String, p.Named])(using
-      Traversal[A, p.Term],
-      Traversal[A, p.Expr]
-  ): A = {
-    def rooted(region: p.Region): p.Region = region match {
-      case p.Region.Rooted(root) => env.get(root.symbol).fold(region)(p.Region.Rooted(_))
-      case other                 => other
-    }
-    if (env.isEmpty) a
-    else
-      a.modifyAll[p.Term] {
-        case s @ p.Term.Select(root, steps, tpe)      => env.get(root.symbol).fold(s)(p.Term.Select(_, steps, tpe))
-        case p.Term.NullPtrConst(comp, space, region) => p.Term.NullPtrConst(comp, space, rooted(region))
-        case other                                    => other
-      }.modifyAll[p.Expr] {
-        case p.Expr.RefTo(lhs, idx, comp, space, region) => p.Expr.RefTo(lhs, idx, comp, space, rooted(region))
-        case p.Expr.Alloc(comp, size, space, region)     => p.Expr.Alloc(comp, size, space, rooted(region))
-        case other                                       => other
-      }
-  }
-
-  // whether a reference to `root` through `steps` names the variable's own storage rather than memory behind it
-  private[pass] def ownStorage(root: p.Named, steps: List[p.PathStep]): Boolean = root.tpe match {
-    case _: p.Type.Ptr => steps.isEmpty
-    case _             => !steps.contains(p.PathStep.Deref)
-  }
-
-  private[pass] def addressOfOwn(refTo: p.Expr.RefTo): Option[p.Named] = refTo match {
-    case p.Expr.RefTo(p.Term.Select(root, steps, _), idx, comp, _, _) =>
-      (root.tpe, comp) match {
-        case (p.Type.Ptr(pointee, _), p.Type.Ptr(other, _)) =>
-          Option.when(steps.isEmpty && idx.isEmpty && pointee == other)(root)
-        case (_: p.Type.Ptr, _) => None
-        case _                  => Some(root)
-      }
-    case _ => None
   }
 
   // a work-group call shares the entry parameters between lanes, so a lane that writes one gets its own copy
@@ -333,14 +300,12 @@ object GroupFission extends ProgramPass {
     }
   }
 
-  private[pass] case class Prepared(entry: p.Function, prologue: List[p.Stmt], body: List[p.Stmt], fresh: Fresh)
-
   private def prepare(entry: p.Function): Either[String, Prepared] = {
     val renamed = uniquify(entry)
     val taken   = mutable.Set.from(params(entry).map(_.symbol) ::: Reserved.map(_.symbol))
     taken ++= renamed.flatMap(_.collectWhere[p.Stmt] {
       case p.Stmt.Var(n, _, _)            => n.symbol
-      case p.Stmt.ForRange(i, _, _, _, _) => i.symbol
+      case p.Stmt.ForRange(induction = i) => i.symbol
     })
     val fresh = Fresh(taken)
     privatise(entry, renamed, fresh).map { body =>
@@ -440,19 +405,6 @@ object GroupFission extends ProgramPass {
   }
 }
 
-private[pass] final class Fresh(taken: mutable.Set[String]) {
-  private var counter = 0L
-  def apply(prefix: String, tpe: p.Type): p.Named = {
-    var symbol = s"$prefix$counter"
-    counter += 1
-    while (!taken.add(symbol)) {
-      symbol = s"$prefix$counter"
-      counter += 1
-    }
-    p.Named(symbol, tpe)
-  }
-}
-
 private[pass] object IntLiteral {
   def isZero(t: p.Term): Option[Boolean] = t match {
     case p.Term.IntU8Const(v)  => Some(v == 0)
@@ -497,8 +449,11 @@ private[pass] object WaitLoops {
   }
 
   private def readsMemory(e: p.Expr, body: List[p.Stmt], seen: Set[p.Named]): Boolean = e match {
-    case _: p.Expr.Index                                                                            => true
-    case p.Expr.SpecOp(_: p.Spec.GpuVolatileLoad | _: p.Spec.GpuAtomicRMW | _: p.Spec.GpuAtomicCAS) => true
+    case p.Expr.Index(_, _, _) => true
+    case p.Expr.SpecOp(
+          p.Spec.GpuVolatileLoad(_, _) | p.Spec.GpuAtomicRMW(_, _, _, _, _, _) | p.Spec.GpuAtomicCAS(_, _, _, _, _, _)
+        ) =>
+      true
     case _ =>
       e.collectWhere[p.Term] { case p.Term.Select(root, steps, _) => (root, steps) }
         .exists((root, steps) => steps.contains(p.PathStep.Deref) || (!seen(root) && freshIn(root, body, seen)))
@@ -510,19 +465,19 @@ private[pass] object WaitLoops {
   }
 
   private def source(e: p.Expr, loop: Option[List[p.Stmt]]): Boolean = e match {
-    case p.Expr.SpecOp(_: p.Spec.GpuVolatileLoad)                    => true
-    case p.Expr.SpecOp(p.Spec.GpuAtomicRMW(op, _, value, _, _, _))   => !counter(op, value)
-    case p.Expr.SpecOp(p.Spec.GpuAtomicCAS(_, expected, _, _, _, _)) => !retry(expected, loop)
-    case _                                                           => false
+    case p.Expr.SpecOp(p.Spec.GpuVolatileLoad(_, _))                => true
+    case p.Expr.SpecOp(p.Spec.GpuAtomicRMW(op = op, value = value)) => !counter(op, value)
+    case p.Expr.SpecOp(p.Spec.GpuAtomicCAS(expected = expected))    => !retry(expected, loop)
+    case _                                                          => false
   }
 
   private def returns(body: List[p.Stmt]): Boolean = body.exists(ReturnUnwind.containsReturn)
 
   private def leaves(body: List[p.Stmt]): Boolean = body.exists {
-    case p.Stmt.Break | _: p.Stmt.Return => true
+    case p.Stmt.Break | p.Stmt.Return(_) => true
     case p.Stmt.Cond(_, t, f)            => leaves(t) || leaves(f)
     case p.Stmt.While(_, b)              => returns(b)
-    case p.Stmt.ForRange(_, _, _, _, b)  => returns(b)
+    case p.Stmt.ForRange(body = b)       => returns(b)
     case p.Stmt.Annotated(inner, _, _)   => leaves(List(inner))
     case _                               => false
   }
@@ -573,7 +528,7 @@ private[pass] object WaitLoops {
     def visit(s: p.Stmt, pos: Option[p.SourcePosition]): Option[Option[p.SourcePosition]] = s match {
       case p.Stmt.Annotated(inner, at, _) => visit(inner, at.orElse(pos))
       case p.Stmt.While(c, b)             => if (reads(c) || exits(b)) Some(pos) else search(b, pos)
-      case p.Stmt.ForRange(_, _, _, _, b) => if (exits(b)) Some(pos) else search(b, pos)
+      case p.Stmt.ForRange(body = b)      => if (exits(b)) Some(pos) else search(b, pos)
       case p.Stmt.Cond(_, t, f)           => search(t, pos).orElse(search(f, pos))
       case _                              => None
     }

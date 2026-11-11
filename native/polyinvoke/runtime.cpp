@@ -1,8 +1,20 @@
 #include "polyinvoke/runtime.h"
 
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <functional>
+#include <initializer_list>
+#include <iterator>
+#include <memory>
 #include <mutex>
+#include <string>
+#include <string_view>
 #include <utility>
+#include <variant>
+#include <vector>
 
 #include "aspartame/all.hpp"
 #include "fmt/format.h"
@@ -28,11 +40,11 @@ template <typename F, typename It> constexpr static void insertIntoBufferAt(invo
   for (auto it = begin; it != end; ++it) {
     auto &[tpe, ptr] = *it;
     buffer.types.insert(f(buffer.types), tpe);
-    if (auto size = byteOfType(tpe); size != 0) {
+    if (const auto size = byteOfType(tpe); size != 0) {
       if (tpe == invoke::Type::Scratch || !ptr) {
         buffer.data.insert(f(buffer.data), size, std::byte{});
       } else {
-        auto offset = static_cast<std::byte *>(ptr);
+        auto *offset = static_cast<std::byte *>(ptr);
         buffer.data.insert(f(buffer.data), offset, offset + size);
       }
     }
@@ -99,14 +111,14 @@ invoke::detail::CountingLatch::Token::Token(CountingLatch &latch) : latch(latch)
 invoke::detail::CountingLatch::Token::~Token() {
   POLYINVOKE_TRACE();
   --latch.pending;
-  std::lock_guard lock(latch.mutex);
+  const std::scoped_lock lock(latch.mutex);
   latch.cv.notify_all();
 }
 invoke::detail::CountingLatch::CountingLatch(const std::chrono::duration<int64_t> &timeout) : timeout(timeout) { POLYINVOKE_TRACE(); }
 std::shared_ptr<invoke::detail::CountingLatch::Token> invoke::detail::CountingLatch::acquire() {
   POLYINVOKE_TRACE();
   ++pending;
-  std::lock_guard lock(mutex);
+  const std::scoped_lock lock(mutex);
   cv.notify_all();
   return std::make_shared<Token>(*this);
 }
@@ -114,7 +126,7 @@ bool invoke::detail::CountingLatch::waitAll() {
   POLYINVOKE_TRACE();
   const auto now = std::chrono::system_clock::now();
   std::unique_lock lock(mutex);
-  return cv.wait_until(lock, now + timeout, [&]() { return pending == 0; });
+  return cv.wait_until(lock, now + timeout, [&] { return pending == 0; });
 }
 invoke::detail::CountingLatch::~CountingLatch() {
   POLYINVOKE_TRACE();
@@ -125,19 +137,19 @@ invoke::detail::CountingLatch::~CountingLatch() {
 }
 
 void *invoke::detail::CountedCallbackHandler::createHandle(const Callback &cb) {
-  std::lock_guard guard(lock);
+  const std::scoped_lock guard(lock);
   const auto eventId = eventCounter++;
   const auto pos = callbacks.emplace(eventId, cb).first;
   return reinterpret_cast<void *>(pos->first);
 }
 void invoke::detail::CountedCallbackHandler::consume(void *data) {
-  std::lock_guard guard(lock);
+  const std::scoped_lock guard(lock);
   if (const auto it = callbacks.find(reinterpret_cast<uintptr_t>(data)); it != callbacks.end()) {
     it->second();
     callbacks.erase(reinterpret_cast<uintptr_t>(data));
   } else POLYINVOKE_FATAL("Runtime", "Cannot consume %p, callback not found!?", data);
 }
-invoke::detail::CountedCallbackHandler::~CountedCallbackHandler() { const std::lock_guard guard(lock); }
+invoke::detail::CountedCallbackHandler::~CountedCallbackHandler() { const std::scoped_lock guard(lock); }
 invoke::detail::CountedCallbackHandler &invoke::detail::CountedCallbackHandler::instance() {
   static CountedCallbackHandler handler;
   return handler;

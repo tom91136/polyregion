@@ -1,6 +1,5 @@
 package polyregion.ast
 
-import scala.annotation.targetName
 import scala.collection.mutable.ArrayBuffer
 import scala.util.Try
 
@@ -10,9 +9,7 @@ case class RenderedLog(name: String, lines: ArrayBuffer[(String, Vector[String])
     val sub = RenderedLog(name); lines += sub; sub
   }
 
-  @targetName("append") infix def +=(log: RenderedLog): Unit          = lines += log
-  @targetName("appendAll") infix def ++=(log: Seq[RenderedLog]): Unit = lines ++= log
-  def info(message: String, details: String*): Unit                   = lines += (message -> details.toVector)
+  def info(message: String, details: String*): Unit = lines += (message -> details.toVector)
 
 //  def info(message: String, details: String*): Result[Log] = info_(message, details*).success
 

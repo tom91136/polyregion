@@ -3,10 +3,17 @@
 
 #include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <functional>
 #include <limits>
+#include <optional>
 #include <set>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 #include "aspartame/all.hpp"
 #include "fmt/core.h"
@@ -98,10 +105,12 @@ static std::optional<uint64_t> scalarBytes(const Type::Any &t) {
   return std::nullopt;
 }
 
+namespace {
 struct ArrayExtent {
   Type::Any element;
   uint64_t count;
 };
+} // namespace
 
 static std::optional<ArrayExtent> arrayExtent(const Type::Any &t) {
   Type::Any element = t;
@@ -114,7 +123,7 @@ static std::optional<ArrayExtent> arrayExtent(const Type::Any &t) {
     count *= static_cast<uint64_t>(a->length);
     element = a->comp;
   }
-  return found ? std::optional<ArrayExtent>{{element, count}} : std::nullopt;
+  return found ? std::optional<ArrayExtent>{{.element = element, .count = count}} : std::nullopt;
 }
 
 template <typename T> static bool usesTpe(const std::vector<Function> &fns, const std::vector<StructDef> &defs) {
@@ -192,7 +201,7 @@ void backend::CSource::bindLocalNames(const Function &fn) {
 
 Type::Any backend::CSource::resolveFieldType(const Type::Any &owner, const std::string &fieldName) const {
   if (auto s = owner.get<Type::Struct>()) {
-    if (auto it = structDefsByName.find(fqcn(s->name)); it != structDefsByName.end()) {
+    if (const auto it = structDefsByName.find(fqcn(s->name)); it != structDefsByName.end()) {
       if (auto m = it->second ^ find([&](const auto &name, const auto &) { return name == fieldName; })) return m->second;
     }
     throw std::logic_error("field " + fieldName + " not found on struct " + repr(s->name));
@@ -297,7 +306,7 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
   }
 }
 
-std::string backend::CSource::mslPtrSpace(const Term::Any &ptr) const {
+std::string backend::CSource::mslPtrSpace(const Term::Any &ptr) {
   const auto tpe = ptr.tpe().template get<Type::Ptr>();
   if (!tpe) throw BackendException("MSL memory operation requires a pointer operand");
   return tpe->space.match_total(
@@ -313,8 +322,10 @@ std::string backend::CSource::mkArrayDecl(const Type::Any &element, const TypeSp
     dims += fmt::format("[{}]", a->length);
     base = a->comp;
   }
-  const auto q =
-      space.template is<TypeSpace::Local>() && dialect != Dialect::C11 ? dialect == Dialect::MSL1_0 ? "threadgroup " : "local " : "";
+  const auto *const q = [&] {
+    if (!space.template is<TypeSpace::Local>() || dialect == Dialect::C11) return "";
+    return dialect == Dialect::MSL1_0 ? "threadgroup " : "local ";
+  }();
   return fmt::format("{}{} {}{}", q, mkTpe(base), name, dims);
 }
 
@@ -415,7 +426,7 @@ std::string backend::CSource::mkTerm(const Term::Any &term) {
                             std::string acc = localName(x.root.symbol);
                             // the AST omits the implicit deref of a Field through a pointer; insert `(*...)` here
                             Type::Any current = x.root.tpe;
-                            for (auto &step : x.steps) {
+                            for (const auto &step : x.steps) {
                               step.match_total(
                                   [&](const PathStep::Field &f) {
                                     if (auto p = current.template get<Type::Ptr>()) {
@@ -452,10 +463,16 @@ std::string backend::CSource::workGroupCollective(const std::string &spec, const
   requireGroupNative(compiletime::Target::Source_C_OpenCL2_0, "", kind, op, value.tpe());
   if (kind == compiletime::GroupKind::Reduce && rtn.template is<Type::Bool1>())
     return fmt::format("work_group_{}({})", op.template is<AtomicOp::Or>() ? "any" : "all", mkTerm(value));
-  const auto operation = op.template is<AtomicOp::Add>() ? "add" : op.template is<AtomicOp::Min>() ? "min" : "max";
-  const auto name = kind == compiletime::GroupKind::Reduce      ? "reduce"
-                    : kind == compiletime::GroupKind::Inclusive ? "scan_inclusive"
-                                                                : "scan_exclusive";
+  const auto *const operation = [&] {
+    if (op.template is<AtomicOp::Add>()) return "add";
+    if (op.template is<AtomicOp::Min>()) return "min";
+    return "max";
+  }();
+  const auto *const name = [&] {
+    if (kind == compiletime::GroupKind::Reduce) return "reduce";
+    if (kind == compiletime::GroupKind::Inclusive) return "scan_inclusive";
+    return "scan_exclusive";
+  }();
   return fmt::format("work_group_{}_{}({})", name, operation, mkTerm(value));
 }
 
@@ -868,7 +885,8 @@ std::string backend::CSource::mkValueCopy(const std::string &lhs, const std::str
     const auto name = fqcn(s->name);
     // a populated union stays whole; naming its members would not preserve the active one
     // a zero-size member has no storage in the emitted body, so it must not be named
-    if (auto it = structDefsByName.find(name); it != structDefsByName.end() && (it->second.empty() || !(unionDefNames ^ contains(name))))
+    if (const auto it = structDefsByName.find(name);
+        it != structDefsByName.end() && (it->second.empty() || !(unionDefNames ^ contains(name))))
       return it->second | map([&](const auto &m) {
                return mkValueCopy(fmt::format("{}.{}", lhs, m.first), fmt::format("{}.{}", rhs, m.first), m.second, depth);
              })                                                       //
@@ -1081,7 +1099,7 @@ std::vector<Stmt::Var> backend::CSource::localArrays(const Function &fnTree) {
 }
 
 backend::CSource::LocalUsage backend::CSource::localUsage(const std::vector<Stmt::Var> &localVars) {
-  return localVars ^ fold_left(LocalUsage{0, {}, nullptr}, [&](LocalUsage acc, const auto &v) {
+  return localVars ^ fold_left(LocalUsage{.fixedBytes = 0, .fixedSizeExprs = {}, .dynamic = nullptr}, [&](LocalUsage acc, const auto &v) {
            const auto extent = arrayExtent(v.name.tpe);
            if (!extent) throw BackendException("workgroup array extent overflow");
            if (extent->count == 0) {
@@ -1105,7 +1123,10 @@ std::string backend::CSource::mkFn(const Function &fnTree) {
     throw BackendException(fmt::format("workgroup storage exceeds configured capacity of {} bytes", workgroupMemoryBytes));
 
   const bool inPlace = usage.dynamic && scalarBytes(usage.dynamic->tpe.template get<Type::Arr>()->comp) == 1;
-  const auto regionName = !usage.dynamic ? ""s : inPlace ? localName(usage.dynamic->symbol) : localName("#workgroup_region");
+  const auto regionName = [&] {
+    if (!usage.dynamic) return ""s;
+    return inPlace ? localName(usage.dynamic->symbol) : localName("#workgroup_region");
+  }();
   const auto fixedExpr = usage.fixedSizeExprs ^ mk_string("", " + ", "", [](const auto &x) { return x; });
   const auto remaining = workgroupMemoryBytes - usage.fixedBytes;
   const auto available = fixedExpr.empty() ? std::to_string(remaining) : fmt::format("{} - ({})", remaining, fixedExpr);
@@ -1140,7 +1161,7 @@ std::string backend::CSource::mkFn(const Function &fnTree) {
     }
     const auto ptr = arg.named.tpe.template get<Type::Ptr>();
     if (!ptr || (!ptr->space.template is<TypeSpace::Global>() && !ptr->space.template is<TypeSpace::Constant>())) return std::nullopt;
-    const auto bytePtr = ptr->space.template is<TypeSpace::Global>() ? "global uchar*" : "constant uchar*";
+    const auto *const bytePtr = ptr->space.template is<TypeSpace::Global>() ? "global uchar*" : "constant uchar*";
     return fmt::format("{} = {} == POLYREGION_OPENCL_NULL_POINTER_OFFSET ? (({}) 0) : (({}) ((({}) {}) + {}));",
                        mkDecl(arg.named.tpe, localName(arg.named.symbol)), offset, mkTpe(arg.named.tpe), mkTpe(arg.named.tpe), bytePtr,
                        base, offset);
@@ -1237,7 +1258,11 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
 
   // hoist string literals to named program-scope constant arrays (collection order is deterministic); an inline
   // OpenCL literal has no addressable storage so reading it through a pointer yields garbage
-  const char *constQual = openCL() ? "__constant " : dialect == Dialect::MSL1_0 ? "constant " : "static const ";
+  const char *constQual = [&] {
+    if (openCL()) return "__constant ";
+    if (dialect == Dialect::MSL1_0) return "constant ";
+    return "static const ";
+  }();
   stringConstNames.clear();
   const auto stringDecls =                                                                    //
       allFns                                                                                  //

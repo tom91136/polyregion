@@ -1,6 +1,7 @@
 package polyregion.ast.pass
 
 import polyregion.ast.Traversal.*
+import polyregion.ast.pass.TypeOps.sameType
 import polyregion.ast.{PolyAST as p, *, given}
 
 // monomorphises generic functions: one specialised copy per distinct tpeArg set reached from entry,
@@ -15,49 +16,15 @@ import polyregion.ast.{PolyAST as p, *, given}
 //   Invoke of an unknown / non-generic name      -> left untouched (no tpeArgs -> not rewritten)
 object Specialisation extends ProgramPass {
 
-  private def sameType(left: p.Type, right: p.Type): Boolean = {
-    def loop(
-        x: p.Type,
-        y: p.Type,
-        xBound: Map[String, Int],
-        yBound: Map[String, Int],
-        depth: Int
-    ): Boolean = (x, y) match {
-      case (p.Type.Nothing, _) | (_, p.Type.Nothing) => true
-      case (p.Type.Var(xName, _), p.Type.Var(yName, _)) =>
-        (xBound.get(xName), yBound.get(yName)) match {
-          case (Some(xId), Some(yId)) => xId == yId
-          case (None, None)           => xName == yName
-          case _                      => false
-        }
-      case (p.Type.Struct(xName, xArgs), p.Type.Struct(yName, yArgs)) =>
-        xName == yName && xArgs.size == yArgs.size &&
-        xArgs.zip(yArgs).forall((a, b) => loop(a, b, xBound, yBound, depth))
-      case (p.Type.Ptr(xComp, xSpace), p.Type.Ptr(yComp, ySpace)) =>
-        xSpace == ySpace && loop(xComp, yComp, xBound, yBound, depth)
-      case (p.Type.Arr(xComp, xLength, xSpace), p.Type.Arr(yComp, yLength, ySpace)) =>
-        xLength == yLength && xSpace == ySpace && loop(xComp, yComp, xBound, yBound, depth)
-      case (p.Type.Exec(xVars, xArgs, xRtn), p.Type.Exec(yVars, yArgs, yRtn)) =>
-        val ids       = xVars.indices.map(depth + _)
-        val nestedX   = xBound ++ xVars.map(_.name).zip(ids)
-        val nestedY   = yBound ++ yVars.map(_.name).zip(ids)
-        val nestedEnd = depth + xVars.size
-        xVars.size == yVars.size && xArgs.size == yArgs.size &&
-        xArgs.zip(yArgs).forall((a, b) => loop(a, b, nestedX, nestedY, nestedEnd)) &&
-        loop(xRtn, yRtn, nestedX, nestedY, nestedEnd)
-      case _ => x == y
-    }
-    loop(left, right, Map.empty, Map.empty, 0)
-  }
-
   private case class Callsite(
       calleeName: p.Sym,
       tpeArgs: List[p.Type],
       receiver: Option[p.Type],
       args: List[p.Type],
-      rtn: Option[p.Type],
-      remote: Boolean
-  )
+      rtn: Option[p.Type]
+  ) {
+    def remote: Boolean = rtn.isEmpty
+  }
 
   private case class Candidate(
       tpeArgs: List[p.Type],
@@ -87,6 +54,16 @@ object Specialisation extends ProgramPass {
       case _ => false
     }
 
+  private def bindAll(
+      patterns: List[p.Type],
+      actuals: List[p.Type],
+      bindings: Map[String, p.Type],
+      variables: Set[String]
+  ): Option[Map[String, p.Type]] =
+    patterns.zip(actuals).foldLeft(Option(bindings)) { case (acc, (expected, found)) =>
+      acc.flatMap(bind(expected, found, _, variables))
+    }
+
   private def bind(
       pattern: p.Type,
       actual: p.Type,
@@ -103,9 +80,7 @@ object Specialisation extends ProgramPass {
       case p.Type.Struct(name, args) =>
         actual match {
           case p.Type.Struct(`name`, actualArgs) if args.size == actualArgs.size =>
-            args.zip(actualArgs).foldLeft(Option(bindings)) { case (acc, (expected, found)) =>
-              acc.flatMap(bind(expected, found, _, variables))
-            }
+            bindAll(args, actualArgs, bindings, variables)
           case _ => None
         }
       case p.Type.Ptr(comp, space) =>
@@ -122,26 +97,11 @@ object Specialisation extends ProgramPass {
         actual match {
           case p.Type.Exec(actualVars, actualArgs, actualRtn)
               if patternVars.size == actualVars.size && args.size == actualArgs.size =>
-            def align(t: p.Type, env: Map[String, String]): p.Type = t match {
-              case variable @ p.Type.Var(name, _)  => variable.copy(name = env.getOrElse(name, name))
-              case p.Type.Struct(name, args)       => p.Type.Struct(name, args.map(align(_, env)))
-              case p.Type.Ptr(comp, space)         => p.Type.Ptr(align(comp, env), space)
-              case p.Type.Arr(comp, length, space) => p.Type.Arr(align(comp, env), length, space)
-              case p.Type.Exec(vars, args, rtn) =>
-                val nested = env -- vars.map(_.name)
-                p.Type.Exec(vars, args.map(align(_, nested)), align(rtn, nested))
-              case other => other
-            }
             val env             = actualVars.map(_.name).zip(patternVars.map(_.name)).toMap
-            val alignedArgs     = actualArgs.map(align(_, env))
-            val alignedRtn      = align(actualRtn, env)
+            val alignedArgs     = actualArgs.map(Binders.renameVars(_, env))
+            val alignedRtn      = Binders.renameVars(actualRtn, env)
             val nestedVariables = variables -- patternVars.map(_.name)
-            args
-              .zip(alignedArgs)
-              .foldLeft(Option(bindings)) { case (acc, (expected, found)) =>
-                acc.flatMap(bind(expected, found, _, nestedVariables))
-              }
-              .flatMap(bind(rtn, alignedRtn, _, nestedVariables))
+            bindAll(args, alignedArgs, bindings, nestedVariables).flatMap(bind(rtn, alignedRtn, _, nestedVariables))
           case _ => None
         }
       case _ => Option.when(sameType(pattern, actual))(bindings)
@@ -195,7 +155,7 @@ object Specialisation extends ProgramPass {
   private def inferLaunchArguments(
       kernel: p.Function,
       args: List[p.Type],
-      allowScalarConversion: Boolean
+      compatible: (p.Type, p.Type) => Boolean
   ): Option[List[p.Type]] = {
     val params = launchParams(kernel)
     if (
@@ -209,7 +169,7 @@ object Specialisation extends ProgramPass {
         .foldLeft(Option(Map.empty[String, p.Type])) { case (acc, (param, arg)) =>
           val normalized = normalizedLaunchType(param.named.tpe, arg)
           if (!containsFreeVariable(param.named.tpe, variables))
-            acc.filter(_ => compatibleArgumentType(param.named.tpe, normalized, allowScalarConversion))
+            acc.filter(_ => compatible(param.named.tpe, normalized))
           else acc.flatMap(bind(param.named.tpe, normalized, _, variables))
         }
         .flatMap(bindings =>
@@ -220,8 +180,16 @@ object Specialisation extends ProgramPass {
     }
   }
 
+  private def inferExactLaunchArguments(kernel: p.Function, args: List[p.Type]): Option[List[p.Type]] =
+    inferLaunchArguments(kernel, args, compatibleArgumentType(_, _, allowScalarConversion = false))
+
+  private def inferScalarLaunchArguments(kernel: p.Function, args: List[p.Type]): Option[List[p.Type]] =
+    inferLaunchArguments(kernel, args, compatibleArgumentType(_, _, allowScalarConversion = true))
+
   private def inferLaunchArguments(fn: p.Function, overloads: Map[p.Sym, List[p.Function]]): p.Function = {
-    val hasRemoteLaunch = fn.collectFirst_[p.Expr] { case p.Expr.SpecOp(_: p.Spec.RemoteLaunch) => true }.isDefined
+    val hasRemoteLaunch = fn
+      .collectFirst_[p.Expr] { case p.Expr.SpecOp(p.Spec.RemoteLaunch(_, _, _, _, _, _, _, _, _, _, _)) => true }
+      .isDefined
     if (!hasRemoteLaunch) return fn
 
     val inferred = fn.modifyAll[p.Expr] {
@@ -230,10 +198,16 @@ object Specialisation extends ProgramPass {
           case p.Type.FnRef(name) =>
             val kernels = overloads
               .getOrElse(name, Nil)
-            val exact = kernels.flatMap(kernel => inferLaunchArguments(kernel, launch.args.map(_.tpe), false)).distinct
+            val argTypes = launch.args.map(_.tpe)
+            val exact = kernels
+              .flatMap(kernel => inferExactLaunchArguments(kernel, argTypes))
+              .distinct
             val matches =
               if (exact.nonEmpty) exact
-              else kernels.flatMap(kernel => inferLaunchArguments(kernel, launch.args.map(_.tpe), true)).distinct
+              else
+                kernels
+                  .flatMap(kernel => inferScalarLaunchArguments(kernel, argTypes))
+                  .distinct
             matches match {
               case arguments :: Nil => Some(arguments)
               case _                => None
@@ -252,7 +226,7 @@ object Specialisation extends ProgramPass {
     def recordDeclarations(statement: p.Stmt): Unit = statement match {
       case p.Stmt.Var(name, _, _) => usedSymbols += name.symbol
       case p.Stmt.While(_, body)  => body.foreach(recordDeclarations)
-      case p.Stmt.ForRange(induction, _, _, _, body) =>
+      case p.Stmt.ForRange(induction = induction, body = body) =>
         usedSymbols += induction.symbol
         body.foreach(recordDeclarations)
       case p.Stmt.Cond(_, trueBr, falseBr) =>
@@ -280,7 +254,7 @@ object Specialisation extends ProgramPass {
     def normalize(launch: p.Spec.RemoteLaunch): (List[p.Stmt], p.Spec.RemoteLaunch) =
       launch.kernel.tpe match {
         case p.Type.FnRef(name) =>
-          val callsite    = Callsite(name, launch.tpeArgs, None, launch.args.map(_.tpe), None, remote = true)
+          val callsite    = Callsite(name, launch.tpeArgs, None, launch.args.map(_.tpe), None)
           val specialised = candidates(callsite, overloads).map(_.function)
           val concrete = overloads
             .getOrElse(name, Nil)
@@ -302,7 +276,7 @@ object Specialisation extends ProgramPass {
                     if (sameType(expected, normalized.tpe)) statements -> (normalized :: terms)
                     else if (isScalar(expected) && isScalar(normalized.tpe)) {
                       val named = temporary(expected)
-                      (p.Stmt.Var(named, Some(p.Expr.Cast(normalized, expected)), isMutable = false) :: statements) ->
+                      (p.Stmt.Var(named, Some(p.Expr.Cast(normalized, expected))) :: statements) ->
                         (p.Term.Select(named, Nil, expected) :: terms)
                     } else statements -> (normalized :: terms)
                 }
@@ -357,25 +331,25 @@ object Specialisation extends ProgramPass {
           appliedTypeArgs(receiver, tpeArgs),
           receiver.map(_.tpe),
           args.map(_.tpe),
-          Some(rtn),
-          false
+          Some(rtn)
         ) :: Nil
-      case _: p.Expr.Invoke => Nil
+      case p.Expr.Invoke(_, _, _, _, _) => Nil
       case p.Expr.SpecOp(launch: p.Spec.RemoteLaunch) =>
         launch.kernel.tpe match {
           case p.Type.FnRef(name) =>
-            Callsite(name, launch.tpeArgs, None, launch.args.map(_.tpe), None, true) :: Nil
+            Callsite(name, launch.tpeArgs, None, launch.args.map(_.tpe), None) :: Nil
           case _ => Nil
         }
     }.flatten
 
+  private def insertSegment(sym: p.Sym, segment: String): p.Sym = sym.fqn match {
+    case xs :+ x => p.Sym(xs :+ segment :+ x)
+    case xs      => p.Sym(segment :: xs)
+  }
+
   def monomorphicName(calleeName: p.Sym, tpeArgs: List[p.Type]): p.Sym = {
     if (tpeArgs.isEmpty) return calleeName
-    val monomorphicToken = tpeArgs.map(_.monomorphicName).mkString("_")
-    calleeName.fqn match {
-      case xs :+ x => p.Sym(xs :+ monomorphicToken :+ x)
-      case xs      => p.Sym(monomorphicToken :: xs)
-    }
+    insertSegment(calleeName, tpeArgs.map(_.monomorphicName).mkString("_"))
   }
 
   def monomorphicName(ivk: p.Expr.Invoke): p.Sym =
@@ -388,7 +362,8 @@ object Specialisation extends ProgramPass {
       overloads: Map[p.Sym, List[p.Function]]
   ): p.Sym = {
     val typedBase          = monomorphicName(fn.name, tpeArgs)
-    val uncoveredCallables = callableNames.filterNot(name => tpeArgs.contains(p.Type.FnRef(name)))
+    val tpeArgSet          = tpeArgs.toSet
+    val uncoveredCallables = callableNames.filterNot(name => tpeArgSet(p.Type.FnRef(name)))
     val base =
       if (uncoveredCallables.isEmpty) typedBase
       else {
@@ -402,52 +377,17 @@ object Specialisation extends ProgramPass {
           hash *= 1099511628211L
         }
         val token = s"callable_${java.lang.Long.toUnsignedString(hash, 16)}"
-        typedBase.fqn match {
-          case xs :+ x => p.Sym(xs :+ token :+ x)
-          case xs      => p.Sym(token :: xs)
-        }
+        insertSegment(typedBase, token)
       }
     val siblings = overloads.getOrElse(fn.name, Nil).sortBy(_.signatureKey)
     if (siblings.size <= 1) base
     else {
       val ordinal = siblings.indexWhere(_.signatureKey == fn.signatureKey)
-      base.fqn match {
-        case xs :+ x => p.Sym(xs :+ s"overload${ordinal.max(0)}" :+ x)
-        case xs      => p.Sym(s"overload${ordinal.max(0)}" :: xs)
-      }
+      insertSegment(base, s"overload${ordinal.max(0)}")
     }
   }
 
   private val ExecBinderPrefix = "#specialisation_exec#"
-
-  private def protectExecBinders(tpe: p.Type): p.Type = {
-    def rename(t: p.Type, env: Map[String, String]): p.Type = t match {
-      case variable @ p.Type.Var(name, _)  => variable.copy(name = env.getOrElse(name, name))
-      case p.Type.Struct(name, args)       => p.Type.Struct(name, args.map(rename(_, env)))
-      case p.Type.Ptr(comp, space)         => p.Type.Ptr(rename(comp, env), space)
-      case p.Type.Arr(comp, length, space) => p.Type.Arr(rename(comp, env), length, space)
-      case p.Type.Exec(vars, args, rtn) =>
-        val nested = env -- vars.map(_.name)
-        p.Type.Exec(vars, args.map(rename(_, nested)), rename(rtn, nested))
-      case other => other
-    }
-    tpe match {
-      case p.Type.Exec(vars, args, rtn) if !vars.forall(_.name.startsWith(ExecBinderPrefix)) =>
-        val renamed: List[p.Type.Var] =
-          vars.map(variable => p.Type.Var(ExecBinderPrefix + variable.name, variable.exactSizeInBytes))
-        val env = vars.map(_.name).zip(renamed.map(_.name)).toMap
-        p.Type.Exec(renamed, args.map(rename(_, env)), rename(rtn, env))
-      case other => other
-    }
-  }
-
-  private def unprotectExecBinders(tpe: p.Type): p.Type = tpe match {
-    case variable @ p.Type.Var(name, _) if name.startsWith(ExecBinderPrefix) =>
-      variable.copy(name = name.stripPrefix(ExecBinderPrefix))
-    case p.Type.Exec(vars, args, rtn) =>
-      p.Type.Exec(vars.map(variable => variable.copy(name = variable.name.stripPrefix(ExecBinderPrefix))), args, rtn)
-    case other => other
-  }
 
   private def bindClosureCallees(fn: p.Function, overloads: Map[p.Sym, List[p.Function]]): p.Function = {
     lazy val operators = overloads.values.flatten.toList
@@ -459,14 +399,15 @@ object Specialisation extends ProgramPass {
       }
       .groupMap(_._1)(_._2)
     fn.modifyAll[p.Expr] {
-      case invoke @ p.Expr.Invoke(closure: p.Type.Struct, _, _, args, _) =>
-        operators.getOrElse(closure.name, Nil).filter(_.args.size == args.size).distinct match {
+      case invoke @ p.Expr.Invoke(callee = closure: p.Type.Struct, args = args) =>
+        val arity = args.size
+        operators.getOrElse(closure.name, Nil).filter(_.args.size == arity).distinct match {
           case operator :: Nil => invoke.copy(callee = p.Type.FnRef(operator.name))
           case _               => invoke
         }
-      case invoke @ p.Expr.Invoke(_: p.Type.FnRef, _, Some(receiver), _, _) =>
+      case invoke @ p.Expr.Invoke(p.Type.FnRef(_), _, Some(receiver), _, _) =>
         receiver.tpe match {
-          case _: p.Type.FnRef | p.Type.Ptr(_: p.Type.FnRef, _) => invoke.copy(receiver = None)
+          case p.Type.FnRef(_) | p.Type.Ptr(p.Type.FnRef(_), _) => invoke.copy(receiver = None)
           case _                                                => invoke
         }
       case expression => expression
@@ -485,12 +426,12 @@ object Specialisation extends ProgramPass {
         val tpeLut = fn.tpeVars.map(_.name).zip(tpeArgs).toMap
         val substituted = fn
           .copy(decl = fn.decl.copy(name = newName, tpeVars = Nil))
-          .modifyAll[p.Type](protectExecBinders)
+          .modifyAll[p.Type](Binders.protectExec(ExecBinderPrefix))
           .modifyAll[p.Type] {
             case v @ p.Type.Var(name, _) => tpeLut.getOrElse(name, v)
             case x                       => x
           }
-          .modifyAll[p.Type](unprotectExecBinders)
+          .modifyAll[p.Type](Binders.unprotectExec(ExecBinderPrefix))
         bindClosureCallees(substituted, overloads)
       }
 
@@ -519,7 +460,9 @@ object Specialisation extends ProgramPass {
       fn.receiver.size == callsite.receiver.size &&
       fn.receiver.map(_.named.tpe).zip(callsite.receiver).forall(sameType) &&
       params.size == callsite.args.size &&
-      params.zip(callsite.args).forall((expected, actual) => compatibleArgumentType(expected, actual, false)) &&
+      params
+        .zip(callsite.args)
+        .forall((expected, actual) => compatibleArgumentType(expected, actual, allowScalarConversion = false)) &&
       callsite.rtn.exists(sameType(_, fn.rtn))
     }
 
@@ -615,7 +558,7 @@ object Specialisation extends ProgramPass {
       def resolveCallableAlias(term: p.Term, visited: Set[p.Named] = Set.empty): p.Term = term match {
         case select @ p.Term.Select(root, Nil, _) if callableAliases.contains(root) && !visited(root) =>
           resolveCallableAlias(callableAliases(root), visited + root) match {
-            case callable @ p.Term.Poison(_: p.Type.FnRef) => callable
+            case callable @ p.Term.Poison(p.Type.FnRef(_)) => callable
             case _                                         => select
           }
         case other => other
@@ -625,13 +568,14 @@ object Specialisation extends ProgramPass {
           p.Expr.SpecOp(launch.copy(kernel = resolveCallableAlias(launch.kernel)))
         case expr => expr
       }
+      val callsiteArity = callsite.tpeArgs.size
       resolved.modifyAll[p.Expr] {
         case p.Expr.SpecOp(launch: p.Spec.RemoteLaunch) if launch.tpeArgs.isEmpty =>
           launch.kernel.tpe match {
             case p.Type.FnRef(name)
                 if replacements.values.exists(_.name == name) &&
                   callsite.tpeArgs.nonEmpty &&
-                  overloads.get(name).fold(true)(_.exists(_.tpeVars.size == callsite.tpeArgs.size)) =>
+                  overloads.get(name).fold(true)(_.exists(_.tpeVars.size == callsiteArity)) =>
               p.Expr.SpecOp(launch.copy(tpeArgs = callsite.tpeArgs))
             case _ => p.Expr.SpecOp(launch)
           }
@@ -721,11 +665,12 @@ object Specialisation extends ProgramPass {
         recursiveSpecialise(fnOverloads, root, state)
       }
       .functions
-    specialisationsByIdentity.toList.groupBy(_._2.signatureKey).collectFirst {
+    specialisationsByIdentity.toList.groupBy(_._2.signatureKey).foreach {
       case (signature, identities) if identities.map(_._1).distinct.size > 1 =>
         throw IllegalStateException(
           s"Specialisation generated colliding symbol `$signature` for distinct callable identities"
         )
+      case _ =>
     }
     val specialisations = specialisationsByIdentity.values
 
@@ -737,8 +682,7 @@ object Specialisation extends ProgramPass {
           ivk.tpeArgs,
           ivk.receiver.map(_.tpe),
           ivk.args.map(_.tpe),
-          Some(ivk.rtn),
-          remote = false
+          Some(ivk.rtn)
         )
         candidates(callsite, fnOverloads).map(_.function.name).distinct match {
           case name :: Nil => ivk.copy(callee = p.Type.FnRef(name), tpeArgs = Nil)
@@ -747,7 +691,7 @@ object Specialisation extends ProgramPass {
       case p.Expr.SpecOp(launch: p.Spec.RemoteLaunch) if launch.tpeArgs.nonEmpty =>
         launch.kernel.tpe match {
           case p.Type.FnRef(name) =>
-            val callsite = Callsite(name, launch.tpeArgs, None, launch.args.map(_.tpe), None, remote = true)
+            val callsite = Callsite(name, launch.tpeArgs, None, launch.args.map(_.tpe), None)
             candidates(callsite, fnOverloads).map(_.function).distinct match {
               case candidate :: Nil =>
                 val kernel = launch.kernel.modifyAll[p.Type] {

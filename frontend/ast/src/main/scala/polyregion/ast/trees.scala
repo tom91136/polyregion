@@ -41,10 +41,13 @@ given Traversal[p.Function, p.Stmt] = Traversal.derived
 
 given Traversal[p.StructDef, p.Type] = Traversal.derived
 
-@tailrec def doUntilNotEq[A](x: A, n: Int = 0, limit: Int = Int.MaxValue)(f: (Int, A) => A): (Int, A) = {
-  val y = f(n, x)
-  if (y == x || n >= limit) (n, y)
-  else doUntilNotEq(y, n + 1, limit)(f)
+inline def doUntilNotEq[A](x: A, n: Int = 0, limit: Int = Int.MaxValue)(inline f: (Int, A) => A): (Int, A) = {
+  @tailrec def go(x: A, n: Int): (Int, A) = {
+    val y = f(n, x)
+    if (y == x || n >= limit) (n, y)
+    else go(y, n + 1)
+  }
+  go(x, n)
 }
 
 final class CompilerException(m: String, e: Throwable) extends Exception(m, e) {
@@ -166,35 +169,58 @@ extension (e: p.Type) {
   }
 }
 
-private[polyregion] def validateCallableBinders(tpe: p.Type, path: String): List[String] = {
-  val errors = List.newBuilder[String]
-  def loop(tpe: p.Type, path: String, local: Map[String, p.Type.Var]): Unit = tpe match {
-    case variable @ p.Type.Var(name, _) =>
-      local.get(name).filter(_ != variable).foreach { binder =>
-        errors += s"$path callable type variable `$name` differs from its binder: expected $binder, got $variable"
+private def scopedTypeVarErrors(tpe: p.Type, path: String, scope: Map[String, p.Type.Var])(
+    check: (p.Type.Var, String, Map[String, p.Type.Var]) => List[String]
+): List[String] = tpe match {
+  case variable: p.Type.Var => check(variable, path, scope)
+  case p.Type.Struct(_, args) =>
+    args.zipWithIndex.flatMap((tpe, index) => scopedTypeVarErrors(tpe, s"$path type argument $index", scope)(check))
+  case p.Type.Ptr(comp, _)    => scopedTypeVarErrors(comp, s"$path pointee", scope)(check)
+  case p.Type.Arr(comp, _, _) => scopedTypeVarErrors(comp, s"$path element", scope)(check)
+  case p.Type.Exec(tpeVars, args, rtn) =>
+    val nested = scope ++ tpeVars.map(variable => variable.name -> variable)
+    callableTypeVarErrors(path, tpeVars) ++
+      args.zipWithIndex.flatMap { (tpe, index) =>
+        scopedTypeVarErrors(tpe, s"$path callable argument $index", nested)(check)
+      } ++
+      scopedTypeVarErrors(rtn, s"$path callable return", nested)(check)
+  case _ => Nil
+}
+
+private[polyregion] def validateCallableBinders(tpe: p.Type, path: String): List[String] =
+  scopedTypeVarErrors(tpe, path, Map.empty) { (variable, site, local) =>
+    local
+      .get(variable.name)
+      .filter(_ != variable)
+      .map { binder =>
+        s"$site callable type variable `${variable.name}` differs from its binder: expected $binder, got $variable"
       }
-    case p.Type.Struct(_, args) =>
-      args.zipWithIndex.foreach((tpe, index) => loop(tpe, s"$path type argument $index", local))
-    case p.Type.Ptr(comp, _)    => loop(comp, s"$path pointee", local)
-    case p.Type.Arr(comp, _, _) => loop(comp, s"$path element", local)
-    case p.Type.Exec(tpeVars, args, rtn) =>
-      tpeVars
-        .groupMapReduce(_.name)(_ => 1)(_ + _)
-        .collect { case (name, n) if n > 1 => name }
-        .toList
-        .sorted
-        .foreach(name => errors += s"$path has duplicate callable type variable `$name`")
-      tpeVars.zipWithIndex.foreach { case (variable, index) =>
-        if (variable.name.trim.isEmpty) errors += s"$path callable type variable $index is empty"
-        if (variable.exactSizeInBytes.nonEmpty)
-          errors += s"$path callable type variable `${variable.name}` cannot have an exact-size constraint"
-      }
-      val nested = local ++ tpeVars.map(variable => variable.name -> variable)
-      args.zipWithIndex.foreach((tpe, index) => loop(tpe, s"$path callable argument $index", nested))
-      loop(rtn, s"$path callable return", nested)
-    case _ => ()
+      .toList
   }
-  loop(tpe, path, Map.empty)
+
+private def duplicateTypeVars(tpeVars: List[p.Type.Var]): List[String] =
+  tpeVars.groupMapReduce(_.name)(_ => 1)(_ + _).collect { case (name, n) if n > 1 => name }.toList.sorted
+
+private def typeVarErrors(tpeVars: List[p.Type.Var]): List[String] = {
+  val errors = List.newBuilder[String]
+  duplicateTypeVars(tpeVars).foreach(name => errors += s"duplicate type variable `$name`")
+  tpeVars.zipWithIndex.foreach { case (variable, index) =>
+    if (variable.name.trim.isEmpty) errors += s"type variable $index is empty"
+    variable.exactSizeInBytes
+      .filter(_ <= 0)
+      .foreach(_ => errors += s"type variable `${variable.name}` exact size must be positive")
+  }
+  errors.result()
+}
+
+private def callableTypeVarErrors(path: String, tpeVars: List[p.Type.Var]): List[String] = {
+  val errors = List.newBuilder[String]
+  duplicateTypeVars(tpeVars).foreach(name => errors += s"$path has duplicate callable type variable `$name`")
+  tpeVars.zipWithIndex.foreach { case (variable, index) =>
+    if (variable.name.trim.isEmpty) errors += s"$path callable type variable $index is empty"
+    if (variable.exactSizeInBytes.nonEmpty)
+      errors += s"$path callable type variable `${variable.name}` cannot have an exact-size constraint"
+  }
   errors.result()
 }
 
@@ -202,18 +228,7 @@ extension (decl: p.FunctionDecl) {
   def validate: List[String] = {
     val errors = List.newBuilder[String]
 
-    decl.tpeVars
-      .groupMapReduce(_.name)(_ => 1)(_ + _)
-      .collect { case (name, n) if n > 1 => name }
-      .toList
-      .sorted
-      .foreach(name => errors += s"duplicate type variable `$name`")
-    decl.tpeVars.zipWithIndex.foreach { case (variable, index) =>
-      if (variable.name.trim.isEmpty) errors += s"type variable $index is empty"
-      variable.exactSizeInBytes
-        .filter(_ <= 0)
-        .foreach(_ => errors += s"type variable `${variable.name}` exact size must be positive")
-    }
+    errors ++= typeVarErrors(decl.tpeVars)
 
     (decl.receiver.toList ::: decl.args ::: decl.moduleCaptures ::: decl.termCaptures)
       .map(_.named.symbol)
@@ -371,54 +386,21 @@ extension (decl: p.FunctionDecl) {
 
 extension (definition: p.StructDef) {
   def validate: List[String] = {
-    val errors = List.newBuilder[String]
-    definition.tpeVars
-      .groupMapReduce(_.name)(_ => 1)(_ + _)
-      .collect { case (name, n) if n > 1 => name }
-      .toList
-      .sorted
-      .foreach(name => errors += s"duplicate type variable `$name`")
-    definition.tpeVars.zipWithIndex.foreach { case (variable, index) =>
-      if (variable.name.trim.isEmpty) errors += s"type variable $index is empty"
-      variable.exactSizeInBytes
-        .filter(_ <= 0)
-        .foreach(_ => errors += s"type variable `${variable.name}` exact size must be positive")
-    }
-
-    def loop(tpe: p.Type, path: String, bound: Map[String, p.Type.Var]): Unit = tpe match {
-      case variable @ p.Type.Var(name, _) =>
-        bound.get(name) match {
-          case None => errors += s"$path has undeclared type variable `$name`"
-          case Some(binder) if binder != variable =>
-            errors += s"$path type variable `$name` differs from its binder: expected $binder, got $variable"
-          case _ => ()
-        }
-      case p.Type.Struct(_, args) =>
-        args.zipWithIndex.foreach((tpe, index) => loop(tpe, s"$path type argument $index", bound))
-      case p.Type.Ptr(comp, _)    => loop(comp, s"$path pointee", bound)
-      case p.Type.Arr(comp, _, _) => loop(comp, s"$path element", bound)
-      case p.Type.Exec(tpeVars, args, rtn) =>
-        tpeVars
-          .groupMapReduce(_.name)(_ => 1)(_ + _)
-          .collect { case (name, n) if n > 1 => name }
-          .toList
-          .sorted
-          .foreach(name => errors += s"$path has duplicate callable type variable `$name`")
-        tpeVars.zipWithIndex.foreach { case (variable, index) =>
-          if (variable.name.trim.isEmpty) errors += s"$path callable type variable $index is empty"
-          if (variable.exactSizeInBytes.nonEmpty)
-            errors += s"$path callable type variable `${variable.name}` cannot have an exact-size constraint"
-        }
-        val nested = bound ++ tpeVars.map(variable => variable.name -> variable)
-        args.zipWithIndex.foreach((tpe, index) => loop(tpe, s"$path callable argument $index", nested))
-        loop(rtn, s"$path callable return", nested)
-      case _ => ()
-    }
-
     val declared = definition.tpeVars.map(variable => variable.name -> variable).toMap
-    definition.members.foreach(member => loop(member.tpe, s"member `${member.symbol}`", declared))
-    definition.parents.zipWithIndex.foreach((parent, index) => loop(parent, s"parent $index", declared))
-    errors.result().distinct
+
+    def check(tpe: p.Type, path: String): List[String] =
+      scopedTypeVarErrors(tpe, path, declared) { (variable, site, bound) =>
+        bound.get(variable.name) match {
+          case None => List(s"$site has undeclared type variable `${variable.name}`")
+          case Some(binder) if binder != variable =>
+            List(s"$site type variable `${variable.name}` differs from its binder: expected $binder, got $variable")
+          case _ => Nil
+        }
+      }
+
+    (typeVarErrors(definition.tpeVars) ++
+      definition.members.flatMap(member => check(member.tpe, s"member `${member.symbol}`")) ++
+      definition.parents.zipWithIndex.flatMap((parent, index) => check(parent, s"parent $index"))).distinct
   }
 }
 
@@ -427,7 +409,7 @@ extension (fn: p.Function) {
   def modifyDecl(f: p.FunctionDecl => p.FunctionDecl): p.Function =
     fn.copy(decl = f(fn.decl))
 
-  def mangledName = fn.receiver.map(_.named.tpe.monomorphicName).getOrElse("") + "!" + fn.name.fqn
+  def mangledName = fn.receiver.fold("")(_.named.tpe.monomorphicName) + "!" + fn.name.fqn
     .mkString("_") + "!" + fn.args.map(_.named.tpe.monomorphicName).mkString("_") + "!" + fn.rtn.monomorphicName
 
   def signature: p.Signature = fn.decl.signature
@@ -444,45 +426,10 @@ extension (ivk: p.Expr.Invoke) {
     calleeSym.getOrElse(throw IllegalStateException(s"callee is not a concrete function: ${ivk.callee}"))
 }
 
-extension (space: p.Type.Space) {
-  def canonicalName: String = space match {
-    case p.Type.Space.Global   => ""
-    case p.Type.Space.Local    => "^Local"
-    case p.Type.Space.Private  => "^Private"
-    case p.Type.Space.Constant => "^Constant"
-  }
-}
-
-extension (t: p.Type) {
-  def canonicalName: String = t match {
-    case p.Type.Struct(name, args) => s"${name.fqcn}<${args.map(_.canonicalName).mkString(",")}>"
-    case p.Type.Ptr(c, s)          => s"${c.canonicalName}*${s.canonicalName}"
-    case p.Type.Arr(c, l, s)       => s"${c.canonicalName}[$l]${s.canonicalName}"
-    case p.Type.Var(name, size)    => size.fold(s"#$name")(n => s"#$name:size=$n")
-    case p.Type.FnRef(name)        => s"&${name.fqcn}"
-    case p.Type.Exec(tv, args, rtn) =>
-      s"<${tv.map(_.canonicalName).mkString(",")}>(${args.map(_.canonicalName).mkString(",")}) => ${rtn.canonicalName}"
-    case p.Type.Float16 => "F16"
-    case p.Type.Float32 => "F32"
-    case p.Type.Float64 => "F64"
-    case p.Type.IntU8   => "U8"
-    case p.Type.IntU16  => "U16"
-    case p.Type.IntU32  => "U32"
-    case p.Type.IntU64  => "U64"
-    case p.Type.IntS8   => "I8"
-    case p.Type.IntS16  => "I16"
-    case p.Type.IntS32  => "I32"
-    case p.Type.IntS64  => "I64"
-    case p.Type.Nothing => "Nothing"
-    case p.Type.Unit0   => "Unit0"
-    case p.Type.Bool1   => "Bool1"
-  }
-}
-
 extension (signature: p.Signature) {
   def signatureKey: String = {
     def types(xs: List[p.Type]): String = xs.map(_.canonicalName).mkString(",")
-    val receiver                        = signature.receiver.map(_.canonicalName + ".").getOrElse("")
+    val receiver                        = signature.receiver.fold("")(_.canonicalName + ".")
     s"$receiver${signature.name.fqcn}<${types(signature.tpeVars)}>(${types(signature.args)})[${types(
         signature.moduleCaptures
       )};${types(signature.termCaptures)}]:${signature.rtn.canonicalName}"
@@ -508,7 +455,7 @@ object Builder {
     case p.Expr.Alias(t) => t
     case other =>
       val n = p.Named(s"_${hint}_${stmts.size}", other.tpe)
-      stmts += p.Stmt.Var(n, Some(other), isMutable = false)
+      stmts += p.Stmt.Var(n, Some(other))
       p.Term.Select(n, Nil, n.tpe)
   }
 
@@ -522,7 +469,7 @@ val I64: p.Type         = p.Type.IntS64
 def call(name: String, args: List[p.Term], rtn: p.Type): p.Expr = p.Expr.ForeignCall(name, args, rtn)
 def sel(n: p.Named): p.Term.Select                              = selectTerm(Nil, n)
 def vlet(name: String, tpe: p.Type, e: p.Expr): (p.Named, p.Stmt) = {
-  val n = p.Named(name, tpe); (n, p.Stmt.Var(n, Some(e), isMutable = false))
+  val n = p.Named(name, tpe); (n, p.Stmt.Var(n, Some(e)))
 }
 
 def defaultTerm(t: p.Type): p.Term = t match {
@@ -578,11 +525,11 @@ def constIntValue(t: p.Term): Option[Long] = t match {
 def isZeroConst(t: p.Term): Boolean = constIntValue(t).contains(0L)
 
 def scalarBytes(t: p.Type): Option[Long] = t match {
-  case p.Type.Bool1 | p.Type.IntU8 | p.Type.IntS8                     => Some(1)
-  case p.Type.IntU16 | p.Type.IntS16 | p.Type.Float16                 => Some(2)
-  case p.Type.IntU32 | p.Type.IntS32 | p.Type.Float32                 => Some(4)
-  case p.Type.IntU64 | p.Type.IntS64 | p.Type.Float64 | _: p.Type.Ptr => Some(8)
-  case _                                                              => None
+  case p.Type.Bool1 | p.Type.IntU8 | p.Type.IntS8                        => Some(1)
+  case p.Type.IntU16 | p.Type.IntS16 | p.Type.Float16                    => Some(2)
+  case p.Type.IntU32 | p.Type.IntS32 | p.Type.Float32                    => Some(4)
+  case p.Type.IntU64 | p.Type.IntS64 | p.Type.Float64 | p.Type.Ptr(_, _) => Some(8)
+  case _                                                                 => None
 }
 def scalarBytesOr8(t: p.Type): Int = scalarBytes(t).getOrElse(8L).toInt
 

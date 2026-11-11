@@ -147,22 +147,21 @@ object Compiler {
 
     val x = new TreeScanner[String, Unit] {
 
-      override def visitMethodInvocation(node: MethodInvocationTree, p: Unit): String = {
+      def debugPosition(node: Tree) = {
         debug(">>>" + node)
         val cu = trees.getPath(elem).getCompilationUnit
         debug(s">>> at ${trees.getSourcePositions.getStartPosition(cu, node)}")
         debug(cu.getLineMap.getLineNumber(trees.getSourcePositions.getStartPosition(cu, node)))
+      }
+
+      override def visitMethodInvocation(node: MethodInvocationTree, p: Unit): String = {
+        debugPosition(node)
 
         ""
       }
 
       override def visitLambdaExpression(node: LambdaExpressionTree, p: Unit) = {
-        debug(">>>" + node)
-
-        val cu = trees.getPath(elem).getCompilationUnit
-        debug(s">>> at ${trees.getSourcePositions.getStartPosition(cu, node)}")
-
-        debug(cu.getLineMap.getLineNumber(trees.getSourcePositions.getStartPosition(cu, node)))
+        debugPosition(node)
 
 //        println(trees.getElement(trees.getPath(trees.getPath(elem).getCompilationUnit, node)))
 //        println("tag="+trees.get)

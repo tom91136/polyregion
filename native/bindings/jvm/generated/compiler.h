@@ -24,10 +24,16 @@ static void registerMethods(JNIEnv *env) {
   if (clazz) return;
   clazz = reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("polyregion/jvm/compiler/Compiler")));
   const static JNINativeMethod methods[4] = {
-      {(char *)"compile0", (char *)"([BZLpolyregion/jvm/compiler/Options;B)Lpolyregion/jvm/compiler/Compilation;", (void *)&compile0},
-      {(char *)"hostTarget0", (char *)"()B", (void *)&hostTarget0},
-      {(char *)"hostTriplet0", (char *)"()Ljava/lang/String;", (void *)&hostTriplet0},
-      {(char *)"layoutOf0", (char *)"([BLpolyregion/jvm/compiler/Options;)[Lpolyregion/jvm/compiler/Layout;", (void *)&layoutOf0}};
+      {.name = const_cast<char *>("compile0"),
+       .signature = const_cast<char *>("([BZLpolyregion/jvm/compiler/Options;B)Lpolyregion/jvm/compiler/Compilation;"),
+       .fnPtr = reinterpret_cast<void *>(&compile0)},
+      {.name = const_cast<char *>("hostTarget0"), .signature = const_cast<char *>("()B"), .fnPtr = reinterpret_cast<void *>(&hostTarget0)},
+      {.name = const_cast<char *>("hostTriplet0"),
+       .signature = const_cast<char *>("()Ljava/lang/String;"),
+       .fnPtr = reinterpret_cast<void *>(&hostTriplet0)},
+      {.name = const_cast<char *>("layoutOf0"),
+       .signature = const_cast<char *>("([BLpolyregion/jvm/compiler/Options;)[Lpolyregion/jvm/compiler/Layout;"),
+       .fnPtr = reinterpret_cast<void *>(&layoutOf0)}};
   if (env->RegisterNatives(clazz, methods, 4) != 0) {
     throw std::logic_error("RegisterNatives returned non-zero for polyregion/jvm/compiler/Compiler");
   }

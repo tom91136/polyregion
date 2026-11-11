@@ -23,7 +23,7 @@ inline void disableUncollectedCoreDumps() {
   std::ifstream in("/proc/sys/kernel/core_pattern");
   std::string pattern;
   if (std::getline(in, pattern) && corePatternCollects(pattern)) return;
-  const rlimit noCore{0, 0};
+  const rlimit noCore{.rlim_cur = 0, .rlim_max = 0};
   setrlimit(RLIMIT_CORE, &noCore);
 #endif
 }

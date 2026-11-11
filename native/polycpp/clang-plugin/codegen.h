@@ -20,7 +20,7 @@ struct PackageExport {
   std::vector<std::string> requiredCapabilities;
 };
 
-polyfront::KernelBundle compileRegion(const polyfront::Options &ctx,
+polyfront::KernelBundle compileRegion(const polyfront::Options &opts,
                                       clang::ASTContext &C,                //
                                       clang::DiagnosticsEngine &diag,      //
                                       const std::string &moduleId,         //

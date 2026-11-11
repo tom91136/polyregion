@@ -181,7 +181,7 @@ class PartialEvalSuite extends munit.FunSuite {
       )
     )
     assert(
-      out.forall { case _: p.Stmt.While | _: p.Stmt.ForRange => false; case _ => true },
+      out.forall { case p.Stmt.While(_, _) | p.Stmt.ForRange(_, _, _, _, _) => false; case _ => true },
       out.map(_.repr).mkString("\n")
     )
   }
@@ -224,7 +224,7 @@ class PartialEvalSuite extends munit.FunSuite {
       rtn = p.Type.IntS32
     )
     assertEquals(returnedTerm(out), Some(p.Term.IntS32Const(1)))
-    assert(out.forall { case _: p.Stmt.Cond => false; case _ => true }, out.map(_.repr).mkString("\n"))
+    assert(out.forall { case p.Stmt.Cond(_, _, _) => false; case _ => true }, out.map(_.repr).mkString("\n"))
   }
 
   // --- address lattice: fold *(&x) and (&x)[0] back to the lvalue ---
@@ -538,8 +538,7 @@ class PartialEvalSuite extends munit.FunSuite {
         body = List(
           p.Stmt.Var(
             ref,
-            Some(p.Expr.RefTo(selectT(pointer), None, ptrI32, p.Type.Space.Global, p.Region.Opaque)),
-            isMutable = false
+            Some(p.Expr.RefTo(selectT(pointer), None, ptrI32, p.Type.Space.Global, p.Region.Opaque))
           ),
           p.Stmt.Update(selectT(ref), p.Term.IntS64Const(0), selectT(next)),
           p.Stmt.Return(p.Expr.Alias(selectT(pointer)))
@@ -717,7 +716,7 @@ class PartialEvalSuite extends munit.FunSuite {
       List(p.Arg(f))
     )
     assert(
-      out.exists { case p.Stmt.Var(`v`, Some(_: p.Expr.IntrOp), _) => true; case _ => false },
+      out.exists { case p.Stmt.Var(`v`, Some(p.Expr.IntrOp(_)), _) => true; case _ => false },
       out.map(_.repr).mkString("\n")
     )
   }
@@ -818,7 +817,7 @@ class PartialEvalSuite extends munit.FunSuite {
   // --- common subexpression elimination ---
 
   private def mulCount(body: List[p.Stmt]): Int =
-    body.flatMap(_.collectWhere[p.Expr] { case e @ p.Expr.IntrOp(_: p.Intr.Mul) => e }).size
+    body.flatMap(_.collectWhere[p.Expr] { case e @ p.Expr.IntrOp(p.Intr.Mul(_, _, _)) => e }).size
 
   test("CSE dedups an identical pure computation") {
     val x   = named("x", p.Type.IntS32); val y = named("y", p.Type.IntS32)

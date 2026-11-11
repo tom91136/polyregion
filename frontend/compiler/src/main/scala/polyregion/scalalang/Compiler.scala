@@ -4,7 +4,7 @@ import cats.syntax.all.*
 import polyregion.ast.Traversal.*
 import polyregion.ast.pass.*
 import polyregion.ast.{PolyAST as p, *, given}
-import polyregion.prism.StdLib
+import polyregion.prism.PrismTables
 
 import java.nio.file.Paths
 import scala.quoted.Expr
@@ -42,15 +42,35 @@ object Compiler {
     })
   }
 
+  private[scalalang] def failIfVerificationErrors(
+      label: String,
+      verification: List[(p.Function, List[String])]
+  ): Result[Unit] =
+    if (verification.exists(_._2.nonEmpty))
+      s"$label validation failed (error=${verification.map(_._2.size).sum})\n${verification
+          .map { case (f, es) =>
+            s"${f.repr.linesIterator.map("\t|" + _).mkString("\n")}\n\t[Errors]\n${es.map("\t -> " + _).mkString("\n")}"
+          }
+          .mkString("\n")}".fail
+    else ().success
+
   // This derives the signature based on the *owning* symbol only!
   // This means, for cases where the method's direct root can be different, the actual owner(i.e. the context of the definition site) is used.
+  private def logVerifier(log: Log, verification: List[(p.Function, List[String])]): Unit =
+    log.info(
+      "Verifier",
+      verification.map((f, xs) => s"${f.signatureKey}\nError = ${xs.map("\t->" + _).mkString("\n")}")*
+    )
+
   def deriveSignature(using q: Quoted)(f: q.DefDef): Result[p.Signature] = for {
-    (_ -> fnRtnTpe, _)      <- typer0(f.returnTpt.tpe) // Ignore the class witness as we're deriving the signature.
-    (fnArgsTpeWithTerms, _) <- typer0N(f.paramss.flatMap(_.params).collect { case d: q.ValDef => d.tpt.tpe })
-    owningClass             <- clsSymTyper0(f.symbol.owner)
+    (_ -> fnRtnTpe, _) <- typer0(f.returnTpt.tpe) // Ignore the class witness as we're deriving the signature.
+    params = f.paramss.flatMap(_.params)
+    symbol = f.symbol
+    (fnArgsTpeWithTerms, _) <- typer0N(params.collect { case d: q.ValDef => d.tpt.tpe })
+    owningClass             <- clsSymTyper0(symbol.owner)
     fnArgsTpes = fnArgsTpeWithTerms.map(_._2)
     fnTypeVars: List[p.Type.Var] =
-      f.paramss.flatMap(_.params).collect { case q.TypeDef(name, _) => p.Type.Var(name) }
+      params.collect { case q.TypeDef(name, _) => p.Type.Var(name) }
     (receiver, receiverTpeVars) <- owningClass match {
       case t @ p.Type.Struct(_, args) =>
         (Some(t), args.collect { case p.Type.Var(name, size) => p.Type.Var(name, size) }: List[p.Type.Var]).success
@@ -58,7 +78,7 @@ object Compiler {
     }
     // TODO run outliner here
   } yield p.Signature(
-    p.Sym(f.symbol.fullName),
+    p.Sym(symbol.fullName),
     receiverTpeVars ::: fnTypeVars,
     receiver,
     fnArgsTpes,
@@ -67,13 +87,16 @@ object Compiler {
     fnRtnTpe
   )
 
-  private def matchingSignatures(sigs: Iterable[p.Signature], target: p.Expr.Invoke) =
+  private def matchingSignatures(sigs: Iterable[p.Signature], target: p.Expr.Invoke) = {
+    val tpeArgCount = target.tpeArgs.size
+    val argCount    = target.args.size
+    val argTpes     = target.args.map(_.tpe)
     sigs
       .collect {
         case sig
             if sig.name.last == target.calleeName.last && // match name first, most methods are eliminated here
-              sig.tpeVars.size == target.tpeArgs.size &&  // then we check type arity
-              sig.args.size == target.args.size           // then finally term arity
+              sig.tpeVars.size == tpeArgCount &&          // then we check type arity
+              sig.args.size == argCount                   // then finally term arity
             =>
           val appliedTypes = // we then apply any type variables to form an applied signature
             sig.tpeVars.zip(target.tpeArgs).map((variable, tpe) => (variable: p.Type) -> tpe).toMap
@@ -82,19 +105,23 @@ object Compiler {
       .collect {
         case (applied, sig) // finally we look for the matching signature
             if applied.rtn == target.rtn &&
-              applied.args == target.args.map(_.tpe) &&
+              applied.args == argTpes &&
               applied.receiver == target.receiver.map(_.tpe) =>
           sig // and remember NOT to return the applied one
       }
+  }
 
-  def compileAllDependencies(using q: Quoted)(
+  def compileAllDependencies(using
+      q: Quoted
+  )(
       sink: Log,
       deps: q.FnWitnesses,
       missingDefDefs: Map[q.Symbol, q.DefDef],
       existing: List[p.Function],
       renameMap: Map[q.Symbol, p.Sym] = Map.empty
   )(
-      fnLut: Map[p.Signature, (p.Function, Set[p.StructDef])] = Map.empty
+      fnLut: Map[p.Signature, (p.Function, Set[p.StructDef])],
+      structDefs: Map[p.Sym, p.StructDef]
   ): Result[(List[p.Function], Set[p.StructDef], Set[q.Symbol])] = {
     val interfaceImports = List.newBuilder[InterfaceResolver.Import]
     for {
@@ -143,29 +170,31 @@ object Compiler {
                       // nothing), also match by the sym's own name when sym differs from the target's name.
                       val symFullName    = p.Sym(sym.fullName)
                       val primaryMatches = matchingSignatures(fnLut.keys, target).map(s => fnLut(s)).toList
+                      val tpeArgCount    = target.tpeArgs.size
+                      val argCount       = target.args.size
                       val symNameMatch =
                         if (primaryMatches.nonEmpty || symFullName == target.calleeName) Nil
                         else
                           fnLut.keys
                             .filter(s =>
                               s.name == symFullName &&
-                                s.tpeVars.size == target.tpeArgs.size &&
-                                s.args.size == target.args.size
+                                s.tpeVars.size == tpeArgCount &&
+                                s.args.size == argCount
                             )
                             .map(fnLut(_))
                             .toList
                       (primaryMatches ::: symNameMatch).distinctBy(_._1.name) match {
                         case Nil => // We found no replacement, log it and keep going.
                           val actualDefDef = missingDefDefs.getOrElse(sym, defDef)
+                          val actualSym    = actualDefDef.symbol
 
-                          interfaceIdentity(actualDefDef.symbol) match {
+                          interfaceIdentity(actualSym) match {
                             case Some((packageName, declaration)) =>
                               interfaceImports += InterfaceResolver.Import(packageName, declaration, target)
                               (xs, depss, clsDepss, moduleSymDepss).success
                             case None if actualDefDef.rhs.isEmpty =>
                               log.info(
-                                s"No implementation: ${target.repr} (${actualDefDef.symbol.flags.show}); ${actualDefDef.symbol
-                                    .hashCode()}",
+                                s"No implementation: ${target.repr} (${actualSym.flags.show}); ${actualSym.hashCode()}",
                                 fnLut.keys.map(r => s"Candidate: ${r.repr}").toList*
                               )
 
@@ -185,18 +214,18 @@ object Compiler {
 
                               for {
                                 log <- log
-                                  .subLog(s"Compile (no replacement): ${target.repr} (${actualDefDef.symbol.fullName})")
+                                  .subLog(s"Compile (no replacement): ${target.repr} (${actualSym.fullName})")
                                   .success
                                 (fn0Raw, deps) <- compileFn(log, actualDefDef, Map.empty)
                                 // Apply rename for symbols that collide on fullName (e.g. multiple
                                 // `_$$anon` classes from given declarations) so each compiled override
                                 // gets a unique IR name.
-                                fn0 = renameMap.get(actualDefDef.symbol) match {
+                                fn0 = renameMap.get(actualSym) match {
                                   case Some(unique) => fn0Raw.copy(decl = fn0Raw.decl.copy(name = unique))
                                   case None         => fn0Raw
                                 }
                                 (fn1, wit0, clsDeps, moduleDeps) <- compileAndReplaceStructDependencies(log, fn0, deps)(
-                                  StdLib.StructDefs
+                                  structDefs
                                 )
                               } yield (
                                 fn1 :: xs ::: deps.resolvedFunctions,
@@ -260,7 +289,10 @@ object Compiler {
     } yield (imports._1 ::: fns, imports._2 ++ clsDeps, moduleSymDeps)
   }
 
-  def compileFn(using q: Quoted) //
+  @SuppressWarnings(Array("bonsai:repeated-subexpression"))
+  def compileFn(using
+      q: Quoted
+  ) //
   (
       sink: Log,
       f: q.DefDef,
@@ -269,17 +301,16 @@ object Compiler {
   ): Result[(p.Function, q.Dependencies)] =
     for {
       log <- sink.subLog(s"Compile DefDef: ${f.name}").success
-      _ = log.info(s"Body", f.show(using q.Printer.TreeAnsiCode))
-      rhs <- f.rhs.failIfEmpty(s"Function does not contain an implementation: (in ${f.symbol.maybeOwner}) ${f.show}")
+      _      = log.info(s"Body", f.show(using q.Printer.TreeAnsiCode))
+      symbol = f.symbol
+      rhs <- f.rhs.failIfEmpty(s"Function does not contain an implementation: (in ${symbol.maybeOwner}) ${f.show}")
 
       // First we run the typer on the return type to see if we can just return a term based on the type.
       (fnRtnTerm -> fnRtnTpe, fnRtnWit) <- Retyper.typer0(f.returnTpt.tpe)
 
       // We also run the typer on all the def's arguments, all of which should come in the form of a ValDef.
       // TODO handle default value of args (ValDef.rhs)
-      (fnArgs, fnArgsWit) <- f.termParamss.flatMap(_.params).foldMapM { arg =>
-        Retyper.typer0(arg.tpt.tpe).map { case (_ -> t, wit) => ((arg, p.Named(arg.name, t)) :: Nil, wit) }
-      }
+      (fnArgs, fnArgsWit) <- Remapper.typedTermParams(f)
 
       fnTypeVars: List[p.Type.Var] =
         f.paramss.flatMap(_.params).collect { case q.TypeDef(name, _) => p.Type.Var(name) }
@@ -287,19 +318,12 @@ object Compiler {
       // And then work out whether this def is part of a class/object instance or free-standing (e.g. local methods),
       // class defs will have a `this` receiver arg with the appropriate type.
 
-      owningSymbol <- Remapper
-        .owningClassSymbol(f.symbol)
-        .failIfEmpty(s"${f.symbol} does not have an owning class symbol")
+      owningSymbol <- Retyper
+        .owningClassSymbol(symbol)
+        .failIfEmpty(s"${symbol} does not have an owning class symbol")
       owningClass <- Retyper.clsSymTyper0(owningSymbol)
       _ = log.info(s"Method owner: $owningClass")
-      (receiver, receiverTpeVars) <- owningClass match {
-        case t @ p.Type.Struct(_, args) =>
-          (
-            Some(p.Named("this", t)),
-            args.collect { case p.Type.Var(name, size) => p.Type.Var(name, size) }: List[p.Type.Var]
-          ).success
-        case x => s"Illegal receiver: $x".fail
-      }
+      (receiver, receiverTpeVars) <- Remapper.receiverOf(owningClass)
 
       allTypeVars = (receiverTpeVars ::: fnTypeVars).distinct
 
@@ -314,7 +338,7 @@ object Compiler {
           compileTerm(
             sink = log,
             term = rhs,
-            root = f.symbol,
+            root = symbol,
             scope = scope, // We pass an empty scope table as we are compiling an independent fn.
             tpeArgs = allTypeVars,
             intrinsify = intrinsify
@@ -333,7 +357,7 @@ object Compiler {
 
       compiledFn = p.Function(
         decl = p.FunctionDecl(
-          name = p.Sym(f.symbol.fullName),
+          name = p.Sym(symbol.fullName),
           tpeVars = allTypeVars,
           receiver = receiver.map(p.Arg(_)),
           args = fnArgs.map(_._2).map(p.Arg(_)),
@@ -350,7 +374,9 @@ object Compiler {
       _ = log.info("Result", compiledFn.repr)
     } yield (compiledFn, deps)
 
-  def compileTerm(using q: Quoted)(
+  def compileTerm(using
+      q: Quoted
+  )(
       sink: Log,
       term: q.Term,
       root: q.Symbol,
@@ -358,11 +384,13 @@ object Compiler {
       tpeArgs: List[p.Type],
       intrinsify: Boolean = true
   ): Result[(List[p.Stmt], p.Type, q.Dependencies, Option[(q.ClassDef, p.Type.Struct)])] = for {
-    log <- sink
-      .subLog(
-        s"Compile term: ${scala.util.Try(s"${term.pos.sourceFile.name}:${term.pos.startLine}~${term.pos.endLine}").getOrElse("<no pos>")}"
-      )
-      .success
+    log <- sink.subLog {
+      val label = scala.util
+        .Try(term.pos)
+        .map(pos => s"${pos.sourceFile.name}:${pos.startLine}~${pos.endLine}")
+        .getOrElse("<no pos>")
+      s"Compile term: $label"
+    }.success
     _ = log.info("Body (AST)", pprint.tokenize(term, indent = 1, showFieldNames = true).mkString)
     _ = log.info("Body (Ascii)", term.show(using q.Printer.TreeAnsiCode))
 
@@ -378,13 +406,17 @@ object Compiler {
     // else (statements, c.deps)
   } yield (optStmts, termTpe, optDeps, c.thisCls)
 
-  def findMatchingClassInHierarchy[A, B](using q: Quoted)(symbol: q.Symbol, clsLut: Map[p.Sym, B]): Option[B] = {
+  def findMatchingClassInHierarchy(using
+      q: Quoted
+  )(symbol: q.Symbol, clsLut: Map[p.Sym, p.StructDef]): Option[p.StructDef] = {
     val hierarchy: List[p.Sym] = structName0(symbol) ::
       q.TypeIdent(symbol).tpe.baseClasses.map(structName0(_))
     hierarchy.collectFirst(Function.unlift(clsLut.get(_)))
   }
 
-  def compileAndReplaceStructDependencies(using q: Quoted)(
+  def compileAndReplaceStructDependencies(using
+      q: Quoted
+  )(
       sink: Log,
       fn: p.Function,
       deps: q.Dependencies
@@ -458,7 +490,9 @@ object Compiler {
 
     } yield (mappedFn, mappedFnDeps, structDefs, deps.modules.keySet)
 
-  def compileExpr(using q: Quoted)(sink: Log, expr: Expr[Any]): Result[
+  def compileExpr(using
+      q: Quoted
+  )(sink: Log, expr: Expr[Any], prisms: PrismTables): Result[
     (                                       //
         List[(p.Named, q.Term)],            //
         Map[p.Sym, polyregion.prism.Prism], //
@@ -468,8 +502,9 @@ object Compiler {
   ] = for {
     log <- sink.subLog("Expr compiler").success
     term = expr.asTerm
+    pos  = term.pos
     // Generate a name for the expr first.
-    exprName = s"${term.pos.sourceFile.name}:${term.pos.startLine}-${term.pos.endLine}"
+    exprName = s"${pos.sourceFile.name}:${pos.startLine}-${pos.endLine}"
     _        = log.info(s"Expr name: `$exprName`")
 
     // And then outline the term.
@@ -518,8 +553,9 @@ object Compiler {
     symbolToMacroDefinedDefDefs = q
       .collectTree[(q.Symbol, q.DefDef)](term) {
         case dd: q.DefDef =>
-          dd.symbol.tree match {
-            case q.DefDef(_, _, _, None) => (dd.symbol -> dd) :: Nil
+          val sym = dd.symbol
+          sym.tree match {
+            case q.DefDef(_, _, _, None) => (sym -> dd) :: Nil
             case _                       => Nil
           }
         case _ => Nil
@@ -532,7 +568,10 @@ object Compiler {
     _ = log.info("symbolToMacroDefinedDefDefs", symbolToMacroDefinedDefDefs.map((k, v) => s"${k} => ${v.show}").toList*)
     _ = log.info(
       "External captures",
-      capturedNames.map((n, r) => s"$r(symbol=${r.symbol}, ${r.symbol.pos}) ~> ${n.repr}")*
+      capturedNames.map { (n, r) =>
+        val sym = r.symbol
+        s"$r(symbol=$sym, ${sym.pos}) ~> ${n.repr}"
+      }*
     )
     _ = log.info(
       "Scope replacements",
@@ -548,7 +587,7 @@ object Compiler {
     )
     _ = log.info(
       s"Expr resolved functions (${exprDeps.resolvedFunctions.size})",
-      exprDeps.resolvedFunctions.map(_.repr).toList*
+      exprDeps.resolvedFunctions.map(_.repr)*
     )
 
     // We mark all potentially required *concrete* virtual methods in the universe.
@@ -557,11 +596,13 @@ object Compiler {
     // abstract trait method calls and don't show up directly in exprDeps.classes since they're
     // only the runtime types of given fields, not statically-named call receivers.
     allClassSymbols = {
-      val direct = exprDeps.classes.map(_._1).toList
+      val direct = exprDeps.classes.keys.toList
       val nested = direct.flatMap(c =>
         Try(q.collectTree[q.Symbol](c.tree) {
-          case cd: q.ClassDef if cd.symbol != c => List(cd.symbol)
-          case _                                => Nil
+          case cd: q.ClassDef =>
+            val sym = cd.symbol
+            if (sym != c) List(sym) else Nil
+          case _ => Nil
         }).getOrElse(Nil)
       )
       (direct ++ nested).distinct
@@ -587,7 +628,7 @@ object Compiler {
         .collect { case x: q.DefDef => x.symbol }
         .filter(_ != sym)
       (sym -> ivks) :: overridesFromHierarchy.map(_ -> ivks)
-    }.toMap
+    }
 
     // Anonymous-class symbols (e.g. multiple `given Monoid[X] = new Monoid {...}` in the same
     // owner) all collapse to the same `fullName` (e.g. `polyregion.GivenSuite._$$anon`). The IR
@@ -653,7 +694,7 @@ object Compiler {
       log,
       exprFn,
       exprDeps
-    )(StdLib.StructDefs)
+    )(prisms.structDefs)
 
     // We got a compiled fn now, now compile all dependencies. Pass the synthetic-name rename
     // map so anonymous-class overrides get distinct IR names per (class symbol, method).
@@ -664,7 +705,7 @@ object Compiler {
         symbolToMacroDefinedDefDefs,
         exprDeps.resolvedFunctions,
         syntheticOverrideNames
-      )(StdLib.Functions)
+      )(prisms.functions, prisms.structDefs)
 
     _ = log.info("A ", rootDependentFns.map(x => x.toString).toList*)
 
@@ -688,10 +729,13 @@ object Compiler {
       // (i.e. nested modules are not path-dependent, where as modules nested in classes are not),
       // not really sure why it does that but we need to remove it otherwise it's essentially a
       // syntax error at splice site.
-      def removeThisFromRef(t: q.Symbol): q.Ref = q.Ref(t.companionModule) match {
-        case select @ q.Select(root @ q.This(_), _) if t.companionModule.maybeOwner.flags.is(q.Flags.Module) =>
-          removeThisFromRef(root.symbol).select(select.symbol)
-        case x => x
+      def removeThisFromRef(t: q.Symbol): q.Ref = {
+        val companion = t.companionModule
+        q.Ref(companion) match {
+          case select @ q.Select(root @ q.This(_), _) if companion.maybeOwner.flags.is(q.Flags.Module) =>
+            removeThisFromRef(root.symbol).select(select.symbol)
+          case x => x
+        }
       }
       symbol.fullName.replace('.', '_') -> removeThisFromRef(symbol)
     }.toMap ++ exprThisCls.map((clsDef, _) => "this" -> q.This(clsDef.symbol)).toMap
@@ -704,15 +748,18 @@ object Compiler {
     // the static dispatch target.
     dispatchTable: Map[(p.Sym, p.Type.Struct), (p.Sym, p.Type.Struct)] = {
       val entries = abstractDefs.flatMap { abstractDefDef =>
-        val abstractOwnerSym = abstractDefDef.symbol.maybeOwner
+        val abstractSym      = abstractDefDef.symbol
+        val abstractOwnerSym = abstractSym.maybeOwner
         if (abstractOwnerSym.isNoSymbol) Nil
         else
           allClassSymbols.flatMap { classSym =>
-            val baseClasses = Try(classSym.typeRef.baseClasses).getOrElse(Nil)
+            val classTypeRef = Try(classSym.typeRef)
+            val baseClasses  = classTypeRef.map(_.baseClasses).getOrElse(Nil)
             val isSubclass = !classSym.isNoSymbol && classSym.isClassDef && classSym != abstractOwnerSym &&
               baseClasses.contains(abstractOwnerSym)
             if (!isSubclass) Nil
             else {
+              val classType = classTypeRef.get
               val overrideSymOpt = Try(classSym.tree).toOption.collect { case cd: q.ClassDef => cd } match {
                 case Some(cd) =>
                   cd.body.collectFirst {
@@ -721,13 +768,13 @@ object Compiler {
                 case None => None
               }
               overrideSymOpt match {
-                case Some(overrideSym) if !overrideSym.isNoSymbol && overrideSym != abstractDefDef.symbol =>
-                  val parentRepr = classSym.typeRef.baseType(abstractOwnerSym)
+                case Some(overrideSym) if !overrideSym.isNoSymbol && overrideSym != abstractSym =>
+                  val parentRepr = classType.baseType(abstractOwnerSym)
                   val parentTry = Retyper.typer0(parentRepr).toOption.flatMap {
                     case ((_, s: p.Type.Struct), _) => Some(s)
                     case _                          => None
                   }
-                  val classTry = Retyper.typer0(classSym.typeRef).toOption.flatMap {
+                  val classTry = Retyper.typer0(classType).toOption.flatMap {
                     case ((_, s: p.Type.Struct), _) => Some(s)
                     case _                          => None
                   }
@@ -739,7 +786,7 @@ object Compiler {
                       val concreteName =
                         syntheticOverrideNames.getOrElse(overrideSym, p.Sym(overrideSym.fullName))
                       val key: (p.Sym, p.Type.Struct) =
-                        (p.Sym(abstractDefDef.symbol.fullName), parentStruct)
+                        (p.Sym(abstractSym.fullName), parentStruct)
                       val value: (p.Sym, p.Type.Struct) = (concreteName, classStruct)
                       List(key -> value)
                     case _ => Nil
@@ -776,7 +823,7 @@ object Compiler {
                 ivk.receiver match {
                   case Some(r) =>
                     val tmp = freshName(classStruct)
-                    prelude += p.Stmt.Var(tmp, Some(p.Expr.Cast(r, classStruct)), isMutable = false)
+                    prelude += p.Stmt.Var(tmp, Some(p.Expr.Cast(r, classStruct)))
                     val tmpSel: p.Term.Select = p.Term.Select(tmp, Nil, classStruct)
                     ivk.copy(callee = p.Type.FnRef(concreteName), receiver = Some(tmpSel))
                   case None => ivk.copy(callee = p.Type.FnRef(concreteName))
@@ -833,22 +880,12 @@ object Compiler {
     unoptLog <- log.subLog("Unopt").success
     _ = unoptLog.info(s"Structures = ${unopt.defs.size}", unopt.defs.map(_.repr)*)
     _ = unoptLog.info(s"Functions  = ${unopt.functions.size}", unopt.functions.map(_.repr)*)
-    _ = unoptLog.info(s"Entry", unopt.entry.map(_.repr).getOrElse("<none>"))
+    _ = unoptLog.info(s"Entry", unopt.entry.fold("<none>")(_.repr))
 
     // verify before optimisation
     unoptVerification <- Verify(unopt, unoptLog, verifyFunction = false).success
-    _ = unoptLog.info(
-      s"Verifier",
-      unoptVerification.map((f, xs) => s"${f.signatureKey}\nError = ${xs.map("\t->" + _).mkString("\n")}")*
-    )
-    _ <-
-      if (unoptVerification.exists(_._2.nonEmpty))
-        s"Unopt validation failed (error=${unoptVerification.map(_._2.size).sum})\n${unoptVerification
-            .map { case (f, es) =>
-              s"${f.repr.linesIterator.map("\t|" + _).mkString("\n")}\n\t[Errors]\n${es.map("\t -> " + _).mkString("\n")}"
-            }
-            .mkString("\n")}".fail
-      else ().success
+    _ = logVerifier(unoptLog, unoptVerification)
+    _ <- failIfVerificationErrors("Unopt", unoptVerification)
 
     // run the global optimiser
 
@@ -870,8 +907,8 @@ object Compiler {
     // walk the program: ensure every Invoke passes the captures its callee needs, and that the
     // entry's own captures cover the transitive closure of all module captures any reachable
     // function needs.
+    entry <- opt.entry.failIfEmpty("compiler optimisation removed the program entry")
     opt <- {
-      val entry = opt.entry.getOrElse(throw IllegalStateException("compiler optimisation removed the program entry"))
       val fnByName: Map[p.Sym, p.Function] = (entry :: opt.functions).map(fn => fn.name -> fn).toMap
       // Transitive module-capture types each function needs, including those from its callees.
       // The call graph is invariant across iterations: only the per-fn capture sets grow;
@@ -885,11 +922,13 @@ object Compiler {
           changed = false
           val next = current.map { case (sym, caps) =>
             val seen = scala.collection.mutable.Set.from(caps.map(_.named.tpe))
-            val merged = callGraph(sym).foldLeft(caps) { (acc, callee) =>
-              current.getOrElse(callee, Nil).foldLeft(acc) { (acc1, cap) =>
-                if (seen.add(cap.named.tpe)) acc1 :+ cap else acc1
+            val merged = callGraph(sym)
+              .foldLeft(caps.reverse) { (acc, callee) =>
+                current.getOrElse(callee, Nil).foldLeft(acc) { (acc1, cap) =>
+                  if (seen.add(cap.named.tpe)) cap :: acc1 else acc1
+                }
               }
-            }
+              .reverse
             sym -> merged
           }
           if (next != current) { changed = true; current = next }
@@ -953,20 +992,10 @@ object Compiler {
 
     _ = optLog.info(s"Structures = ${opt.defs.size}", opt.defs.map(_.repr)*)
     _ = optLog.info(s"Functions  = ${opt.functions.size}", opt.functions.map(_.repr)*)
-    _ = optLog.info(s"Entry", opt.entry.map(_.repr).getOrElse("<none>"))
+    _ = optLog.info(s"Entry", opt.entry.fold("<none>")(_.repr))
 
-    _ = optLog.info(
-      s"Verifier",
-      optVerification.map((f, xs) => s"${f.signatureKey}\nError = ${xs.map("\t->" + _).mkString("\n")}")*
-    )
-    _ <-
-      if (optVerification.exists(_._2.nonEmpty))
-        s"Opt validation failed (error=${optVerification.map(_._2.size).sum})\n${optVerification
-            .map { case (f, es) =>
-              s"${f.repr.linesIterator.map("\t|" + _).mkString("\n")}\n\t[Errors]\n${es.map("\t -> " + _).mkString("\n")}"
-            }
-            .mkString("\n")}".fail
-      else ().success
+    _ = logVerifier(optLog, optVerification)
+    _ <- failIfVerificationErrors("Opt", optVerification)
 
     capturedNameTable = capturedNames.map((name, ref) => name.symbol -> (name.tpe, ref)).toMap
     finalEntry <- opt.entry.failIfEmpty("compiler optimisation removed the program entry")
@@ -989,6 +1018,8 @@ object Compiler {
       monomorphicToPolymorphicSym.map((m, p) => s"$m => $p").toList*
     )
 
+    mirrorsBySource = prisms.mirrors.groupBy(_._1.source)
+
     // List[(StructDef, Option[Prism])]
   } yield (
     captured.map((arg, term) => arg.named -> term),
@@ -998,7 +1029,7 @@ object Compiler {
     opt.defs.flatMap { monomorphicDef =>
       monomorphicToPolymorphicSym.get(monomorphicDef.name) match {
         case Some(polymorphicSym) =>
-          StdLib.Mirrors.collect { case prism @ (m, _) if m.source == polymorphicSym => monomorphicDef.name -> prism }
+          mirrorsBySource.getOrElse(polymorphicSym, Nil).map(monomorphicDef.name -> _)
         case None => Nil
       }
     }.toMap,

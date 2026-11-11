@@ -11,7 +11,7 @@ import net.bytebuddy.implementation.{FieldAccessor, InvocationHandlerAdapter, Me
 import net.bytebuddy.matcher.ElementMatchers
 import polyregion.__UnsafeObject
 import polyregion.ast.*
-import polyregion.javalang.Processor.{addOpens, collectTree}
+import polyregion.javalang.Processor.addOpens
 
 import java.lang.reflect.*
 import java.util
@@ -26,9 +26,23 @@ import scala.collection.immutable.ArraySeq
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
 import scala.reflect.ClassTag
-import scala.util.{Failure, Success, Try}
+import scala.util.{Failure, Success, Try, Using}
 
 object Processor {
+
+  private val javacPackages = Seq(
+    "com.sun.tools.javac.code",
+    "com.sun.tools.javac.comp",
+    "com.sun.tools.javac.file",
+    "com.sun.tools.javac.main",
+    "com.sun.tools.javac.model",
+    "com.sun.tools.javac.parser",
+    "com.sun.tools.javac.processing",
+    "com.sun.tools.javac.tree",
+    "com.sun.tools.javac.util",
+    "com.sun.tools.javac.jvm",
+    "com.sun.tools.javac.api"
+  )
 
   private def getUnsafe = try {
     val theUnsafe = classOf[sun.misc.Unsafe].getDeclaredField("theUnsafe")
@@ -53,9 +67,6 @@ object Processor {
 
   def getMethod(c: Class[?], mName: String, parameterTypes: Class[?]*): Method =
     traverseUp(c)(c => c.getDeclaredMethod(mName, parameterTypes*)).get
-
-  def getField(c: Class[?], fName: String): Field =
-    traverseUp(c)(c => c.getDeclaredField(fName)).get
 
   private def getOwnModule = try {
     val m = getMethod(classOf[Class[?]], "getModule")
@@ -86,11 +97,8 @@ object Processor {
   private def getFirstFieldOffset(unsafe: sun.misc.Unsafe) = try
     unsafe.objectFieldOffset(classOf[__UnsafeObject].getDeclaredField("first"))
   catch {
-    case e: NoSuchFieldException =>
+    case e @ (_: NoSuchFieldException | _: SecurityException) =>
       // can't happen.
-      throw RuntimeException(e)
-    case e: SecurityException =>
-      // can't happen
       throw RuntimeException(e)
   }
 
@@ -111,89 +119,6 @@ object Processor {
         packages.foreach(m.invoke(jdkCompilerModule, _, ownModule))
       }
   }
-
-  def asCanonicalName(clsName: String): String = clsName.replace('/', '.').replace('$', '.')
-
-  def collectTree[A](t: Tree)(f: Tree => List[A]): List[A] = new TreeScanner[List[A], Unit] {
-    private type U = Unit
-    override def reduce(l: List[A], r: List[A]) = (l, r) match {
-      case (null, null) => Nil
-      case (null, r)    => r
-      case (l, null)    => l
-      case (l, r)       => r ::: l
-    }
-    // Commented lines are trees introduced after Java 8
-    private inline def v[T <: Tree](n: T, inline g: (T, Unit) => List[A]) = reduce(f(n), g(n, ()))
-    override def visitCompilationUnit(n: CompilationUnitTree, p: U)       = v(n, super.visitCompilationUnit)
-    // override def visitPackage(n: PackageTree, p: U)                             = v(n, super.visitPackage)
-    override def visitImport(n: ImportTree, p: U)                     = v(n, super.visitImport)
-    override def visitClass(n: ClassTree, p: U)                       = v(n, super.visitClass)
-    override def visitMethod(n: MethodTree, p: U)                     = v(n, super.visitMethod)
-    override def visitVariable(n: VariableTree, p: U)                 = v(n, super.visitVariable)
-    override def visitEmptyStatement(n: EmptyStatementTree, p: U)     = v(n, super.visitEmptyStatement)
-    override def visitBlock(n: BlockTree, p: U)                       = v(n, super.visitBlock)
-    override def visitDoWhileLoop(n: DoWhileLoopTree, p: U)           = v(n, super.visitDoWhileLoop)
-    override def visitWhileLoop(n: WhileLoopTree, p: U)               = v(n, super.visitWhileLoop)
-    override def visitForLoop(n: ForLoopTree, p: U)                   = v(n, super.visitForLoop)
-    override def visitEnhancedForLoop(n: EnhancedForLoopTree, p: U)   = v(n, super.visitEnhancedForLoop)
-    override def visitLabeledStatement(n: LabeledStatementTree, p: U) = v(n, super.visitLabeledStatement)
-    override def visitSwitch(n: SwitchTree, p: U)                     = v(n, super.visitSwitch)
-    // override def visitSwitchExpression(n: SwitchExpressionTree, p: U)           = v(n, super.visitSwitchExpression)
-    override def visitCase(n: CaseTree, p: U)                                   = v(n, super.visitCase)
-    override def visitSynchronized(n: SynchronizedTree, p: U)                   = v(n, super.visitSynchronized)
-    override def visitTry(n: TryTree, p: U)                                     = v(n, super.visitTry)
-    override def visitCatch(n: CatchTree, p: U)                                 = v(n, super.visitCatch)
-    override def visitConditionalExpression(n: ConditionalExpressionTree, p: U) = v(n, super.visitConditionalExpression)
-    override def visitIf(n: IfTree, p: U)                                       = v(n, super.visitIf)
-    override def visitExpressionStatement(n: ExpressionStatementTree, p: U)     = v(n, super.visitExpressionStatement)
-    override def visitBreak(n: BreakTree, p: U)                                 = v(n, super.visitBreak)
-    override def visitContinue(n: ContinueTree, p: U)                           = v(n, super.visitContinue)
-    override def visitReturn(n: ReturnTree, p: U)                               = v(n, super.visitReturn)
-    override def visitThrow(n: ThrowTree, p: U)                                 = v(n, super.visitThrow)
-    override def visitAssert(n: AssertTree, p: U)                               = v(n, super.visitAssert)
-    override def visitMethodInvocation(n: MethodInvocationTree, p: U)           = v(n, super.visitMethodInvocation)
-    override def visitNewClass(n: NewClassTree, p: U)                           = v(n, super.visitNewClass)
-    override def visitNewArray(n: NewArrayTree, p: U)                           = v(n, super.visitNewArray)
-    override def visitLambdaExpression(n: LambdaExpressionTree, p: U)           = v(n, super.visitLambdaExpression)
-    override def visitParenthesized(n: ParenthesizedTree, p: U)                 = v(n, super.visitParenthesized)
-    override def visitAssignment(n: AssignmentTree, p: U)                       = v(n, super.visitAssignment)
-    override def visitCompoundAssignment(n: CompoundAssignmentTree, p: U)       = v(n, super.visitCompoundAssignment)
-    override def visitUnary(n: UnaryTree, p: U)                                 = v(n, super.visitUnary)
-    override def visitBinary(n: BinaryTree, p: U)                               = v(n, super.visitBinary)
-    override def visitTypeCast(n: TypeCastTree, p: U)                           = v(n, super.visitTypeCast)
-    override def visitInstanceOf(n: InstanceOfTree, p: U)                       = v(n, super.visitInstanceOf)
-    // override def visitBindingPattern(n: BindingPatternTree, p: U)               = v(n, super.visitBindingPattern)
-    // override def visitDefaultCaseLabel(n: DefaultCaseLabelTree, p: U)           = v(n, super.visitDefaultCaseLabel)
-    override def visitArrayAccess(n: ArrayAccessTree, p: U)   = v(n, super.visitArrayAccess)
-    override def visitMemberSelect(n: MemberSelectTree, p: U) = v(n, super.visitMemberSelect)
-    // override def visitParenthesizedPattern(n: ParenthesizedPatternTree, p: U)   = v(n, super.visitParenthesizedPattern)
-    // override def visitGuardedPattern(n: GuardedPatternTree, p: U)               = v(n, super.visitGuardedPattern)
-    override def visitMemberReference(n: MemberReferenceTree, p: U)     = v(n, super.visitMemberReference)
-    override def visitIdentifier(n: IdentifierTree, p: U)               = v(n, super.visitIdentifier)
-    override def visitLiteral(n: LiteralTree, p: U)                     = v(n, super.visitLiteral)
-    override def visitPrimitiveType(n: PrimitiveTypeTree, p: U)         = v(n, super.visitPrimitiveType)
-    override def visitArrayType(n: ArrayTypeTree, p: U)                 = v(n, super.visitArrayType)
-    override def visitParameterizedType(n: ParameterizedTypeTree, p: U) = v(n, super.visitParameterizedType)
-    override def visitUnionType(n: UnionTypeTree, p: U)                 = v(n, super.visitUnionType)
-    override def visitIntersectionType(n: IntersectionTypeTree, p: U)   = v(n, super.visitIntersectionType)
-    override def visitTypeParameter(n: TypeParameterTree, p: U)         = v(n, super.visitTypeParameter)
-    override def visitWildcard(n: WildcardTree, p: U)                   = v(n, super.visitWildcard)
-    override def visitModifiers(n: ModifiersTree, p: U)                 = v(n, super.visitModifiers)
-    override def visitAnnotation(n: AnnotationTree, p: U)               = v(n, super.visitAnnotation)
-    override def visitAnnotatedType(n: AnnotatedTypeTree, p: U)         = v(n, super.visitAnnotatedType)
-    // override def visitModule(n: ModuleTree, p: U)                               = v(n, super.visitModule)
-    // override def visitExports(n: ExportsTree, p: U)                             = v(n, super.visitExports)
-    // override def visitOpens(n: OpensTree, p: U)                                 = v(n, super.visitOpens)
-    // override def visitProvides(n: ProvidesTree, p: U)                           = v(n, super.visitProvides)
-    // override def visitRequires(n: RequiresTree, p: U)                           = v(n, super.visitRequires)
-    // override def visitUses(n: UsesTree, p: U)                                   = v(n, super.visitUses)
-    override def visitOther(n: Tree, p: U)              = v(n, super.visitOther)
-    override def visitErroneous(n: ErroneousTree, p: U) = v(n, super.visitErroneous)
-    // override def visitYield(n: YieldTree, p: U)                                 = v(n, super.visitYield)
-
-  }.scan(t, ())
-
-  def collectTrees[A](xs: List[Tree])(f: Tree => List[A]): List[A] = xs.flatMap(collectTree(_)(f))
 
 //  def resolveMethodSignature(
 //      processingEnvironment: ProcessingEnvironment,
@@ -248,8 +173,6 @@ class Processor extends AbstractProcessor {
   private val symbolTable = mutable.Map[String, TypeElement]()
   private val methodTable = mutable.Map[String, MethodTree]()
 
-  private var trees: Trees = scala.compiletime.uninitialized
-
   override def getSupportedAnnotationTypes: java.util.Set[String] =
     java.util.Collections.singleton[String]("*")
 
@@ -261,32 +184,17 @@ class Processor extends AbstractProcessor {
 
     debug(getClass.getClassLoader)
 
-    val allPkgs = Seq(
-      "com.sun.tools.javac.code",
-      "com.sun.tools.javac.comp",
-      "com.sun.tools.javac.file",
-      "com.sun.tools.javac.main",
-      "com.sun.tools.javac.model",
-      "com.sun.tools.javac.parser",
-      "com.sun.tools.javac.processing",
-      "com.sun.tools.javac.tree",
-      "com.sun.tools.javac.util",
-      "com.sun.tools.javac.jvm",
-      "com.sun.tools.javac.api"
-    )
-
     val markerClosures =
       Set("polyregion.javalang.OffloadRunnable", "polyregion.javalang.OffloadFunction")
 
     (for {
-      _ <- addOpens(allPkgs).adaptError(e => RuntimeException("Unable to add opens at runtime", e))
+      _ <- addOpens(Processor.javacPackages).adaptError(e => RuntimeException("Unable to add opens at runtime", e))
       tasks <- Either
         .catchNonFatal(JavacTask.instance(processingEnv))
         .adaptError(e => RuntimeException("Unable to obtain an instance of JavacTask", e))
-      trees <- Either
+      _ <- Either
         .catchNonFatal(Trees.instance(processingEnv))
         .adaptError(e => RuntimeException("Unable to obtain an instance of Trees", e))
-      _ = this.trees = trees
     } yield {
 
       val visited = mutable.Set[JavaFileObject]()
@@ -307,7 +215,7 @@ class Processor extends AbstractProcessor {
               // we do any compilation BEFORE (at the start) GENERATE kicks in as the tree is gone (probably gc'd) after GENERATE
               visited += file
 
-              val reflector = LambdaOutliner.Reflector(processingEnv, trees, symbolTable.toMap, methodTable.toMap)
+              val reflector = LambdaOutliner.Reflector(symbolTable.toMap, methodTable.toMap)
 
               val r = LambdaOutliner.extractDeserializeLambdaMethods(
                 reflector,
@@ -342,27 +250,26 @@ class Processor extends AbstractProcessor {
                 if (!generated.contains(fqcn)) {
                   val gen =
                     processingEnv.getFiler.createResource(StandardLocation.CLASS_OUTPUT, pkg, s"$name.class", null)
-                  val os = gen.openOutputStream()
+                  Using.resource(gen.openOutputStream()) { os =>
+                    val bytes = new net.bytebuddy.ByteBuddy()
+                      .subclass(classOf[ /* polyregion.java.BinaryOffloadExecutable */ Nothing])
+                      .name(fqcn)
+                      .modifiers(Visibility.PUBLIC, TypeManifestation.FINAL)
+                      .defineField(
+                        "$BINARY$",
+                        classOf[scala.Array[Byte]],
+                        Visibility.PUBLIC,
+                        Ownership.STATIC,
+                        FieldManifestation.FINAL
+                      )
+                      .method(ElementMatchers.named("binary"))
+                      .intercept(FieldAccessor.ofField("$BINARY$"))
+                      .make()
+                      .getBytes
 
-                  val bytes = new net.bytebuddy.ByteBuddy()
-                    .subclass(classOf[ /* polyregion.java.BinaryOffloadExecutable */ Nothing])
-                    .name(fqcn)
-                    .modifiers(Visibility.PUBLIC, TypeManifestation.FINAL)
-                    .defineField(
-                      "$BINARY$",
-                      classOf[scala.Array[Byte]],
-                      Visibility.PUBLIC,
-                      Ownership.STATIC,
-                      FieldManifestation.FINAL
-                    )
-                    .method(ElementMatchers.named("binary"))
-                    .intercept(FieldAccessor.ofField("$BINARY$"))
-                    .make()
-                    .getBytes
-
-                  os.write(bytes)
-                  os.flush()
-                  os.close()
+                    os.write(bytes)
+                    os.flush()
+                  }
                   generated += fqcn
                 } else {
                   debug(s"OVERWRITE ${fqcn}")

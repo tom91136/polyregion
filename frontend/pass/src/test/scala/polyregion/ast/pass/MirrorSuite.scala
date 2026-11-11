@@ -10,16 +10,19 @@ class MirrorSuite extends munit.FunSuite {
     val in  = program(entry(args = List(arg("capture", p.Type.Ptr(p.Type.IntS8, p.Type.Space.Global)))))
     val out = Mirror()(in, PassTest.NoopLog)
 
-    val added = out.functions.filterNot(in.functions.contains)
+    val inFunctions = in.functions.toSet
+    val added       = out.functions.filterNot(inFunctions)
     assertEquals(added.map(_.name.fqn.last).toSet, Set(Mirror.PreludeName, Mirror.PostludeName))
 
-    val mirror   = out.functions.find(_.name.fqn.last == Mirror.PreludeName).get
-    val unmirror = out.functions.find(_.name.fqn.last == Mirror.PostludeName).get
+    val mirror     = out.functions.find(_.name.fqn.last == Mirror.PreludeName).get
+    val unmirror   = out.functions.find(_.name.fqn.last == Mirror.PostludeName).get
+    val captureTpe = p.Type.Ptr(p.Type.IntS8, p.Type.Space.Global)
 
+    val expectedArgs = List(captureTpe, p.Type.IntU64)
     for (f <- List(mirror, unmirror)) {
       assertEquals(f.affinity, p.Function.Affinity.Host)
       assertEquals(f.visibility, p.Function.Visibility.Exported)
-      assertEquals(f.args.map(_.named.tpe), List(p.Type.Ptr(p.Type.IntS8, p.Type.Space.Global), p.Type.IntU64))
+      assertEquals(f.args.map(_.named.tpe), expectedArgs)
     }
     assertEquals(mirror.rtn, p.Type.IntU64)
     assertEquals(unmirror.rtn, p.Type.Unit0)

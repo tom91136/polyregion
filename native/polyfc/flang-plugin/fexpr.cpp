@@ -1,6 +1,12 @@
 #include "fexpr.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <limits>
 #include <optional>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "aspartame/all.hpp"
@@ -47,7 +53,7 @@ StructDef polyfc::FBoxedMirror::def() const {
   return StructDef(tpe().name, {}, members ^ concat(derivedTypeInfo ^ to_vector()), {}, false);
 }
 
-polyfc::FBoxed::FBoxed(const Expr::Any &base, const FBoxedMirror &aggregate) : base(base), mirror(aggregate) {}
+polyfc::FBoxed::FBoxed(Expr::Any base, FBoxedMirror aggregate) : base(std::move(base)), mirror(std::move(aggregate)) {}
 polyfc::FBoxed::FBoxed() : FBoxed(Expr::Alias(Term::Poison(Type::Nothing())), {}) {}
 Type::Any polyfc::FBoxed::comp() const { return mirror.comp(); }
 Expr::Any polyfc::FBoxed::addr() const { return selectAny(base, mirror.addr); }

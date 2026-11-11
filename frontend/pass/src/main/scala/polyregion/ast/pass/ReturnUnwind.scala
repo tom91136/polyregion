@@ -15,20 +15,19 @@ private[pass] object ReturnUnwind {
     s.collectFirst_[p.Stmt] { case r: p.Stmt.Return => r }.isDefined
 
   def needsUnwind(stmts: List[p.Stmt]): Boolean = stmts.exists {
-    case t: p.Stmt.Try                  => t.blocks.exists(_.exists(containsReturn)) || t.blocks.exists(needsUnwind)
-    case p.Stmt.While(_, b)             => b.exists(containsReturn) || needsUnwind(b)
-    case p.Stmt.ForRange(_, _, _, _, b) => b.exists(containsReturn) || needsUnwind(b)
-    case p.Stmt.Cond(_, t, f)           => needsUnwind(t) || needsUnwind(f)
-    case p.Stmt.Annotated(inner, _, _)  => needsUnwind(List(inner))
-    case _                              => false
+    case t: p.Stmt.Try                 => t.blocks.exists(_.exists(containsReturn)) || t.blocks.exists(needsUnwind)
+    case p.Stmt.While(_, b)            => b.exists(containsReturn) || needsUnwind(b)
+    case p.Stmt.ForRange(body = b)     => b.exists(containsReturn) || needsUnwind(b)
+    case p.Stmt.Cond(_, t, f)          => needsUnwind(t) || needsUnwind(f)
+    case p.Stmt.Annotated(inner, _, _) => needsUnwind(List(inner))
+    case _                             => false
   }
 
   def apply(
       stmts: List[p.Stmt],
       flag: p.Term.Select,
       onReturn: p.Expr => List[p.Stmt],
-      pending: () => p.Named,
-      inLoop: Boolean = false
+      pending: () => p.Named
   ): List[p.Stmt] = {
     def unwind(stmts: List[p.Stmt], inLoop: Boolean): List[p.Stmt] = {
       def guard(tail: List[p.Stmt]): List[p.Stmt] =
@@ -42,7 +41,7 @@ private[pass] object ReturnUnwind {
         else {
           val savedName            = pending()
           val saved: p.Term.Select = p.Term.Select(savedName, Nil, p.Type.Bool1)
-          val save                 = p.Stmt.Var(savedName, Some(p.Expr.Alias(flag)), isMutable = false)
+          val save                 = p.Stmt.Var(savedName, Some(p.Expr.Alias(flag)))
           val clear                = p.Stmt.Mut(flag, p.Expr.Alias(p.Term.Bool1Const(false)))
           val restore              = p.Stmt.Mut(flag, p.Expr.Alias(saved))
           save :: clear :: rewritten ::: List(p.Stmt.Cond(flag, Nil, List(restore)))
@@ -81,6 +80,6 @@ private[pass] object ReturnUnwind {
         case other :: rest => other :: unwind(rest, inLoop)
       }
     }
-    unwind(stmts, inLoop)
+    unwind(stmts, inLoop = false)
   }
 }

@@ -14,17 +14,17 @@ class HeterogeneousClosureSuite extends munit.FunSuite {
     val bytes  = p.Term.IntU64Const(64)
     val ptr    = p.Term.NullPtrConst(p.Type.IntU8, p.Type.Space.Global, p.Region.Opaque)
     val launch: p.Spec.RemoteLaunch = p.Spec.RemoteLaunch(
-      ptr,
-      kernel,
-      List(p.Type.Float32),
-      one,
-      one,
-      one,
-      one,
-      one,
-      one,
-      zero,
-      List(ptr)
+      context = ptr,
+      kernel = kernel,
+      tpeArgs = List(p.Type.Float32),
+      gridX = one,
+      gridY = one,
+      gridZ = one,
+      blockX = one,
+      blockY = one,
+      blockZ = one,
+      shmem = zero,
+      args = List(ptr)
     )
     val operations: List[p.Spec] = List(
       launch,

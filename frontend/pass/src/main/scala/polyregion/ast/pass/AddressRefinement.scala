@@ -3,6 +3,37 @@ package polyregion.ast.pass
 import polyregion.ast.{PolyAST as p, *, given}
 import polyregion.ast.Traversal.*
 
+private[pass] object LogicalArenaViewAbi {
+  private val Global = p.Type.Space.Global
+
+  val bindings: List[p.Named] =
+    List(
+      p.Type.IntS8,
+      p.Type.IntS16,
+      p.Type.IntS32,
+      p.Type.IntS64,
+      p.Type.Float32,
+      p.Type.Float64,
+      p.Type.Float16
+    ).zipWithIndex
+      .map((tpe, index) => p.Named(s"#av$index", p.Type.Ptr(tpe, Global)))
+
+  val rootBinding: p.Named = p.Named("#aroot", p.Type.IntS64)
+
+  val addressBinding: p.Named = bindings
+    .collectFirst { case binding @ p.Named(_, p.Type.Ptr(p.Type.IntS64, p.Type.Space.Global), _) =>
+      binding
+    }
+    .getOrElse(throw IllegalStateException("logical arena-view ABI lacks its address view"))
+
+  def arenaAddressBindings(bound: Iterable[p.Named]): Set[String] = {
+    val actual = bound.iterator.map(binding => binding.symbol -> binding.tpe).toMap
+    Option
+      .when(bindings.forall(binding => actual.get(binding.symbol).contains(binding.tpe)))(Set(addressBinding.symbol))
+      .getOrElse(Set.empty)
+  }
+}
+
 /** Constraint-based address refinement.
   *
   * The PolyAST remains the source tree. Refinements are composed with it in a typed side table and are valid only for
@@ -90,12 +121,12 @@ private[pass] object AddressRefinement {
     def spaces: Set[p.Type.Space]    = alternatives.flatMap(_.spaceOption)
     def includesNull: Boolean        = alternatives.contains(AbstractAddress.Null)
     def hasArenaRoot: Boolean = alternatives.exists {
-      case AbstractAddress.Absolute(Some(_: Provenance.ArenaRoot), _) => true
+      case AbstractAddress.Absolute(Some(Provenance.ArenaRoot(_)), _) => true
       case _                                                          => false
     }
     def hasNonArenaAbsolute: Boolean = alternatives.exists {
-      case AbstractAddress.Absolute(Some(_: Provenance.ArenaRoot), _) => false
-      case _: AbstractAddress.Absolute                                => true
+      case AbstractAddress.Absolute(Some(Provenance.ArenaRoot(_)), _) => false
+      case AbstractAddress.Absolute(_, _)                             => true
       case _                                                          => false
     }
 
@@ -172,7 +203,7 @@ private[pass] object AddressRefinement {
     private[AddressRefinement] def rekeyed(terms: List[(p.Term, p.Term)], exprs: List[(p.Expr, p.Expr)]): FactTable = {
       val structural = entries.filter { case (token, _) =>
         token match {
-          case _: Query.TermValue | _: Query.ExprResult | _: Query.AddressOf => false
+          case Query.TermValue(_) | Query.ExprResult(_) | Query.AddressOf(_) => false
           case _                                                             => true
         }
       }
@@ -188,19 +219,15 @@ private[pass] object AddressRefinement {
     }
   }
 
-  final case class CoercionSite(
-      index: Int,
-      target: Query[AddressValue],
-      source: AddressValue,
-      coercion: Coercion,
-      context: String
-  )
+  @SuppressWarnings(Array("bonsai:test-only-member"))
+  final case class CoercionSite(target: Query[AddressValue], coercion: Coercion)
 
   final case class Diagnostic(code: String, message: String, evidence: List[String] = Nil) {
     override def toString: String =
       if (evidence.isEmpty) s"$code: $message" else s"$code: $message\n${evidence.map("  " + _).mkString("\n")}"
   }
 
+  @SuppressWarnings(Array("bonsai:test-only-member"))
   final case class Solution(
       function: p.Function,
       model: AddressModel,
@@ -215,6 +242,10 @@ private[pass] object AddressRefinement {
     def value(term: p.Term): AddressValue            = facts.get(Query.TermValue(term)).getOrElse(AddressValue())
     def result(expr: p.Expr): AddressValue           = facts.get(Query.ExprResult(expr)).getOrElse(AddressValue())
     def provenancesOf(term: p.Term): Set[Provenance] = facts.get(Query.AddressOf(term)).getOrElse(Set.empty)
+    def isLocal(term: p.Term): Boolean = provenancesOf(term).exists {
+      case Provenance.Local(_, _) => true
+      case _                      => false
+    }
     def refinedSpace(name: p.Named): Option[p.Type.Space] =
       refinedSpaces.get(name.symbol).flatMap(spaces => Option.when(spaces.size == 1)(spaces.head))
 
@@ -233,7 +264,7 @@ private[pass] object AddressRefinement {
     def respaced(to: p.Function): Option[Solution] = {
       lazy val exprs = function.collectAll[p.Expr]
       if (model != AddressModel.Physical || diagnostics.nonEmpty) None
-      else if (exprs.exists { case _: p.Expr.Invoke => true; case _ => false }) None
+      else if (exprs.exists { case p.Expr.Invoke(_, _, _, _, _) => true; case _ => false }) None
       else
         Some(
           copy(
@@ -252,6 +283,47 @@ private[pass] object AddressRefinement {
 
   type Field = (p.Sym, String)
 
+  private[pass] def pointee(t: p.Type): p.Type = t match { case p.Type.Ptr(c, _) => c; case _ => t }
+  private[pass] def elem(t: p.Type): p.Type = t match {
+    case p.Type.Ptr(c, _) => c; case p.Type.Arr(c, _, _) => c; case _ => t
+  }
+
+  private[pass] def fieldsAt(
+      rootTpe: p.Type,
+      steps: List[p.PathStep],
+      members: Map[p.Sym, List[p.Named]]
+  ): List[(Field, p.Type)] = {
+    def member(sym: p.Sym, field: String): Option[p.Type] =
+      members.get(sym).flatMap(_.find(_.symbol == field).map(_.tpe))
+    steps
+      .foldLeft((rootTpe, List.empty[(Field, p.Type)])) {
+        case ((cur, found), p.PathStep.Field(field)) =>
+          val owner = pointee(cur) match { case p.Type.Struct(sym, _) => Some(sym); case _ => None }
+          owner.flatMap(sym => member(sym, field).map(t => (t, (sym -> field, t)))) match {
+            case Some((t, resolved)) => (t, resolved :: found)
+            case None                => (cur, found)
+          }
+        case ((cur, found), p.PathStep.Deref)       => (pointee(cur), found)
+        case ((cur, found), p.PathStep.Index(_))    => (elem(cur), found)
+        case ((cur, found), p.PathStep.IndexDyn(_)) => (elem(cur), found)
+      }
+      ._2
+      .reverse
+  }
+
+  private[pass] def declaredNames(function: p.Function): Map[String, p.Named] = (
+    function.receiver.iterator.map(_.named) ++ function.args.iterator.map(_.named) ++
+      function.moduleCaptures.iterator.map(_.named) ++ function.termCaptures.iterator.map(_.named) ++
+      function.collectAll[p.Stmt].iterator.collect { case p.Stmt.Var(name, _, _) => name }
+  ).map(name => name.symbol -> name).toMap
+
+  private[pass] def retargetWrites(retarget: p.Term => p.Term)(stmt: p.Stmt): p.Stmt = stmt match {
+    case p.Stmt.Mut(target, expr) => p.Stmt.Mut(retarget(target).asInstanceOf[p.Term.Select], expr)
+    case p.Stmt.Update(target, index, value) =>
+      p.Stmt.Update(retarget(target).asInstanceOf[p.Term.Select], index, value)
+    case other => other
+  }
+
   final case class LogicalAddressPlan(
       arenaStructs: Set[p.Sym],
       identityFields: Set[Field],
@@ -262,11 +334,9 @@ private[pass] object AddressRefinement {
 
   private final case class StorageInfo(tpe: p.Type, region: StorageRegion)
   private final case class Pending(
-      index: Int,
       target: Query[AddressValue],
       slot: Option[(p.Named, List[p.PathStep])],
-      expr: p.Expr,
-      context: String
+      expr: p.Expr
   )
   private final case class SlotCopy(
       target: p.Named,
@@ -302,12 +372,48 @@ private[pass] object AddressRefinement {
   def session(program: p.Program, model: AddressModel = AddressModel.Physical): Session = Session(program, model)
 
   def isPtr(t: p.Type): Boolean = t match {
-    case _: p.Type.Ptr => true
-    case _             => false
+    case p.Type.Ptr(_, _) => true
+    case _                => false
   }
 
   def reassignedIn(function: p.Function): Set[String] =
     function.collectAll[p.Stmt].collect { case p.Stmt.Mut(p.Term.Select(name, Nil, _), _) => name.symbol }.toSet
+
+  def reassignedPointersIn(function: p.Function): Set[p.Named] =
+    function.collectAll[p.Stmt].collect { case p.Stmt.Mut(p.Term.Select(name, Nil, p.Type.Ptr(_, _)), _) => name }.toSet
+
+  private def staticIndex(index: Option[p.Term]): Option[String] = index match {
+    case None                        => Some("")
+    case Some(p.Term.IntU8Const(v))  => Some(java.lang.Byte.toUnsignedInt(v).toString)
+    case Some(p.Term.IntU16Const(v)) => Some(v.toInt.toString)
+    case Some(p.Term.IntU32Const(v)) => Some(java.lang.Integer.toUnsignedLong(v).toString)
+    case Some(p.Term.IntU64Const(v)) => Some(java.lang.Long.toUnsignedString(v))
+    case Some(p.Term.IntS8Const(v))  => Some(v.toString)
+    case Some(p.Term.IntS16Const(v)) => Some(v.toString)
+    case Some(p.Term.IntS32Const(v)) => Some(v.toString)
+    case Some(p.Term.IntS64Const(v)) => Some(v.toString)
+    case _                           => None
+  }
+
+  private def staticPathKey(steps: List[p.PathStep]): Option[String] =
+    if (steps.exists(_.isInstanceOf[p.PathStep.IndexDyn])) None
+    else
+      Some(
+        steps
+          .map {
+            case p.PathStep.Field(name) => s"field:$name"
+            case p.PathStep.Deref       => "deref"
+            case p.PathStep.Index(idx)  => s"index:$idx"
+            case p.PathStep.IndexDyn(_) => throw IllegalStateException("dynamic step in static arena path")
+          }
+          .mkString("/")
+      )
+
+  private[pass] def localReferenceKey(base: p.Term.Select, index: Option[p.Term]): Option[String] =
+    for {
+      path <- staticPathKey(base.steps)
+      idx  <- staticIndex(index)
+    } yield s"${base.root.symbol}:$path:$idx"
 
   def spaceOf(tpe: p.Type): Option[p.Type.Space] = tpe match {
     case p.Type.Ptr(_, space)    => Some(space)
@@ -329,9 +435,9 @@ private[pass] object AddressRefinement {
     */
   def slotPrefix(prefix: List[p.PathStep], path: List[p.PathStep]): Boolean =
     prefix.size <= path.size && prefix.zip(path).forall {
-      case (_: p.PathStep.IndexDyn, _: p.PathStep.Index)    => true
-      case (_: p.PathStep.IndexDyn, _: p.PathStep.IndexDyn) => true
-      case (_: p.PathStep.Index, _: p.PathStep.IndexDyn)    => true
+      case (p.PathStep.IndexDyn(_), p.PathStep.Index(_))    => true
+      case (p.PathStep.IndexDyn(_), p.PathStep.IndexDyn(_)) => true
+      case (p.PathStep.Index(_), p.PathStep.IndexDyn(_))    => true
       case (left, right)                                    => left == right
     }
 
@@ -346,69 +452,10 @@ private[pass] object AddressRefinement {
     val function = analysis.function
     val members  = program.defs.iterator.map(d => d.name -> d.members).toMap
 
-    def pointee(tpe: p.Type): p.Type = tpe match {
-      case p.Type.Ptr(component, _) => component
-      case other                    => other
-    }
-    def elem(tpe: p.Type): p.Type = tpe match {
-      case p.Type.Ptr(component, _)    => component
-      case p.Type.Arr(component, _, _) => component
-      case other                       => other
-    }
     def isArray(tpe: p.Type): Boolean = tpe match {
-      case _: p.Type.Arr => true
-      case _             => false
+      case p.Type.Arr(_, _, _) => true
+      case _                   => false
     }
-    def fieldsAt(rootTpe: p.Type, steps: List[p.PathStep]): List[(Field, p.Type)] = {
-      def member(symbol: p.Sym, field: String): Option[p.Type] =
-        members.get(symbol).flatMap(_.find(_.symbol == field).map(_.tpe))
-      steps
-        .foldLeft((rootTpe, List.empty[(Field, p.Type)])) {
-          case ((current, found), p.PathStep.Field(field)) =>
-            val owner = pointee(current) match {
-              case p.Type.Struct(symbol, _) => Some(symbol)
-              case _                        => None
-            }
-            owner.flatMap(symbol => member(symbol, field).map(tpe => tpe -> (symbol -> field, tpe))) match {
-              case Some((tpe, resolved)) => tpe     -> (found :+ resolved)
-              case None                  => current -> found
-            }
-          case ((current, found), p.PathStep.Deref)       => pointee(current) -> found
-          case ((current, found), _: p.PathStep.Index)    => elem(current)    -> found
-          case ((current, found), _: p.PathStep.IndexDyn) => elem(current)    -> found
-        }
-        ._2
-    }
-    def staticIndex(index: Option[p.Term]): Option[String] = index match {
-      case None                        => Some("")
-      case Some(p.Term.IntU8Const(v))  => Some(java.lang.Byte.toUnsignedInt(v).toString)
-      case Some(p.Term.IntU16Const(v)) => Some(v.toInt.toString)
-      case Some(p.Term.IntU32Const(v)) => Some(java.lang.Integer.toUnsignedLong(v).toString)
-      case Some(p.Term.IntU64Const(v)) => Some(java.lang.Long.toUnsignedString(v))
-      case Some(p.Term.IntS8Const(v))  => Some(v.toString)
-      case Some(p.Term.IntS16Const(v)) => Some(v.toString)
-      case Some(p.Term.IntS32Const(v)) => Some(v.toString)
-      case Some(p.Term.IntS64Const(v)) => Some(v.toString)
-      case _                           => None
-    }
-    def staticPathKey(steps: List[p.PathStep]): Option[String] =
-      if (steps.exists { case _: p.PathStep.IndexDyn => true; case _ => false }) None
-      else
-        Some(
-          steps
-            .map {
-              case p.PathStep.Field(name) => s"field:$name"
-              case p.PathStep.Deref       => "deref"
-              case p.PathStep.Index(idx)  => s"index:$idx"
-              case _: p.PathStep.IndexDyn => throw IllegalStateException("dynamic step in static arena path")
-            }
-            .mkString("/")
-        )
-    def localReferenceKey(base: p.Term.Select, index: Option[p.Term]): Option[String] =
-      for {
-        path <- staticPathKey(base.steps)
-        idx  <- staticIndex(index)
-      } yield s"${base.root.symbol}:$path:$idx"
     def referencedStructs(tpe: p.Type): Set[p.Sym] = tpe match {
       case p.Type.Struct(symbol, args) => Set(symbol) ++ args.flatMap(referencedStructs)
       case p.Type.Ptr(component, _)    => referencedStructs(component)
@@ -419,43 +466,36 @@ private[pass] object AddressRefinement {
     val arenaStructs = doUntilNotEq(captureRoot(function).map(_._2.name).toSet) { (_, seen) =>
       seen ++ seen.flatMap(symbol => members.getOrElse(symbol, Nil).flatMap(member => referencedStructs(member.tpe)))
     }._2
-    def isLocal(term: p.Term): Boolean = analysis.provenancesOf(term).exists {
-      case _: Provenance.Local => true
-      case _                   => false
-    }
-    val reassignedPointers = function
-      .collectAll[p.Stmt]
-      .collect { case p.Stmt.Mut(p.Term.Select(name, Nil, _: p.Type.Ptr), _) => name }
-      .toSet
+    val reassignedPointers = reassignedPointersIn(function)
     val localPointerKeys = function.collectAll[p.Stmt].foldLeft(Map.empty[p.Named, String]) {
-      case (known, p.Stmt.Var(name, Some(p.Expr.RefTo(base: p.Term.Select, index, _, _, _)), _))
-          if isPtr(name.tpe) && !reassignedPointers(name) && isLocal(base) =>
+      case (known, p.Stmt.Var(name, Some(p.Expr.RefTo(lhs = base: p.Term.Select, idx = index)), _))
+          if isPtr(name.tpe) && !reassignedPointers(name) && analysis.isLocal(base) =>
         localReferenceKey(base, index).fold(known)(key => known.updated(name, key))
       case (known, p.Stmt.Var(name, Some(p.Expr.Alias(p.Term.Select(root, Nil, _))), _))
           if isPtr(name.tpe) && !reassignedPointers(name) && !reassignedPointers(root) && known.contains(root) =>
         known.updated(name, known(root))
-      case (known, p.Stmt.Var(name, Some(p.Expr.Cast(source @ p.Term.Select(root, Nil, _), _: p.Type.Ptr)), _))
+      case (known, p.Stmt.Var(name, Some(p.Expr.Cast(source @ p.Term.Select(root, Nil, _), p.Type.Ptr(_, _))), _))
           if isPtr(name.tpe) && !reassignedPointers(name) && !reassignedPointers(root) &&
-            (known.contains(root) || (isArray(root.tpe) && isLocal(source))) =>
+            (known.contains(root) || (isArray(root.tpe) && analysis.isLocal(source))) =>
         known.updated(name, known.getOrElse(root, s"${root.symbol}:array"))
       case (known, _) => known
     }
     val directLocalPointerKeys = function
       .collectAll[p.Expr]
       .collect {
-        case p.Expr.RefTo(base: p.Term.Select, index, _, _, _) if isLocal(base) =>
+        case p.Expr.RefTo(lhs = base: p.Term.Select, idx = index) if analysis.isLocal(base) =>
           localReferenceKey(base, index)
       }
       .flatten
       .toSet
     def localIdentity(term: p.Term): Boolean = term match {
-      case _: p.Term.NullPtrConst      => true
-      case p.Term.Select(root, Nil, _) => isLocal(term) || localPointerKeys.contains(root)
-      case _                           => false
+      case p.Term.NullPtrConst(_, _, _) => true
+      case p.Term.Select(root, Nil, _)  => analysis.isLocal(term) || localPointerKeys.contains(root)
+      case _                            => false
     }
     def directSelectedField(term: p.Term): Option[Field] = term match {
-      case p.Term.Select(root, steps, _: p.Type.Ptr) if steps.nonEmpty =>
-        fieldsAt(root.tpe, steps).lastOption.collect { case (field, p.Type.Ptr(_, p.Type.Space.Global)) =>
+      case p.Term.Select(root, steps, p.Type.Ptr(_, _)) if steps.nonEmpty =>
+        fieldsAt(root.tpe, steps, members).lastOption.collect { case (field, p.Type.Ptr(_, p.Type.Space.Global)) =>
           field
         }
       case _ => None
@@ -480,14 +520,14 @@ private[pass] object AddressRefinement {
     }._2
     def selectedField(term: p.Term): Option[Field] =
       directSelectedField(term).orElse(term match {
-        case p.Term.Select(root, Nil, _: p.Type.Ptr) => fieldAliases.get(root).map(_._1)
-        case _                                       => None
+        case p.Term.Select(root, Nil, p.Type.Ptr(_, _)) => fieldAliases.get(root).map(_._1)
+        case _                                          => None
       })
     def identityWriteSource(expr: p.Expr): Option[Either[Field, Boolean]] = expr match {
-      case p.Expr.Alias(rhs)               => Some(selectedField(rhs).toLeft(localIdentity(rhs)))
-      case p.Expr.Cast(rhs, _: p.Type.Ptr) => Some(selectedField(rhs).toLeft(localIdentity(rhs)))
-      case p.Expr.RefTo(base: p.Term.Select, index, _, _, _) =>
-        Some(Right(isLocal(base) && localReferenceKey(base, index).nonEmpty))
+      case p.Expr.Alias(rhs)                  => Some(selectedField(rhs).toLeft(localIdentity(rhs)))
+      case p.Expr.Cast(rhs, p.Type.Ptr(_, _)) => Some(selectedField(rhs).toLeft(localIdentity(rhs)))
+      case p.Expr.RefTo(lhs = base: p.Term.Select, idx = index) =>
+        Some(Right(analysis.isLocal(base) && localReferenceKey(base, index).nonEmpty))
       case _ => None
     }
     val writes = function
@@ -498,7 +538,7 @@ private[pass] object AddressRefinement {
       .flatten
     def traversedPointerFields(term: p.Term): List[Field] = term match {
       case p.Term.Select(root, steps, _) if steps.nonEmpty =>
-        fieldsAt(root.tpe, steps).collect { case (field, _: p.Type.Ptr) => field }
+        fieldsAt(root.tpe, steps, members).collect { case (field, p.Type.Ptr(_, _)) => field }
       case _ => Nil
     }
     def tally(fields: List[Field]): Map[Field, Int] = fields.groupMapReduce(identity)(_ => 1)(_ + _)
@@ -532,7 +572,7 @@ private[pass] object AddressRefinement {
       }.toSet
     }._2
     def comparable(term: p.Term): Boolean = term match {
-      case _: p.Term.NullPtrConst                                         => true
+      case p.Term.NullPtrConst(_, _, _)                                   => true
       case p.Term.Select(root, Nil, _) if localPointerKeys.contains(root) => true
       case selected if selectedField(selected).exists(candidates)         => true
       case _                                                              => false
@@ -591,16 +631,10 @@ private[pass] object AddressRefinement {
       case _ => None
     }
 
-    val statements  = function.collectAll[p.Stmt].map(stmt => indexedAssignment(stmt).getOrElse(stmt))
-    val terms       = function.collectAll[p.Term]
-    val expressions = function.collectAll[p.Expr]
-    val declarations = (
-      function.receiver.iterator.map(_.named) ++
-        function.args.iterator.map(_.named) ++
-        function.moduleCaptures.iterator.map(_.named) ++
-        function.termCaptures.iterator.map(_.named) ++
-        statements.iterator.collect { case p.Stmt.Var(n, _, _) => n }
-    ).map(n => n.symbol -> n).toMap
+    val statements   = function.collectAll[p.Stmt].map(stmt => indexedAssignment(stmt).getOrElse(stmt))
+    val terms        = function.collectAll[p.Term]
+    val expressions  = function.collectAll[p.Expr]
+    val declarations = declaredNames(function)
     val localAggregates = statements.iterator.collect {
       case p.Stmt.Var(n, _, _) if !isPtr(n.tpe) => n.symbol
     }.toSet
@@ -647,9 +681,8 @@ private[pass] object AddressRefinement {
           if (upcasts.nonEmpty)
             fact.copy(alternatives = fact.alternatives.flatMap {
               case AbstractAddress.Absolute(Some(Provenance.Local(symbol, path)), space) =>
-                upcasts.map(candidate =>
-                  AbstractAddress.Absolute(Some(Provenance.Local(symbol, path ++ candidate)), space)
-                )
+                upcasts
+                  .map(candidate => AbstractAddress.Absolute(Some(Provenance.Local(symbol, path ++ candidate)), space))
               case other => Set(other)
             })
           else {
@@ -668,13 +701,13 @@ private[pass] object AddressRefinement {
         case _ => fact
       }
     def pointerSlotDepth(tpe: p.Type, seen: Set[p.Sym] = Set.empty): Int = tpe match {
-      case _: p.Type.Ptr => 0
+      case p.Type.Ptr(_, _) => 0
       case p.Type.Struct(symbol, _) if !seen(symbol) =>
         members
           .getOrElse(symbol, Map.empty)
           .valuesIterator
           .map {
-            case _: p.Type.Ptr => 1
+            case p.Type.Ptr(_, _) => 1
             case member =>
               val nested = pointerSlotDepth(member, seen + symbol)
               if (nested > 0) nested + 1 else 0
@@ -704,15 +737,15 @@ private[pass] object AddressRefinement {
         Some(Query.Slot(root.symbol, steps)    -> StorageInfo(tpe, StorageRegion.Local))
       else Some(Query.Slot(root.symbol, steps) -> StorageInfo(tpe, StorageRegion.Undetermined))
 
-    val pending = statements.zipWithIndex.flatMap { case (stmt, index) =>
+    val pending = statements.flatMap { stmt =>
       stmt match {
         case p.Stmt.Var(n, Some(expr), _) if isCarrier(n.tpe) =>
-          Some(Pending(index, Query.Binding(n.symbol), None, expr, s"initialiser of ${n.symbol}"))
+          Some(Pending(Query.Binding(n.symbol), None, expr))
         case p.Stmt.Mut(p.Term.Select(n, Nil, tpe), expr) if isCarrier(tpe) =>
-          Some(Pending(index, Query.Binding(n.symbol), None, expr, s"assignment to ${n.symbol}"))
+          Some(Pending(Query.Binding(n.symbol), None, expr))
         case p.Stmt.Mut(p.Term.Select(root, steps, tpe), expr) =>
           directSlot(root, steps, tpe).map { case (slot, _) =>
-            Pending(index, slot, Some(root -> steps), expr, s"assignment to ${slot.label}")
+            Pending(slot, Some(root -> steps), expr)
           }
         case _ => None
       }
@@ -752,7 +785,7 @@ private[pass] object AddressRefinement {
           AddressValue.arenaRoot(symbol)
         case Query.Binding(symbol) if info.region == StorageRegion.External =>
           AddressValue.absolute(Some(Provenance.Parameter(symbol)), spaceOf(info.tpe))
-        case _: Query.Slot if info.region == StorageRegion.Arena =>
+        case Query.Slot(_, _) if info.region == StorageRegion.Arena =>
           AddressValue.arenaRelative(capture.map(_.symbol))
         case _ => AddressValue()
       }
@@ -760,14 +793,14 @@ private[pass] object AddressRefinement {
     }.toMap
 
     def classifyProvenance(origins: Set[Provenance]): (Boolean, Boolean) = {
-      val arena = origins.exists { case _: Provenance.ArenaRoot => true; case _ => false }
-      arena -> origins.exists { case _: Provenance.ArenaRoot => false; case _ => true }
+      val arena = origins.exists { case Provenance.ArenaRoot(_) => true; case _ => false }
+      arena -> origins.exists { case Provenance.ArenaRoot(_) => false; case _ => true }
     }
 
     def domainOf(
         token: Query[AddressValue],
         state: Map[Query[AddressValue], AddressValue]
-    ): StorageRegion = storage.get(token).map(_.region).getOrElse(StorageRegion.Undetermined) match {
+    ): StorageRegion = storage.get(token).fold[StorageRegion](StorageRegion.Undetermined)(_.region) match {
       case StorageRegion.Undetermined =>
         token match {
           case Query.Slot(root, _) if localAggregates(root) => StorageRegion.Local
@@ -775,7 +808,8 @@ private[pass] object AddressRefinement {
             val origins        = state.getOrElse(Query.Binding(root), AddressValue()).provenances
             val (arena, other) = classifyProvenance(origins)
             if (arena && !other) StorageRegion.Arena
-            else if (origins.exists { case _: Provenance.Local => true; case _ => false } && !arena) StorageRegion.Local
+            else if (origins.exists { case Provenance.Local(_, _) => true; case _ => false } && !arena)
+              StorageRegion.Local
             else if (other && !arena) StorageRegion.External
             else StorageRegion.Undetermined
           case _ => StorageRegion.Undetermined
@@ -790,8 +824,8 @@ private[pass] object AddressRefinement {
     ): AddressValue = {
       val domain = domainOf(token, state)
       val isSlot = token match {
-        case _: Query.Slot => true
-        case _             => false
+        case Query.Slot(_, _) => true
+        case _                => false
       }
       val isCaptureBinding = token match {
         case Query.Binding(symbol) => capture.exists(_.symbol == symbol)
@@ -809,8 +843,7 @@ private[pass] object AddressRefinement {
         case StorageRegion.Local if fact.includesNull && fact.encodings.isEmpty =>
           if (model == AddressModel.Physical) Some(Encoding.Absolute) else Some(Encoding.ArenaRelative)
         case StorageRegion.Local if fact.hasArenaRoot =>
-          if (model == AddressModel.Physical) Some(Encoding.Absolute)
-          else if (fact.hasNonArenaAbsolute) Some(Encoding.Absolute)
+          if (model == AddressModel.Physical || fact.hasNonArenaAbsolute) Some(Encoding.Absolute)
           else Some(Encoding.ArenaRelative)
         case StorageRegion.Arena if isCaptureBinding         => Some(Encoding.Absolute)
         case _ if fact.encodings.contains(Encoding.Absolute) => Some(Encoding.Absolute)
@@ -833,7 +866,7 @@ private[pass] object AddressRefinement {
     }
 
     def read(state: Map[Query[AddressValue], AddressValue], token: Query[AddressValue]): AddressValue =
-      state.get(token).map(_.read).getOrElse(AddressValue.unresolved(s"no facts for ${token.label}"))
+      state.get(token).fold(AddressValue.unresolved(s"no facts for ${token.label}"))(_.read)
 
     def pointerFromMemory(base: AddressValue, tpe: p.Type, context: String): AddressValue = {
       val (arena, other) = classifyProvenance(base.provenances)
@@ -867,7 +900,7 @@ private[pass] object AddressRefinement {
             .map(p.Type.Struct(_, Nil))
             .orElse(member(tpe, name))
             .getOrElse(p.Type.Nothing)
-        case p.PathStep.Deref | _: p.PathStep.Index | _: p.PathStep.IndexDyn =>
+        case p.PathStep.Deref | p.PathStep.Index(_) | p.PathStep.IndexDyn(_) =>
           tpe match {
             case p.Type.Ptr(component, _)    => component
             case p.Type.Arr(component, _, _) => component
@@ -899,9 +932,9 @@ private[pass] object AddressRefinement {
       def evidencedBaseAlias(root: String, path: List[p.PathStep]): List[p.PathStep] =
         if (state.contains(Query.Slot(root, path))) path
         else {
-          val candidates = path.indices.iterator
-            .flatMap { index =>
-              path(index) match {
+          val candidates = path.iterator.zipWithIndex
+            .flatMap { (step, index) =>
+              step match {
                 case p.PathStep.Field(name) if name.startsWith(p.Conventions.BaseFieldPrefix) =>
                   Some(path.patch(index, Nil, 1))
                 case _ => None
@@ -924,8 +957,7 @@ private[pass] object AddressRefinement {
           else steps
         val path = declarations
           .get(storage)
-          .map(n => normaliseBaseProjections(n.tpe, prefix ++ suffix))
-          .getOrElse(prefix ++ suffix)
+          .fold(prefix ++ suffix)(n => normaliseBaseProjections(n.tpe, prefix ++ suffix))
         Query.Slot(storage, evidencedBaseAlias(storage, path))
       } else Query.Slot(root.symbol, steps)
     }
@@ -994,7 +1026,7 @@ private[pass] object AddressRefinement {
 
     def termFactUncached(state: Map[Query[AddressValue], AddressValue], term: p.Term): AddressValue = term match {
       case p.Term.NullPtrConst(_, _, _) => AddressValue.nullValue
-      case _: p.Term.StringConst =>
+      case p.Term.StringConst(_) =>
         AddressValue.absolute(Some(Provenance.StaticStorage), Some(p.Type.Space.Constant))
       case p.Term.IntU64Const(value) => if (value == 0) AddressValue.nullValue else AddressValue.empty
       case p.Term.IntS64Const(value) => if (value == 0) AddressValue.nullValue else AddressValue.empty
@@ -1046,14 +1078,14 @@ private[pass] object AddressRefinement {
               AddressValue.absolute(Some(Provenance.Parameter(root.symbol)), spaceOf(root.tpe))
           }
         case p.Term.Select(root, steps, _) =>
-          slotFact(state, root, steps).map(_._2.copy(references = Set.empty)).getOrElse {
+          slotFact(state, root, steps).fold {
             // an address beyond a stored pointer lies in that pointer's storage, known once its slot is
             val crossesStoredPointer = !isPtr(root.tpe) && steps
               .dropRight(1)
               .scanLeft(root.tpe) {
                 case (p.Type.Struct(symbol, _), p.PathStep.Field(name)) =>
                   members.get(symbol).flatMap(_.get(name)).getOrElse(p.Type.Nothing)
-                case (p.Type.Arr(component, _, _), _: p.PathStep.Index | _: p.PathStep.IndexDyn) => component
+                case (p.Type.Arr(component, _, _), p.PathStep.Index(_) | p.PathStep.IndexDyn(_)) => component
                 case _                                                                           => p.Type.Nothing
               }
               .exists(isPtr)
@@ -1069,8 +1101,8 @@ private[pass] object AddressRefinement {
                     }
                   else
                     root.tpe match {
-                      case _: p.Type.Struct => p.Type.Space.Private
-                      case _                => spaceOf(root.tpe).getOrElse(space)
+                      case p.Type.Struct(_, _) => p.Type.Space.Private
+                      case _                   => spaceOf(root.tpe).getOrElse(space)
                     }
                 )
               )
@@ -1097,7 +1129,7 @@ private[pass] object AddressRefinement {
                 }
               else AddressValue(obligations = base.obligations + s"address through ${root.symbol} has no known origin")
             }
-          }
+          }(_._2.copy(references = Set.empty))
         case _ =>
           AddressValue.absolute(Some(Provenance.Local(s"materialised ${term.repr}")), Some(space))
       }
@@ -1111,8 +1143,8 @@ private[pass] object AddressRefinement {
       case p.Expr.Alias(term) => termFact(state, term)
       case p.Expr.Cast(term: p.Term.Select, p.Type.Ptr(_, space)) if !isCarrier(term.tpe) =>
         val materialisesStorageAddress = term.tpe match {
-          case _: p.Type.Arr => true
-          case _             => false
+          case p.Type.Arr(_, _, _) => true
+          case _                   => false
         }
         addressFact(state, term, pointsToBinding = false, materialisesStorageAddress, space)
       case p.Expr.Cast(term, target) => adjustStructCast(term, target, termFact(state, term))
@@ -1132,7 +1164,7 @@ private[pass] object AddressRefinement {
           materialisesStorageAddress = true,
           space
         )
-      case p.Expr.Alloc(_, _, space, _) =>
+      case p.Expr.Alloc(space = space) =>
         AddressValue.absolute(Some(Provenance.Allocation), Some(space))
       case p.Expr.Index(p.Term.Select(root, _, _), _, comp)
           if isAddressInt(comp) && logicalArenaAddressViews(root.symbol) =>
@@ -1158,15 +1190,16 @@ private[pass] object AddressRefinement {
           AddressValue.absolute()
         else if (left.spaces.nonEmpty) left
         else AddressValue.absolute()
-      case _: p.Expr.ForeignCall if carrierResult(expr) =>
+      case p.Expr.ForeignCall(_, _, _) if carrierResult(expr) =>
         AddressValue.unresolved(s"foreign call ${expr.repr} has no pointer summary")
       case invoke: p.Expr.Invoke if carrierResult(expr) =>
         val candidates = invoke.calleeSym.toList.flatMap(context.functionsByName.getOrElse(_, Nil))
         val actuals    = invoke.receiver.toList ::: invoke.args
+        val actualTpes = actuals.map(_.tpe)
         val callee = candidates
           .find { candidate =>
             val formals = candidate.receiver.toList.map(_.named) ::: candidate.args.map(_.named)
-            formals.map(_.tpe) == actuals.map(_.tpe) && candidate.rtn == invoke.rtn
+            formals.map(_.tpe) == actualTpes && candidate.rtn == invoke.rtn
           }
           .orElse(Option.when(candidates.size == 1)(candidates.head))
         callee match {
@@ -1187,7 +1220,7 @@ private[pass] object AddressRefinement {
               solve(program, target, model, overrides, target.signatureKey :: activeCalls, context).returned
             )
         }
-      case p.Expr.SpecOp(_: p.Spec.RemoteAlloc) =>
+      case p.Expr.SpecOp(p.Spec.RemoteAlloc(_, _)) =>
         AddressValue.absolute(Some(Provenance.Allocation), Some(p.Type.Space.Global))
       case _ if isAddressInt(expr.tpe) => AddressValue()
       case _ if carrierResult(expr)    => AddressValue.unresolved(s"unsupported pointer result ${expr.repr}")
@@ -1195,7 +1228,7 @@ private[pass] object AddressRefinement {
     }
 
     def isScalarConstant(term: p.Term): Boolean = term match {
-      case _: p.Term.IntU64Const | _: p.Term.IntS64Const => true
+      case p.Term.IntU64Const(_) | p.Term.IntS64Const(_) => true
       case _                                             => false
     }
 
@@ -1210,14 +1243,13 @@ private[pass] object AddressRefinement {
               else pointerSlots(memberType, path, remaining - 1)
             }
           case p.Type.Arr(component, size, _) =>
-            (0 until size).toList.flatMap(index =>
-              pointerSlots(component, prefix :+ p.PathStep.Index(index), remaining - 1)
-            )
+            (0 until size).toList
+              .flatMap(index => pointerSlots(component, prefix :+ p.PathStep.Index(index), remaining - 1))
           case _ => Nil
         }
 
     def bearsPointers(tpe: p.Type, seen: Set[p.Sym] = Set.empty): Boolean = tpe match {
-      case _: p.Type.Ptr               => true
+      case p.Type.Ptr(_, _)            => true
       case p.Type.Arr(component, _, _) => bearsPointers(component, seen)
       case p.Type.Struct(symbol, _) if !seen(symbol) =>
         members.getOrElse(symbol, Map.empty).valuesIterator.exists(bearsPointers(_, seen + symbol))
@@ -1276,14 +1308,15 @@ private[pass] object AddressRefinement {
         )
       }
       val nextRaw = slotCopies.foldLeft(assigned) { (facts, copy) =>
-        val source = canonicalSlot(current, copy.source, copy.sourcePrefix)
-        val target = canonicalSlot(current, copy.target, copy.targetPrefix)
+        val source      = canonicalSlot(current, copy.source, copy.sourcePrefix)
+        val target      = canonicalSlot(current, copy.target, copy.targetPrefix)
+        val sourceDepth = source.path.size
         val copied = slotsByRoot(current)
           .getOrElse(source.root, Nil)
           .iterator
           .collect {
             case (path, fact) if slotPrefix(source.path, path) =>
-              Query.Slot(target.root, target.path ++ path.drop(source.path.size)) -> fact.copy(obligations = Set.empty)
+              Query.Slot(target.root, target.path ++ path.drop(sourceDepth)) -> fact.copy(obligations = Set.empty)
           }
           .filter { case (slot, _) => slot.path.size <= maxSlotDepth }
           .toList
@@ -1332,12 +1365,10 @@ private[pass] object AddressRefinement {
     val assignmentResults = pending.map { item =>
       val target = targetOf(item, solved)
       val source = selectValue(exprFact(solved, item.expr))
-      (item, target) -> (source -> coercion(target, source))
+      target -> coercion(target, source)
     }
-    val coercions = assignmentResults.collect { case ((item, target), (source, Right(c))) =>
-      CoercionSite(item.index, target, source, c, item.context)
-    }
-    val conversionDiagnostics = assignmentResults.collect { case (_, (_, Left(diagnostic))) => diagnostic }
+    val coercions             = assignmentResults.collect { case (target, Right(c)) => CoercionSite(target, c) }
+    val conversionDiagnostics = assignmentResults.collect { case (_, Left(diagnostic)) => diagnostic }
 
     val aggregateParameterSeeds = bound.iterator
       .filterNot(n => isPtr(n.tpe))
@@ -1364,23 +1395,21 @@ private[pass] object AddressRefinement {
         )
       }
 
-    def mergeStates(
-        left: Map[Query[AddressValue], AddressValue],
-        right: Map[Query[AddressValue], AddressValue]
-    ): Map[Query[AddressValue], AddressValue] =
-      right.foldLeft(left) { case (current, (token, rightFact)) =>
-        val fact = current.get(token).fold(rightFact)(mergeFacts(_, rightFact))
-        if (current.get(token).contains(fact)) current else current.updated(token, fact)
+    def mergeFactMaps[K](left: Map[K, AddressValue], right: Map[K, AddressValue]): Map[K, AddressValue] =
+      right.foldLeft(left) { case (current, (key, rightFact)) =>
+        val fact = current.get(key).fold(rightFact)(mergeFacts(_, rightFact))
+        if (current.get(key).contains(fact)) current else current.updated(key, fact)
       }
 
-    def mergeSummaries(
-        left: Map[String, AddressValue],
-        right: Map[String, AddressValue]
-    ): Map[String, AddressValue] =
-      right.foldLeft(left) { case (current, (symbol, rightFact)) =>
-        val fact = current.get(symbol).fold(rightFact)(mergeFacts(_, rightFact))
-        if (current.get(symbol).contains(fact)) current else current.updated(symbol, fact)
-      }
+    def joinBranches(
+        left: (FlowState, Summary, Boolean, List[Diagnostic]),
+        right: (FlowState, Summary, Boolean, List[Diagnostic])
+    ): (FlowState, Summary, Boolean, List[Diagnostic]) = (
+      mergeFactMaps(left._1, right._1),
+      mergeFactMaps(left._2, right._2),
+      left._3 && right._3,
+      left._4 ::: right._4
+    )
 
     def copySlots(
         state: Map[Query[AddressValue], AddressValue],
@@ -1390,16 +1419,18 @@ private[pass] object AddressRefinement {
         sourcePrefix: List[p.PathStep],
         tpe: p.Type
     ): Map[Query[AddressValue], AddressValue] = {
-      val source = canonicalSlot(state, sourceRoot, sourcePrefix)
-      val target = canonicalSlot(state, targetRoot, targetPrefix)
+      val source      = canonicalSlot(state, sourceRoot, sourcePrefix)
+      val target      = canonicalSlot(state, targetRoot, targetPrefix)
+      val sourceDepth = source.path.size
+      val targetDepth = target.path.size
       val copied = slotsByRoot(state)
         .getOrElse(source.root, Nil)
         .iterator
         .collect {
           case (path, fact)
               if slotPrefix(source.path, path) &&
-                target.path.size + path.size - source.path.size <= maxSlotDepth =>
-            Query.Slot(target.root, target.path ++ path.drop(source.path.size)) -> fact
+                targetDepth + path.size - sourceDepth <= maxSlotDepth =>
+            Query.Slot(target.root, target.path ++ path.drop(sourceDepth)) -> fact
         }
         .toMap
       val written = copied ++ loadedSlots(state, sourceRoot, sourcePrefix, source, target, tpe, copied.keySet)
@@ -1418,7 +1449,7 @@ private[pass] object AddressRefinement {
             fact.alternatives.toList
               .map {
                 case address @ AbstractAddress.Absolute(Some(Provenance.Local(symbol, _)), _) =>
-                  val declared = declarations.get(symbol).map(_.tpe.repr).getOrElse("<unknown>")
+                  val declared = declarations.get(symbol).fold("<unknown>")(_.tpe.repr)
                   s"possible address: $address (storage type: $declared)"
                 case address => s"possible address: $address"
               }
@@ -1454,22 +1485,23 @@ private[pass] object AddressRefinement {
           case p.Type.Struct(symbol, _) => members.get(symbol).flatMap(_.get(name)).getOrElse(p.Type.Nothing)
           case _                        => p.Type.Nothing
         }
-      case p.PathStep.Deref | _: p.PathStep.Index | _: p.PathStep.IndexDyn => pointee(current)
+      case p.PathStep.Deref | p.PathStep.Index(_) | p.PathStep.IndexDyn(_) => pointee(current)
     }
 
     def traversedPointers(term: p.Term.Select): List[p.Term] = {
+      val depth = term.steps.size
       val (_, _, pointers) =
         term.steps.zipWithIndex.foldLeft((term.root.tpe, List.empty[p.PathStep], List.empty[p.Term])) {
-          case ((current, prefix, found), (step, index)) =>
-            val nextPrefix = prefix :+ step
-            val nextType   = stepType(current, step)
+          case ((current, prefixRev, found), (step, index)) =>
+            val nextPrefixRev = step :: prefixRev
+            val nextType      = stepType(current, step)
             val next =
-              if (isPtr(nextType) && index < term.steps.size - 1)
-                found :+ p.Term.Select(term.root, nextPrefix, nextType)
+              if (isPtr(nextType) && index < depth - 1)
+                p.Term.Select(term.root, nextPrefixRev.reverse, nextType) :: found
               else found
-            (nextType, nextPrefix, next)
+            (nextType, nextPrefixRev, next)
         }
-      pointers
+      pointers.reverse
     }
 
     def diagnosticsIn(stmt: p.Stmt, state: FlowState): List[Diagnostic] = {
@@ -1482,9 +1514,9 @@ private[pass] object AddressRefinement {
       }
       val expressions = stmt.collectAll[p.Expr].flatMap {
         case p.Expr.Index(base, _, _) => pointerOperand(base).flatMap(unresolvedUse(state, _, "index"))
-        case p.Expr.SpecOp(p.Spec.GpuAtomicRMW(_, ptr, _, _, _, _)) =>
+        case p.Expr.SpecOp(p.Spec.GpuAtomicRMW(ptr = ptr)) =>
           unresolvedUse(state, ptr, "atomic operation")
-        case p.Expr.SpecOp(p.Spec.GpuAtomicCAS(ptr, _, _, _, _, _)) =>
+        case p.Expr.SpecOp(p.Spec.GpuAtomicCAS(ptr = ptr)) =>
           unresolvedUse(state, ptr, "atomic operation")
         case p.Expr.SpecOp(p.Spec.GpuVolatileLoad(ptr, _))  => unresolvedUse(state, ptr, "volatile load")
         case p.Expr.SpecOp(p.Spec.GpuVolatileStore(ptr, _)) => unresolvedUse(state, ptr, "volatile store")
@@ -1495,7 +1527,7 @@ private[pass] object AddressRefinement {
             if isAddressInt(tpe) && isScalarConstant(value) &&
               state
                 .get(Query.Binding(name.symbol))
-                .exists(_.provenances.exists { case _: Provenance.ArenaRoot => true; case _ => false }) =>
+                .exists(_.provenances.exists { case Provenance.ArenaRoot(_) => true; case _ => false }) =>
           List(
             Diagnostic(
               "incompatible-address-encoding",
@@ -1542,34 +1574,20 @@ private[pass] object AddressRefinement {
         case ((state, summary, converged, diagnostics), stmt) =>
           val (next, added, stable, found) = stmt match {
             case p.Stmt.Cond(_, whenTrue, whenFalse) =>
-              val (trueState, trueSummary, trueStable, trueDiagnostics)     = analyse(whenTrue, state)
-              val (falseState, falseSummary, falseStable, falseDiagnostics) = analyse(whenFalse, state)
-              (
-                mergeStates(trueState, falseState),
-                mergeSummaries(trueSummary, falseSummary),
-                trueStable && falseStable,
-                trueDiagnostics ::: falseDiagnostics
-              )
+              joinBranches(analyse(whenTrue, state), analyse(whenFalse, state))
             case p.Stmt.While(_, body)             => flowLoop(body, state)
             case p.Stmt.ForRange(_, _, _, _, body) => flowLoop(body, state)
             case p.Stmt.Try(body, handlers, fin) =>
               val (bodyState, bodySummary, bodyStable, bodyDiagnostics) = analyse(body, state)
               val (handledState, handledSummary, handledStable, handledDiagnostics) = handlers.foldLeft(
                 (bodyState, bodySummary, bodyStable, bodyDiagnostics)
-              ) { case ((currentState, currentSummary, currentStable, currentDiagnostics), handler) =>
-                val (handlerState, handlerSummary, handlerStable, handlerDiagnostics) =
-                  analyse(handler.body, mergeStates(state, bodyState))
-                (
-                  mergeStates(currentState, handlerState),
-                  mergeSummaries(currentSummary, handlerSummary),
-                  currentStable && handlerStable,
-                  currentDiagnostics ::: handlerDiagnostics
-                )
+              ) { case (current, handler) =>
+                joinBranches(current, analyse(handler.body, mergeFactMaps(state, bodyState)))
               }
               val (finalState, finalSummary, finalStable, finalDiagnostics) = analyse(fin, handledState)
               (
                 finalState,
-                mergeSummaries(handledSummary, finalSummary),
+                mergeFactMaps(handledSummary, finalSummary),
                 handledStable && finalStable,
                 handledDiagnostics ::: finalDiagnostics
               )
@@ -1582,7 +1600,7 @@ private[pass] object AddressRefinement {
           }
           (
             next,
-            mergeSummaries(summary, added),
+            mergeFactMaps(summary, added),
             converged && stable,
             if (found.isEmpty) diagnostics else diagnostics ::: found
           )
@@ -1597,8 +1615,8 @@ private[pass] object AddressRefinement {
           remaining: Int
       ): (FlowState, Summary, Boolean, List[Diagnostic]) = {
         val (bodyState, bodySummary, nestedStable, bodyDiagnostics) = analyse(body, current)
-        val next                                                    = mergeStates(entry, bodyState)
-        val nextSummary                                             = mergeSummaries(summary, bodySummary)
+        val next                                                    = mergeFactMaps(entry, bodyState)
+        val nextSummary                                             = mergeFactMaps(summary, bodySummary)
         val nextDiagnostics                                         = (diagnostics ::: bodyDiagnostics).distinct
         if (next == current) (next, nextSummary, nestedStable, nextDiagnostics)
         else if (remaining == 0) (next, nextSummary, false, nextDiagnostics)
@@ -1697,8 +1715,7 @@ private[pass] object AddressRefinement {
       .iterator
       .map(stmt => selectValue(exprFact(solved, stmt.value)))
       .reduceOption(_.join(_))
-      .map(selectValue)
-      .getOrElse(AddressValue())
+      .fold(AddressValue())(selectValue)
     Solution(function, model, FactTable(entries), bindings, slots, refinedSpaces, coercions, returned, diagnostics)
   }
 }

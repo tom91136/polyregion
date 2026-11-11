@@ -34,13 +34,17 @@ inline void emitCtestFragment(const std::string &file, const std::string &prefix
                               const std::string & /*workdir*/, const std::string &env, const std::vector<CtestEntry> &tasks) {
   // set_tests_properties scans every test per property at parse (O(n^2)), so emit only the properties a
   // test needs; the runner chdirs itself, so no WORKING_DIRECTORY
-  const auto joinEnv = [&](const std::string &extra) { return env.empty() ? extra : extra.empty() ? env : env + ";" + extra; };
+  const auto joinEnv = [&](const std::string &extra) -> std::string {
+    if (env.empty()) return extra;
+    if (extra.empty()) return env;
+    return env + ";" + extra;
+  };
   const auto envProp = [&](const std::string &extra) {
     const auto e = joinEnv(extra);
     return e.empty() ? std::string{} : fmt::format(" ENVIRONMENT \"{}\"", e);
   };
 
-  unsigned long long seed = 0x9e3779b97f4a7c15ull;
+  unsigned long long seed = 0x9e3779b97f4a7c15ULL;
   if (const char *s = std::getenv(env::PolytestSeed)) {
     char *end = nullptr;
     if (const auto v = std::strtoull(s, &end, 10); end != s && *end == '\0') seed = v;

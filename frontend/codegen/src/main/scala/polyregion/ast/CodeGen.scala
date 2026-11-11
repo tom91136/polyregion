@@ -81,6 +81,12 @@ private[polyregion] object CodeGen {
     StandardOpenOption.WRITE
   )
 
+  private def writeGenerated(target: Path)(files: List[(String, String)]): Unit = {
+    println(s"Writing to $target")
+    Files.createDirectories(target)
+    files.foreach((name, content) => overwrite(target.resolve(name))(content))
+  }
+
   private def generateJniBindings(): Unit = {
     import java.lang.reflect.{Constructor, Field, Method, Modifier}
 
@@ -142,25 +148,29 @@ private[polyregion] object CodeGen {
     println(s"Generated ADT=${(header + impl).count(_ == '\n')} lines")
 
     val target = Paths.get("../native/bindings/jvm/generated/").toAbsolutePath.normalize
-    println(s"Writing to $target")
-    Files.createDirectories(target)
-    overwrite(target.resolve("mirror.h"))(header)
-    overwrite(target.resolve("mirror.cpp"))(impl)
-    registerNatives.foreach((name, header) => overwrite(target.resolve(name))(header))
+    writeGenerated(target)(List("mirror.h" -> header, "mirror.cpp" -> impl) ++ registerNatives)
     println("Done")
   }
 
-  private def astCoreStructs: List[StructNode] =
+  private def astCoreTypeLeafStructs: List[StructNode] =
     deriveStruct[Sym]()
       :: deriveStruct[SourcePosition]()
       :: deriveStruct[Origin]()
       :: deriveStruct[Named]()
       :: deriveStruct[Type.Kind]()
       :: deriveStruct[Type.Space]()
-      :: deriveStruct[Type]()
+      :: Nil
+
+  private def astCoreTypeRefStructs: List[StructNode] =
+    deriveStruct[Type]()
       :: deriveStruct[PathStep]()
       :: deriveStruct[Region]()
-      :: deriveStruct[Term]()
+      :: Nil
+
+  private def astCoreTypeStructs: List[StructNode] = astCoreTypeLeafStructs ::: astCoreTypeRefStructs
+
+  private def astCoreTermStructs: List[StructNode] =
+    deriveStruct[Term]()
       :: deriveStruct[Expr]()
       :: deriveStruct[Overload]()
       :: deriveStruct[AtomicOp]()
@@ -170,13 +180,18 @@ private[polyregion] object CodeGen {
       :: deriveStruct[Spec]()
       :: deriveStruct[Intr]()
       :: deriveStruct[Math]()
-      :: deriveStruct[ExceptionKind]()
+      :: Nil
+
+  private def astCoreStmtStructs: List[StructNode] =
+    deriveStruct[ExceptionKind]()
       :: deriveStruct[Handler]()
       :: deriveStruct[Stmt]()
       :: deriveStruct[Signature]()
       :: Nil
 
-  private def astProgramStructs: List[StructNode] =
+  private def astCoreStructs: List[StructNode] = astCoreTypeStructs ::: astCoreTermStructs ::: astCoreStmtStructs
+
+  private def astFunctionStructs: List[StructNode] =
     deriveStruct[Function.Visibility]()
       :: deriveStruct[Function.FpMode]()
       :: deriveStruct[Function.Affinity]()
@@ -188,7 +203,10 @@ private[polyregion] object CodeGen {
       :: deriveStruct[FunctionDecl]()
       :: deriveStruct[CallConvention]()
       :: deriveStruct[Function]()
-      :: deriveStruct[StructDef]()
+      :: Nil
+
+  private def astModuleStructs: List[StructNode] =
+    deriveStruct[StructDef]()
       :: deriveStruct[Mirror]()
       :: deriveStruct[Pass.Phase]()
       :: deriveStruct[MetaEntry]()
@@ -202,6 +220,8 @@ private[polyregion] object CodeGen {
       :: deriveStruct[Pass.RunResult]()
       :: deriveStruct[Compile.Result]()
       :: Nil
+
+  private def astProgramStructs: List[StructNode] = astFunctionStructs ::: astModuleStructs
 
   private def astPackageStructs: List[StructNode] =
     deriveStruct[Interface]()
@@ -240,9 +260,8 @@ private[polyregion] object CodeGen {
     val adtFileName       = "polyast"
     val jsonCodecFileName = "polyast_codec"
 
-    val adtSources          = structs.flatMap(_.emit())
-    val jsonCodecSources    = structs.flatMap(CppNlohmannJsonCodecGen.emit)
-    val msgpackCodecSources = structs.flatMap(CppMsgPackCodecGen.emit)
+    val adtSources       = structs.flatMap(_.emit())
+    val jsonCodecSources = structs.flatMap(CppNlohmannJsonCodecGen.emit)
     val msgpackRoots = {
       import CppMsgPackCodecGen.{Root, Schema}
       List(
@@ -291,6 +310,8 @@ private[polyregion] object CodeGen {
         Root.raw[Pass.RunResult]("passrunresult")
       )
     }
+    val msgpackCodecSources =
+      structs.flatMap(CppMsgPackCodecGen.emit(CppMsgPackCodecGen.reachable(structs, msgpackRoots)))
     validateGeneratedNames(structs, msgpackRoots)
 
     val adtHeader = StructSource.emitHeader(namespace, adtSources)
@@ -391,15 +412,17 @@ private[polyregion] object CodeGen {
         .get("ast/src/main/scala/polyregion/ast/generated/PolyPackageWireSchema.scala")
         .toAbsolutePath
         .normalize
-      println(s"Writing to $target")
-      Files.createDirectories(target)
-      overwrite(target.resolve("polyast.h"))(adtHeader)
-      overwrite(target.resolve("polyast.cpp"))(adtImpl)
-      overwrite(target.resolve("polyast_codec.h"))(jsonCodecHeader)
-      overwrite(target.resolve("polyast_codec.cpp"))(jsonCodecImpl)
-      overwrite(target.resolve("polyast_repr.h"))(reprHeader)
-      overwrite(target.resolve("polyast_repr.cpp"))(reprImpl)
-      overwrite(target.resolve("polyast_jit.h"))(jitHeader)
+      writeGenerated(target)(
+        List(
+          "polyast.h"         -> adtHeader,
+          "polyast.cpp"       -> adtImpl,
+          "polyast_codec.h"   -> jsonCodecHeader,
+          "polyast_codec.cpp" -> jsonCodecImpl,
+          "polyast_repr.h"    -> reprHeader,
+          "polyast_repr.cpp"  -> reprImpl,
+          "polyast_jit.h"     -> jitHeader
+        )
+      )
       overwrite(scalaTarget)(
         s"""package polyregion.scalalang.generated
            |
@@ -488,31 +511,31 @@ private[polyregion] object CodeGen {
   def main(args: Array[String]): Unit = {
     writePolyASTSources()
     writeAbiSources(
-      "PolyPass",
-      "../native/polyc/include/polyregion/polypass.h",
-      "../native/polyc/generated/polypass_symbols.h",
-      "../native/polyc/generated/polypass-exports.txt",
-      CAbiCodeGen.polyPassHeader,
-      CAbiCodeGen.polyPassSymbolsHeader,
-      CAbiCodeGen.polyPassExportsList
+      name = "PolyPass",
+      header = "../native/polyc/include/polyregion/polypass.h",
+      symbols = "../native/polyc/generated/polypass_symbols.h",
+      exports = "../native/polyc/generated/polypass-exports.txt",
+      headerSrc = CAbiCodeGen.polyPassHeader,
+      symbolsSrc = CAbiCodeGen.polyPassSymbolsHeader,
+      exportsSrc = CAbiCodeGen.polyPassExportsList
     )
     writeAbiSources(
-      "PolyPackage",
-      "../native/common/generated/polyregion/polypackage.h",
-      "../native/common/generated/polyregion/polypackage_symbols.h",
-      "../native/polyc/generated/polypackage-exports.txt",
-      CAbiCodeGen.polyPackageHeader, // expands the PolyPackageAbi version and operation surface here
-      CAbiCodeGen.polyPackageSymbolsHeader,
-      CAbiCodeGen.polyPackageExportsList
+      name = "PolyPackage",
+      header = "../native/common/generated/polyregion/polypackage.h",
+      symbols = "../native/common/generated/polyregion/polypackage_symbols.h",
+      exports = "../native/polyc/generated/polypackage-exports.txt",
+      headerSrc = CAbiCodeGen.polyPackageHeader, // expands the PolyPackageAbi version and operation surface here
+      symbolsSrc = CAbiCodeGen.polyPackageSymbolsHeader,
+      exportsSrc = CAbiCodeGen.polyPackageExportsList
     )
     writeAbiSources(
-      "polyc_jit",
-      "../native/common/generated/polyregion/polyc_jit.h",
-      "../native/common/generated/polyregion/polyc_jit_symbols.h",
-      "../native/polyc/generated/polyc_jit-exports.txt",
-      CAbiCodeGen.polyJitHeader,
-      CAbiCodeGen.polyJitSymbolsHeader,
-      CAbiCodeGen.polyJitExportsList
+      name = "polyc_jit",
+      header = "../native/common/generated/polyregion/polyc_jit.h",
+      symbols = "../native/common/generated/polyregion/polyc_jit_symbols.h",
+      exports = "../native/polyc/generated/polyc_jit-exports.txt",
+      headerSrc = CAbiCodeGen.polyJitHeader,
+      symbolsSrc = CAbiCodeGen.polyJitSymbolsHeader,
+      exportsSrc = CAbiCodeGen.polyJitExportsList
     )
     writeConventions()
     writeCoreInterface()

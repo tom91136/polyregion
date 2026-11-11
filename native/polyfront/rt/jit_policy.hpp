@@ -36,7 +36,7 @@ class AdaptiveJitPolicy {
   std::unordered_map<std::string, KernelState> kernels;
 
   void observe(KernelState &state, const uint64_t key) {
-    if (auto it = state.observations.find(key); it != state.observations.end()) {
+    if (const auto it = state.observations.find(key); it != state.observations.end()) {
       it->second.hits++;
       it->second.touched = ++tick;
       return;
@@ -49,7 +49,7 @@ class AdaptiveJitPolicy {
           | min_by([](const auto &, const auto &rank) { return rank; })                //
           | for_each([&](const auto &victim, const auto &) { state.observations.erase(victim); });
     }
-    state.observations.emplace(key, Observation{1, ++tick});
+    state.observations.emplace(key, Observation{.hits = 1, .touched = ++tick});
   }
 
 public:
@@ -62,17 +62,17 @@ public:
     if (!state.genericSeen) {
       state.genericSeen = true;
       if (variantLimit) observe(state, key);
-      return {false, false};
+      return {.specialise = false, .admitted = false};
     }
-    if (state.variants.contains(key)) return {true, false};
-    if (!variantLimit || state.variants.size() >= variantLimit) return {false, false};
+    if (state.variants.contains(key)) return {.specialise = true, .admitted = false};
+    if (!variantLimit || state.variants.size() >= variantLimit) return {.specialise = false, .admitted = false};
 
     observe(state, key);
     const auto observation = state.observations.find(key);
-    if (observation->second.hits < hotThreshold) return {false, false};
+    if (observation->second.hits < hotThreshold) return {.specialise = false, .admitted = false};
     state.observations.erase(observation);
     state.variants.insert(key);
-    return {true, true};
+    return {.specialise = true, .admitted = true};
   }
 
   size_t variantCount(const std::string &kernel) const {

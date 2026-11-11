@@ -1,5 +1,9 @@
 #include <algorithm>
 #include <cstdlib>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "llvm/Config/llvm-config.h"
 #include "llvm/Support/FileSystem.h"
@@ -37,7 +41,7 @@ int main(int argc, const char *argv[]) {
     return polyregion::polyc(argc - 1, argv + 1);
   }
 
-#if defined(_WIN32)
+#ifdef _WIN32
   // XXX per-process mspdbsrv endpoint; shared default deadlocks if a sibling link crashes
   // mid-PDB-write (LNK1318/LNK1201/STATUS_ACCESS_VIOLATION).
   polyregion::env::put("_MSPDBSRV_ENDPOINT_", fmt::format("polyfc-{}", llvm::sys::Process::getProcessId()).c_str(), true);
@@ -51,7 +55,7 @@ int main(int argc, const char *argv[]) {
                   llvm::Triple::getEnvironmentTypeName(hostTriple.getEnvironment()).str());
 #endif
 
-  const std::string execPath = llvm::sys::fs::getMainExecutable(argv[0], (void *)&addrAnchor);
+  const std::string execPath = llvm::sys::fs::getMainExecutable(argv[0], reinterpret_cast<void *>(&addrAnchor));
   const std::string execParentPath = llvm::sys::path::parent_path(execPath).str();
 
   std::string flangPath;
@@ -149,7 +153,7 @@ int main(int argc, const char *argv[]) {
                        // polydco-static references _rt_record / _rt_release / _rt_reflect_p; link the
                        // shared polyreflect-rt so MSVC's dllimport thunks resolve.
                        append(Driver::dynamicOriginLinkFlags(polyfcLibPath, "polyreflect-rt"));
-#if defined(_WIN32)
+#ifdef _WIN32
                        // flang Fortran sources cannot use #pragma comment(lib); inject the
                        // Windows system imports that polydco-static depends on directly.
                        append({"-Xlinker", "Version.lib", "-Xlinker", "psapi.lib", "-Xlinker", "ntdll.lib", "-Xlinker", "ws2_32.lib",
@@ -192,7 +196,7 @@ int main(int argc, const char *argv[]) {
                  }
                }
 
-#if defined(__APPLE__)
+#ifdef __APPLE__
                // Runtime, libc++, and JIT dependencies can share install locations; ld64.lld warns for repeated identical rpaths.
                remaining ^= distinct_by_if([](const auto &x) { return x.starts_with("-Wl,-rpath,"); }, [](const auto &x) { return x; });
 #endif

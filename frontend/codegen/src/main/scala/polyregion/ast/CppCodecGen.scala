@@ -2,13 +2,13 @@ package polyregion.ast
 
 private[polyregion] object CppCodecGen {
 
-  private def namespaced(lines: List[(List[String], List[String])]): String =
+  private def namespaced(lines: List[(List[String], List[String])], anonymous: Boolean = false): String =
     lines
       .groupMapReduce(_._1.mkString("::"))(_._2)(_ ::: _)
       .toList
-      .flatMap {
-        case ("", body) => body
-        case (ns, body) => s"namespace $ns {" :: body ::: s"} // namespace $ns" :: Nil
+      .flatMap { case (ns, body) =>
+        val inner = if (anonymous) "namespace {" :: body ::: "}" :: Nil else body
+        if (ns.isEmpty) inner else s"namespace $ns {" :: inner ::: s"} // namespace $ns" :: Nil
       }
       .mkString("\n")
 
@@ -52,14 +52,11 @@ private[polyregion] object CppCodecGen {
       msgpack: List[CppMsgPackCodecGen],
       roots: List[CppMsgPackCodecGen.Root]
   ): String = {
-    val msgpackForwardDecls = namespaced(msgpack.map(x => x.namespace -> x.forwardDecls))
-    val msgpackImpls        = msgpack.flatMap(_.impls).mkString("\n")
+    val msgpackForwardDecls = namespaced(msgpack.map(x => x.namespace -> x.forwardDecls), anonymous = true)
+    val msgpackImpls        = namespaced(msgpack.map(x => x.namespace -> x.impls), anonymous = true)
     val msgpackRoots        = roots.flatMap(CppMsgPackCodecGen.rootImpl).mkString("\n")
     s"""|#include "$headerName.h"
         |#include "msgpack.hpp"
-        |
-        |template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
-        |template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
         |
         |namespace $namespace {
         |constexpr auto AdtHash = "$hash";
@@ -73,7 +70,7 @@ private[polyregion] object CppCodecGen {
         |using msgpack::MsgpackWriter;
         |${json.flatMap(_.impls).mkString("\n")}
         |json hashed_from_json(const json& j_) {
-        |  auto hash_ = j_.at(0).get<std::string>();
+        |  const auto hash_ = j_.at(0).get<std::string>();
         |  auto data_ = j_.at(1);
         |  if(hash_ != AdtHash) {
         |   throw std::runtime_error("Expecting ADT hash to be " + std::string(AdtHash) + ", but was " + hash_);

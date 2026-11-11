@@ -168,7 +168,7 @@ class GroupFissionSuite extends munit.FunSuite {
   test("barrier kernels are split into regions with no barrier left") {
     val res = run(List(localDecl("s"), let("l", lid, u32), barrier))
     assertEquals(abi(res), Some("2"))
-    assert(!specs(res).exists(GroupFission.isBarrier), specs(res).toString)
+    assert(!specs(res).exists(GroupVocabulary.isBarrier), specs(res).toString)
     assertEquals(localVars(res).map(_.symbol), List("s"))
     assertEquals(Verify(res, NoopLog, verifyFunction = true).flatMap(_._2), Nil)
   }
@@ -499,7 +499,7 @@ class GroupFissionSuite extends munit.FunSuite {
 
   test("classifier: a compare-and-swap retry loop whose expected value is re-read does not wait") {
     val body = List(
-      p.Stmt.Var(named("old"), Some(p.Expr.Index(selectT(flag), i(0), i32)), true),
+      p.Stmt.Var(named("old"), Some(p.Expr.Index(selectT(flag), i(0), i32)), isMutable = true),
       let("again", alias(p.Term.Bool1Const(true)), bool, mut = true),
       p.Stmt.While(
         selectT("again", bool),
@@ -662,11 +662,7 @@ class GroupFissionSuite extends munit.FunSuite {
     prog.entry.required.body
       .flatMap(_.collectWhere[p.Stmt] {
         case p.Stmt.ForRange(
-              _,
-              _,
-              _,
-              _,
-              List(
+              body = List(
                 _,
                 p.Stmt.Var(_, Some(p.Expr.IntrOp(p.Intr.LogicEq(_, p.Term.IntU32Const(k)))), _),
                 p.Stmt.Cond(_, code, _)
@@ -937,7 +933,7 @@ class GroupFissionSuite extends munit.FunSuite {
     val prog = grouped(let("lanes", lanesE, u32) :: body)
     assert(!prog.entry.required.body.flatMap(_.collectAll[p.Stmt]).exists {
       case p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const)) => false
-      case _: p.Stmt.Return                               => true
+      case p.Stmt.Return(_)                               => true
       case _                                              => false
     })
     val (got, _) = runGroups(prog, 7)
@@ -1002,10 +998,11 @@ class GroupFissionSuite extends munit.FunSuite {
       let("sum", uadd(sel("quad"), sel("shifted")), u32),
       let("again", uadd(sel("sum"), sel("l")), u32)
     ) ::: emit(sel("l"), sel("again"))
+    val unviewed = List("l", "shifted", "quad")
     List(false, true).foreach { uniform =>
       val prog  = grouped(let("lanes", lanesE, u32) :: body, uniform)
       val names = declared(prog)
-      List("l", "shifted", "quad").foreach(n => assert(!names.exists(_.startsWith(s"$n#gf_view")), s"$n $names"))
+      unviewed.foreach(n => assert(!names.exists(_.startsWith(s"$n#gf_view")), s"$n $names"))
       assert(names.exists(_.startsWith("shifted#gf_re")), names.toString)
       assert(names.exists(_.startsWith("quad#gf_re")), names.toString)
       assert(names.exists(_.startsWith("l#gf_re")), names.toString)
@@ -1184,7 +1181,7 @@ class GroupFissionSuite extends munit.FunSuite {
       .exists(_.startsWith("#gf_pc"))
   private def laneLoops(stmts: List[p.Stmt]): List[p.Stmt.ForRange] = stmts.flatMap {
     case l: p.Stmt.ForRange if l.induction.symbol == "#gf_lid" => List(l)
-    case p.Stmt.ForRange(_, _, _, _, b)                        => laneLoops(b)
+    case p.Stmt.ForRange(body = b)                             => laneLoops(b)
     case p.Stmt.While(_, b)                                    => laneLoops(b)
     case p.Stmt.Cond(_, t, f)                                  => laneLoops(t) ::: laneLoops(f)
     case _                                                     => Nil
@@ -1192,8 +1189,10 @@ class GroupFissionSuite extends munit.FunSuite {
   private def topLevelLaneLoops(prog: p.Program): Int =
     prog.entry.required.body.count { case l: p.Stmt.ForRange => l.induction.symbol == "#gf_lid"; case _ => false }
 
+  private trait Expected { def apply(lanes: Int, groups: Int): List[V] }
+
   // runs a kernel under both lowerings and checks them against the expected output
-  private def agrees(body: List[p.Stmt], shapes: List[(Int, Int)], expected: (Int, Int) => List[V]) = {
+  private def agrees(body: List[p.Stmt], shapes: List[(Int, Int)], expected: Expected) = {
     val fast = grouped(let("lanes", lanesE, u32) :: body, uniform = true)
     val slow = grouped(let("lanes", lanesE, u32) :: body)
     assert(!machine(fast), "the kernel should lower to lane loops")
@@ -1228,7 +1227,7 @@ class GroupFissionSuite extends munit.FunSuite {
     val names = fast.entry.required.body.flatMap(_.collectWhere[p.Stmt] { case p.Stmt.Var(n, _, _) => n.symbol })
     assert(!names.exists(n => n.startsWith("#gf_cnt") || n.startsWith("#gf_runnable")), names.toString)
     assert(!fast.entry.required.collectAll[p.Expr].exists {
-      case p.Expr.SpecOp(op) => GroupFission.isBarrier(op)
+      case p.Expr.SpecOp(op) => GroupVocabulary.isBarrier(op)
       case _                 => false
     })
   }

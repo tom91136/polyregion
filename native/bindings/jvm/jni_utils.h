@@ -18,7 +18,7 @@ static jstring toJni(JNIEnv *env, const std::string &s) { return env->NewStringU
 
 template <typename C, typename F> static jobjectArray toJni(JNIEnv *env, C &xs, jclass clazz, F &&f) {
   // XXX xs is non-const because it may hold things that we std::move from
-  auto ys = env->NewObjectArray(jsize(xs.size()), clazz, nullptr);
+  auto *ys = env->NewObjectArray(jsize(xs.size()), clazz, nullptr);
   for (jsize i = 0; i < jsize(xs.size()); ++i) {
     jobject local = f(xs[i]);
     env->SetObjectArrayElement(ys, i, local);
@@ -28,14 +28,16 @@ template <typename C, typename F> static jobjectArray toJni(JNIEnv *env, C &xs, 
 }
 
 static std::string fromJni(JNIEnv *env, const jstring &s) {
-  auto data = env->GetStringUTFChars(s, nullptr);
+  const auto *data = env->GetStringUTFChars(s, nullptr);
   std::string out(data);
   env->ReleaseStringUTFChars(s, data);
   return out;
 }
-template <typename T, typename = std::enable_if_t<std::is_convertible_v<T, char>>>
-static std::vector<T> fromJni(JNIEnv *env, jbyteArray xs) {
-  auto xsData = env->GetByteArrayElements(xs, nullptr);
+template <typename T>
+static std::vector<T> fromJni(JNIEnv *env, jbyteArray xs)
+  requires(std::is_convertible_v<T, char>)
+{
+  auto *xsData = env->GetByteArrayElements(xs, nullptr);
   auto bytes = std::vector<T>(xsData, xsData + env->GetArrayLength(xs));
   env->ReleaseByteArrayElements(xs, xsData, JNI_ABORT);
   return bytes;
@@ -48,7 +50,7 @@ static std::vector<jlong> fromJni(JNIEnv *env, jlongArray xs) {
 }
 
 template <typename T = std::nullptr_t> static T throwGeneric(JNIEnv *env, const std::string &exceptionClass, const std::string &message) {
-  if (auto exClass = env->FindClass(exceptionClass.c_str()); exClass) {
+  if (auto *exClass = env->FindClass(exceptionClass.c_str()); exClass) {
     if (env->ThrowNew(exClass, message.c_str()) != JNI_OK) {
       throw std::logic_error("Cannot throw exception of class " + exceptionClass + ", message was: " + message);
     } else {

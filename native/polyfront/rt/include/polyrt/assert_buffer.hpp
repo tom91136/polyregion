@@ -31,19 +31,21 @@ class AssertSink {
 public:
   void reset() {
     flag.store(false, std::memory_order_relaxed);
-    const std::lock_guard guard(mutex);
+    const std::scoped_lock guard(mutex);
     last = {};
   }
   void record(const AssertReason &reason) {
     if (!reason.raised) return;
-    const std::lock_guard guard(mutex);
+    const std::scoped_lock guard(mutex);
     last = reason;
     flag.store(true, std::memory_order_relaxed);
   }
-  void record(const uint32_t code, const char *message) { record({true, code, message ? std::string(message) : std::string(), false}); }
+  void record(const uint32_t code, const char *message) {
+    record({.raised = true, .code = code, .message = message ? std::string(message) : std::string(), .truncated = false});
+  }
   bool raised() const { return flag.load(std::memory_order_relaxed); }
   AssertReason reason() const {
-    const std::lock_guard guard(mutex);
+    const std::scoped_lock guard(mutex);
     return last;
   }
 };
@@ -52,7 +54,8 @@ inline AssertReason decodeAssertBuffer(const uint8_t *buf) {
   const uint32_t code = uint32_t(buf[0]) | (uint32_t(buf[1]) << 8) | (uint32_t(buf[2]) << 16) | (uint32_t(buf[3]) << 24);
   const auto *msg = reinterpret_cast<const char *>(buf + assertCodeBytes);
   const size_t len = ::strnlen(msg, conventions::AssertMessageLimit);
-  return {code != 0 || len != 0, code, std::string(msg, len), len == conventions::AssertMessageLimit};
+  return {
+      .raised = code != 0 || len != 0, .code = code, .message = std::string(msg, len), .truncated = len == conventions::AssertMessageLimit};
 }
 
 inline void logAssertReason(const AssertReason &r, const char *fn, const char *moduleId) {

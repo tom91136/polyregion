@@ -1,6 +1,11 @@
 #include "backend.h"
 
 #include <charconv>
+#include <cstdint>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <system_error>
 
 #include "aspartame/all.hpp"
 #include "fmt/core.h"

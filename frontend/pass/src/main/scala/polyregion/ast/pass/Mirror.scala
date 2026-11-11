@@ -32,11 +32,12 @@ final case class Mirror(id: String = "") extends ProgramPass derives PassArgCode
     val walk    = MirrorWalk(program)
     import walk.*
 
+    val (remote, remoteDecl) =
+      vlet("remote", U64, call(RuntimeAbi.SmaAlloc, List(sel(capture), sel(size), p.Term.IntS32Const(0)), U64))
+
     val (preludeFn, postludeFn) = captureStruct(program) match {
       case None =>
-        val (remote, rDecl) =
-          vlet("remote", U64, call(RuntimeAbi.SmaAlloc, List(sel(capture), sel(size), p.Term.IntS32Const(0)), U64))
-        val m           = hostFn(preludeName(id), U64, List(rDecl, p.Stmt.Return(p.Expr.Alias(sel(remote)))))
+        val m           = hostFn(preludeName(id), U64, List(remoteDecl, p.Stmt.Return(p.Expr.Alias(sel(remote)))))
         val (_, rdDecl) = vlet("#d", p.Type.Unit0, call(RuntimeAbi.SmaReadAlloc, List(sel(capture)), p.Type.Unit0))
         val u = hostFn(postludeName(id), p.Type.Unit0, List(rdDecl, p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))))
         (m, u)
@@ -44,8 +45,6 @@ final case class Mirror(id: String = "") extends ProgramPass derives PassArgCode
       case Some((structTpe, sdef)) =>
         val capturePtr = p.Type.Ptr(structTpe, p.Type.Space.Global)
 
-        val (remote, remoteDecl) =
-          vlet("remote", U64, call(RuntimeAbi.SmaAlloc, List(sel(capture), sel(size), p.Term.IntS32Const(0)), U64))
         val (typed, typedDecl) = typedCapture(capture, capturePtr)
         val mirrorFields =
           mirror(
@@ -85,6 +84,8 @@ enum MirrorTarget {
 
 final class MirrorWalk(program: p.Program) {
 
+  private val defsByName = program.defs.distinctBy(_.name).map(d => d.name -> d).toMap
+
   private def add(a: p.Term, b: p.Term): p.Expr                = p.Expr.IntrOp(p.Intr.Add(a, b, U64))
   private def u64v(name: String, e: p.Expr): (p.Named, p.Stmt) = vlet(name, U64, e)
 
@@ -107,7 +108,7 @@ final class MirrorWalk(program: p.Program) {
     List(fpDecl, fpiDecl, nnDecl, p.Stmt.Cond(sel(nn), fp8Decl :: inner(fp, fp8), Nil))
   }
 
-  def structDefOf(sym: p.Sym): Option[p.StructDef] = program.defs.find(_.name == sym)
+  def structDefOf(sym: p.Sym): Option[p.StructDef] = defsByName.get(sym)
 
   def hasPointers(sym: p.Sym, seen: Set[p.Sym]): Boolean = structHasPointers(program, sym, seen)
   def pointeeBearing(comp: p.Type): Boolean = comp match {
@@ -119,6 +120,7 @@ final class MirrorWalk(program: p.Program) {
     case _                   => 0
   }
 
+  @SuppressWarnings(Array("bonsai:complexity"))
   def mirror(
       target: MirrorTarget,
       hostRoot: p.Named,
@@ -235,6 +237,7 @@ final class MirrorWalk(program: p.Program) {
     }
   }
 
+  @SuppressWarnings(Array("bonsai:complexity"))
   def readback(
       hostRoot: p.Named,
       hostSteps: List[p.PathStep],
@@ -286,17 +289,17 @@ def postludeName(id: String): String = if (id.isEmpty) Mirror.PostludeName else 
 
 // runtime::Type tag, kept in sync with the generated C enum via p.Enums.Type.value
 private def runtimeTag(t: p.Type): Long = (t match {
-  case _: p.Type.Ptr  => Some(p.Enums.Type.Ptr)
-  case p.Type.Bool1   => Some(p.Enums.Type.Bool1)
-  case p.Type.IntU8   => Some(p.Enums.Type.IntU8); case p.Type.IntU16    => Some(p.Enums.Type.IntU16)
-  case p.Type.IntU32  => Some(p.Enums.Type.IntU32); case p.Type.IntU64   => Some(p.Enums.Type.IntU64)
-  case p.Type.IntS8   => Some(p.Enums.Type.IntS8); case p.Type.IntS16    => Some(p.Enums.Type.IntS16)
-  case p.Type.IntS32  => Some(p.Enums.Type.IntS32); case p.Type.IntS64   => Some(p.Enums.Type.IntS64)
-  case p.Type.Float16 => Some(p.Enums.Type.Float16); case p.Type.Float32 => Some(p.Enums.Type.Float32)
-  case p.Type.Float64 => Some(p.Enums.Type.Float64)
-  case _              => None
+  case p.Type.Ptr(_, _) => Some(p.Enums.Type.Ptr)
+  case p.Type.Bool1     => Some(p.Enums.Type.Bool1)
+  case p.Type.IntU8     => Some(p.Enums.Type.IntU8); case p.Type.IntU16    => Some(p.Enums.Type.IntU16)
+  case p.Type.IntU32    => Some(p.Enums.Type.IntU32); case p.Type.IntU64   => Some(p.Enums.Type.IntU64)
+  case p.Type.IntS8     => Some(p.Enums.Type.IntS8); case p.Type.IntS16    => Some(p.Enums.Type.IntS16)
+  case p.Type.IntS32    => Some(p.Enums.Type.IntS32); case p.Type.IntS64   => Some(p.Enums.Type.IntS64)
+  case p.Type.Float16   => Some(p.Enums.Type.Float16); case p.Type.Float32 => Some(p.Enums.Type.Float32)
+  case p.Type.Float64   => Some(p.Enums.Type.Float64)
+  case _                => None
 }).fold(0L)(_.value.toLong)
-def scalarTagOf(t: p.Type): Long = t match { case _: p.Type.Ptr => 0L; case _ => runtimeTag(t) }
+def scalarTagOf(t: p.Type): Long = t match { case p.Type.Ptr(_, _) => 0L; case _ => runtimeTag(t) }
 
 def sizeAlignOf(program: p.Program, t: p.Type): (Int, Int) = t match {
   case p.Type.Struct(n, _) =>
@@ -354,7 +357,7 @@ def structHasPointers(program: p.Program, sym: p.Sym, seen: Set[p.Sym]): Boolean
     .find(_.name == sym)
     .exists(_.members.exists { m =>
       m.tpe match {
-        case _: p.Type.Ptr    => true
+        case p.Type.Ptr(_, _) => true
         case s: p.Type.Struct => structHasPointers(program, s.name, seen + sym)
         case _                => false
       }

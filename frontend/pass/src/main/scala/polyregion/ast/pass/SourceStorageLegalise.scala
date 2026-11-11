@@ -4,6 +4,7 @@ import scala.collection.mutable.ListBuffer
 
 import polyregion.ast.Traversal.*
 import polyregion.ast.{Log, PolyAST as p, *, given}
+import polyregion.ast.pass.TypeOps.pathType
 
 // chooses the source-language storage representation before rendering. erased callable members retain their ABI
 // byte, empty aggregate members are elided, and address-taken scalar values are materialised as private lvalues.
@@ -45,25 +46,10 @@ final case class SourceStorageLegalise(elideRecursivelyEmptyAggregates: Boolean 
       case _                      => false
     }
 
-    def selectedType(root: p.Type, steps: List[p.PathStep]): p.Type = steps.foldLeft(root) {
-      case (current, p.PathStep.Field(field)) =>
-        val structure = current match {
-          case value: p.Type.Struct                => value
-          case p.Type.Ptr(value: p.Type.Struct, _) => value
-          case other => throw IllegalArgumentException(s"field $field selected on non-struct type ${other.repr}")
-        }
-        definitions
-          .get(structure.name)
-          .flatMap(_.members.find(_.symbol == field))
-          .map(_.tpe)
-          .getOrElse(throw IllegalArgumentException(s"field $field not found on ${structure.name.fqcn}"))
-      case (p.Type.Ptr(component, _), p.PathStep.Deref | _: p.PathStep.Index | _: p.PathStep.IndexDyn) => component
-      case (p.Type.Arr(component, _, _), _: p.PathStep.Index | _: p.PathStep.IndexDyn)                 => component
-      case (current, step) => throw IllegalArgumentException(s"cannot apply ${step.repr} to ${current.repr}")
-    }
+    def selectedType(root: p.Type, steps: List[p.PathStep]): p.Type = pathType(definitions, root, steps)
 
     def trailingElidedBase(select: p.Term.Select): Option[(List[p.PathStep], p.Type)] = {
-      val prefixes = select.steps.indices.map(i => select.steps.take(i) -> select.steps(i)).toList
+      val prefixes = select.steps.zipWithIndex.map((step, i) => select.steps.take(i) -> step)
       val flags = prefixes.map {
         case (prefix, p.PathStep.Field(field)) if field.startsWith(p.Conventions.BaseFieldPrefix) =>
           selectedType(select.root.tpe, prefix :+ p.PathStep.Field(field)) match {
@@ -87,7 +73,7 @@ final case class SourceStorageLegalise(elideRecursivelyEmptyAggregates: Boolean 
               case _                            => current   -> space
             }
             selectedType(owner, List(p.PathStep.Field(field))) -> ownerSpace
-          case ((current, space), p.PathStep.Deref | _: p.PathStep.Index | _: p.PathStep.IndexDyn) =>
+          case ((current, space), p.PathStep.Deref | p.PathStep.Index(_) | p.PathStep.IndexDyn(_)) =>
             current match {
               case p.Type.Ptr(component, value)    => component -> value
               case p.Type.Arr(component, _, value) => component -> value
@@ -111,20 +97,7 @@ final case class SourceStorageLegalise(elideRecursivelyEmptyAggregates: Boolean 
       }
 
     def legalise(function: p.Function): p.Function = {
-      val occupied = scala.collection.mutable.Set.from(
-        (function.receiver.toList ::: function.args ::: function.moduleCaptures ::: function.termCaptures)
-          .map(_.named.symbol) :::
-          function.collectAll[p.Stmt].flatMap {
-            case p.Stmt.Var(name, _, _)                 => List(name.symbol)
-            case p.Stmt.ForRange(induction, _, _, _, _) => List(induction.symbol)
-            case _                                      => Nil
-          }
-      )
-      val candidates = Iterator.from(0).map(index => s"#source_storage_$index")
-      def fresh(tpe: p.Type): p.Named = {
-        val symbol = candidates.find(occupied.add).get
-        p.Named(symbol, tpe)
-      }
+      val fresh                                = Binders.freshNamer(function, "#source_storage_")
       def select(name: p.Named): p.Term.Select = p.Term.Select(name, Nil, name.tpe)
 
       def lowerExpr(expression: p.Expr, prefix: ListBuffer[p.Stmt]): p.Expr = expression match {
@@ -143,7 +116,7 @@ final case class SourceStorageLegalise(elideRecursivelyEmptyAggregates: Boolean 
                 region = if (throughPointer(lhs, index.nonEmpty)) region else p.Region.Rooted(lhs.root)
               )
           }
-        case ref @ p.Expr.RefTo(lhs, _, comp, _, _)
+        case ref @ p.Expr.RefTo(lhs = lhs, comp = comp)
             if !lhs.isInstanceOf[p.Term.Select] &&
               !lhs.isInstanceOf[p.Term.StringConst] && !lhs.tpe.isInstanceOf[p.Type.Ptr] && !lhs.tpe
                 .isInstanceOf[p.Type.Arr] =>
@@ -166,24 +139,11 @@ final case class SourceStorageLegalise(elideRecursivelyEmptyAggregates: Boolean 
           val prefix  = ListBuffer.empty[p.Stmt]
           val lowered = lowerExpr(value, prefix)
           prefix.toList :+ returned.copy(value = lowered)
-        case loop @ p.Stmt.While(_, body)             => List(loop.copy(body = lowerBlock(body)))
-        case loop @ p.Stmt.ForRange(_, _, _, _, body) => List(loop.copy(body = lowerBlock(body)))
+        case loop @ p.Stmt.While(_, body)        => List(loop.copy(body = lowerBlock(body)))
+        case loop @ p.Stmt.ForRange(body = body) => List(loop.copy(body = lowerBlock(body)))
         case branch @ p.Stmt.Cond(_, trueBr, falseBr) =>
           List(branch.copy(trueBr = lowerBlock(trueBr), falseBr = lowerBlock(falseBr)))
-        case annotated @ p.Stmt.Annotated(inner, _, _) =>
-          lowerBlock(List(inner)) match {
-            case init :+ last => init :+ annotated.copy(inner = last)
-            case Nil          => Nil
-            case other        => other
-          }
-        case tried @ p.Stmt.Try(body, handlers, fin) =>
-          List(
-            tried.copy(
-              body = lowerBlock(body),
-              handlers = handlers.map(h => h.copy(body = lowerBlock(h.body))),
-              fin = lowerBlock(fin)
-            )
-          )
+        case nested @ (p.Stmt.Annotated(_, _, _) | p.Stmt.Try(_, _, _)) => Binders.lowerNested(lowerBlock)(nested)
         case raised @ p.Stmt.Raise(_, _, cleanup) => List(raised.copy(cleanup = lowerBlock(cleanup)))
         case other                                => List(other)
       }

@@ -1,11 +1,16 @@
 #include "interface_resolution.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <functional>
+#include <future>
 #include <map>
+#include <memory>
 #include <numeric>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "flang/Optimizer/Dialect/FIROps.h"
@@ -246,9 +251,11 @@ void polyregion::polyfc::interface_resolution::resolveInterfaces(clang::Diagnost
       typeSizes.emplace_back(concrete ? concrete->comp : mapped,
                              static_cast<int32_t>(layout.getTypeSize(source ? source.getEleTy() : type)));
     }
-    const auto returnType = erasedResult                    ? polyast::Type::Nothing().widen()
-                            : function.getNumResults() == 0 ? polyast::Type::Unit0().widen()
-                                                            : remapper.handleType(function.getResultTypes().front());
+    const auto returnType = [&] {
+      if (erasedResult) return polyast::Type::Nothing().widen();
+      if (function.getNumResults() == 0) return polyast::Type::Unit0().widen();
+      return remapper.handleType(function.getResultTypes().front());
+    }();
     if (function.getNumResults() != 0)
       typeSizes.emplace_back(returnType, static_cast<int32_t>(layout.getTypeSize(function.getResultTypes().front())));
 
@@ -283,7 +290,7 @@ void polyregion::polyfc::interface_resolution::resolveInterfaces(clang::Diagnost
     return;
   }
 
-  for (auto &item : prepared) {
+  for (const auto &item : prepared) {
     auto function = item.function;
     const auto &argumentTypes = item.argumentTypes;
     const auto erasedResult = item.erasedResult;
@@ -304,7 +311,7 @@ void polyregion::polyfc::interface_resolution::resolveInterfaces(clang::Diagnost
       if (program::importArgumentMode(argumentTypes[index]) == program::ImportArgumentMode::DirectPointer) {
         entryArgs.emplace_back(argument);
       } else {
-        auto slot = fir::AllocaOp::create(builder, function.getLoc(), argument.getType()).getResult();
+        const auto slot = fir::AllocaOp::create(builder, function.getLoc(), argument.getType()).getResult();
         fir::StoreOp::create(builder, function.getLoc(), argument, slot);
         entryArgs.emplace_back(slot);
       }
@@ -340,7 +347,7 @@ Value polyregion::polyfc::interface_resolution::emitPackageCall(OpBuilder &build
   const auto declare = [&](llvm::StringRef name, const std::vector<mlir::Type> &inputs, const std::vector<mlir::Type> &results) {
     auto function = module.lookupSymbol<func::FuncOp>(name);
     if (!function) {
-      OpBuilder::InsertionGuard guard(builder);
+      const OpBuilder::InsertionGuard guard(builder);
       builder.setInsertionPointToStart(module.getBody());
       function = func::FuncOp::create(builder, loc, name, FunctionType::get(module.getContext(), inputs, results));
       function.setPrivate();

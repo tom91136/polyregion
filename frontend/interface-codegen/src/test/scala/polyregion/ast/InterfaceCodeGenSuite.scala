@@ -52,8 +52,8 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
   )
   private val countValue   = count.copy(args = count.args :+ p.Arg(p.Named("value", t)))
   private val interfaceDef = p.Interface(p.Sym("example"), List(transform, count))
-  private val fortran      = InterfaceCodeGen.FortranConfig("example_ffi")
-  private val scala        = InterfaceCodeGen.ScalaConfig("example.bindings", "ExampleInterface")
+  private val fortran      = FortranConfig("example_ffi")
+  private val scala        = ScalaConfig("example.bindings", "ExampleInterface")
 
   test("interface declarations project exact identities into C++, Fortran and Scala") {
     val cpp = InterfaceCodeGen.cppHeader(interfaceDef)

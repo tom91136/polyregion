@@ -1,5 +1,9 @@
 #include "interpose.h"
 
+#include <iterator>
+#include <string>
+#include <utility>
+
 #include "llvm/Demangle/Demangle.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
@@ -84,7 +88,7 @@ bool runSplice(llvm::Module &M, const llvm::StringRef tag, const llvm::StringRef
   }
   std::string recordNewName;
   if (targetPrefix == "polyrt_record_")
-    for (auto &F : M) {
+    for (const auto &F : M) {
       if (!F.getName().contains("polyrt_record_operator_new")) continue;
       const auto demangled = llvm::demangle(F.getName());
       if (!llvm::StringRef(demangled).contains("polyrt_record_operator_new(")) continue;
@@ -104,9 +108,9 @@ bool runSplice(llvm::Module &M, const llvm::StringRef tag, const llvm::StringRef
     if (verbose)
       llvm::errs() << "[" << tag << "] In " << F.getName() << " (demangled=" << llvm::demangle(F.getName()) << ") -> " << replacement
                    << "\n";
-    const auto Replacement = M.getOrInsertFunction(replacement, F.getFunctionType()).getCallee();
+    auto *const Replacement = M.getOrInsertFunction(replacement, F.getFunctionType()).getCallee();
     if (verbose) {
-      for (auto &u : F.uses())
+      for (const auto &u : F.uses())
         llvm::errs() << "[" << tag << "]   Interposed " << u << "\n";
     }
     F.replaceAllUsesWith(Replacement);
@@ -118,13 +122,13 @@ bool runSplice(llvm::Module &M, const llvm::StringRef tag, const llvm::StringRef
 } // namespace
 
 polyreflect::InterposePass::InterposePass(const bool verbose) : verbose(verbose) {}
-llvm::PreservedAnalyses polyreflect::InterposePass::run(llvm::Module &M, llvm::ModuleAnalysisManager &) {
+llvm::PreservedAnalyses polyreflect::InterposePass::run(llvm::Module &M, llvm::ModuleAnalysisManager &) const {
   if (runSplice(M, "InterposePass", "polyrt_usm_", verbose)) return llvm::PreservedAnalyses::none();
   return llvm::PreservedAnalyses::all();
 }
 
 polyreflect::RecordAllocPass::RecordAllocPass(const bool verbose) : verbose(verbose) {}
-llvm::PreservedAnalyses polyreflect::RecordAllocPass::run(llvm::Module &M, llvm::ModuleAnalysisManager &) {
+llvm::PreservedAnalyses polyreflect::RecordAllocPass::run(llvm::Module &M, llvm::ModuleAnalysisManager &) const {
   if (runSplice(M, "RecordAllocPass", "polyrt_record_", verbose)) return llvm::PreservedAnalyses::none();
   return llvm::PreservedAnalyses::all();
 }

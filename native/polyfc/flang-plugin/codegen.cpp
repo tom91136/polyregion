@@ -1,5 +1,12 @@
 #include "codegen.h"
 
+#include <cstddef>
+#include <optional>
+#include <string>
+#include <system_error>
+#include <tuple>
+#include <vector>
+
 #include "flang/Optimizer/Dialect/FIROpsSupport.h"
 
 #include "aspartame/all.hpp"
@@ -22,22 +29,22 @@ polyfront::KernelBundle polyfc::compileRegion( //
     const std::string &moduleId, const Remapper::DoConcurrentRegion &region) {
   using Level = clang::DiagnosticsEngine::Level;
   if (opts.jit) {
-    auto jitObjects = opts.targets                                                                                            //
-                      | filter([&](const auto &target, const auto &) { return runtime::targetPlatformKind(target) == kind; }) //
-                      | collect([&](const auto &target, const auto &arch) -> std::optional<polyfront::KernelObject> {
-                          auto format = runtime::moduleFormatOf(target);
-                          if (!format) return std::nullopt;
-                          const auto pp = polyfront::passes::arenaPassesFor(target, arch, opts.stackDepth);
-                          polyfront::KernelObject ko;
-                          ko.format = *format;
-                          ko.kind = runtime::targetPlatformKind(target);
-                          ko.features = polyfront::passes::jitFeaturesFor(target, arch);
-                          ko.target = target;
-                          ko.arch = arch;
-                          ko.pipelineSpec = pp.size() >= 2 ? pp[1] : std::string{};
-                          return ko;
-                        }) //
-                      | to_vector();
+    const auto jitObjects = opts.targets                                                                                            //
+                            | filter([&](const auto &target, const auto &) { return runtime::targetPlatformKind(target) == kind; }) //
+                            | collect([&](const auto &target, const auto &arch) -> std::optional<polyfront::KernelObject> {
+                                auto format = runtime::moduleFormatOf(target);
+                                if (!format) return std::nullopt;
+                                const auto pp = polyfront::passes::arenaPassesFor(target, arch, opts.stackDepth);
+                                polyfront::KernelObject ko;
+                                ko.format = *format;
+                                ko.kind = runtime::targetPlatformKind(target);
+                                ko.features = polyfront::passes::jitFeaturesFor(target, arch);
+                                ko.target = target;
+                                ko.arch = arch;
+                                ko.pipelineSpec = pp.size() >= 2 ? pp[1] : std::string{};
+                                return ko;
+                              }) //
+                            | to_vector();
     const auto packed = polyast::hashed_program_to_msgpack(region.program);
     const bool jitAsserts = !region.program.template collect_all<polyast::Spec::Assert>().empty();
     return polyfront::recorded(polyfront::KernelBundle{moduleId,
@@ -72,11 +79,11 @@ polyfront::KernelBundle polyfc::compileRegion( //
 
   const auto objects =
       compiled | collect([&](const auto &target, const auto &features, const auto &result) -> std::optional<polyfront::KernelObject> {
-        auto targetName = std::string(magic_enum::enum_name(target));
+        const auto targetName = std::string(magic_enum::enum_name(target));
         emit(diag, Level::Remark, "%0 " POLYREGION_DIAG_POLYDCO "Compilation events for [%1, target=%2, features=%3]\n%4", //
              diagLoc, moduleId, targetName, features, repr(result));
         if (auto bin = result.binary) {
-          auto size = std::to_string(static_cast<float>(bin->size()) / 1000.f);
+          const auto size = std::to_string(static_cast<float>(bin->size()) / 1000.F);
           if (!result.messages.empty())
             emit(diag, Level::Warning,
                  "%0 " POLYREGION_DIAG_POLYDCO "Backend emitted binary (%1KB) with warnings [%2, target=%3, features=%4]\n%5", //

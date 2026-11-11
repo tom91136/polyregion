@@ -75,8 +75,7 @@ class HigherOrderPassAllocationSuite extends munit.FunSuite {
             List(p.Term.IntS32Const(index)),
             p.Type.IntS32
           )
-        ),
-        isMutable = false
+        )
       )
     }
     val input = program(entry(body = calls :+ p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))), helpers)
@@ -115,8 +114,7 @@ class HigherOrderPassAllocationSuite extends munit.FunSuite {
       val statements = List.tabulate(size) { index =>
         p.Stmt.Var(
           named(s"value$index"),
-          Some(p.Expr.Alias(p.Term.IntS32Const(index))),
-          isMutable = false
+          Some(p.Expr.Alias(p.Term.IntS32Const(index)))
         )
       }
       val helper = fn(
@@ -128,7 +126,7 @@ class HigherOrderPassAllocationSuite extends munit.FunSuite {
       program(
         entry(
           body = List(
-            p.Stmt.Var(named("call", p.Type.Unit0), Some(call), isMutable = false),
+            p.Stmt.Var(named("call", p.Type.Unit0), Some(call)),
             p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
           )
         ),
@@ -207,7 +205,7 @@ class HigherOrderPassAllocationSuite extends munit.FunSuite {
       )
       val nested = (0 until depth).foldLeft(List[p.Stmt](p.Stmt.Return(launch))) { (body, index) =>
         List(
-          p.Stmt.Var(named(s"nested$index"), Some(p.Expr.Alias(p.Term.IntS32Const(index))), isMutable = false),
+          p.Stmt.Var(named(s"nested$index"), Some(p.Expr.Alias(p.Term.IntS32Const(index)))),
           p.Stmt.Cond(p.Term.Bool1Const(true), body, Nil)
         )
       }
@@ -215,7 +213,7 @@ class HigherOrderPassAllocationSuite extends munit.FunSuite {
     }
 
     def declarations(program: p.Program): Long =
-      Specialisation(program, NoopLog).entry.get.collectWhere[p.Stmt] { case _: p.Stmt.Var => 1L }.sum
+      Specialisation(program, NoopLog).entry.get.collectWhere[p.Stmt] { case p.Stmt.Var(_, _, _) => 1L }.sum
 
     val small = input(128)
     val large = input(256)

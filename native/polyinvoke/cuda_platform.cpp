@@ -1,5 +1,15 @@
 #include "polyinvoke/cuda_platform.h"
 
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <string>
+#include <utility>
+#include <variant>
+#include <vector>
+
 #include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
@@ -12,7 +22,7 @@ static constexpr auto PREFIX = "CUDA";
 
 #define CHECKED(f__)                                                                                                                       \
   do {                                                                                                                                     \
-    CUresult result__ = (f__);                                                                                                             \
+    const CUresult result__ = (f__);                                                                                                       \
     if (result__ != CUDA_SUCCESS && result__ != CUDA_ERROR_DEINITIALIZED) {                                                                \
       const char *name__ = "(unknown)", *desc__ = "(unknown)";                                                                             \
       cuGetErrorName(result__, &name__);                                                                                                   \
@@ -23,7 +33,7 @@ static constexpr auto PREFIX = "CUDA";
 
 #define CHECKED_EXTRA(f__, fmt__, ...)                                                                                                     \
   do {                                                                                                                                     \
-    CUresult result__ = (f__);                                                                                                             \
+    const CUresult result__ = (f__);                                                                                                       \
     if (result__ != CUDA_SUCCESS && result__ != CUDA_ERROR_DEINITIALIZED) {                                                                \
       const char *name__ = "(unknown)", *desc__ = "(unknown)";                                                                             \
       cuGetErrorName(result__, &name__);                                                                                                   \
@@ -97,9 +107,9 @@ void makeCurrent(CUcontext context) {
 
 CudaDevice::CudaDevice(int ordinal)
     : context(
-          [this]() {
+          [this] {
             POLYINVOKE_TRACE();
-            CUcontext c;
+            CUcontext c = nullptr;
             CHECKED(cuDevicePrimaryCtxRetain(&c, device));
             makeCurrent(c);
             return c;
@@ -113,14 +123,14 @@ CudaDevice::CudaDevice(int ordinal)
           [this](auto &&s) {
             POLYINVOKE_TRACE();
             makeCurrent(*context);
-            CUmodule module;
+            CUmodule module = nullptr;
             CHECKED(cuModuleLoadData(&module, s.data()));
             return module;
           },
           [this](auto &&m, auto &&name, auto) {
             POLYINVOKE_TRACE();
             makeCurrent(*context);
-            CUfunction fn;
+            CUfunction fn = nullptr;
             CHECKED_EXTRA(cuModuleGetFunction(&fn, m, name.c_str()), //
                           "cuModuleGetFunction(module=%p, name=%s)", static_cast<void *>(m), name.c_str());
             return fn;
@@ -290,7 +300,7 @@ CudaDeviceQueue::~CudaDeviceQueue() {
 void CudaDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
   if (!cb) return;
   makeCurrent(context);
-  auto f = [cb, token = latch.acquire()]() {
+  const auto f = [cb, token = latch.acquire()] {
     if (cb) (*cb)();
   };
   // FIXME cuLaunchHostFunc does not retain errors from previous launches, use the deprecated cuStreamAddCallback
@@ -328,8 +338,8 @@ void CudaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const st
   makeCurrent(context);
   if (types.back() != Type::Void)
     POLYINVOKE_FATAL(PREFIX, "Non-void return type not supported: %s", magic_enum::enum_name(types.back()).data());
-  auto fn = store.resolveFunction(moduleName, symbol, types);
-  auto grid = policy.global;
+  auto *fn = store.resolveFunction(moduleName, symbol, types);
+  const auto grid = policy.global;
   auto [block, sharedMem] = policy.local.value_or(std::pair{Dim3{}, 0});
   auto args = detail::argDataAsPointers(types, argData);
   // XXX `Type::Scratch` slot must be 0 (start of dynamic shared); kernel signature keeps the

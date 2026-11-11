@@ -49,7 +49,7 @@ class OffloadEntryInlineSuite extends munit.FunSuite {
 
   test("a recursive callee is lowered before its offload entry is inlined") {
     val i32                                           = p.Type.IntS32
-    def let(name: String, e: p.Expr, t: p.Type = i32) = p.Stmt.Var(named(name, t), Some(e), false)
+    def let(name: String, e: p.Expr, t: p.Type = i32) = p.Stmt.Var(named(name, t), Some(e))
     def sum(n: p.Term): p.Expr                        = p.Expr.Invoke(p.Type.FnRef(sym("sum")), Nil, None, List(n), i32)
     val recursive = fn(
       "sum",

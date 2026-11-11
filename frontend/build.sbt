@@ -67,6 +67,9 @@ lazy val commonSettings = Seq(
   scalacOptions ++= Seq(                         //
     "-release:17",                               //
     "-no-indent",                                //
+    "-Werror",                                   //
+    "-deprecation",                              //
+    "-feature",                                  //
     "-Wconf:cat=unchecked:error",                //
     "-Wconf:name=MatchCaseUnreachable:error",    //
     "-Wconf:name=PatternMatchExhaustivity:error" //

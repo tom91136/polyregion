@@ -1,10 +1,25 @@
 #include "polyinvoke/cl_platform.h"
 
 #include <algorithm>
+#include <array>
+#include <chrono>
 #include <cinttypes>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <functional>
+#include <iterator>
 #include <limits>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <string_view>
 #include <thread>
+#include <utility>
+#include <variant>
+#include <vector>
 
 #include "aspartame/all.hpp"
 #include "fmt/format.h"
@@ -42,14 +57,14 @@ auto cl_details::SVMTracker::owner(uintptr_t ptr) const {
 }
 
 void cl_details::SVMTracker::track(void *ptr, size_t size) {
-  std::lock_guard lock(mutex);
+  const std::scoped_lock lock(mutex);
   const auto base = reinterpret_cast<uintptr_t>(ptr);
   const auto inherited = leakedHostMaps.erase(base) != 0 && !freeReleasesMap;
-  entries.insert_or_assign(base, Entry{size, inherited ? Ownership::InheritedHost : Ownership::Device});
+  entries.insert_or_assign(base, Entry{.size = size, .ownership = inherited ? Ownership::InheritedHost : Ownership::Device});
 }
 
 void cl_details::SVMTracker::untrack(void *ptr) {
-  std::lock_guard lock(mutex);
+  const std::scoped_lock lock(mutex);
   const auto base = reinterpret_cast<uintptr_t>(ptr);
   const auto it = entries.find(base);
   if (it == entries.end()) return;
@@ -58,7 +73,7 @@ void cl_details::SVMTracker::untrack(void *ptr) {
 }
 
 std::optional<cl_int> cl_details::SVMTracker::mapForHost(void *ptr, const Map &map) {
-  std::lock_guard lock(mutex);
+  const std::scoped_lock lock(mutex);
   const auto it = owner(reinterpret_cast<uintptr_t>(ptr));
   if (it == entries.end()) return {};
   if (it->second.ownership == Ownership::Device) {
@@ -70,7 +85,7 @@ std::optional<cl_int> cl_details::SVMTracker::mapForHost(void *ptr, const Map &m
 }
 
 cl_int cl_details::SVMTracker::mapAllForHost(const Map &map) {
-  std::lock_guard lock(mutex);
+  const std::scoped_lock lock(mutex);
   for (auto &[base, entry] : entries) {
     if (entry.ownership != Ownership::Device) continue;
     if (const auto result = map(reinterpret_cast<void *>(base), entry.size); result != CL_SUCCESS) return result;
@@ -80,7 +95,7 @@ cl_int cl_details::SVMTracker::mapAllForHost(const Map &map) {
 }
 
 cl_int cl_details::SVMTracker::unmapAllForDevice(const Unmap &unmap) {
-  std::lock_guard lock(mutex);
+  const std::scoped_lock lock(mutex);
   for (auto &[base, entry] : entries) {
     if (entry.ownership == Ownership::Device) continue;
     if (const auto result = unmap(reinterpret_cast<void *>(base)); result != CL_SUCCESS) {
@@ -93,24 +108,24 @@ cl_int cl_details::SVMTracker::unmapAllForDevice(const Unmap &unmap) {
 }
 
 bool cl_details::SVMTracker::anyDeviceOwned() const {
-  std::lock_guard lock(mutex);
+  const std::scoped_lock lock(mutex);
   return std::any_of(entries.begin(), entries.end(), [](const auto &entry) { return entry.second.ownership == Ownership::Device; });
 }
 
 std::vector<void *> cl_details::SVMTracker::pointers() const {
-  std::lock_guard lock(mutex);
+  const std::scoped_lock lock(mutex);
   return entries | aspartame::keys() | aspartame::map([](uintptr_t base) { return reinterpret_cast<void *>(base); })
          | aspartame::to_vector();
 }
 
 std::optional<cl_details::SVMTracker::Ownership> cl_details::SVMTracker::ownership(void *ptr) const {
-  std::lock_guard lock(mutex);
+  const std::scoped_lock lock(mutex);
   const auto it = owner(reinterpret_cast<uintptr_t>(ptr));
   return it == entries.end() ? std::nullopt : std::optional{it->second.ownership};
 }
 
 bool cl_details::SVMTracker::freeReleasesHostMap() const {
-  std::lock_guard lock(mutex);
+  const std::scoped_lock lock(mutex);
   return freeReleasesMap;
 }
 
@@ -194,7 +209,7 @@ std::string cl_details::errorString(cl_int error) {
 }
 
 cl_details::LaunchDimensions cl_details::launchDimensions(const Dim3 &groups, const Dim3 &local) {
-  return {Dim3{groups.x * local.x, groups.y * local.y, groups.z * local.z}, local};
+  return {.global = Dim3{groups.x * local.x, groups.y * local.y, groups.z * local.z}, .local = local};
 }
 
 std::optional<cl_details::LaunchDimensions> cl_details::retryLaunchDimensions(cl_int error, const Dim3 &groups, const Dim3 &local,
@@ -207,7 +222,7 @@ std::optional<cl_details::LaunchDimensions> cl_details::retryLaunchDimensions(cl
 
 #define CHECKED(f__)                                                                                                                       \
   do {                                                                                                                                     \
-    cl_int result__ = (f__);                                                                                                               \
+    const cl_int result__ = (f__);                                                                                                         \
     if (result__ != CL_SUCCESS) {                                                                                                          \
       const auto message__ = cl_details::errorString(result__);                                                                            \
       POLYINVOKE_FATAL(PREFIX, "%s:%d: %s", __FILE__, __LINE__, message__.c_str());                                                        \
@@ -351,7 +366,7 @@ std::vector<std::unique_ptr<Device>> ClPlatform::enumerate() {
           clGetExtensionFunctionAddressForPlatform(platform, "clCreateProgramWithILKHR"));
     if (!ilFn) ilFn = reinterpret_cast<cl_details::ClCreateProgramWithIL_fn>(clCreateProgramWithIL);
     for (auto &device : devices) {
-      auto svm = resolveSVM(device);
+      const auto svm = resolveSVM(device);
       clDevices.push_back(std::make_unique<ClDevice>(device, ModuleFormat::Source, nullptr, svm, platformName));
       if (ilFn && deviceSupportsIL(device))
         clDevices.push_back(std::make_unique<ClDevice>(device, ModuleFormat::SPIRV_Kernel, ilFn, svm, platformName));
@@ -366,7 +381,7 @@ ClPlatform::~ClPlatform() { POLYINVOKE_TRACE(); }
 static DeviceQuirks resolveQuirks(const std::string &deviceName) {
   const bool llvmpipe = deviceName ^ aspartame::contains_slice("llvmpipe");
   const bool rusticl = deviceName ^ aspartame::contains_slice("rusticl");
-  return DeviceQuirks{/*nativeTrig*/ rusticl || llvmpipe, /*overReadPad*/ llvmpipe ? size_t{4096} : size_t{0}};
+  return DeviceQuirks{.nativeTrig = rusticl || llvmpipe, .overReadPad = llvmpipe ? size_t{4096} : size_t{0}};
 }
 
 // Rusticl's libclc JIT fails to link precise sin/cos/tan range-reduction, while llvmpipe historically crashed there;
@@ -376,8 +391,8 @@ static std::string patchSpirvNativeTrig(const char *data, size_t len) {
   if (len < 5 * sizeof(uint32_t) || len % sizeof(uint32_t) != 0) return out;
   auto *w = reinterpret_cast<uint32_t *>(out.data());
   const size_t n = len / sizeof(uint32_t);
-  auto opcode = [](uint32_t inst) { return static_cast<uint16_t>(inst & 0xFFFF); };
-  auto wcount = [](uint32_t inst) { return static_cast<uint16_t>(inst >> 16); };
+  const auto opcode = [](uint32_t inst) { return static_cast<uint16_t>(inst & 0xFFFF); };
+  const auto wcount = [](uint32_t inst) { return static_cast<uint16_t>(inst >> 16); };
   uint32_t openclSet = 0;
   for (size_t i = 5; i < n;) {
     const uint16_t wc = wcount(w[i]);
@@ -406,7 +421,7 @@ static std::string patchSpirvNativeTrig(const char *data, size_t len) {
 ClDevice::ClDevice(cl_device_id device, ModuleFormat format, cl_details::ClCreateProgramWithIL_fn ilCreateFn,
                    std::optional<cl_bitfield> svm, const std::string &platformName)
     : device(
-          [&, device]() {
+          [&, device] {
             POLYINVOKE_TRACE();
             // XXX clReleaseDevice appears to crash various CL implementation regardless of version, skip retain as well
             //            if (__clewRetainDevice && __clewReleaseDevice) { // clRetainDevice requires OpenCL >= 1.2
@@ -421,7 +436,7 @@ ClDevice::ClDevice(cl_device_id device, ModuleFormat format, cl_details::ClCreat
             //              CHECKED(__clewReleaseDevice(device));
           }),
       context(
-          [this]() {
+          [this] {
             POLYINVOKE_TRACE();
             return OUT_CHECKED(clCreateContext(nullptr, 1, &*this->device, nullptr, nullptr, OUT_ERR));
           },
@@ -443,10 +458,11 @@ ClDevice::ClDevice(cl_device_id device, ModuleFormat format, cl_details::ClCreat
             // an OpenCL C 2.0 module builds at the device's own language version, as compilers otherwise default to 1.2
             const bool openCL2 =
                 this->format == ModuleFormat::Source && image ^ aspartame::contains_slice("POLYREGION_OPENCL_C_VERSION 200");
-            const std::string languageVersion = !openCL2 ? ""
-                                                : queryDeviceInfo(*this->device, CL_DEVICE_VERSION) ^ aspartame::starts_with("OpenCL 2.")
-                                                    ? " -cl-std=CL2.0"
-                                                    : " -cl-std=CL3.0";
+            const std::string languageVersion = [&]() -> std::string {
+              if (!openCL2) return "";
+              if (queryDeviceInfo(*this->device, CL_DEVICE_VERSION) ^ aspartame::starts_with("OpenCL 2.")) return " -cl-std=CL2.0";
+              return " -cl-std=CL3.0";
+            }();
             const std::string compilerArgs =
                 std::string((this->format != ModuleFormat::SPIRV_Kernel && this->quirks.nativeTrig) ? "-DPOLY_NATIVE_TRIG" : "")
                 + languageVersion;
@@ -479,7 +495,7 @@ ClDevice::ClDevice(cl_device_id device, ModuleFormat format, cl_details::ClCreat
                 CHECKED(clGetProgramBuildInfo(program, *this->device, CL_PROGRAM_BUILD_LOG, 0, nullptr, &len));
                 std::string buildLog(len, '\0');
                 CHECKED(clGetProgramBuildInfo(program, *this->device, CL_PROGRAM_BUILD_LOG, len, buildLog.data(), nullptr));
-                auto compilerMessage = cl_details::errorString(result);
+                const auto compilerMessage = cl_details::errorString(result);
                 POLYINVOKE_FATAL(PREFIX, "Program failed to compile with: %s\nDiagnostics:\n%s\n===Program source===:\n%s\n", //
                                  compilerMessage.c_str(), buildLog.c_str(), image.c_str());
               }
@@ -825,7 +841,10 @@ void ClDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, siz
   POLYINVOKE_TRACE();
   cl_event event = {};
   if (!src) POLYINVOKE_FATAL(PREFIX, "Source pointer is NULL, destination=%" PRIuPTR, dst);
-  if (size == 0) return enqueueCallback(cb, {});
+  if (size == 0) {
+    enqueueCallback(cb, {});
+    return;
+  }
   if (svm) {
     unmapAllSvmForDevice();
     auto *dstP = reinterpret_cast<char *>(dst) + dstOffset;
@@ -843,7 +862,10 @@ void ClDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, vo
   cl_event event = {};
   if (!dst) POLYINVOKE_FATAL(PREFIX, "Destination pointer is NULL, source=%" PRIuPTR, src);
   // XXX zero-byte is a no-op; ReadBuffer/SVMMemcpy reject size 0 with CL_INVALID_VALUE (an -O3 reflect can size a result to 0)
-  if (size == 0) return enqueueCallback(cb, {});
+  if (size == 0) {
+    enqueueCallback(cb, {});
+    return;
+  }
   if (svm) {
     auto *srcP = reinterpret_cast<char *>(src) + srcOffset;
     if (mapSvmForHost(srcP)) {
@@ -866,8 +888,8 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
   const bool trace = std::getenv(polyregion::env::PolyinvokeTrace) != nullptr;
   if (types.back() != Type::Void)
     POLYINVOKE_FATAL(PREFIX, "Non-void return type not supported, was %s", magic_enum::enum_name(types.back()).data());
-  auto kernel = store.resolveFunction(moduleName, symbol, types);
-  auto toSize = [](Type t) -> size_t {
+  auto *kernel = store.resolveFunction(moduleName, symbol, types);
+  const auto toSize = [](Type t) -> size_t {
     switch (t) {
       case Type::Ptr: return sizeof(cl_mem);
       case Type::Void: POLYINVOKE_FATAL(PREFIX, "Illegal argument type: %s", magic_enum::enum_name(t).data());
@@ -900,14 +922,14 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
 
   cl_uint physicalIdx = 0;
   for (cl_uint logicalIdx = 0; logicalIdx < logicalArgCount; ++logicalIdx) {
-    const auto rawPtr = args[logicalIdx];
+    const void *const rawPtr = args[logicalIdx];
     switch (const auto tpe = types[logicalIdx]) {
       case Type::Ptr: {
         static_assert(byteOfType(Type::Ptr) == sizeof(uintptr_t));
         uintptr_t ptr = {};
         std::memcpy(&ptr, rawPtr, byteOfType(Type::Ptr));
         if (svm) {
-          void *value = reinterpret_cast<void *>(ptr);
+          const auto *value = reinterpret_cast<void *>(ptr);
           if (!value && ownerOffsetPointerAbi) value = ensureNullArgStub();
           CHECKED(clSetKernelArgSVMPointer(kernel, physicalIdx++, value));
           if (ownerOffsetPointerAbi) {
@@ -936,7 +958,7 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
             if (memBaseAddrAlign != 0 && offset % memBaseAddrAlign != 0)
               POLYINVOKE_FATAL(PREFIX, "Interior pointer %" PRIuPTR " is %zu bytes into its allocation, not aligned to %zu bytes on %s",
                                ptr, offset, memBaseAddrAlign, deviceName.c_str());
-            cl_buffer_region region{offset, remaining};
+            cl_buffer_region region{.origin = offset, .size = remaining};
             mem = OUT_CHECKED(clCreateSubBuffer(mem, 0, CL_BUFFER_CREATE_TYPE_REGION, &region, OUT_ERR));
             subBuffers.push_back(mem);
           }
@@ -977,14 +999,15 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
         if (void *stub = ensureNullArgStub()) allSvmPtrs.push_back(stub);
     }
     allSvmPtrs.insert(allSvmPtrs.end(), tracked.begin(), tracked.end());
-    auto declare = [&](void *const *ptrs, size_t n) {
+    const auto declare = [&](void *const *ptrs, size_t n) {
       return n == 0 ? CL_SUCCESS : clSetKernelExecInfo(kernel, CL_KERNEL_EXEC_INFO_SVM_PTRS_, n * sizeof(void *), ptrs);
     };
     cl_int rc = declare(allSvmPtrs.data(), allSvmPtrs.size());
     if (rc == CL_INVALID_VALUE) {
       size_t rejected = 0;
+      // NOLINTNEXTLINE(misc-const-correctness)
       for (void *ptr : allSvmPtrs) {
-        cl_int rcOne = declare(&ptr, 1);
+        const cl_int rcOne = declare(&ptr, 1);
         if (rcOne == CL_INVALID_VALUE) ++rejected;
         else if (rcOne != CL_SUCCESS) CHECKED(rcOne);
       }
@@ -1007,7 +1030,7 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
                                   dimensions.local.sizes().data(),  //
                                   0, nullptr, cb ? &event : nullptr);
   };
-  auto dimensions = cl_details::launchDimensions(policy.global, local);
+  const auto dimensions = cl_details::launchDimensions(policy.global, local);
   cl_int result = enqueue(dimensions);
   if (result == CL_INVALID_WORK_GROUP_SIZE || result == CL_INVALID_WORK_ITEM_SIZE) {
     cl_device_id device = {};
@@ -1019,7 +1042,7 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
   }
   CHECKED(result);
   pending = true;
-  for (const auto subBuffer : subBuffers)
+  for (auto *const subBuffer : subBuffers)
     CHECKED(clReleaseMemObject(subBuffer));
   enqueueCallback(cb, event);
   CHECKED(clFlush(queue));

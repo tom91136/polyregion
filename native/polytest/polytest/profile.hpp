@@ -69,7 +69,7 @@ inline ProfileEnvironment parseProfileEnvironment(const std::vector<std::string>
                                return (value ^ starts_with(":") ? value ^ drop(1) : value) ^ split_once('=');
                              });
                     });
-  return {std::move(assignments), std::move(forwardedNames), std::move(testVars)};
+  return {.assignments = std::move(assignments), .forwardedNames = std::move(forwardedNames), .testVars = std::move(testVars)};
 }
 
 inline std::vector<std::string> materialiseProfileEnvironment(const std::vector<std::string> &values) {
@@ -122,7 +122,7 @@ inline std::vector<std::string> profileCandidates(const std::string &profileDir)
   };
 
   std::vector<std::string> bases; // the profile name, then the short hostname
-  if (const auto v = std::getenv(polyregion::env::PolyregionTestProfile)) bases ^= append(v);
+  if (auto *const v = std::getenv(polyregion::env::PolyregionTestProfile)) bases ^= append(v);
   if (auto h = hostname()) bases ^= append(*h ^ take_while([](char c) { return c != '.'; }));
   return bases                                                                                                                    //
          ^ flat_map([&](const auto &b) { return std::vector{path(b + "." + std::string(hostOs()) + ".env"), path(b + ".env")}; }) //
@@ -137,7 +137,7 @@ inline std::vector<std::string> loadTestTargets(const std::string &profileDir,
              return t.empty() ? std::nullopt : std::optional{t};
            });
   };
-  if (const auto v = std::getenv(envKey)) return splitTargets(v);
+  if (const char *const v = std::getenv(envKey)) return splitTargets(v);
   const auto readKey = [&](const std::string &file) -> std::optional<std::vector<std::string>> {
     if (!llvm::sys::fs::exists(file)) return {};
     const auto vals = fileLines(file)                               //
@@ -183,14 +183,14 @@ inline void applyProfileEnvironment(const std::string &profileDir) {
 struct ResolvedTarget {
   compiletime::TargetSpec spec;
   std::string arch;
-  std::string canonical() const { return std::string(spec.canonical) + "@" + arch; }
+  [[nodiscard]] std::string canonical() const { return std::string(spec.canonical) + "@" + arch; }
 };
 
 inline std::optional<ResolvedTarget> resolveTestTarget(std::string_view token) {
   const auto pair = token ^ split_once('@');
   const auto backendName = pair ? pair->first : token;
   const auto arch = pair ? pair->second : std::string_view{};
-  if (auto s = compiletime::TargetSpec::findByName(backendName)) return ResolvedTarget{*s, std::string(arch)};
+  if (auto s = compiletime::TargetSpec::findByName(backendName)) return ResolvedTarget{.spec = *s, .arch = std::string(arch)};
   return std::nullopt;
 }
 

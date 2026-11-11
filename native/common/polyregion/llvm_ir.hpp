@@ -22,16 +22,16 @@ template <class T> T *getValueOneLevel(llvm::Constant *V, unsigned idx = 0) {
 // XXX Stolen from
 // https://github.com/AdaptiveCpp/AdaptiveCpp/blob/061e2d6ffe1084021d99f22ac1f16e28c6dab899/include/hipSYCL/compiler/cbs/IRUtils.hpp#L195
 template <class Handler> void findFunctionsWithStringAnnotationsWithArg(llvm::Module &M, Handler &&f) {
-  for (auto &I : M.globals()) {
+  for (const auto &I : M.globals()) {
     if (I.getName() == "llvm.global.annotations") {
       auto *CA = llvm::dyn_cast<llvm::ConstantArray>(I.getOperand(0));
-      for (auto *OI = CA->op_begin(); OI != CA->op_end(); ++OI) {
-        if (auto *CS = llvm::dyn_cast<llvm::ConstantStruct>(OI->get()); CS && CS->getNumOperands() >= 2)
+      for (const llvm::Use *OI = CA->op_begin(); OI != CA->op_end(); ++OI) {
+        if (const auto *CS = llvm::dyn_cast<llvm::ConstantStruct>(OI->get()); CS && CS->getNumOperands() >= 2)
           if (auto *F = getValueOneLevel<llvm::Function>(CS->getOperand(0)))
             if (auto *AnnotationGL = getValueOneLevel<llvm::GlobalVariable>(CS->getOperand(1)))
-              if (auto *Initializer = llvm::dyn_cast<llvm::ConstantDataArray>(AnnotationGL->getInitializer())) {
-                llvm::StringRef Annotation = Initializer->getAsCString();
-                f(F, Annotation, CS->getNumOperands() > 3 ? CS->getOperand(4) : nullptr);
+              if (const auto *Initializer = llvm::dyn_cast<llvm::ConstantDataArray>(AnnotationGL->getInitializer())) {
+                const llvm::StringRef Annotation = Initializer->getAsCString();
+                f(F, Annotation, CS->getNumOperands() > 4 ? CS->getOperand(4) : nullptr);
               }
       }
     }
@@ -48,17 +48,17 @@ template <typename Handler> void findValuesWithStringAnnotations(llvm::Module &M
   for (auto &F : M) {
     for (auto &BB : F) {
       for (auto &I : BB) {
-        const auto CI = dyn_cast<llvm::CallInst>(&I);
+        auto *const CI = dyn_cast<llvm::CallInst>(&I);
         if (!CI) continue;
         const auto id = CI->getIntrinsicID();
         if (id != llvm::Intrinsic::var_annotation && id != llvm::Intrinsic::ptr_annotation) continue;
         // XXX ptr.annotation returns its arg (the annotated SSA pointer); var.annotation yields the alloca.
-        const auto V = id == llvm::Intrinsic::ptr_annotation //
-                           ? static_cast<llvm::Value *>(CI)
-                           : CI->getArgOperand(0)->stripPointerCasts();
-        const auto annoArg = dyn_cast<llvm::Constant>(CI->getArgOperand(1));
+        auto *const V = id == llvm::Intrinsic::ptr_annotation //
+                            ? static_cast<llvm::Value *>(CI)
+                            : CI->getArgOperand(0)->stripPointerCasts();
+        auto *const annoArg = dyn_cast<llvm::Constant>(CI->getArgOperand(1));
         if (!annoArg) continue;
-        const auto annoStrGV = llvm::dyn_cast<llvm::GlobalVariable>(annoArg->stripPointerCasts());
+        auto *const annoStrGV = llvm::dyn_cast<llvm::GlobalVariable>(annoArg->stripPointerCasts());
         if (!annoStrGV || !annoStrGV->hasInitializer()) continue;
         if (const auto *CDA = llvm::dyn_cast<llvm::ConstantDataArray>(annoStrGV->getInitializer())) {
           f(F, V, CDA->getAsString());

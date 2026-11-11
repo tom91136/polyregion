@@ -27,8 +27,7 @@ class TraversalAllocationSuite extends munit.FunSuite {
               Nil,
               resultType
             )
-          ),
-          isMutable = false
+          )
         )
       }
       p.Function(
@@ -52,8 +51,8 @@ class TraversalAllocationSuite extends munit.FunSuite {
     def collect(): Long = functions.foldLeft(0L) { (count, function) =>
       count + function
         .collectWhere[p.Type] {
-          case _: p.Type.FnRef  => 1L
-          case _: p.Type.Struct => 1L
+          case p.Type.FnRef(_)     => 1L
+          case p.Type.Struct(_, _) => 1L
         }
         .sum
     }
@@ -61,9 +60,9 @@ class TraversalAllocationSuite extends munit.FunSuite {
     def visit(): Long = {
       var count = 0L
       functions.foreach(_.visitAll[p.Type] {
-        case _: p.Type.FnRef  => count += 1
-        case _: p.Type.Struct => count += 1
-        case _                => ()
+        case p.Type.FnRef(_)     => count += 1
+        case p.Type.Struct(_, _) => count += 1
+        case _                   => ()
       })
       count
     }

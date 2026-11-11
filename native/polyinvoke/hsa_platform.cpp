@@ -1,7 +1,23 @@
 #include "polyinvoke/hsa_platform.h"
 
+#include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <cinttypes>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
+#include <exception>
+#include <functional>
+#include <limits>
+#include <memory>
+#include <optional>
+#include <string>
+#include <tuple>
+#include <type_traits>
+#include <utility>
+#include <variant>
+#include <vector>
 
 #include "llvm/Object/ELFObjectFile.h"
 #include "llvm/Object/ObjectFile.h"
@@ -22,7 +38,7 @@ static constexpr const char *PREFIX = "HSA";
 
 #define CHECKED(m__, f__)                                                                                                                  \
   do {                                                                                                                                     \
-    hsa_status_t result__ = (f__);                                                                                                         \
+    const hsa_status_t result__ = (f__);                                                                                                   \
     if (result__ != HSA_STATUS_SUCCESS) {                                                                                                  \
       const char *status__ = nullptr;                                                                                                      \
       hsa_status_string(result__, &status__);                                                                                              \
@@ -41,7 +57,7 @@ std::variant<std::string, std::unique_ptr<Platform>> HsaPlatform::create() {
 #endif
   if (!lib) return "HSA: failed to open libhsa-runtime64.so.1, no ROCm runtime present?";
   hsaew_hsa_resolve(dl::lookup, lib);
-  if (auto result = hsa_init(); result != HSA_STATUS_SUCCESS) {
+  if (const auto result = hsa_init(); result != HSA_STATUS_SUCCESS) {
     const char *status = nullptr;
     hsa_status_string(result, &status);
     return "HSA initialisation failed:" + (status ? std::string(status) : "(code=" + std::to_string(result) + ")");
@@ -95,7 +111,7 @@ std::vector<std::unique_ptr<Device>> HsaPlatform::enumerate() {
           hsa_iterate_agents(
               [](hsa_agent_t agent, void *data) {
                 hsa_device_type_t device_type;
-                if (auto result = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &device_type); HSA_STATUS_SUCCESS == result) {
+                if (const auto result = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &device_type); HSA_STATUS_SUCCESS == result) {
                   hsa_agent_feature_t features;
                   CHECKED("Query agent feature", hsa_agent_get_info(agent, HSA_AGENT_INFO_FEATURE, &features));
                   uint32_t queueSize;
@@ -164,7 +180,7 @@ HsaDevice::Regions HsaDevice::queryRegions(hsa_agent_t agent) {
 // ---
 
 template <typename ELFT> static auto extractGeneric(const llvm::object::ELFObjectFile<ELFT> &obj) {
-  using ELFT_Note = typename ELFT::Note;
+  using ELFT_Note = ELFT::Note;
   const auto &file = obj.getELFFile();
   if (auto sections = file.sections(); auto e = sections.takeError())
     POLYINVOKE_FATAL(PREFIX, "Cannot read ELF sections: %s", toString(std::move(e)).c_str());
@@ -172,7 +188,7 @@ template <typename ELFT> static auto extractGeneric(const llvm::object::ELFObjec
     for (const auto s : *sections) {
       if (s.sh_type != llvm::ELF::SHT_NOTE) continue;
       auto Err = llvm::Error::success();
-      for (ELFT_Note note : file.notes(s, Err)) {
+      for (const ELFT_Note note : file.notes(s, Err)) {
         if (note.getName() != "AMDGPU" || note.getType() != llvm::ELF::NT_AMDGPU_METADATA) continue;
         try {
           using namespace nlohmann;
@@ -204,10 +220,10 @@ static polyregion::invoke::hsa::details::SymbolArgOffsetTable extractSymbolArgOf
     POLYINVOKE_FATAL(PREFIX, "Cannot load module: %s", toString(std::move(e)).c_str());
   } else {
     if (const ELFObjectFileBase *elfObj = llvm::dyn_cast<ELFObjectFileBase>(object->get())) {
-      if (const auto obj = llvm::dyn_cast<ELF32LEObjectFile>(elfObj)) return extractGeneric(*obj);
-      if (const auto obj = llvm::dyn_cast<ELF32BEObjectFile>(elfObj)) return extractGeneric(*obj);
-      if (const auto obj = llvm::dyn_cast<ELF64LEObjectFile>(elfObj)) return extractGeneric(*obj);
-      if (const auto obj = llvm::dyn_cast<ELF64BEObjectFile>(elfObj)) return extractGeneric(*obj);
+      if (const auto *const obj = llvm::dyn_cast<ELF32LEObjectFile>(elfObj)) return extractGeneric(*obj);
+      if (const auto *const obj = llvm::dyn_cast<ELF32BEObjectFile>(elfObj)) return extractGeneric(*obj);
+      if (const auto *const obj = llvm::dyn_cast<ELF64LEObjectFile>(elfObj)) return extractGeneric(*obj);
+      if (const auto *const obj = llvm::dyn_cast<ELF64BEObjectFile>(elfObj)) return extractGeneric(*obj);
       POLYINVOKE_FATAL(PREFIX, "Unrecognised ELF variant: %u", elfObj->getType());
     } else POLYINVOKE_FATAL(PREFIX, "Object image TypeID %d is not in the ELF range", object->get()->getType());
   }
@@ -244,7 +260,7 @@ HsaDevice::HsaDevice(uint32_t queueSize, hsa_agent_t hostAgent, hsa_agent_t agen
             hsa_executable_symbol_t symbol;
             // HSA suffixes the entry with .kd, e.g. `theKernel` is `theKernel.kd`
             CHECKED("Resolve symbol", hsa_executable_get_symbol_by_name(exec, (name + ".kd").c_str(), &this->agent, &symbol));
-            if (auto it = offsets.find(name); it != offsets.end()) return std::make_pair(symbol, it->second);
+            if (const auto it = offsets.find(name); it != offsets.end()) return std::make_pair(symbol, it->second);
             else POLYINVOKE_FATAL(PREFIX, "Cannot argument offset table for symbol `%s`", name.c_str());
           },
           [&](const auto &m) {
@@ -256,16 +272,16 @@ HsaDevice::HsaDevice(uint32_t queueSize, hsa_agent_t hostAgent, hsa_agent_t agen
   POLYINVOKE_TRACE();
   // As per HSA_AGENT_INFO_NAME, name must be <= 63 chars
 
-  auto marketingName = detail::allocateAndTruncate(
+  const auto marketingName = detail::allocateAndTruncate(
       [&](const auto &data, const auto &) {
         hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_PRODUCT_NAME), data);
       },
       64);
-  auto gfxArch =
+  const auto gfxArch =
       detail::allocateAndTruncate([&](const auto &data, const auto &) { hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, data); }, 64);
   deviceName = marketingName + "(" + gfxArch + ")";
 
-  auto regions = queryRegions(agent);
+  const auto regions = queryRegions(agent);
   kernelArgRegion = regions.kernelArgRegion;
   deviceGlobalRegion = regions.deviceGlobalRegion;
   POLYINVOKE_TRACE();
@@ -379,7 +395,7 @@ std::vector<Property> HsaDevice::properties() {
 }
 std::vector<std::string> HsaDevice::features() {
   POLYINVOKE_TRACE();
-  auto gfxArch =
+  const auto gfxArch =
       detail::allocateAndTruncate([&](const auto &data, const auto &) { hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, data); }, 64);
   std::vector<std::string> out{"hsa", "amd", gfxArch};
   const auto paging = pagingMode();
@@ -389,8 +405,8 @@ std::vector<std::string> HsaDevice::features() {
   // XXX HSA exposes no direct hasDoubles/hasInt64Atomics query (unlike HIP's hipDeviceProp_t.arch).
   // In practice, gfx >= 7xx supports fp64 and global int64 atomics
   int gfx = 0;
-  for (char c : gfxArch)
-    if (c >= '0' && c <= '9') gfx = gfx * 10 + (c - '0');
+  for (const char c : gfxArch)
+    if (c >= '0' && c <= '9') gfx = (gfx * 10) + (c - '0');
   if (gfx >= 700) {
     out.emplace_back("fp64");
     out.emplace_back("int64");
@@ -491,9 +507,9 @@ HsaDeviceQueue::~HsaDeviceQueue() {
 // `createSignal` and trigger SIGSEGV inside `hsa_signal_wait_scacquire` on later enqueues.
 // `hostUnlockHandle` is the locked-pointer returned by `hsa_amd_memory_lock`, or nullptr
 // for D2D where neither end is host memory.
-static void syncCopy(const char *tag, void *dst, hsa_agent_t dstAgent, void *src, hsa_agent_t srcAgent, size_t size, void *hostUnlockHandle,
-                     const MaybeCallback &cb) {
-  hsa_signal_t signal = createSignal(tag);
+static void syncCopy(const char *tag, void *dst, hsa_agent_t dstAgent, const void *src, hsa_agent_t srcAgent, size_t size,
+                     void *hostUnlockHandle, const MaybeCallback &cb) {
+  const hsa_signal_t signal = createSignal(tag);
   CHECKED(tag, hsa_amd_memory_async_copy(dst, dstAgent, src, srcAgent, size, 0, nullptr, signal));
   hsa_signal_wait_acquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, std::numeric_limits<uint64_t>::max(), HSA_WAIT_STATE_BLOCKED);
   std::atomic_thread_fence(std::memory_order_acquire);
@@ -574,7 +590,7 @@ void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std
     }
     if (types[i] == Type::Void) POLYINVOKE_FATAL(PREFIX, "Illegal argument type: %s", magic_enum::enum_name(types[i]).data());
     // XXX scratch (local) in HSA is a pointer of 4 bytes with the dynamic_shared_pointer kind
-    size_t size = types[i] == Type::Scratch ? 4 : byteOfType(types[i]);
+    const size_t size = types[i] == Type::Scratch ? 4 : byteOfType(types[i]);
     if (types[i] == Type::Scratch) {
       // XXX In AMD ROCclr, the implementation of KernelBlitManager::setArgument writes the local memory size as an
       // argument here, but writing zero appears to have the same effect.
@@ -584,9 +600,9 @@ void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std
     }
   }
   auto [block, sharedMem] = policy.local.value_or(std::pair{Dim3{}, 0});
-  auto grid = Dim3{policy.global.x * block.x, policy.global.y * block.y, policy.global.z * block.z};
-  hsa_signal_t signal = createSignal("Allocate kernel signal");
-  uint64_t index = hsa_queue_load_write_index_relaxed(queue);
+  const auto grid = Dim3{policy.global.x * block.x, policy.global.y * block.y, policy.global.z * block.z};
+  const hsa_signal_t signal = createSignal("Allocate kernel signal");
+  const uint64_t index = hsa_queue_load_write_index_relaxed(queue);
   const uint32_t queueMask = queue->size - 1;
   hsa_kernel_dispatch_packet_t *dispatch = &((static_cast<hsa_kernel_dispatch_packet_t *>(queue->base_address))[index & queueMask]);
 
@@ -623,7 +639,7 @@ void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std
   hsa_queue_store_write_index_relaxed(queue, index + 1);
   hsa_signal_store_relaxed(queue->doorbell_signal, static_cast<hsa_signal_value_t>(index));
   POLYINVOKE_TRACE();
-  enqueueCallback(signal, [cb, kernargAddress, signal, token = latch.acquire()]() {
+  enqueueCallback(signal, [cb, kernargAddress, signal, token = latch.acquire()] {
     std::atomic_thread_fence(std::memory_order_acquire);
     CHECKED("Release kernel arg memory", hsa_memory_free(kernargAddress));
     destroySignal("Release kernel signal", signal);

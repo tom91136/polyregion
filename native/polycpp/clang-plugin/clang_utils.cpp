@@ -1,5 +1,10 @@
 #include "clang_utils.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <string>
+#include <vector>
+
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/ExprCXX.h"
@@ -78,7 +83,7 @@ clang::ImplicitCastExpr *mkArrayToPtrDecay(const clang::ASTContext &C, clang::Qu
 }
 
 clang::InitListExpr *mkInitList(const clang::ASTContext &C, clang::QualType ty, const std::vector<clang::Expr *> &initExprs) {
-  auto init = new (C) clang::InitListExpr(C, {}, initExprs, {});
+  auto *init = new (C) clang::InitListExpr(C, {}, initExprs, {});
   init->setType(ty);
   return init;
 }
@@ -98,7 +103,7 @@ clang::QualType constCharStarTy(const clang::ASTContext &C) { return C.getPointe
 
 clang::VarDecl *mkStaticVarDecl(clang::ASTContext &C, clang::DeclContext *calleeDecl, const std::string &name, clang::QualType ty,
                                 const std::vector<clang::Expr *> &initExprs) {
-  const auto decl = clang::VarDecl::Create(C, calleeDecl, {}, {}, &C.Idents.get(name), ty, nullptr, clang::SC_Static);
+  auto *const decl = clang::VarDecl::Create(C, calleeDecl, {}, {}, &C.Idents.get(name), ty, nullptr, clang::SC_Static);
   decl->setInit(mkInitList(C, ty, initExprs));
   decl->setInitStyle(clang::VarDecl::InitializationStyle::ListInit);
   return decl;
@@ -133,14 +138,14 @@ clang::FunctionDecl *mkExternCppFn(clang::ASTContext &C, const std::string &name
   return mkExternFn(C, C.getTranslationUnitDecl(), name, retTy, paramTys);
 }
 
-clang::CallExpr *mkCall(clang::ASTContext &C, clang::FunctionDecl *fn, const std::vector<clang::Expr *> &args) {
+clang::CallExpr *mkCall(const clang::ASTContext &C, clang::FunctionDecl *fn, const std::vector<clang::Expr *> &args) {
   auto *ref = clang::DeclRefExpr::Create(C, {}, {}, fn, false, clang::SourceLocation{}, fn->getType(), clang::VK_LValue);
   auto *decay = clang::ImplicitCastExpr::Create(C, C.getPointerType(fn->getType()), clang::CK_FunctionToPointerDecay, ref, nullptr,
                                                 clang::VK_PRValue, {});
   return clang::CallExpr::Create(C, decay, args, fn->getReturnType(), clang::VK_PRValue, {}, {});
 }
 
-clang::Expr *mkLoad(clang::ASTContext &C, clang::VarDecl *var) {
+clang::Expr *mkLoad(const clang::ASTContext &C, clang::VarDecl *var) {
   auto *ref = mkDeclRef(C, var);
   if (var->getType()->getAsCXXRecordDecl()) return ref;
   return clang::ImplicitCastExpr::Create(C, var->getType(), clang::CK_LValueToRValue, ref, nullptr, clang::VK_PRValue, {});

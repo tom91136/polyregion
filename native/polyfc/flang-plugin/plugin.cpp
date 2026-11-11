@@ -8,9 +8,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <string>
+#include <utility>
 #include <vector>
 
-#if defined(__APPLE__)
+#ifdef __APPLE__
   #include <crt_externs.h>
 #elif defined(_WIN32)
 // XXX Forward-declare the Win32 command-line APIs; including <windows.h> clashes with flang's
@@ -81,7 +83,7 @@ class MutableCodeGenAction final : public Fortran::frontend::CodeGenAction {
 public:
   explicit MutableCodeGenAction(const Fortran::frontend::BackendActionTy ty) : CodeGenAction(ty) {}
   void setAction(const Fortran::frontend::BackendActionTy ty) { action = ty; }
-  mlir::ModuleOp getMLIRModule() const {
+  [[nodiscard]] mlir::ModuleOp getMLIRModule() const {
 #if LLVM_VERSION_MAJOR >= 20
     return mlirModule.get();
 #else
@@ -155,7 +157,7 @@ public:
   }
 };
 
-template <typename A> static bool executeAction(Fortran::frontend::FrontendAction &parent) {
+template <typename A> bool executeAction(Fortran::frontend::FrontendAction &parent) {
   A action;
   return parent.getInstance().executeAction(action);
 }
@@ -172,7 +174,7 @@ class RewriteIRAction final : public Fortran::frontend::PluginParseTreeAction {
     unsigned int missingArgCount{};
     const auto args =
         clang::getDriverOptTable().ParseArgs(cmdArgRef, missingArgIndex, missingArgCount, llvm::opt::Visibility(clang::options::FC1Option));
-    if (const auto arg = args.getLastArg(clang::options::OPT_Action_Group)) {
+    if (auto *const arg = args.getLastArg(clang::options::OPT_Action_Group)) {
       llvm::outs() << "[PolyFC] action=" << arg->getOption().getName() << "\n";
       const bool success = [&] {
         using namespace Fortran::frontend;

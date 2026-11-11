@@ -1,7 +1,12 @@
 #include "driver_package.h"
 
+#include <algorithm>
+#include <cstdint>
 #include <cstdlib>
+#include <exception>
 #include <fstream>
+#include <ios>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -88,9 +93,9 @@ polyfront::package::Checked<polyfront::package::ValidatedArchiveFragment> valida
   for (size_t index = 0; index < fragment.value->implementations.size(); ++index)
     fragments.emplace_back(std::to_string(index), std::move(fragment.value->implementations[index]));
   auto linked = compiler::package::link(polyast::PackageLinkRequest(fragment.value->archive.interface, std::move(fragments), {}, true));
-  if (!linked) return {{}, std::move(linked.errors)};
+  if (!linked) return {.value = {}, .errors = std::move(linked.errors)};
   if (linked.value->interface != fragment.value->archive.interface)
-    return {{}, {"package fragment interface advertises declarations without compatible implementations"}};
+    return {.value = {}, .errors = {"package fragment interface advertises declarations without compatible implementations"}};
   return fragment;
 }
 
@@ -99,24 +104,25 @@ polyfront::package::Checked<polyast::ProgramLinkRequest> hydrateRequest(polyast:
   std::vector<polyfront::package::Archive> archives;
   for (const auto &path : archivePaths) {
     auto loaded = polyfront::package::loadPackageFile(path);
-    if (!loaded) return {{}, std::move(loaded.errors)};
+    if (!loaded) return {.value = {}, .errors = std::move(loaded.errors)};
     archives.emplace_back(std::move(*loaded.value));
   }
   const auto selections = compiler::package::select(request);
-  if (!selections) return {{}, std::move(selections.errors)};
+  if (!selections) return {.value = {}, .errors = std::move(selections.errors)};
   for (auto &package : request.packages) {
     const auto archive =
         std::find_if(archives.begin(), archives.end(), [&](const auto &candidate) { return candidate.interface == package.interface; });
-    if (archive == archives.end()) return {{}, {"no package archive was provided for `" + polyast::fqcn(package.interface.name) + "`"}};
+    if (archive == archives.end())
+      return {.value = {}, .errors = {"no package archive was provided for `" + polyast::fqcn(package.interface.name) + "`"}};
     const auto implementations = *selections.value | filter([&](const auto &selection) {
       return package.interface.declarations ^ exists([&](const auto &declaration) { return declaration.name == selection.declaration; });
     }) | map([](const auto &selection) { return selection.implementation; })
                                  | to<std::unordered_set>();
     auto hydrated = polyfront::package::hydratePackage(*archive, package, implementations);
-    if (!hydrated) return {{}, std::move(hydrated.errors)};
+    if (!hydrated) return {.value = {}, .errors = std::move(hydrated.errors)};
     package = std::move(*hydrated.value);
   }
-  return {{std::move(request)}, {}};
+  return {.value = std::move(request), .errors = {}};
 }
 
 int packageLink(fire::optional<std::string> capabilities = fire::arg({"--capabilities", "Comma-separated implementation capabilities"}),
@@ -282,24 +288,28 @@ int packageCompile(std::string requestPath = fire::arg({0, "<request.msgpack>", 
 }
 
 int runPackageLink(int argc, const char *argv[]) {
+  // NOLINTNEXTLINE(misc-const-correctness)
   PREPARE_FIRE_(argc, argv, false, packageLink, "Link PolyAST program fragments into an indexed package archive.");
   fire::_::logger.set_program_descr("Link PolyAST program fragments into an indexed package archive.");
   return packageLink();
 }
 
 int runPackageLinkFragment(int argc, const char *argv[]) {
+  // NOLINTNEXTLINE(misc-const-correctness)
   PREPARE_FIRE_(argc, argv, false, packageLinkFragment, "Link one PolyAST program fragment into an indexed archive.");
   fire::_::logger.set_program_descr("Link one PolyAST program fragment into an indexed archive.");
   return packageLinkFragment();
 }
 
 int runPackagePack(int argc, const char *argv[]) {
+  // NOLINTNEXTLINE(misc-const-correctness)
   PREPARE_FIRE_(argc, argv, false, packagePack, "Combine validated package fragment archives without recompressing them.");
   fire::_::logger.set_program_descr("Combine validated package fragment archives without recompressing them.");
   return packagePack();
 }
 
 int runPackageCompile(int argc, const char *argv[]) {
+  // NOLINTNEXTLINE(misc-const-correctness)
   PREPARE_FIRE_(argc, argv, false, packageCompile, "Compile a package import request for its host and device profiles.");
   fire::_::logger.set_program_descr("Compile a package import request for its host and device profiles.");
   return packageCompile();
@@ -315,7 +325,7 @@ std::optional<int> polyregion::packageDriver(int argc, const char *argv[]) {
   }
 
   const std::string_view command(argv[2]);
-  std::string executable = std::string(argv[0]) + " package " + std::string(command);
+  const std::string executable = std::string(argv[0]) + " package " + std::string(command);
   std::vector<const char *> commandArgs{executable.c_str()};
   commandArgs.insert(commandArgs.end(), argv + 3, argv + argc);
   const auto commandArgc = static_cast<int>(commandArgs.size());

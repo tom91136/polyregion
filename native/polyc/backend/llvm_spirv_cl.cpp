@@ -1,8 +1,12 @@
 #include "llvm_spirv_cl.h"
 
+#include <cstdint>
 #include <cstring>
+#include <stdexcept>
+#include <string>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
 
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/IntrinsicsSPIRV.h"
@@ -41,14 +45,14 @@ void SPIRVOpenCLTargetSpecificHandler::witnessFn(CodeGen &cg, llvm::Function &fn
   llvm::SmallVector<llvm::Metadata *, 8> argTypeQuals;     // MDNode for the kernel argument type qualifiers.
   llvm::SmallVector<llvm::Metadata *, 8> argNames;         // MDNode for the kernel argument names.
 
-  for (auto arg : source.decl.args) {
-    const auto ty = cg.resolveType(arg.named.tpe, true, /*kernelEntryArg*/ true);
+  for (const auto &arg : source.decl.args) {
+    const llvm::Type *const ty = cg.resolveType(arg.named.tpe, true, /*kernelEntryArg*/ true);
     addressQuals.push_back(llvm::ConstantAsMetadata::get( //
         cg.B.getInt32(ty->isPointerTy() ? ty->getPointerAddressSpace() : 0)));
     accessQuals.push_back(llvm::MDString::get(cg.C.actual, "none")); // write_only | read_only | read_write | none
 
-    auto typeName = [](const Type::Any &tpe) -> std::string {
-      auto impl = [](const Type::Any &x, const auto &thunk) -> std::string {
+    const auto typeName = [](const Type::Any &tpe) -> std::string {
+      const auto impl = [](const Type::Any &x, const auto &thunk) -> std::string {
         return x.match_total(                                                                                               //
             [&](const Type::Float16 &) -> std::string { return "half"; },                                                   //
             [&](const Type::Float32 &) -> std::string { return "float"; },                                                  //
@@ -103,21 +107,21 @@ inline llvm::Type *i32(llvm::LLVMContext &c) { return llvm::Type::getInt32Ty(c);
 inline llvm::Type *i64(llvm::LLVMContext &c) { return llvm::Type::getInt64Ty(c); }
 inline llvm::Type *vd(llvm::LLVMContext &c) { return llvm::Type::getVoidTy(c); }
 
-const OclBuiltin GET_GLOBAL_ID{"_Z13get_global_idj", i64, {i32}};
-const OclBuiltin GET_GLOBAL_SIZE{"_Z15get_global_sizej", i64, {i32}};
-const OclBuiltin GET_GROUP_ID{"_Z12get_group_idj", i64, {i32}};
-const OclBuiltin GET_NUM_GROUPS{"_Z14get_num_groupsj", i64, {i32}};
-const OclBuiltin GET_LOCAL_ID{"_Z12get_local_idj", i64, {i32}};
-const OclBuiltin GET_LOCAL_SIZE{"_Z14get_local_sizej", i64, {i32}};
-const OclBuiltin GET_SUB_GROUP_SIZE{"_Z18get_sub_group_sizev", i32, {}};
-const OclBuiltin GET_MAX_SUB_GROUP_SIZE{"_Z22get_max_sub_group_sizev", i32, {}};
-const OclBuiltin GET_SUB_GROUP_LOCAL_ID{"_Z22get_sub_group_local_idv", i32, {}};
+const OclBuiltin GET_GLOBAL_ID{.mangled = "_Z13get_global_idj", .ret = i64, .args = {i32}};
+const OclBuiltin GET_GLOBAL_SIZE{.mangled = "_Z15get_global_sizej", .ret = i64, .args = {i32}};
+const OclBuiltin GET_GROUP_ID{.mangled = "_Z12get_group_idj", .ret = i64, .args = {i32}};
+const OclBuiltin GET_NUM_GROUPS{.mangled = "_Z14get_num_groupsj", .ret = i64, .args = {i32}};
+const OclBuiltin GET_LOCAL_ID{.mangled = "_Z12get_local_idj", .ret = i64, .args = {i32}};
+const OclBuiltin GET_LOCAL_SIZE{.mangled = "_Z14get_local_sizej", .ret = i64, .args = {i32}};
+const OclBuiltin GET_SUB_GROUP_SIZE{.mangled = "_Z18get_sub_group_sizev", .ret = i32, .args = {}};
+const OclBuiltin GET_MAX_SUB_GROUP_SIZE{.mangled = "_Z22get_max_sub_group_sizev", .ret = i32, .args = {}};
+const OclBuiltin GET_SUB_GROUP_LOCAL_ID{.mangled = "_Z22get_sub_group_local_idv", .ret = i32, .args = {}};
 // XXX Use the `__spirv_*` form: OpenCL `barrier(flags)` routes through SPIRVBuiltins.cpp::
 // buildBarrierInst which ORs SequentiallyConsistent into the semantics; OpenCL drivers reject
 // that and silently drop the barrier. The __spirv_* path bypasses that and emits the op with
 // our chosen semantics.
-const OclBuiltin CONTROL_BARRIER{"_Z22__spirv_ControlBarrierjjj", vd, {i32, i32, i32}};
-const OclBuiltin MEMORY_BARRIER{"_Z21__spirv_MemoryBarrierjj", vd, {i32, i32}};
+const OclBuiltin CONTROL_BARRIER{.mangled = "_Z22__spirv_ControlBarrierjjj", .ret = vd, .args = {i32, i32, i32}};
+const OclBuiltin MEMORY_BARRIER{.mangled = "_Z21__spirv_MemoryBarrierjj", .ret = vd, .args = {i32, i32}};
 
 // Mirrors SPIRV::MemorySemantics / SPIRV::Scope; the upstream header is private to LLVM,
 // but the constants are part of the SPIR-V ABI.
@@ -166,13 +170,13 @@ static ValPtr callOcl(CodeGen &cg, const OclBuiltin &b, const AnyType &requested
   fn->addFnAttr(llvm::Attribute::Convergent);
   fn->addFnAttr(llvm::Attribute::NoUnwind);
 
-  auto coerced = args | zip_with_index<size_t>() | map([&](const auto &src, const auto &i) -> llvm::Value * {
-                   auto *dst = paramTys[i];
-                   if (src->getType() == dst) return src;
-                   if (src->getType()->isIntegerTy() && dst->isIntegerTy()) return cg.B.CreateIntCast(src, dst, /*isSigned*/ false);
-                   throw polyregion::backend::BackendException(std::string("cannot coerce arg to OCL builtin ") + b.mangled);
-                 }) //
-                 | to_vector();
+  const auto coerced = args | zip_with_index<size_t>() | map([&](const auto &src, const auto &i) -> llvm::Value * {
+                         auto *dst = paramTys[i];
+                         if (src->getType() == dst) return src;
+                         if (src->getType()->isIntegerTy() && dst->isIntegerTy()) return cg.B.CreateIntCast(src, dst, /*isSigned*/ false);
+                         throw polyregion::backend::BackendException(std::string("cannot coerce arg to OCL builtin ") + b.mangled);
+                       }) //
+                       | to_vector();
   auto *call = cg.B.CreateCall(fn, coerced);
   call->setCallingConv(llvm::CallingConv::SPIR_FUNC);
 
@@ -188,7 +192,7 @@ static ValPtr callOcl(CodeGen &cg, const OclBuiltin &b, const AnyType &requested
 static llvm::CallInst *callSpirFunc(CodeGen &cg, const std::string &mangled, llvm::Type *rtn, llvm::ArrayRef<ValPtr> args) {
   std::vector<llvm::Type *> argTys;
   argTys.reserve(args.size());
-  for (auto *a : args)
+  for (const llvm::Value *a : args)
     argTys.push_back(a->getType());
   auto callee = cg.M.getOrInsertFunction(mangled, llvm::FunctionType::get(rtn, argTys, false));
   auto *fn = llvm::cast<llvm::Function>(callee.getCallee());
@@ -208,18 +212,26 @@ static ValPtr emitGroupPredicate(CodeGen &cg, const std::string &name, const Ter
 static ValPtr emitGroupCollective(CodeGen &cg, const compiletime::GroupKind kind, const AtomicOp::Any &op, const Term::Any &value) {
   requireGroupNative(compiletime::Target::Object_LLVM_SPIRV64_Kernel, cg.C.options.arch, kind, op, value.tpe());
   const bool predicate = value.tpe().is<Type::Bool1>();
-  const std::string base = kind == compiletime::GroupKind::Reduce      ? "work_group_reduce"
-                           : kind == compiletime::GroupKind::Inclusive ? "work_group_scan_inclusive"
-                                                                       : "work_group_scan_exclusive";
+  const std::string base = [&] {
+    if (kind == compiletime::GroupKind::Reduce) return "work_group_reduce";
+    if (kind == compiletime::GroupKind::Inclusive) return "work_group_scan_inclusive";
+    return "work_group_scan_exclusive";
+  }();
   if (predicate) return emitGroupPredicate(cg, op.is<AtomicOp::Or>() ? "work_group_any" : "work_group_all", value);
-  const std::string suffix = op.is<AtomicOp::Add>() ? "add" : op.is<AtomicOp::Min>() ? "min" : "max";
+  const std::string suffix = [&] {
+    if (op.is<AtomicOp::Add>()) return "add";
+    if (op.is<AtomicOp::Min>()) return "min";
+    return "max";
+  }();
   const auto valueType = value.tpe();
-  const std::string mangle = valueType.is<Type::Float32>()   ? "f"
-                             : valueType.is<Type::Float64>() ? "d"
-                             : valueType.is<Type::IntS32>()  ? "i"
-                             : valueType.is<Type::IntU32>()  ? "j"
-                             : valueType.is<Type::IntS64>()  ? "l"
-                                                             : "m";
+  const std::string mangle = [&] {
+    if (valueType.is<Type::Float32>()) return "f";
+    if (valueType.is<Type::Float64>()) return "d";
+    if (valueType.is<Type::IntS32>()) return "i";
+    if (valueType.is<Type::IntU32>()) return "j";
+    if (valueType.is<Type::IntS64>()) return "l";
+    return "m";
+  }();
   auto *valueV = cg.mkTermVal(value);
   return callSpirFunc(cg, mangleOcl(base + "_" + suffix, mangle), valueV->getType(), {valueV});
 }
@@ -247,22 +259,22 @@ static ValPtr emitSubgroupPredicate(CodeGen &cg, const std::string &name, const 
 
 // OpenCL Itanium mangle suffix for a scalar shuffle element from the polyast type; nullptr if not a scalar
 static const char *scalarShuffleMangle(const Type::Any &rtn) {
-  return rtn.is<Type::Float32>()   ? "f"
-         : rtn.is<Type::Float64>() ? "d"
-         : rtn.is<Type::Float16>() ? "Dh"
-         : rtn.is<Type::IntS8>()   ? "c"
-         : rtn.is<Type::IntU8>()   ? "h"
-         : rtn.is<Type::IntS16>()  ? "s"
-         : rtn.is<Type::IntU16>()  ? "t"
-         : rtn.is<Type::IntS32>()  ? "i"
-         : rtn.is<Type::IntU32>()  ? "j"
-         : rtn.is<Type::IntS64>()  ? "l"
-         : rtn.is<Type::IntU64>()  ? "m"
-                                   : nullptr;
+  if (rtn.is<Type::Float32>()) return "f";
+  if (rtn.is<Type::Float64>()) return "d";
+  if (rtn.is<Type::Float16>()) return "Dh";
+  if (rtn.is<Type::IntS8>()) return "c";
+  if (rtn.is<Type::IntU8>()) return "h";
+  if (rtn.is<Type::IntS16>()) return "s";
+  if (rtn.is<Type::IntU16>()) return "t";
+  if (rtn.is<Type::IntS32>()) return "i";
+  if (rtn.is<Type::IntU32>()) return "j";
+  if (rtn.is<Type::IntS64>()) return "l";
+  if (rtn.is<Type::IntU64>()) return "m";
+  return nullptr;
 }
 
 // width-derived mangle for an LLVM scalar leaf; shuffle is a bit-exact lane permutation so signedness is irrelevant
-static std::string leafShuffleMangle(llvm::Type *ty) {
+static std::string leafShuffleMangle(const llvm::Type *ty) {
   if (ty->isFloatTy()) return "f";
   if (ty->isDoubleTy()) return "d";
   if (ty->isHalfTy()) return "Dh";
@@ -302,7 +314,7 @@ static void emitShuffleAggPtr(CodeGen &cg, const std::string &base, llvm::Type *
     const unsigned n = ty->isStructTy() ? ty->getStructNumElements() : static_cast<unsigned>(ty->getArrayNumElements());
     for (unsigned i = 0; i < n; ++i) {
       auto *elemTy = ty->isStructTy() ? ty->getStructElementType(i) : ty->getArrayElementType();
-      llvm::Value *idx[] = {llvm::ConstantInt::get(i32, 0), llvm::ConstantInt::get(i32, i)};
+      llvm::Value *const idx[] = {llvm::ConstantInt::get(i32, 0), llvm::ConstantInt::get(i32, i)};
       emitShuffleAggPtr(cg, base, elemTy, cg.B.CreateInBoundsGEP(ty, srcPtr, idx), cg.B.CreateInBoundsGEP(ty, dstPtr, idx), idxV);
     }
   } else {
@@ -366,7 +378,7 @@ static ValPtr emitClampedSubgroupShuffle(CodeGen &cg, const char kind, const Ter
   auto *maskV = cg.B.CreateIntCast(cg.mkTermVal(mask), i32, false);
   // Match NVPTX's maskless convention: -1 means all currently active subgroup lanes; other values are
   // 32-bit masks relative to each aligned 32-lane segment on a wider subgroup.
-  auto *isAll = cg.B.CreateICmpEQ(maskV, llvm::ConstantInt::get(i32, 0xFFFFFFFFu));
+  auto *isAll = cg.B.CreateICmpEQ(maskV, llvm::ConstantInt::get(i32, 0xFFFFFFFFU));
   const auto member = [&](ValPtr laneV) {
     auto *bit = cg.B.CreateAnd(laneV, llvm::ConstantInt::get(i32, 31));
     auto *set =
@@ -399,7 +411,7 @@ static void emitVulkanSubgroupShufflePtr(CodeGen &cg, llvm::Type *ty, ValPtr src
     const unsigned n = ty->isStructTy() ? ty->getStructNumElements() : static_cast<unsigned>(ty->getArrayNumElements());
     for (unsigned i = 0; i < n; ++i) {
       auto *elemTy = ty->isStructTy() ? ty->getStructElementType(i) : ty->getArrayElementType();
-      llvm::Value *idx[] = {llvm::ConstantInt::get(i32, 0), llvm::ConstantInt::get(i32, i)};
+      llvm::Value *const idx[] = {llvm::ConstantInt::get(i32, 0), llvm::ConstantInt::get(i32, i)};
       emitVulkanSubgroupShufflePtr(cg, elemTy, cg.B.CreateInBoundsGEP(ty, srcPtr, idx), cg.B.CreateInBoundsGEP(ty, dstPtr, idx), srcLane);
     }
   } else {
@@ -413,14 +425,14 @@ ValPtr SPIRVOpenCLTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
   auto &ctx = cg.C.actual;
   auto u32 = [&](uint32_t k) { return llvm::ConstantInt::get(i32(ctx), k); };
   auto barrier = [&](const AnyType &tpe, uint32_t memSem) -> ValPtr {
-    const auto scope = u32(SpvScope::Workgroup);
+    auto *const scope = u32(SpvScope::Workgroup);
     return callOcl(cg, CONTROL_BARRIER, tpe, {scope, scope, u32(memSem | SpvMemSem::AcquireRelease)});
   };
   auto fence = [&](const AnyType &tpe, uint32_t memSem) -> ValPtr {
     return callOcl(cg, MEMORY_BARRIER, tpe, {u32(SpvScope::Workgroup), u32(memSem | SpvMemSem::AcquireRelease)});
   };
   auto subgroupBarrier = [&]() -> ValPtr {
-    const auto scope = u32(SpvScope::Subgroup);
+    auto *const scope = u32(SpvScope::Subgroup);
     return callOcl(cg, CONTROL_BARRIER, Type::Unit0(), {scope, scope, u32(SpvMemSem::WorkgroupMemory | SpvMemSem::AcquireRelease)});
   };
 
@@ -500,7 +512,7 @@ void SPIRVVulkanTargetSpecificHandler::witnessFn(CodeGen &cg, llvm::Function &fn
 }
 
 ValPtr SPIRVVulkanTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr) {
-  auto &ctx = cg.C.actual;
+  const auto &ctx = cg.C.actual;
   auto &B = cg.B;
   auto *i32t = cg.C.i32Ty();
   auto dimI32 = [&](const AnyTerm &dim) { return B.CreateIntCast(cg.mkTermVal(dim), i32t, /*isSigned*/ false); };
@@ -525,7 +537,7 @@ ValPtr SPIRVVulkanTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
   auto subgroupSize = [&]() -> ValPtr { return B.CreateIntrinsic(i32t, llvm::Intrinsic::spv_subgroup_size, {}); };
   auto maskMember = [&](const AnyTerm &mask, ValPtr lane) -> ValPtr {
     auto *maskV = B.CreateIntCast(cg.mkTermVal(mask), i32t, false);
-    auto *isAll = B.CreateICmpEQ(maskV, llvm::ConstantInt::get(i32t, 0xFFFFFFFFu));
+    auto *isAll = B.CreateICmpEQ(maskV, llvm::ConstantInt::get(i32t, 0xFFFFFFFFU));
     auto *bit = B.CreateAnd(lane, llvm::ConstantInt::get(i32t, 31));
     auto *set = B.CreateICmpNE(B.CreateAnd(B.CreateLShr(maskV, bit), llvm::ConstantInt::get(i32t, 1)), llvm::ConstantInt::get(i32t, 0));
     return B.CreateOr(isAll, set);
@@ -575,7 +587,7 @@ ValPtr SPIRVVulkanTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
     return B.CreateExtractElement(bits, word);
   };
   auto segmentMask = [&]() -> ValPtr {
-    auto *base = B.CreateAnd(laneIdx(), llvm::ConstantInt::get(i32t, ~31u));
+    auto *base = B.CreateAnd(laneIdx(), llvm::ConstantInt::get(i32t, ~31U));
     auto *remaining = B.CreateSub(subgroupSize(), base);
     auto *count = B.CreateSelect(B.CreateICmpULT(remaining, llvm::ConstantInt::get(i32t, 32)), remaining, llvm::ConstantInt::get(i32t, 32));
     auto *wideOne = llvm::ConstantInt::get(B.getInt64Ty(), 1);
@@ -585,7 +597,7 @@ ValPtr SPIRVVulkanTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
   auto vote = [&](const AnyTerm &mask, const AnyTerm &predicate, bool all) -> ValPtr {
     auto *valid = segmentMask();
     auto *requested = B.CreateIntCast(cg.mkTermVal(mask), i32t, false);
-    auto *isAll = B.CreateICmpEQ(requested, llvm::ConstantInt::get(i32t, 0xFFFFFFFFu));
+    auto *isAll = B.CreateICmpEQ(requested, llvm::ConstantInt::get(i32t, 0xFFFFFFFFU));
     auto *effective = B.CreateAnd(B.CreateSelect(isAll, valid, requested), valid);
     auto *selected = B.CreateAnd(ballotWord(cg.mkTermVal(predicate)), effective);
     return all ? B.CreateICmpEQ(selected, effective) : B.CreateICmpNE(selected, llvm::ConstantInt::get(i32t, 0));

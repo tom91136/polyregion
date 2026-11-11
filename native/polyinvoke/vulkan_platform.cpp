@@ -1,10 +1,25 @@
 #include "polyinvoke/vulkan_platform.h"
 
 #include <algorithm>
+#include <array>
+#include <chrono>
 #include <cinttypes>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <exception>
+#include <functional>
 #include <limits>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <string_view>
 #include <utility>
+#include <variant>
+#include <vector>
 
 #include "aspartame/all.hpp"
 #include "fmt/format.h"
@@ -62,22 +77,22 @@ static vk::raii::Instance createInstance(std::vector<const char *> &extensions, 
                                          std::vector<const char *> &layers,     //
                                          const vk::raii::Context &ctx) {
 
-  auto insertSupported = [](const auto &from, auto &to, const auto &available, const auto &f) {
+  const auto insertSupported = [](const auto &from, auto &to, const auto &available, const auto &f) {
     from | filter([&](const auto &ext) {
       return available ^ exists([&](const auto &avail) { return std::string_view(f(avail)) == ext; });
     }) //
         | append_to(to);
   };
 
-  auto supportedExtensions = ctx.enumerateInstanceExtensionProperties();
-  auto supportedLayers = ctx.enumerateInstanceLayerProperties();
+  const auto supportedExtensions = ctx.enumerateInstanceExtensionProperties();
+  const auto supportedLayers = ctx.enumerateInstanceLayerProperties();
   insertSupported(commonExtensions, extensions, supportedExtensions, [](const auto &e) { return e.extensionName; });
   insertSupported(extraExtensions, extensions, supportedExtensions, [](const auto &e) { return e.extensionName; });
   insertSupported(extraLayers, layers, supportedLayers, [](const auto &e) { return e.layerName; });
 
-  vk::InstanceCreateInfo info(vk::InstanceCreateFlags(), &AppInfo, //
-                              layers.size(), layers.data(),        //
-                              extensions.size(), extensions.data() //
+  const vk::InstanceCreateInfo info(vk::InstanceCreateFlags(), &AppInfo, //
+                                    layers.size(), layers.data(),        //
+                                    extensions.size(), extensions.data() //
   );
 
   return {ctx, info};
@@ -91,7 +106,7 @@ std::variant<std::string, std::unique_ptr<Platform>> VulkanPlatform::create() {
     return std::string("Vulkan: ") + e.what();
   }
 }
-VulkanPlatform::VulkanPlatform() : context(), instance(createInstance(extensions, layers, context)) { POLYINVOKE_TRACE(); }
+VulkanPlatform::VulkanPlatform() : instance(createInstance(extensions, layers, context)) { POLYINVOKE_TRACE(); }
 std::string VulkanPlatform::name() {
   POLYINVOKE_TRACE();
   return "Vulkan";
@@ -125,21 +140,21 @@ std::vector<std::unique_ptr<Device>> VulkanPlatform::enumerate() {
         return q.queueCount > 0 && q.queueFlags & vk::QueueFlagBits::eCompute ? std::optional{std::pair{i, q.queueCount}} : std::nullopt;
       });
 
-      auto transferQueueIds = transform_idx_if<uint32_t>(queueProps, [](const auto &q, const auto &i) {
+      const auto transferQueueIds = transform_idx_if<uint32_t>(queueProps, [](const auto &q, const auto &i) {
         return q.queueCount > 0 && q.queueFlags & vk::QueueFlagBits::eTransfer ? std::optional{std::pair{i, q.queueCount}} : std::nullopt;
       });
 
       // VK_QUEUE_COMPUTE_BIT implies VK_QUEUE_TRANSFER_BIT
       if (!computeQueueIds.empty()) {
         // default transfer to the compute queue, then prefer a distinct transfer queue if one exists
-        auto computeQueueId = computeQueueIds[0];
+        const auto computeQueueId = computeQueueIds[0];
         auto transferQueueId = computeQueueId;
-        for (auto xferId : transferQueueIds)
+        for (const auto xferId : transferQueueIds)
           if (xferId.first != computeQueueId.first) {
             transferQueueId = xferId;
             break;
           }
-        float priority = 1.0f;
+        float priority = 1.0F;
         std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos;
         queueCreateInfos.reserve(2);
         queueCreateInfos.emplace_back(vk::DeviceQueueCreateFlags(), computeQueueId.first, 1, &priority);
@@ -154,7 +169,7 @@ std::vector<std::unique_ptr<Device>> VulkanPlatform::enumerate() {
   return devices;
 }
 
-VmaAllocator createAllocator(vk::raii::Instance &instance, vk::raii::PhysicalDevice &dev, vk::raii::Device &ctx) {
+static VmaAllocator createAllocator(const vk::raii::Instance &instance, const vk::raii::PhysicalDevice &dev, const vk::raii::Device &ctx) {
   VmaVulkanFunctions vulkanFunctions = {};
   vulkanFunctions.vkGetInstanceProcAddr = instance.getDispatcher()->vkGetInstanceProcAddr;
   vulkanFunctions.vkGetDeviceProcAddr = instance.getDispatcher()->vkGetDeviceProcAddr;
@@ -171,7 +186,7 @@ VmaAllocator createAllocator(vk::raii::Instance &instance, vk::raii::PhysicalDev
 }
 
 static vk::raii::Device createDevice(const vk::raii::PhysicalDevice &dev, uint32_t computeQueueId, uint32_t transferQueueId) {
-  float priority = 1.0f;
+  float priority = 1.0F;
   std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos;
   queueCreateInfos.reserve(2);
   queueCreateInfos.emplace_back(vk::DeviceQueueCreateFlags(), computeQueueId, 1, &priority);
@@ -229,9 +244,9 @@ VulkanDevice::VulkanDevice(vk::raii::Instance &instance,              //
             POLYINVOKE_TRACE();
             auto data = std::vector<uint32_t>((s.size() + 3) / 4, 0);
             std::copy(s.begin(), s.end(), reinterpret_cast<char *>(data.data()));
-            auto module = std::make_shared<vk::raii::ShaderModule>(
+            const auto module = std::make_shared<vk::raii::ShaderModule>(
                 ctx.createShaderModule({vk::ShaderModuleCreateFlags(), sizeof(uint32_t) * data.size(), data.data()}));
-            return polyregion::invoke::vulkan::details::LoadedModule{module, spirv::arenaViewStart(data)};
+            return polyregion::invoke::vulkan::details::LoadedModule{.module = module, .arenaViewStart = spirv::arenaViewStart(data)};
           },
           [this](const auto &m, const auto &name, const auto &types) {
             POLYINVOKE_TRACE();
@@ -239,7 +254,7 @@ VulkanDevice::VulkanDevice(vk::raii::Instance &instance,              //
             uint32_t bindingsId = 0;
             size_t storages = 0;
             size_t scalars = 0;
-            for (auto tpe : types) {
+            for (const auto tpe : types) {
               if (tpe == Type::Ptr) {
                 bindings.emplace_back(bindingsId++, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute);
                 storages++;
@@ -259,7 +274,7 @@ VulkanDevice::VulkanDevice(vk::raii::Instance &instance,              //
 int64_t VulkanDevice::id() {
   POLYINVOKE_TRACE();
   auto uuid = device.getProperties().pipelineCacheUUID;
-  std::string data(uuid.begin(), uuid.end());
+  const std::string data(uuid.begin(), uuid.end());
   return int64_t(std::hash<std::string>{}(data));
 }
 std::string VulkanDevice::name() {
@@ -316,7 +331,7 @@ std::vector<Property> VulkanDevice::properties() {
   POLYINVOKE_TRACE();
   const auto props = device.getProperties();
 
-  auto apiVersion = props.apiVersion;
+  const auto apiVersion = props.apiVersion;
 
   return {
       {"apiVersion", std::to_string(VK_VERSION_MAJOR(apiVersion)) + "." +     //
@@ -384,7 +399,7 @@ static polyregion::invoke::vulkan::details::MemObject allocate(VmaAllocator &all
     throw std::runtime_error(fmt::format("{}: vmaCreateBuffer failed for {} bytes (VkResult {}); likely exceeds the device memory or its "
                                          "maxMemoryAllocationSize",
                                          PREFIX, size, static_cast<int>(r)));
-  return {vk::Buffer(buffer), allocation, allocInfo.pMappedData, size};
+  return {.buffer = vk::Buffer(buffer), .allocation = allocation, .mappedData = allocInfo.pMappedData, .size = size};
 }
 
 uintptr_t VulkanDevice::mallocDevice(size_t size, Access) {
@@ -419,7 +434,7 @@ std::optional<HeapLimits> VulkanDevice::heapLimits() {
                                                .maxBufferSize));
   constexpr size_t widestScalarView = 8, vectorAccess = 16;
   const auto alignment = std::max<vk::DeviceSize>({props.limits.minStorageBufferOffsetAlignment, vectorAccess, widestScalarView});
-  return HeapLimits{maxBytes, static_cast<size_t>(alignment)};
+  return HeapLimits{.maxBytes = maxBytes, .alignment = static_cast<size_t>(alignment)};
 }
 
 uintptr_t VulkanDevice::reserveDevice(size_t maxBytes, size_t committedBytes) {
@@ -436,7 +451,7 @@ uintptr_t VulkanDevice::reserveDevice(size_t maxBytes, size_t committedBytes) {
 
 void VulkanDevice::growDevice(uintptr_t handle, size_t committedBytes) {
   POLYINVOKE_TRACE();
-  const std::lock_guard lock(growMutex);
+  const std::scoped_lock lock(growMutex);
   const auto current = memoryObjects.query(handle);
   const auto reserved = memoryObjects.reservedSize(handle);
   if (!current || !reserved || current->offset != 0)
@@ -446,7 +461,7 @@ void VulkanDevice::growDevice(uintptr_t handle, size_t committedBytes) {
                                         PREFIX, committedBytes, *reserved));
   const auto committed = current->remaining;
   if (committedBytes <= committed) return;
-  auto grown = std::make_shared<polyregion::invoke::vulkan::details::MemObject>(allocate(allocator, committedBytes, false));
+  const auto grown = std::make_shared<polyregion::invoke::vulkan::details::MemObject>(allocate(allocator, committedBytes, false));
   try {
     std::memcpy(grown->mappedData, current->value->mappedData, committed);
     vmaFlushAllocation(allocator, grown->allocation, 0, committed);
@@ -495,7 +510,7 @@ VulkanDeviceQueue::VulkanDeviceQueue(decltype(ctx) ctx, decltype(allocator) allo
       computeQueue(std::move(computeQueue)),                   //
       transferQueue(std::move(transferQueue)),                 //
       store(store), queryMemObject(std::move(queryMemObject)), //
-      callbackQueue(), callbackThread([this]() {
+      callbackQueue(), callbackThread([this] {
         while (true) {
           auto [f, keepGoing] = callbackQueue.pop();
           if (f) (*f)();
@@ -511,7 +526,7 @@ VulkanDeviceQueue::~VulkanDeviceQueue() {
   if (nullObject) vmaDestroyBuffer(allocator, VkBuffer(nullObject->buffer), nullObject->allocation);
 }
 void VulkanDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
-  callbackQueue.push([cb]() {
+  callbackQueue.push([cb] {
     if (cb) (*cb)();
   });
 }
@@ -605,8 +620,8 @@ void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
     specValues.emplace_back(uint32_t(sharedMem));
   }
 
-  vk::SpecializationInfo specInfo(specEntries.size(), specEntries.data(), //
-                                  specValues.size() * sizeof(uint32_t), specValues.data());
+  const vk::SpecializationInfo specInfo(specEntries.size(), specEntries.data(), //
+                                        specValues.size() * sizeof(uint32_t), specValues.data());
 
   auto &cached = fn.pipelines[specValues];
   if (!cached) {
@@ -631,7 +646,7 @@ void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
 
   ctx.updateDescriptorSets(writeDsSets, {});
 
-  auto beginInfo = vk::CommandBufferBeginInfo();
+  const auto beginInfo = vk::CommandBufferBeginInfo();
   fn.cmdBuffer.begin(beginInfo);
   fn.cmdBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, **pipe);
   fn.cmdBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, *fn.pipeLayout, 0, *fn.dscSet, {});
@@ -640,24 +655,25 @@ void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
   fn.cmdBuffer.end();
 
   if (cb) {
-    auto [key, enqueued] = enqueuedStore.store(std::make_shared<polyregion::invoke::vulkan::details::Enqueued>(
-        polyregion::invoke::vulkan::details::Enqueued{pipe, ctx.createFence(vk::FenceCreateInfo()), std::move(argObj)}));
+    auto [key, enqueued] =
+        enqueuedStore.store(std::make_shared<polyregion::invoke::vulkan::details::Enqueued>(polyregion::invoke::vulkan::details::Enqueued{
+            .pipeline = pipe, .fence = ctx.createFence(vk::FenceCreateInfo()), .argObject = std::move(argObj)}));
 
     computeQueue.submit(vk::SubmitInfo{{}, {}, *fn.cmdBuffer}, *(enqueued->fence));
-    callbackQueue.push([this, &fn, cb, key = key]() {
+    callbackQueue.push([this, &fn, cb, key = key] {
       if (auto enqueued_ = enqueuedStore.find(key); enqueued_) {
         static_cast<void>(ctx.waitForFences({*(*enqueued_)->fence}, true, uint64_t(-1)));
         fn.cmdBuffer.reset();
         fn.cmdPool.reset();
         enqueuedStore.erase(key);
-        if (auto argObj = (*enqueued_)->argObject; argObj) {
+        if (const auto argObj = (*enqueued_)->argObject; argObj) {
           vmaDestroyBuffer(allocator, VkBuffer(argObj->buffer), argObj->allocation);
         }
       }
       (*cb)();
     });
   } else {
-    auto fence = ctx.createFence(vk::FenceCreateInfo());
+    const auto fence = ctx.createFence(vk::FenceCreateInfo());
     computeQueue.submit(vk::SubmitInfo{{}, {}, *fn.cmdBuffer}, *fence);
     static_cast<void>(ctx.waitForFences({*fence}, true, uint64_t(-1)));
     fn.cmdPool.reset();

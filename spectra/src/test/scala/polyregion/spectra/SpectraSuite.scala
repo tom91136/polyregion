@@ -151,8 +151,8 @@ class SpectraSuite extends munit.FunSuite {
   test("erased value algorithms carry their semantics as callables") {
     val callableArguments = Spectra.interfaceDef.declarations.map { decl =>
       decl.name.last -> decl.args.count(_.named.tpe match {
-        case _: p.Type.Exec => true
-        case _              => false
+        case p.Type.Exec(_, _, _) => true
+        case _                    => false
       })
     }.toMap
 

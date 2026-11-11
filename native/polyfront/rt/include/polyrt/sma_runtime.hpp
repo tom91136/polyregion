@@ -80,7 +80,7 @@ POLYREGION_RT_PROTECT inline auto stdRemoteRelease() {
 
 POLYREGION_RT_PROTECT inline void dumpMemoryWithLayout(const runtime::TypeLayout *layout, const char *data) {
   layout->visualise(stderr, [&](const size_t offset, const runtime::AggregateMember &m) {
-    const auto p = data + offset;
+    const auto *const p = data + offset;
     std::fprintf(stderr, "  [%p]=", static_cast<const void *>(p));
     if (m.ptrIndirection != 0) compiletime::showPtr(stderr, sizeof(void *), p);
     else switch (m.type->name[0]) {

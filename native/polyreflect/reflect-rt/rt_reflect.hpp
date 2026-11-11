@@ -19,7 +19,7 @@
   #include "rt_index.hpp"
   #include "rt_protected.hpp"
 
-  #if defined(__has_feature)
+  #ifdef __has_feature
     #if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer) || __has_feature(memory_sanitizer)
       #define __RT_SANITIZED 1
     #endif
@@ -41,7 +41,7 @@ using pid_t = pid_t;
 
 #endif
 
-// NOLINTBEGIN(misc-definitions-in-headers)
+// NOLINTBEGIN(misc-definitions-in-headers, modernize-use-designated-initializers)
 
 namespace polyregion::rt_reflect {
 
@@ -97,7 +97,7 @@ constexpr const char *to_string(const Type t) {
 }
 
 #ifndef __RT_IMPL
-  #if defined(_MSC_VER)
+  #ifdef _MSC_VER
 extern "C" __declspec(dllimport) PtrMeta _rt_reflect_p(const void *ptr);
 extern "C" __declspec(dllimport) PtrMeta _rt_reflect_v(uintptr_t ptrValue);
 extern "C" __declspec(dllimport) void _rt_record(const void *ptr, size_t size, Type type);
@@ -118,7 +118,7 @@ extern "C" void _rt_reclaim(const void *ptr, size_t size, bool forWrite);
 
 #ifdef __RT_IMPL
 
-  #if defined(_MSC_VER)
+  #ifdef _MSC_VER
     #define __RT_EXPORTED __RT_NOINLINE __declspec(dllexport)
     #define __RT_PRINTF_FORMAT(fmt_index, first_arg)
   #else
@@ -139,7 +139,7 @@ using namespace std::chrono;
 __RT_ODR int safe_vasprintf(char **buffer, const char *format, va_list args) {
   va_list args0;
   va_copy(args0, args);
-  int size = std::vsnprintf(nullptr, 0, format, args0);
+  const int size = std::vsnprintf(nullptr, 0, format, args0);
   va_end(args0);
 
   if (size < 0) {
@@ -153,23 +153,25 @@ __RT_ODR int safe_vasprintf(char **buffer, const char *format, va_list args) {
   return size;
 }
 
+// NOLINTNEXTLINE(modernize-avoid-variadic-functions)
 __RT_ODR __RT_PRINTF_FORMAT(2, 3) int safe_snprintf(char **buffer, const char *format, ...) {
   va_list args;
   va_start(args, format);
-  int size = safe_vasprintf(buffer, format, args);
+  const int size = safe_vasprintf(buffer, format, args);
   va_end(args);
   return size;
 }
 
+// NOLINTNEXTLINE(modernize-avoid-variadic-functions)
 __RT_ODR __RT_PRINTF_FORMAT(2, 3) int safe_fprintf(FILE *stream, const char *format, ...) {
   if (!stream) return 0;
   va_list args;
   va_start(args, format);
   char *buffer{};
-  int size = safe_vasprintf(&buffer, format, args);
+  const int size = safe_vasprintf(&buffer, format, args);
   va_end(args);
   if (size > 0) {
-    auto written = static_cast<int>(fwrite(buffer, 1, size, stream));
+    const auto written = static_cast<int>(fwrite(buffer, 1, size, stream));
     __RT_ALTERNATIVE(free)(buffer);
     return written;
   }
@@ -221,7 +223,7 @@ public:
   }
 
   __RT_ODR void blockingRecord(const PtrInfo &info, const time_point<steady_clock> now = steady_clock::now()) {
-    std::unique_lock lock(mutex);
+    const std::unique_lock lock(mutex);
     // XXX upsert: foreign HeapFree paths can recycle addresses without notifying us.
     if (!data.emplace(info.base, PtrRecord{now, info})) {
       index.erase(info.base);
@@ -233,7 +235,7 @@ public:
 
   __RT_ODR std::optional<PtrInfo> blockingRelease(const uintptr_t ptr, const Type type,
                                                   const time_point<steady_clock> now = steady_clock::now()) {
-    std::unique_lock lock(mutex);
+    const std::unique_lock lock(mutex);
     if (const auto *rec = queryUnsafe(ptr, false)) {
       if (trace)
         safe_fprintf(trace,
@@ -253,7 +255,7 @@ public:
   }
 
   __RT_ODR void finishTrace() {
-    std::unique_lock lock(mutex);
+    const std::unique_lock lock(mutex);
     if (!trace) return;
     const auto now = steady_clock::now();
     // Final event has no trailing comma; closes the JSON array.
@@ -266,8 +268,8 @@ public:
   }
 
   __RT_ODR PtrMeta blockingQuery(const uintptr_t ptrValue) {
-    std::shared_lock lock(mutex);
-    if (const auto it = queryUnsafe(ptrValue, true)) return PtrMeta{it->info.size, ptrValue - it->info.base, it->info.type};
+    const std::shared_lock lock(mutex);
+    if (const auto *const it = queryUnsafe(ptrValue, true)) return PtrMeta{it->info.size, ptrValue - it->info.base, it->info.type};
     return PtrMeta{0, 0, Type::Unknown};
   }
 
@@ -350,14 +352,14 @@ extern "C" __RT_ODR __RT_EXPORTED void _rt_reclaim(const void *ptr, const size_t
 extern "C" __RT_ODR __RT_EXPORTED void _rt_record(const void *ptr, const size_t size, const Type type) {
   if (!details::serviceInit.load()) return;
   if (details::_rt_in_service()) return;
-  details::_rt_service_guard guard;
+  const details::_rt_service_guard guard;
   details::_rt_get()->blockingRecord(details::PtrInfo{reinterpret_cast<uintptr_t>(ptr), size, type});
 }
 extern "C" __RT_ODR __RT_EXPORTED void _rt_release(void *ptr, const Type type) {
   if (!ptr) return;
   if (!details::serviceInit.load()) return;
   if (details::_rt_in_service()) return;
-  details::_rt_service_guard guard;
+  const details::_rt_service_guard guard;
   const auto released = details::_rt_get()->blockingRelease(reinterpret_cast<uintptr_t>(ptr), type);
   if (type == Type::HeapFree || type == Type::HeapCXXDelete || (type == Type::HeapSanitizer && released))
     if (const auto cb = details::_rt_release_cb().load(std::memory_order_relaxed)) cb(ptr, released ? released->size : 0);
@@ -365,12 +367,12 @@ extern "C" __RT_ODR __RT_EXPORTED void _rt_release(void *ptr, const Type type) {
 
 extern "C" __RT_ODR __RT_EXPORTED PtrMeta _rt_reflect_p(const void *ptr) {
   if (details::_rt_in_service()) return PtrMeta{0, 0, Type::Unknown};
-  details::_rt_service_guard guard;
+  const details::_rt_service_guard guard;
   return details::_rt_get()->blockingQuery(ptr);
 }
 extern "C" __RT_ODR __RT_EXPORTED PtrMeta _rt_reflect_v(const uintptr_t ptrValue) {
   if (details::_rt_in_service()) return PtrMeta{0, 0, Type::Unknown};
-  details::_rt_service_guard guard;
+  const details::_rt_service_guard guard;
   return details::_rt_get()->blockingQuery(ptrValue);
 }
 
@@ -385,4 +387,4 @@ inline const int sanitizerHooks = __sanitizer_install_malloc_and_free_hooks(
 #endif
 } // namespace polyregion::rt_reflect
 
-// NOLINTEND(misc-definitions-in-headers)
+// NOLINTEND(misc-definitions-in-headers, modernize-use-designated-initializers)

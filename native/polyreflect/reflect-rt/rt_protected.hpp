@@ -14,13 +14,13 @@
   #include <dlfcn.h>
 #endif
 
-#if defined(__clang__)
+#ifdef __clang__
   #define __RT_ANNOTATE(name) [[clang::annotate(name)]]
 #else
   #define __RT_ANNOTATE(name)
 #endif
 
-#if defined(_MSC_VER)
+#ifdef _MSC_VER
   #define __RT_NOINLINE __declspec(noinline)
 #elif defined(__GNUC__) || defined(__clang__)
   #define __RT_NOINLINE __attribute__((noinline))
@@ -33,7 +33,8 @@
 
 #if defined(__linux__) || defined(__APPLE__)
 
-  #define __DEF_DLSYM(func, ret_type, ...) ret_type (*_##func)(__VA_ARGS__) = (ret_type (*)(__VA_ARGS__))dlsym(RTLD_NEXT, #func)
+  #define __DEF_DLSYM(func, ret_type, ...)                                                                                                 \
+    ret_type (*_##func)(__VA_ARGS__) = reinterpret_cast<ret_type (*)(__VA_ARGS__)>(dlsym(RTLD_NEXT, #func))
 
 extern "C" inline void *__interposed_malloc(const size_t size) {
   static __DEF_DLSYM(malloc, void *, size_t);
@@ -46,7 +47,7 @@ extern "C" inline void *__interposed_calloc(const size_t nmemb, const size_t siz
 }
 
 extern "C" inline void *__interposed_memalign(const size_t alignment, const size_t size) {
-  #if defined(__APPLE__)
+  #ifdef __APPLE__
   // macOS libc has no memalign.
   static __DEF_DLSYM(posix_memalign, int, void **, size_t, size_t);
   void *ptr = nullptr;
@@ -113,7 +114,7 @@ extern "C" __attribute__((weak)) void __interceptor_free(void *ptr);
   // doesn't override malloc/free itself so this stays safe.
   #ifdef __RT_IMPL
     #include <cstdlib>
-    #if defined(__linux__)
+    #ifdef __linux__
       #include <malloc.h>
     #endif
     #define __RT_ALTERNATIVE(func) ::func

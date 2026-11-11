@@ -1,6 +1,7 @@
 package polyregion
 
 import polyregion.ast.*
+import polyregion.prism.StdLib
 import polyregion.scalalang.{Compiler, Quoted}
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
@@ -40,28 +41,35 @@ object CompilerTests {
     println("In!")
     val l = RenderedLog("")
 
-    try {
-
-      val v = (for {
-        (captures, prismRefs, monoMap, prog0) <- Compiler.compileExpr(using Quoted(q))(l, expr)
-
-      } yield '{ () }).fold(x => throw x, identity)
+    def failed(e: Throwable): Expr[Unit] = {
       println(s"Log=${l.lines.size}")
       println(l.render(0).mkString("\n"))
-      v
+      '{
+        val exception: Throwable = ${ Expr(e) }
+        exception.setStackTrace(
+          exception.getStackTrace.takeWhile(e => e.getClassName != "jdk.internal.reflect.NativeMethodAccessorImpl")
+        )
+        throw exception
+      }
+    }
 
-    } catch {
-      case e: Throwable =>
+    val compiled =
+      try
+        for {
+          (captures, prismRefs, monoMap, prog0) <- Compiler.compileExpr(using Quoted(q))(l, expr, StdLib.Tables)
+        } yield '{ () }
+      catch {
+        case e: Throwable => Left(e)
+      }
+
+    compiled.fold(
+      failed,
+      v => {
         println(s"Log=${l.lines.size}")
         println(l.render(0).mkString("\n"))
-        '{
-          val exception: Throwable = ${ Expr(e) }
-          exception.setStackTrace(
-            exception.getStackTrace.takeWhile(e => e.getClassName != "jdk.internal.reflect.NativeMethodAccessorImpl")
-          )
-          throw exception
-        }
-    }
+        v
+      }
+    )
 
   }
 

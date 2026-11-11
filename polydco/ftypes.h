@@ -20,7 +20,7 @@ struct FHostThreadedPrelude {
   int64_t lowerBound, upperBound, step, tripCount;
   int64_t *begins, *ends;
 };
-static_assert(sizeof(FHostThreadedPrelude) == (sizeof(int64_t) * 4 + sizeof(void *) * 2));
+static_assert(sizeof(FHostThreadedPrelude) == ((sizeof(int64_t) * 4) + (sizeof(void *) * 2)));
 
 struct FReduction {
   enum class Kind : uint8_t {
@@ -84,7 +84,10 @@ private:
       case Kind::IAnd: return reduceTyped<T>(range, dest, data, ~static_cast<T>(0), [](const auto x, const auto y) { return x & y; });
       case Kind::IOr: return reduceTyped<T>(range, dest, data, 0, [](const auto x, const auto y) { return x | y; });
       case Kind::IEor: return reduceTyped<T>(range, dest, data, 0, [](const auto x, const auto y) { return x ^ y; });
-      default: return fail("Unsupported reduction kind on integer type");
+      default: {
+        fail("Unsupported reduction kind on integer type");
+        return;
+      }
     }
   }
 
@@ -95,39 +98,93 @@ private:
       case Kind::Mul: return reduceTyped<T>(range, dest, data, 1, [](const auto x, const auto y) { return x * y; });
       case Kind::Max: return reduceTyped<T>(range, dest, data, Lim::lowest(), [](const auto x, const auto y) { return std::fmax(x, y); });
       case Kind::Min: return reduceTyped<T>(range, dest, data, Lim::max(), [](const auto x, const auto y) { return std::fmin(x, y); });
-      default: return fail("Unsupported reduction kind on real type");
+      default: {
+        fail("Unsupported reduction kind on real type");
+        return;
+      }
     }
   }
 
   void reduceBool(const int64_t range, const char *data) const {
     switch (kind) {
-      case Kind::And: return reduceTyped<bool>(range, dest, data, true, [](const bool x, const bool y) { return x && y; });
-      case Kind::Or: return reduceTyped<bool>(range, dest, data, false, [](const bool x, const bool y) { return x || y; });
-      case Kind::Eqv: return reduceTyped<bool>(range, dest, data, true, [](const bool x, const bool y) { return x == y; });
-      case Kind::Neqv: return reduceTyped<bool>(range, dest, data, false, [](const bool x, const bool y) { return x != y; });
-      default: return fail("Unsupported reduction kind on bool type");
+      case Kind::And: {
+        reduceTyped<bool>(range, dest, data, true, [](const bool x, const bool y) { return x && y; });
+        return;
+      }
+      case Kind::Or: {
+        reduceTyped<bool>(range, dest, data, false, [](const bool x, const bool y) { return x || y; });
+        return;
+      }
+      case Kind::Eqv: {
+        reduceTyped<bool>(range, dest, data, true, [](const bool x, const bool y) { return x == y; });
+        return;
+      }
+      case Kind::Neqv: {
+        reduceTyped<bool>(range, dest, data, false, [](const bool x, const bool y) { return x != y; });
+        return;
+      }
+      default: {
+        fail("Unsupported reduction kind on bool type");
+        return;
+      }
     }
   }
 
 public:
   void reduce(const int64_t range, const char *data) const {
     switch (type) {
-      case runtime::Type::Bool1: return reduceBool(range, data);
-      case runtime::Type::IntU8: return reduceInt<uint8_t>(range, data);
-      case runtime::Type::IntS8: return reduceInt<int8_t>(range, data);
-      case runtime::Type::IntU16: return reduceInt<uint16_t>(range, data);
-      case runtime::Type::IntS16: return reduceInt<int16_t>(range, data);
-      case runtime::Type::IntU32: return reduceInt<uint32_t>(range, data);
-      case runtime::Type::IntS32: return reduceInt<int32_t>(range, data);
-      case runtime::Type::IntU64: return reduceInt<uint64_t>(range, data);
-      case runtime::Type::IntS64: return reduceInt<int64_t>(range, data);
+      case runtime::Type::Bool1: {
+        reduceBool(range, data);
+        return;
+      }
+      case runtime::Type::IntU8: {
+        reduceInt<uint8_t>(range, data);
+        return;
+      }
+      case runtime::Type::IntS8: {
+        reduceInt<int8_t>(range, data);
+        return;
+      }
+      case runtime::Type::IntU16: {
+        reduceInt<uint16_t>(range, data);
+        return;
+      }
+      case runtime::Type::IntS16: {
+        reduceInt<int16_t>(range, data);
+        return;
+      }
+      case runtime::Type::IntU32: {
+        reduceInt<uint32_t>(range, data);
+        return;
+      }
+      case runtime::Type::IntS32: {
+        reduceInt<int32_t>(range, data);
+        return;
+      }
+      case runtime::Type::IntU64: {
+        reduceInt<uint64_t>(range, data);
+        return;
+      }
+      case runtime::Type::IntS64: {
+        reduceInt<int64_t>(range, data);
+        return;
+      }
       // XXX case runtime::Type::Float16: return reduceReal<float16_t>(range, data);
-      case runtime::Type::Float32: return reduceReal<float>(range, data);
-      case runtime::Type::Float64: return reduceReal<double>(range, data);
-      default: return fail("Unsupported type for reduction");
+      case runtime::Type::Float32: {
+        reduceReal<float>(range, data);
+        return;
+      }
+      case runtime::Type::Float64: {
+        reduceReal<double>(range, data);
+        return;
+      }
+      default: {
+        fail("Unsupported type for reduction");
+        return;
+      }
     }
   }
 
-  size_t typeSizeInBytes() const { return runtime::byteOfType(type); }
+  [[nodiscard]] size_t typeSizeInBytes() const { return runtime::byteOfType(type); }
 };
 } // namespace polyregion::polydco

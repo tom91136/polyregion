@@ -20,6 +20,7 @@
 #include "llvm/TargetParser/Triple.h"
 
 #include "aspartame/all.hpp"
+#include "aspartame/ext/llvm.hpp"
 #include "nlohmann/json.hpp"
 
 #include "polyregion/conventions.h"
@@ -85,7 +86,7 @@ inline bool objectLayoutsCompatible(const llvm::Module &source, const llvm::Data
   llvm::SmallPtrSet<llvm::Type *, 32> visited;
   std::function<bool(llvm::Type *)> visit = [&](llvm::Type *type) {
     if (!visited.insert(type).second) return true;
-    if (const auto pointer = llvm::dyn_cast<llvm::PointerType>(type)) {
+    if (const auto *const pointer = llvm::dyn_cast<llvm::PointerType>(type)) {
       const auto addressSpace = pointer->getAddressSpace();
       if (layout.getPointerSizeInBits(addressSpace) != target.getPointerSizeInBits(addressSpace)
           || layout.getPointerABIAlignment(addressSpace) != target.getPointerABIAlignment(addressSpace)
@@ -97,9 +98,7 @@ inline bool objectLayoutsCompatible(const llvm::Module &source, const llvm::Data
                    || layout.getABITypeAlign(type) != target.getABITypeAlign(type)
                    || layout.getPrefTypeAlign(type) != target.getPrefTypeAlign(type)))
       return false;
-    for (auto *subtype : type->subtypes())
-      if (!visit(subtype)) return false;
-    return true;
+    return type->subtypes() ^ forall([&](llvm::Type *subtype) { return visit(subtype); });
   };
   for (auto *type : source.getIdentifiedStructTypes())
     if (!visit(type)) return false;
@@ -119,22 +118,25 @@ inline bool objectLayoutsCompatible(const llvm::Module &source, const llvm::Data
 struct KernelObject {
   runtime::ModuleFormat format{};
   runtime::PlatformKind kind{};
-  std::vector<std::string> features{};
-  std::string moduleImage{};
+  std::vector<std::string> features;
+  std::string moduleImage;
   compiletime::Target target{};
+  // NOLINTNEXTLINE(readability-redundant-member-init)
   std::string arch{};
+  // NOLINTNEXTLINE(readability-redundant-member-init)
   std::string pipelineSpec{};
 };
 
 struct KernelBundle {
-  std::string moduleName{};
-  std::vector<KernelObject> objects{};
-  std::vector<std::pair<bool, polyast::StructLayout>> layouts{};
-  std::unordered_map<std::string, std::unordered_set<std::string>> readOnlyMembers{};
+  std::string moduleName;
+  std::vector<KernelObject> objects;
+  std::vector<std::pair<bool, polyast::StructLayout>> layouts;
+  std::unordered_map<std::string, std::unordered_set<std::string>> readOnlyMembers;
   std::string metadata;
-  std::string hostMirrorBitcode{};
-  std::string mirrorId{};
+  std::string hostMirrorBitcode;
+  std::string mirrorId;
   bool asserts = false;
+  // NOLINTNEXTLINE(readability-redundant-member-init)
   std::string program{};
 };
 
@@ -153,7 +155,7 @@ struct Options {
   bool jit = false;
   std::string executable;
   std::vector<Target> targets;
-  std::optional<int> stackDepth = {};
+  std::optional<int> stackDepth;
   std::string emitLibraryPath;
   std::string libraryPath;
   std::set<std::string> libraryCapabilities;
@@ -182,7 +184,7 @@ struct Options {
       else errors.emplace_back("invalid stack depth: " + *depth);
     }
     if (auto targets = maybeTargets) {
-      for (auto &rawEntry : *targets ^ split(';')) {
+      for (const auto &rawEntry : *targets ^ split(';')) {
         const auto compileAndRuntime = rawEntry ^ split_once('!');
         const auto rawArchAndFeaturesList = compileAndRuntime ? compileAndRuntime->first : rawEntry;
         const auto archAndFeatures = rawArchAndFeaturesList ^ split_once('@');
@@ -203,7 +205,7 @@ struct Options {
   }
 
   static std::variant<std::vector<std::string>, Options> parseArgs(const std::vector<std::string> &args) {
-    auto parseSuffix = [&](const std::string &key) -> std::optional<std::string> {
+    const auto parseSuffix = [&](const std::string &key) -> std::optional<std::string> {
       const auto prefix = key + "=";
       return args ^ collect_first([&](const auto &arg) -> std::optional<std::string> {
                if (arg ^ starts_with(prefix)) return arg.substr(prefix.size());
@@ -216,7 +218,7 @@ struct Options {
   }
 
   static std::variant<std::vector<std::string>, Options> parseArgsFromEnv() {
-    auto readEnv = [&](const auto &key) -> std::optional<std::string> {
+    const auto readEnv = [&](const auto &key) -> std::optional<std::string> {
       if (auto env = std::getenv(key)) return env;
       else return {};
     };
@@ -238,13 +240,13 @@ static std::variant<std::string, polyast::CompileResult> compileProgram(const po
   // from opening via Windows file sharing; closing it deletes the file outright. Either way the
   // child's read_struct throws "Cannot open ..." into SEH 0xE06D7363.
   llvm::SmallString<128> inputPath, outputPath;
-  if (auto ec = llvm::sys::fs::createTemporaryFile("polyfront-in", "msgpack", inputPath))
+  if (const auto ec = llvm::sys::fs::createTemporaryFile("polyfront-in", "msgpack", inputPath))
     return "Failed to create temp input file: " + ec.message();
-  if (auto ec = llvm::sys::fs::createTemporaryFile("polyfront-out", "msgpack", outputPath)) {
+  if (const auto ec = llvm::sys::fs::createTemporaryFile("polyfront-out", "msgpack", outputPath)) {
     llvm::sys::fs::remove(inputPath);
     return "Failed to create temp output file: " + ec.message();
   }
-  auto cleanup = llvm::scope_exit([&] {
+  const auto cleanup = llvm::scope_exit([&] {
     llvm::sys::fs::remove(inputPath);
     llvm::sys::fs::remove(outputPath);
   });
@@ -268,12 +270,12 @@ static std::variant<std::string, polyast::CompileResult> compileProgram(const po
     (llvm::errs() << (args | prepend(opts.executable) | mk_string(" ", [](const auto &s) { return s.data(); })) << "\n").flush();
   }
 
-  if (int code = llvm::sys::ExecuteAndWait(opts.executable, args); code != 0)
+  if (const int code = llvm::sys::ExecuteAndWait(opts.executable, args); code != 0)
     return "Non-zero exit code for task: " + (args ^ mk_string(" ", [](const auto &s) { return s.str(); }));
 
   auto BufferOrErr = llvm::MemoryBuffer::getFile(outputPath);
 
-  if (auto Err = BufferOrErr.getError()) return "Failed to read output buffer: " + toString(llvm::errorCodeToError(Err));
+  if (const auto Err = BufferOrErr.getError()) return "Failed to read output buffer: " + toString(llvm::errorCodeToError(Err));
   // The polycpp clang plugin is built with -fno-exceptions, so a throw from `from_msgpack(empty)`
   // would unwind into terminate(); return a string error here instead of letting it propagate.
   if ((*BufferOrErr)->getBufferSize() == 0)

@@ -164,7 +164,7 @@ object BUDE {
     val forcefields = readNStruct(deck / "forcefield.in", 4 * 4)(mkFFParam(_))
     val poseFloats  = readNStruct(deck / "poses.in", 4)(_.getFloat)
 
-    val poseCount = poseFloats.length / 6
+    val poseCount      = poseFloats.length / 6
     require(poseFloats.length % 6 == 0)
     val transformPoses = poseFloats.grouped(poseCount).toArray
 
@@ -190,7 +190,7 @@ object BUDE {
     val elapsed = Array.ofDim[Long](iters)
     for (iter <- 0 until iters) {
       val start = System.nanoTime()
-      (0 until (poseCount / PPWI)).par.map { group =>
+      (0 until (poseCount / PPWI)).par.foreach { group =>
         fasten_main(
           proteins = proteins,
           ligands = ligands,

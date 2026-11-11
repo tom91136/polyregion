@@ -24,7 +24,7 @@ class RecursionLowerSuite extends munit.FunSuite {
   private def hasFrame(out: p.Program): Boolean = out.defs.exists(_.members.exists(_.symbol == "#pc"))
   // the generic path traps on stack overflow with a `'assert`; the StructuredExit pass lowers this
   private def hasOverflowGuard(out: p.Program): Boolean =
-    out.functions.exists(_.body.collectWhere[p.Expr] { case p.Expr.SpecOp(_: p.Spec.Assert) => () }.nonEmpty)
+    out.functions.exists(_.body.collectWhere[p.Expr] { case p.Expr.SpecOp(p.Spec.Assert(_, _)) => () }.nonEmpty)
   private def call(name: String, args: List[p.Term], rtn: p.Type = i32) =
     p.Expr.Invoke(p.Type.FnRef(sym(name)), Nil, None, args, rtn)
   private def i(v: Int): p.Term = p.Term.IntS32Const(v)
@@ -57,7 +57,7 @@ class RecursionLowerSuite extends munit.FunSuite {
     val out     = RecursionLower()(in, NoopLog)
     val lowered = out.functions.find(_.name == sym("recursive")).get
     assertEquals(selfCalls(lowered), 0)
-    assert(lowered.collectFirst_[p.Stmt] { case _: p.Stmt.Try => () }.isEmpty)
+    assert(lowered.collectFirst_[p.Stmt] { case p.Stmt.Try(_, _, _) => () }.isEmpty)
     for (n <- 0 to 4)
       assertEquals(
         Interpreter.Vm(out).call("recursive", List(i32 -> V.I(n))),
@@ -482,7 +482,7 @@ class RecursionLowerSuite extends munit.FunSuite {
     cases.foreach { case p.Stmt.Cond(_, body, otherwise) =>
       assert(otherwise.isEmpty, "dispatch cases must be sibling guards, not a nested else-if chain")
       assert(
-        body.collectWhere[p.Stmt] { case _: p.Stmt.Cond => () }.isEmpty,
+        body.collectWhere[p.Stmt] { case p.Stmt.Cond(_, _, _) => () }.isEmpty,
         "a dispatch case must not contain a conditional state transition"
       )
     }
@@ -496,7 +496,7 @@ class RecursionLowerSuite extends munit.FunSuite {
     assert(
       lowered.body
         .drop(loopIndex + 1)
-        .exists(_.collectWhere[p.Expr] { case p.Expr.SpecOp(_: p.Spec.Assert) =>
+        .exists(_.collectWhere[p.Expr] { case p.Expr.SpecOp(p.Spec.Assert(_, _)) =>
           ()
         }.nonEmpty),
       "the overflow guard must be outside the dispatch loop"

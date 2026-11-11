@@ -33,10 +33,10 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
   }
 
   private def retypeStruct(tpe: p.Type, replacement: p.Type.Struct): p.Type = tpe match {
-    case _: p.Type.Struct                          => replacement
-    case p.Type.Ptr(_: p.Type.Struct, space)       => p.Type.Ptr(replacement, space)
-    case p.Type.Arr(_: p.Type.Struct, size, space) => p.Type.Arr(replacement, size, space)
-    case other                                     => other
+    case p.Type.Struct(_, _)                          => replacement
+    case p.Type.Ptr(p.Type.Struct(_, _), space)       => p.Type.Ptr(replacement, space)
+    case p.Type.Arr(p.Type.Struct(_, _), size, space) => p.Type.Arr(replacement, size, space)
+    case other                                        => other
   }
 
   private def spaceCode(space: p.Type.Space): String = space match {
@@ -64,7 +64,7 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
 
     def typeAt(root: p.Type, steps: List[p.PathStep]): p.Type = steps.foldLeft(root) {
       case (current, p.PathStep.Field(name)) => memberType(current, name).getOrElse(p.Type.Nothing)
-      case (current, p.PathStep.Deref | _: p.PathStep.Index | _: p.PathStep.IndexDyn) => element(current)
+      case (current, p.PathStep.Deref | p.PathStep.Index(_) | p.PathStep.IndexDyn(_)) => element(current)
     }
 
     private def fieldPath(steps: List[p.PathStep]): FieldPath = steps.collect { case p.PathStep.Field(name) => name }
@@ -78,8 +78,8 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
         .when(spaces.size == 1)(spaces.head)
         .orElse {
           expression match {
-            case p.Expr.RefTo(_, _, _, space, _)     => Some(space)
-            case p.Expr.Alias(_: p.Term.StringConst) => Some(p.Type.Space.Constant)
+            case p.Expr.RefTo(space = space)         => Some(space)
+            case p.Expr.Alias(p.Term.StringConst(_)) => Some(p.Type.Space.Constant)
             case p.Expr.Alias(term)                  => AddressRefinement.spaceOf(term.tpe)
             case other                               => AddressRefinement.spaceOf(other.tpe)
           }
@@ -95,12 +95,11 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
     }
 
     private def freshName(original: p.Sym, suffix: String): p.Sym = {
-      val base   = original.fqn.lastOption.getOrElse("") + "_as" + suffix
-      val prefix = original.fqn.dropRight(1)
-      val fqn = (Iterator.single(base) ++ Iterator.from(1).map(base + _))
-        .map(prefix :+ _)
-        .find(name => takenNames.add(name.mkString(".")))
-        .get
+      val base       = original.fqn.lastOption.getOrElse("") + "_as" + suffix
+      val prefix     = original.fqn.dropRight(1)
+      val candidates = (Iterator.single(base) ++ Iterator.from(1).map(base + _)).map(prefix :+ _)
+      var fqn        = candidates.next()
+      while (!takenNames.add(fqn.mkString("."))) fqn = candidates.next()
       p.Sym(fqn)
     }
 
@@ -112,11 +111,13 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
             structure.name,
             throw IllegalArgumentException(s"missing definition for ${structure.name.fqn.mkString(".")}")
           )
+          val nestedByHead = requirement.toList
+            .collect { case (head :: tail, space) if tail.nonEmpty => head -> (tail -> space) }
+            .groupMap(_._1)(_._2)
+            .map((head, entries) => head -> entries.toMap)
           val members = definition.members.map { member =>
             val direct = requirement.get(List(member.symbol))
-            val nested = requirement.collect {
-              case (head :: tail, space) if head == member.symbol && tail.nonEmpty => tail -> space
-            }
+            val nested = nestedByHead.getOrElse(member.symbol, Map.empty)
             val retyped = (member.tpe, direct) match {
               case (p.Type.Ptr(component, old), Some(space)) if old != space => p.Type.Ptr(component, space)
               case _                                                         => member.tpe
@@ -148,25 +149,18 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
       )
     }
 
-    private def declarations(function: p.Function): Map[String, p.Named] =
-      (function.receiver.iterator.map(_.named) ++ function.args.iterator.map(_.named) ++
-        function.moduleCaptures.iterator.map(_.named) ++ function.termCaptures.iterator.map(_.named) ++
-        function.collectAll[p.Stmt].iterator.collect { case p.Stmt.Var(name, _, _) => name })
-        .map(name => name.symbol -> name)
-        .toMap
-
     private def requirements(
         function: p.Function,
         solution: AddressRefinement.Solution
     ): Map[String, Requirement] = {
-      val declared = declarations(function)
+      val declared = AddressRefinement.declaredNames(function)
       val grouped = solution.slots.toList
         .flatMap { case (AddressRefinement.Query.Slot(root, steps), value) =>
           declared.get(root).flatMap { named =>
             val path = fieldPath(steps)
             typeAt(named.tpe, steps) match {
-              case _: p.Type.Ptr if path.nonEmpty && value.spaces.nonEmpty => Some((root -> path) -> value.spaces)
-              case _                                                       => None
+              case p.Type.Ptr(_, _) if path.nonEmpty && value.spaces.nonEmpty => Some((root -> path) -> value.spaces)
+              case _                                                          => None
             }
           }
         }
@@ -250,7 +244,7 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
     }
 
     private def inferredTypes(function: p.Function, requirement: Map[String, Requirement]): Map[String, p.Type] = {
-      val declared     = declarations(function)
+      val declared     = AddressRefinement.declaredNames(function)
       val localStorage = function.collectAll[p.Stmt].collect { case p.Stmt.Var(name, _, _) => name.symbol }.toSet
       val initial = declared.iterator.map { case (symbol, named) =>
         val retyped = structOf(named.tpe)
@@ -287,13 +281,16 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
       }
       doUntilNotEq(initial) { (_, known) =>
         function.collectAll[p.Stmt].foldLeft(known) {
-          case (types, p.Stmt.Var(name @ p.Named(_, _: p.Type.Ptr, _), Some(p.Expr.Alias(select: p.Term.Select)), _)) =>
+          case (
+                types,
+                p.Stmt.Var(name @ p.Named(_, p.Type.Ptr(_, _), _), Some(p.Expr.Alias(select: p.Term.Select)), _)
+              ) =>
             propagatePointerStruct(types, name, select, followSourceType = true)
           case (
                 types,
                 p.Stmt.Var(
-                  name @ p.Named(_, _: p.Type.Ptr, _),
-                  Some(p.Expr.Cast(select: p.Term.Select, _: p.Type.Ptr)),
+                  name @ p.Named(_, p.Type.Ptr(_, _), _),
+                  Some(p.Expr.Cast(select: p.Term.Select, p.Type.Ptr(_, _))),
                   _
                 )
               ) =>
@@ -301,7 +298,7 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
           case (
                 types,
                 p.Stmt.Var(
-                  name @ p.Named(_, _: p.Type.Ptr, _),
+                  name @ p.Named(_, p.Type.Ptr(_, _), _),
                   Some(ref @ p.Expr.RefTo(select: p.Term.Select, index, _, space, _)),
                   _
                 )
@@ -328,7 +325,7 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
           case (types, p.Stmt.Var(name, Some(p.Expr.Alias(select: p.Term.Select)), _)) if structOf(name.tpe).nonEmpty =>
             val source = selectedType(select, types)
             if (structOf(source).nonEmpty) types.updated(name.symbol, source) else types
-          case (types, p.Stmt.Var(name, Some(p.Expr.RefTo(select: p.Term.Select, _, _, space, _)), _))
+          case (types, p.Stmt.Var(name, Some(p.Expr.RefTo(lhs = select: p.Term.Select, space = space)), _))
               if AddressRefinement.isPtr(name.tpe) && structOf(name.tpe).nonEmpty =>
             structOf(selectedType(select, types)).fold(types)(structure =>
               types.updated(name.symbol, p.Type.Ptr(structure, space))
@@ -348,8 +345,8 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
       def retype(name: p.Named): p.Named = types.get(name.symbol).fold(name)(tpe => name.copy(tpe = tpe))
       def retypeArg(arg: p.Arg): p.Arg   = arg.copy(named = retype(arg.named))
       def conform(expression: p.Expr, expected: p.Type): p.Expr = expression match {
-        case cast @ p.Expr.Cast(_, _: p.Type.Ptr) if AddressRefinement.isPtr(expected) => cast.copy(as = expected)
-        case other                                                                     => other
+        case cast @ p.Expr.Cast(_, p.Type.Ptr(_, _)) if AddressRefinement.isPtr(expected) => cast.copy(as = expected)
+        case other                                                                        => other
       }
       val rewritten = function
         .modifyAll[p.Term] {
@@ -360,14 +357,14 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
               if (select.steps.isEmpty) root.tpe
               else
                 resolved match {
-                  case _: p.Type.Ptr | _: p.Type.Struct | _: p.Type.Arr => resolved
-                  case _                                                => select.tpe
+                  case p.Type.Ptr(_, _) | p.Type.Struct(_, _) | p.Type.Arr(_, _, _) => resolved
+                  case _                                                            => select.tpe
                 }
             p.Term.Select(root, select.steps, selected)
           case term => term
         }
         .modifyAll[p.Expr] {
-          case ref @ p.Expr.RefTo(select: p.Term.Select, _, _, _, _) =>
+          case ref @ p.Expr.RefTo(lhs = select: p.Term.Select) =>
             val resolved = typeAt(select.root.tpe, select.steps)
             val component =
               if (select.steps.isEmpty && ref.idx.isEmpty) select.root.tpe
@@ -429,7 +426,7 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
     case p.Expr.Alias(ref) if AddressRefinement.isPtr(ref.tpe) =>
       Some(p.Expr.Index(ref, candidate.readIndex, candidate.scalar))
     case p.Expr.RefTo(lhs, Some(index), _, _, _) => Some(p.Expr.Index(lhs, index, candidate.scalar))
-    case p.Expr.RefTo(lhs, None, _, _, _)        => Some(p.Expr.Alias(lhs))
+    case p.Expr.RefTo(lhs = lhs, idx = None)     => Some(p.Expr.Alias(lhs))
     case _                                       => None
   }
 
@@ -483,11 +480,9 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
     }
     if (selectionCount != assignments.size + aliasInitialisers + indexedReads.size + dereferenceReads.size) return None
 
-    val readIndex = indexedReads.headOption.map(_.idx).getOrElse(p.Term.IntS64Const(0))
-    if (
-      !isZero(readIndex) || assignments
-        .exists(mutation => load(PointerMerge(symbol, scalar, aliases, readIndex), mutation.expr).isEmpty)
-    )
+    val readIndex = indexedReads.headOption.fold[p.Term](p.Term.IntS64Const(0))(_.idx)
+    val merge     = PointerMerge(symbol, scalar, aliases, readIndex)
+    if (!isZero(readIndex) || assignments.exists(mutation => load(merge, mutation.expr).isEmpty))
       return None
 
     def assigns(body: List[p.Stmt]): Int = body.count {
@@ -507,8 +502,10 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
     def pureVariable(statement: p.Stmt): Boolean = statement match {
       case variable: p.Stmt.Var =>
         !variable.collectAll[p.Expr].exists {
-          case _: p.Expr.Invoke | _: p.Expr.ForeignCall | _: p.Expr.SpecOp | _: p.Expr.Alloc => true
-          case _                                                                             => false
+          case p.Expr.Invoke(_, _, _, _, _) | p.Expr.ForeignCall(_, _, _) | p.Expr.SpecOp(_) |
+              p.Expr.Alloc(_, _, _, _) =>
+            true
+          case _ => false
         }
       case _ => false
     }
@@ -527,22 +524,23 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
             .takeWhile(statement => containsRead(statement) || aliasInitialiser(statement) || pureVariable(statement))
             .exists(containsRead)
           local || safeEnvelope(trueBr) || safeEnvelope(falseBr) || search(tail, declared)
-        case p.Stmt.While(_, loop) :: tail             => safeEnvelope(loop) || search(tail, declared)
-        case p.Stmt.ForRange(_, _, _, _, loop) :: tail => safeEnvelope(loop) || search(tail, declared)
-        case p.Stmt.Annotated(inner, _, _) :: tail     => safeEnvelope(List(inner)) || search(tail, declared)
-        case _ :: tail                                 => search(tail, declared)
+        case p.Stmt.While(_, loop) :: tail         => safeEnvelope(loop) || search(tail, declared)
+        case p.Stmt.ForRange(body = loop) :: tail  => safeEnvelope(loop) || search(tail, declared)
+        case p.Stmt.Annotated(inner, _, _) :: tail => safeEnvelope(List(inner)) || search(tail, declared)
+        case _ :: tail                             => search(tail, declared)
       }
       search(body, declared = false)
     }
     Option.when(safeEnvelope(function.body))(PointerMerge(symbol, scalar, aliases, readIndex))
   }
 
+  @SuppressWarnings(Array("bonsai:complexity"))
   private def demote(function: p.Function, symbols: Set[String]): p.Function = {
     val candidates = symbols.toList.sorted.flatMap(plan(function, _))
-    val byRoot     = candidates.map(candidate => candidate.symbol -> candidate).toMap
-    val byAlias    = candidates.flatMap(candidate => candidate.aliases.map(_ -> candidate)).toMap
     if (candidates.isEmpty) function
     else {
+      val byRoot  = candidates.map(candidate => candidate.symbol -> candidate).toMap
+      val byAlias = candidates.flatMap(candidate => candidate.aliases.map(_ -> candidate)).toMap
       def tracked(name: p.Named): Option[PointerMerge] =
         byAlias
           .get(name.symbol)
@@ -633,8 +631,9 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
 
     val (entry0, entryCount, entryAnalysis) = program.entry
       .map(respace)
-      .map((function, count, analysis) => (Some(function), count, Some(analysis)))
-      .getOrElse((None, 0, None))
+      .fold[(Option[p.Function], Int, Option[AddressRefinement.Solution])]((None, 0, None)) {
+        case (function, count, analysis) => (Some(function), count, Some(analysis))
+      }
     val functionResults  = program.functions.map(respace)
     val functions0       = functionResults.map(_._1)
     val counts           = functionResults.map(_._2)

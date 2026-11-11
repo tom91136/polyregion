@@ -1,4 +1,10 @@
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <optional>
+#include <string>
 #include <string_view>
+#include <utility>
 
 #include "clang/AST/Decl.h"
 #include "clang/AST/Expr.h"
@@ -57,15 +63,15 @@ constexpr std::string_view thrustUninitializedCopyN = "thrust::cuda_cub::uniniti
   return static_cast<uint32_t>(width);
 }
 
-Expr::Any boundedShuffle(Remapper &self, Remapper::RemapContext &r, const bool down, Term::Any value, Term::Any delta, Term::Any boundary,
-                         Term::Any width, Term::Any mask, const Type::Any &result) {
+Expr::Any boundedShuffle(const Remapper &self, Remapper::RemapContext &r, const bool down, Term::Any value, Term::Any delta,
+                         Term::Any boundary, Term::Any width, Term::Any mask, const Type::Any &result) {
   // CUB accepts the shuffled value by value, but Clang may present a class-valued lvalue as T&.  A call prism
   // bypasses ordinary parameter conformance, so perform the load here before both the shuffle and fallback path.
-  value = r.newVar(self.conform(r, Expr::Alias(value), result));
-  delta = r.newVar(self.conform(r, Expr::Alias(delta), Type::IntU32()));
-  boundary = r.newVar(self.conform(r, Expr::Alias(boundary), Type::IntU32()));
-  width = r.newVar(self.conform(r, Expr::Alias(width), Type::IntU32()));
-  mask = r.newVar(self.conform(r, Expr::Alias(mask), Type::IntU32()));
+  value = r.newVar(Remapper::conform(r, Expr::Alias(value), result));
+  delta = r.newVar(Remapper::conform(r, Expr::Alias(delta), Type::IntU32()));
+  boundary = r.newVar(Remapper::conform(r, Expr::Alias(boundary), Type::IntU32()));
+  width = r.newVar(Remapper::conform(r, Expr::Alias(width), Type::IntU32()));
+  mask = r.newVar(Remapper::conform(r, Expr::Alias(mask), Type::IntU32()));
   const auto physicalLane = r.newVar(Expr::SpecOp(Spec::GpuLaneIdx()));
   const auto lane = r.newVar(Expr::IntrOp(Intr::BAnd(physicalLane, width, Type::IntU32())));
   const auto threshold = r.newVar(Expr::IntrOp(Intr::Add(down ? lane : boundary, delta, Type::IntU32())));
@@ -96,23 +102,23 @@ Expr::Any boundedShuffle(Remapper &self, Remapper::RemapContext &r, const bool d
 struct BitOps {
   Remapper::RemapContext &r;
   Type::Any type;
-  Term::Any add(const Term::Any &a, const Term::Any &b) const { return r.newVar(Expr::IntrOp(Intr::Add(a, b, type))); }
-  Term::Any sub(const Term::Any &a, const Term::Any &b) const { return r.newVar(Expr::IntrOp(Intr::Sub(a, b, type))); }
-  Term::Any mul(const Term::Any &a, const Term::Any &b) const { return r.newVar(Expr::IntrOp(Intr::Mul(a, b, type))); }
-  Term::Any band(const Term::Any &a, const Term::Any &b) const { return r.newVar(Expr::IntrOp(Intr::BAnd(a, b, type))); }
-  Term::Any bor(const Term::Any &a, const Term::Any &b) const { return r.newVar(Expr::IntrOp(Intr::BOr(a, b, type))); }
-  Term::Any shl(const Term::Any &a, const Term::Any &b) const { return r.newVar(Expr::IntrOp(Intr::BSL(a, b, type))); }
-  Term::Any shr(const Term::Any &a, const Term::Any &b) const { return r.newVar(Expr::IntrOp(Intr::BZSR(a, b, type))); }
+  [[nodiscard]] Term::Any add(const Term::Any &a, const Term::Any &b) const { return r.newVar(Expr::IntrOp(Intr::Add(a, b, type))); }
+  [[nodiscard]] Term::Any sub(const Term::Any &a, const Term::Any &b) const { return r.newVar(Expr::IntrOp(Intr::Sub(a, b, type))); }
+  [[nodiscard]] Term::Any mul(const Term::Any &a, const Term::Any &b) const { return r.newVar(Expr::IntrOp(Intr::Mul(a, b, type))); }
+  [[nodiscard]] Term::Any band(const Term::Any &a, const Term::Any &b) const { return r.newVar(Expr::IntrOp(Intr::BAnd(a, b, type))); }
+  [[nodiscard]] Term::Any bor(const Term::Any &a, const Term::Any &b) const { return r.newVar(Expr::IntrOp(Intr::BOr(a, b, type))); }
+  [[nodiscard]] Term::Any shl(const Term::Any &a, const Term::Any &b) const { return r.newVar(Expr::IntrOp(Intr::BSL(a, b, type))); }
+  [[nodiscard]] Term::Any shr(const Term::Any &a, const Term::Any &b) const { return r.newVar(Expr::IntrOp(Intr::BZSR(a, b, type))); }
 };
 
-static Term::Any populationCount(Remapper::RemapContext &r, const Type::Any &type, Term::Any value) {
-  const BitOps op{r, type};
+Term::Any populationCount(Remapper::RemapContext &r, const Type::Any &type, Term::Any value) {
+  const BitOps op{.r = r, .type = type};
   const auto constant = [&](const uint64_t x) { return r.newVar(Remapper::integralConstOfType(type, x)); };
   const auto bits = static_cast<uint64_t>(primitiveSize(type).value_or(4) * 8);
-  value = op.sub(value, op.band(op.shr(value, constant(1)), constant(0x5555555555555555ull)));
-  value = op.add(op.band(value, constant(0x3333333333333333ull)), op.band(op.shr(value, constant(2)), constant(0x3333333333333333ull)));
-  value = op.band(op.add(value, op.shr(value, constant(4))), constant(0x0f0f0f0f0f0f0f0full));
-  return op.shr(op.mul(value, constant(0x0101010101010101ull)), constant(bits - 8));
+  value = op.sub(value, op.band(op.shr(value, constant(1)), constant(0x5555555555555555ULL)));
+  value = op.add(op.band(value, constant(0x3333333333333333ULL)), op.band(op.shr(value, constant(2)), constant(0x3333333333333333ULL)));
+  value = op.band(op.add(value, op.shr(value, constant(4))), constant(0x0f0f0f0f0f0f0f0fULL));
+  return op.shr(op.mul(value, constant(0x0101010101010101ULL)), constant(bits - 8));
 }
 
 } // namespace
@@ -125,20 +131,20 @@ static Opt<MatchedCall> cubLegacyShuffle(const clang::CallExpr &call, const clan
   const auto logicalWidth = legacy ? Opt<uint32_t>{} : firstIntegralTemplateArgument(decl);
   if (!legacy && (!logicalWidth || !validLogicalWarpWidth(*logicalWidth))) raise("CUB shuffle has no valid logical-warp width");
   const auto *expression = &call;
-  return MatchedCall{Lowering{[expression, down, legacy, logicalWidth](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+  return MatchedCall{.lower = Lowering{[expression, down, legacy, logicalWidth](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
                        const auto args = lowerArguments(*expression, self, r);
                        const auto tpe = self.handleType(expression->getType(), r);
                        if (!legacy)
                          return boundedShuffle(self, r, down, args[0], args[1], args[2], Term::IntU32Const(*logicalWidth - 1), args[3],
                                                tpe);
-                       const auto control = r.newVar(self.conform(r, Expr::Alias(args[2]), Type::IntU32()));
+                       const auto control = r.newVar(Remapper::conform(r, Expr::Alias(args[2]), Type::IntU32()));
                        const auto shifted = r.newVar(Expr::IntrOp(Intr::BZSR(control, Term::IntU32Const(8), Type::IntU32())));
                        const auto inverted = r.newVar(Expr::IntrOp(Intr::BNot(shifted, Type::IntU32())));
                        const auto width = r.newVar(Expr::IntrOp(Intr::BAnd(inverted, Term::IntU32Const(31), Type::IntU32())));
                        const auto boundary = r.newVar(Expr::IntrOp(Intr::BAnd(control, Term::IntU32Const(31), Type::IntU32())));
                        return boundedShuffle(self, r, down, args[0], args[1], boundary, width, args[3], tpe);
                      }},
-                     false};
+                     .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> cubThreadAccess(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
@@ -147,7 +153,7 @@ static Opt<MatchedCall> cubThreadAccess(const clang::CallExpr &call, const clang
   const bool store = name == cubThreadStore;
   if (!load && !store) return {};
   const auto *expression = &call;
-  return MatchedCall{Lowering{[expression, load](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+  return MatchedCall{.lower = Lowering{[expression, load](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
                        const auto arguments = lowerArguments(*expression, self, r);
                        const auto result = self.handleType(expression->getType(), r);
                        Opt<size_t> pointerIndex;
@@ -163,11 +169,12 @@ static Opt<MatchedCall> cubThreadAccess(const clang::CallExpr &call, const clang
                        }
                        if (!pointerIndex || (!load && !valueIndex)) raise("CUB thread access has no compatible pointer/value arguments");
                        const auto pointee = arguments[*pointerIndex].tpe().get<Type::Ptr>()->comp;
-                       if (load) return self.conform(r, Expr::SpecOp(Spec::GpuVolatileLoad(arguments[*pointerIndex], pointee)), result);
-                       const auto value = r.newVar(self.conform(r, Expr::Alias(arguments[*valueIndex]), pointee));
+                       if (load)
+                         return Remapper::conform(r, Expr::SpecOp(Spec::GpuVolatileLoad(arguments[*pointerIndex], pointee)), result);
+                       const auto value = r.newVar(Remapper::conform(r, Expr::Alias(arguments[*valueIndex]), pointee));
                        return Expr::SpecOp(Spec::GpuVolatileStore(arguments[*pointerIndex], value));
                      }},
-                     false};
+                     .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> cudaAtomic(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
@@ -187,15 +194,15 @@ static Opt<MatchedCall> cudaAtomic(const clang::CallExpr &call, const clang::Fun
   const bool compareExchange = name == "atomicCAS";
   if ((!operation || call.getNumArgs() != 2) && (!compareExchange || call.getNumArgs() != 3)) return {};
   const auto *expression = &call;
-  return MatchedCall{Lowering{[expression, operation, compareExchange, scope](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
-                       const auto arguments = lowerArguments(*expression, self, r);
-                       const auto result = self.handleType(expression->getType(), r);
-                       if (compareExchange)
-                         return Expr::SpecOp(
-                             Spec::GpuAtomicCAS(arguments[0], arguments[1], arguments[2], scope, MemOrder::Relaxed(), result));
-                       return Expr::SpecOp(Spec::GpuAtomicRMW(*operation, arguments[0], arguments[1], scope, MemOrder::Relaxed(), result));
-                     }},
-                     false};
+  return MatchedCall{
+      .lower = Lowering{[expression, operation, compareExchange, scope](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+        const auto arguments = lowerArguments(*expression, self, r);
+        const auto result = self.handleType(expression->getType(), r);
+        if (compareExchange)
+          return Expr::SpecOp(Spec::GpuAtomicCAS(arguments[0], arguments[1], arguments[2], scope, MemOrder::Relaxed(), result));
+        return Expr::SpecOp(Spec::GpuAtomicRMW(*operation, arguments[0], arguments[1], scope, MemOrder::Relaxed(), result));
+      }},
+      .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> cudaBitOperation(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
@@ -207,15 +214,15 @@ static Opt<MatchedCall> cudaBitOperation(const clang::CallExpr &call, const clan
   if ((!reverse && !leadingZeros && !count && !trailingZeros) || call.getNumArgs() != 1) return {};
   const auto *expression = &call;
   return MatchedCall{
-      Lowering{[expression, reverse, leadingZeros, count](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+      .lower = Lowering{[expression, reverse, leadingZeros, count](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
         const auto wide = expression->getArg(0)->getType()->isIntegerType()
                           && self.context.getTypeSizeInChars(expression->getArg(0)->getType()).getQuantity() == 8;
         const auto type = wide ? Type::IntU64().widen() : Type::IntU32().widen();
-        const BitOps op{r, type};
+        const BitOps op{.r = r, .type = type};
         const auto constant = [&](const uint64_t x) { return r.newVar(Remapper::integralConstOfType(type, x)); };
         auto value = r.newVar(Expr::Cast(r.newVar(self.handleExpr(expression->getArg(0), r)), type));
         if (reverse) {
-          for (const auto [shift, mask] : {Pair<uint64_t, uint64_t>{1, 0x55555555u}, {2, 0x33333333u}, {4, 0x0f0f0f0fu}, {8, 0x00ff00ffu}})
+          for (const auto [shift, mask] : {Pair<uint64_t, uint64_t>{1, 0x55555555U}, {2, 0x33333333U}, {4, 0x0f0f0f0fU}, {8, 0x00ff00ffU}})
             value =
                 op.bor(op.band(op.shr(value, constant(shift)), constant(mask)), op.shl(op.band(value, constant(mask)), constant(shift)));
           value = op.bor(op.shr(value, constant(16)), op.shl(value, constant(16)));
@@ -229,9 +236,9 @@ static Opt<MatchedCall> cudaBitOperation(const clang::CallExpr &call, const clan
           const auto lowBit = op.band(value, op.sub(constant(0), value));
           value = populationCount(r, type, op.sub(lowBit, constant(1)));
         }
-        return self.conform(r, Expr::Alias(value), self.handleType(expression->getType(), r));
+        return Remapper::conform(r, Expr::Alias(value), self.handleType(expression->getType(), r));
       }},
-      false};
+      .preservesExceptionMetadata = false};
 }
 
 static bool thrustBitwiseRelocatable(clang::QualType tpe, const clang::ASTContext &context) {
@@ -249,7 +256,7 @@ static Opt<MatchedCall> thrustRelocate(const clang::CallExpr &call, const clang:
   const auto name = decl.getQualifiedNameAsString();
   const bool counted = name == thrustUninitializedCopyN;
   if ((!counted && name != thrustUninitializedCopy) || call.getNumArgs() != 4 || !call.getArg(1)->getType()->isPointerType()) return {};
-  const auto operation = counted ? "thrust::uninitialized_copy_n" : "thrust::uninitialized_copy";
+  const auto *const operation = counted ? "thrust::uninitialized_copy_n" : "thrust::uninitialized_copy";
   const auto *policy = call.getArg(0)->getType().getCanonicalType()->getAsCXXRecordDecl();
   if (!policy || !policy->getQualifiedNameAsString().starts_with("thrust::cuda_cub::"))
     raise(std::string(operation) + " requires a CUDA device execution policy");
@@ -259,7 +266,7 @@ static Opt<MatchedCall> thrustRelocate(const clang::CallExpr &call, const clang:
                       call.getArg(1)->getType()->getPointeeType().getAsString()));
   const auto *expression = &call;
   return MatchedCall{
-      Lowering{[expression, counted](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+      .lower = Lowering{[expression, counted](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
         (void)r.newVar(self.handleExpr(expression->getArg(0), r));
         const auto *sourceExpression = expression->getArg(1);
         const auto *destinationExpression = expression->getArg(3);
@@ -268,7 +275,7 @@ static Opt<MatchedCall> thrustRelocate(const clang::CallExpr &call, const clang:
         const auto pointerType = self.handleType(sourceExpression->getType(), r);
         const auto pointer = pointerType.get<Type::Ptr>();
         if (!pointer) raise("Thrust relocation source did not lower to a pointer");
-        const auto source = r.newVar(self.conform(r, self.handleExpr(sourceExpression, r), pointerType));
+        const auto source = r.newVar(Remapper::conform(r, self.handleExpr(sourceExpression, r), pointerType));
         Opt<Named> destinationHolder;
         Opt<Term::Select> destinationIterator;
         const Term::Any destination = [&]() -> Term::Any {
@@ -300,18 +307,18 @@ static Opt<MatchedCall> thrustRelocate(const clang::CallExpr &call, const clang:
           const auto path = findIterator(*root);
           if (!path) raise("Thrust relocation output has no m_iterator field");
           destinationHolder = holder;
-          auto prefix = Vector<Named>{holder} | concat(*path | take(path->size() - 1)) | to_vector();
-          destinationIterator = self.selectPath(r, prefix, path->back());
+          const auto prefix = Vector<Named>{holder} | concat(*path | take(path->size() - 1)) | to_vector();
+          destinationIterator = Remapper::selectPath(r, prefix, path->back());
           if (destinationIterator->tpe != pointerType)
             raise(fmt::format("Thrust relocation requires identical source and destination iterator pointer types: {} and {}",
                               repr(pointerType), repr(destinationIterator->tpe)));
           return r.newVar(Expr::Alias(*destinationIterator));
         }();
-        const auto count = [&]() {
-          if (counted) return r.newVar(self.conform(r, self.handleExpr(expression->getArg(2), r), Type::IntS64()));
+        const auto count = [&] {
+          if (counted) return r.newVar(Remapper::conform(r, self.handleExpr(expression->getArg(2), r), Type::IntS64()));
           const auto endType = self.handleType(expression->getArg(2)->getType(), r);
           if (endType != pointerType) raise("Thrust relocation requires identical range iterator types");
-          const auto end = r.newVar(self.conform(r, self.handleExpr(expression->getArg(2), r), pointerType));
+          const auto end = r.newVar(Remapper::conform(r, self.handleExpr(expression->getArg(2), r), pointerType));
           const auto beginAddress = r.newVar(Expr::Cast(source, Type::IntS64()));
           const auto endAddress = r.newVar(Expr::Cast(end, Type::IntS64()));
           const auto byteCount = r.newVar(Expr::IntrOp(Intr::Sub(endAddress, beginAddress, Type::IntS64())));
@@ -330,7 +337,7 @@ static Opt<MatchedCall> thrustRelocate(const clang::CallExpr &call, const clang:
         r.push(Stmt::Mut(*destinationIterator, Expr::Alias(advanced)));
         return Expr::Alias(Term::Select(*destinationHolder, {}, destinationHolder->tpe));
       }},
-      false};
+      .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> cubWarpScan(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
@@ -344,9 +351,11 @@ static Opt<MatchedCall> cubWarpScan(const clang::CallExpr &call, const clang::Fu
   }
   const auto *operationRecord = operationType.isNull() ? nullptr : operationType->getAsCXXRecordDecl();
   const auto *operationSpecialisation = llvm::dyn_cast_or_null<clang::ClassTemplateSpecializationDecl>(operationRecord);
-  const auto operationName = operationSpecialisation ? operationSpecialisation->getSpecializedTemplate()->getQualifiedNameAsString()
-                             : operationRecord       ? operationRecord->getQualifiedNameAsString()
-                                                     : std::string{};
+  const auto operationName = [&]() -> std::string {
+    if (operationSpecialisation) return operationSpecialisation->getSpecializedTemplate()->getQualifiedNameAsString();
+    if (operationRecord) return operationRecord->getQualifiedNameAsString();
+    return {};
+  }();
   const bool additive = operationName == "cub::Sum" || (operationName.starts_with("cub::") && operationName.ends_with("::Sum"))
                         || operationName == "cuda::std::plus"
                         || (operationName.starts_with("cuda::std::__") && operationName.ends_with("::plus")) || operationName == "std::plus"
@@ -359,7 +368,7 @@ static Opt<MatchedCall> cubWarpScan(const clang::CallExpr &call, const clang::Fu
     const auto resultType = call.getType().getCanonicalType().getUnqualifiedType();
     const auto exact = [&](const clang::FunctionDecl *candidate) {
       return candidate && candidate->getNumParams() == 2 && !candidate->getReturnType()->isDependentType()
-             && decl.getASTContext().hasSameType(candidate->getReturnType().getCanonicalType().getUnqualifiedType(), resultType);
+             && clang::ASTContext::hasSameType(candidate->getReturnType().getCanonicalType().getUnqualifiedType(), resultType);
     };
     const clang::CXXMethodDecl *fallback = nullptr;
     for (const auto *method : operationRecord->methods()) {
@@ -393,12 +402,13 @@ static Opt<MatchedCall> cubWarpScan(const clang::CallExpr &call, const clang::Fu
   if (!logicalWidth) raise("CUB WarpScan has no valid logical-warp width");
   const auto *expression = member;
   return MatchedCall{
-      Lowering{[expression, logicalWidth, additive, operationCall, operationName](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+      .lower = Lowering{[expression, logicalWidth, additive, operationCall, operationName](Remapper &self,
+                                                                                           Remapper::RemapContext &r) -> Expr::Any {
         const auto result = self.handleType(expression->getType(), r);
         if (additive && !(result.kind().is<TypeKind::Integral>() || result.kind().is<TypeKind::Fractional>()))
           raise("CUB additive WarpScan result is not numeric");
         const auto receiver = r.newVar(self.handleExpr(expression->getImplicitObjectArgument(), r));
-        const auto input = r.newVar(self.conform(r, self.handleExpr(expression->getArg(0), r), result));
+        const auto input = r.newVar(Remapper::conform(r, self.handleExpr(expression->getArg(0), r), result));
         const auto operation = r.newVar(self.handleExpr(expression->getArg(1), r));
         const auto firstLane = r.newVar(self.handleExpr(expression->getArg(2), r));
         const auto offset = r.newVar(self.handleExpr(expression->getArg(3), r));
@@ -448,9 +458,9 @@ static Opt<MatchedCall> cubWarpScan(const clang::CallExpr &call, const clang::Fu
             const auto [name, function] = self.handleCall(operationCall, r);
             if (function->decl.args.size() != 3)
               raise(fmt::format("CUB WarpScan operation expected three lowered arguments, found {}", function->decl.args.size()));
-            const auto receiver = r.newVar(self.conform(r, Expr::Alias(callable), function->decl.args[0].named.tpe));
-            const auto lhs = r.newVar(self.conform(r, Expr::Alias(shuffled), function->decl.args[1].named.tpe));
-            const auto rhs = r.newVar(self.conform(r, Expr::Alias(input), function->decl.args[2].named.tpe));
+            const auto receiver = r.newVar(Remapper::conform(r, Expr::Alias(callable), function->decl.args[0].named.tpe));
+            const auto lhs = r.newVar(Remapper::conform(r, Expr::Alias(shuffled), function->decl.args[1].named.tpe));
+            const auto rhs = r.newVar(Remapper::conform(r, Expr::Alias(input), function->decl.args[2].named.tpe));
             return r.newVar(
                 Expr::Invoke(Type::FnRef(Sym({name})), functionTypeArguments(function->decl), {}, {receiver, lhs, rhs}, result));
           }
@@ -466,7 +476,7 @@ static Opt<MatchedCall> cubWarpScan(const clang::CallExpr &call, const clang::Fu
         r.push(Stmt::Cond(below, {}, {Stmt::Mut(Term::Select(output, {}, result), Expr::Alias(combined))}));
         return Expr::Alias(Term::Select(output, {}, result));
       }},
-      false};
+      .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> cudaWarp(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
@@ -486,8 +496,8 @@ static Opt<MatchedCall> cudaWarp(const clang::CallExpr &call, const clang::Funct
   if (shuffleIndex && (!indexWidth || !validLogicalWarpWidth(*indexWidth))) raise("CUB ShuffleIndex has no valid logical-warp width");
   const auto *expression = &call;
   const bool highLevelShuffleXor = name == "__shfl_xor_sync";
-  return MatchedCall{Lowering{[expression, ballot, any, all, barrier, shuffleXor, highLevelShuffleXor, shuffleIndex, lane, width, cub,
-                               indexWidth](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+  return MatchedCall{.lower = Lowering{[expression, ballot, any, all, barrier, shuffleXor, highLevelShuffleXor, shuffleIndex, lane, width,
+                                        cub, indexWidth](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
                        const auto arguments = lowerArguments(*expression, self, r);
                        if (barrier) return Expr::SpecOp(Spec::GpuSubgroupBarrier(arguments[0]));
                        if (lane) {
@@ -503,7 +513,7 @@ static Opt<MatchedCall> cudaWarp(const clang::CallExpr &call, const clang::Funct
                          return Expr::SpecOp(Spec::GpuVoteAll(mask, predicate));
                        }
                        if (shuffleXor) {
-                         const auto control = r.newVar(self.conform(r, Expr::Alias(arguments[3]), Type::IntU32()));
+                         const auto control = r.newVar(Remapper::conform(r, Expr::Alias(arguments[3]), Type::IntU32()));
                          const auto clamp = highLevelShuffleXor
                                                 ? r.newVar(Expr::IntrOp(Intr::Sub(control, Term::IntU32Const(1), Type::IntU32())))
                                                 : control;
@@ -515,9 +525,9 @@ static Opt<MatchedCall> cudaWarp(const clang::CallExpr &call, const clang::Funct
                                                                  arguments[2], self.handleType(expression->getType(), r)));
                        const auto physicalLane = r.newVar(Expr::SpecOp(Spec::GpuLaneIdx()));
                        const auto laneIndex = r.newVar(Expr::IntrOp(Intr::BAnd(physicalLane, Term::IntU32Const(31), Type::IntU32())));
-                       return Expr::IntrOp(Intr::BSL(Term::IntU32Const(0xFFFFFFFFu), laneIndex, Type::IntU32()));
+                       return Expr::IntrOp(Intr::BSL(Term::IntU32Const(0xFFFFFFFFU), laneIndex, Type::IntU32()));
                      }},
-                     false};
+                     .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> cudaBarrier(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
@@ -531,14 +541,15 @@ static Opt<MatchedCall> cudaBarrier(const clang::CallExpr &call, const clang::Fu
   if (countedBarrier) raise("Counted CUDA barriers are not supported in package code");
   if (call.getNumArgs() != 0) raise("CUDA barrier or fence has an unsupported arity");
   const auto *expression = &call;
-  return MatchedCall{Lowering{[expression, localFence, globalFence, allFence](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
-                       (void)lowerArguments(*expression, self, r);
-                       if (localFence) return Expr::SpecOp(Spec::GpuFenceLocal());
-                       if (globalFence) return Expr::SpecOp(Spec::GpuFenceGlobal());
-                       if (allFence) return Expr::SpecOp(Spec::GpuFenceAll());
-                       return Expr::SpecOp(Spec::GpuBarrierLocal());
-                     }},
-                     false};
+  return MatchedCall{.lower =
+                         Lowering{[expression, localFence, globalFence, allFence](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+                           (void)lowerArguments(*expression, self, r);
+                           if (localFence) return Expr::SpecOp(Spec::GpuFenceLocal());
+                           if (globalFence) return Expr::SpecOp(Spec::GpuFenceGlobal());
+                           if (allFence) return Expr::SpecOp(Spec::GpuFenceAll());
+                           return Expr::SpecOp(Spec::GpuBarrierLocal());
+                         }},
+                     .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> cudaSynchronise(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
@@ -547,26 +558,26 @@ static Opt<MatchedCall> cudaSynchronise(const clang::CallExpr &call, const clang
   const bool device = name == "cudaDeviceSynchronize" && call.getNumArgs() == 0;
   if (!stream && !device) return {};
   const auto *expression = &call;
-  return MatchedCall{Lowering{[expression](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+  return MatchedCall{.lower = Lowering{[expression](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
                        (void)lowerArguments(*expression, self, r);
                        if (expression->getNumArgs() == 1
                            && !expression->getArg(0)->isNullPointerConstant(self.context, clang::Expr::NPC_ValueDependentIsNotNull))
                          raise("Non-default CUDA streams are not supported in package code");
                        (void)r.newVar(Expr::SpecOp(Spec::RemoteSync(packageContext())));
-                       return self.integralConstOfType(self.handleType(expression->getType(), r), 0);
+                       return Remapper::integralConstOfType(self.handleType(expression->getType(), r), 0);
                      }},
-                     false};
+                     .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> cudaErrorState(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
   const auto name = decl.getQualifiedNameAsString();
   if (call.getNumArgs() != 0 || (name != "cudaPeekAtLastError" && name != "cudaGetLastError")) return {};
   const auto *expression = &call;
-  return MatchedCall{Lowering{[expression](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+  return MatchedCall{.lower = Lowering{[expression](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
                        (void)lowerArguments(*expression, self, r);
-                       return self.integralConstOfType(self.handleType(expression->getType(), r), 0);
+                       return Remapper::integralConstOfType(self.handleType(expression->getType(), r), 0);
                      }},
-                     false};
+                     .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> thrustTripleChevronLaunch(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
@@ -577,7 +588,7 @@ static Opt<MatchedCall> thrustTripleChevronLaunch(const clang::CallExpr &call, c
   if (!owner.ends_with("thrust::cuda_cub::launcher::triple_chevron") && owner != "thrust::cuda_cub::launcher::triple_chevron") return {};
   const auto *expression = member;
   return MatchedCall{
-      Lowering{[expression](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+      .lower = Lowering{[expression](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
         const auto receiver = r.newVar(self.handleExpr(expression->getImplicitObjectArgument(), r));
         const auto selected = receiver.get<Term::Select>();
         if (!selected) raise("Thrust triple-chevron launcher receiver is not selectable");
@@ -613,7 +624,7 @@ static Opt<MatchedCall> thrustTripleChevronLaunch(const clang::CallExpr &call, c
         };
         const auto grid = field("grid");
         const auto block = field("block");
-        const auto shared = r.newVar(self.conform(r, Expr::Alias(field("shared_mem")), Type::IntU32()));
+        const auto shared = r.newVar(Remapper::conform(r, Expr::Alias(field("shared_mem")), Type::IntU32()));
         const auto *kernelExpression = expression->getArg(0)->IgnoreParenImpCasts();
         if (const auto *address = llvm::dyn_cast<clang::UnaryOperator>(kernelExpression);
             address && address->getOpcode() == clang::UO_AddrOf)
@@ -648,16 +659,16 @@ static Opt<MatchedCall> thrustTripleChevronLaunch(const clang::CallExpr &call, c
         launchArguments.reserve(expression->getNumArgs() - 1);
         for (unsigned i = 1; i < expression->getNumArgs(); ++i) {
           auto lowered = self.handleExpr(expression->getArg(i), r);
-          if (kernelArgumentTypes) lowered = self.conform(r, std::move(lowered), (*kernelArgumentTypes)[i - 1]);
-          auto argument = r.newVar(std::move(lowered));
+          if (kernelArgumentTypes) lowered = Remapper::conform(r, std::move(lowered), (*kernelArgumentTypes)[i - 1]);
+          const auto argument = r.newVar(std::move(lowered));
           launchArguments.emplace_back(argument);
         }
         (void)r.newVar(
             Expr::SpecOp(Spec::RemoteLaunch(packageContext(), kernel, {}, dimension(grid, "x"), dimension(grid, "y"), dimension(grid, "z"),
                                             dimension(block, "x"), dimension(block, "y"), dimension(block, "z"), shared, launchArguments)));
-        return self.integralConstOfType(self.handleType(expression->getType(), r), 0);
+        return Remapper::integralConstOfType(self.handleType(expression->getType(), r), 0);
       }},
-      false};
+      .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> cudaRuntime(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
@@ -674,50 +685,53 @@ static Opt<MatchedCall> cudaHostQuery(const clang::CallExpr &call, const clang::
   if ((!ptxVersion && !occupancy && !deviceOrdinal && !deviceAttribute) || call.getNumArgs() < 1) return {};
   const auto *expression = &call;
   return MatchedCall{
-      Lowering{[expression, ptxVersion, occupancy, deviceOrdinal, deviceAttribute, attribute](Remapper &self,
-                                                                                              Remapper::RemapContext &r) -> Expr::Any {
+      .lower = Lowering{[expression, ptxVersion, occupancy, deviceOrdinal, deviceAttribute,
+                         attribute](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
         const auto arguments = lowerArguments(*expression, self, r);
         const auto pointer = arguments.front().tpe().get<Type::Ptr>();
-        const auto outputType = pointer                   ? Opt<Type::Any>{pointer->comp}
-                                : ptxVersion || occupancy ? Opt<Type::Any>{arguments.front().tpe()}
-                                                          : std::nullopt;
+        const auto outputType = [&]() -> Opt<Type::Any> {
+          if (pointer) return Opt<Type::Any>{pointer->comp};
+          if (ptxVersion || occupancy) return Opt<Type::Any>{arguments.front().tpe()};
+          return std::nullopt;
+        }();
         if (outputType) {
           Expr::Any queried = Expr::Alias(Term::Poison(*outputType));
           if (ptxVersion && self.cudaProducerArch) {
-            queried = self.integralConstOfType(*outputType, *self.cudaProducerArch);
+            queried = Remapper::integralConstOfType(*outputType, *self.cudaProducerArch);
           } else if (ptxVersion) {
             const auto major = r.newVar(Expr::ForeignCall("polyrt_device_cuda_architecture_major", {packageContext()}, Type::IntU64()));
             const auto minor = r.newVar(Expr::ForeignCall("polyrt_device_cuda_architecture_minor", {packageContext()}, Type::IntU64()));
             const auto hundreds = r.newVar(Expr::IntrOp(Intr::Mul(major, Term::IntU64Const(100), Type::IntU64())));
             const auto tens = r.newVar(Expr::IntrOp(Intr::Mul(minor, Term::IntU64Const(10), Type::IntU64())));
-            queried = self.conform(r, Expr::IntrOp(Intr::Add(hundreds, tens, Type::IntU64())), *outputType);
+            queried = Remapper::conform(r, Expr::IntrOp(Intr::Add(hundreds, tens, Type::IntU64())), *outputType);
           } else if (occupancy) {
             if (expression->getDirectCallee()->getQualifiedNameAsString() == "cudaOccupancyMaxActiveBlocksPerMultiprocessor") {
               raise("cudaOccupancyMaxActiveBlocksPerMultiprocessor requires a target-specific occupancy query");
             }
             // One resident block is the conservative target-independent lower bound for a launchable kernel.
-            queried = self.integralConstOfType(*outputType, 1);
+            queried = Remapper::integralConstOfType(*outputType, 1);
           } else if (deviceOrdinal) {
-            queried = self.integralConstOfType(*outputType, 0);
+            queried = Remapper::integralConstOfType(*outputType, 0);
           }
           if (deviceAttribute) {
             if (!attribute) raise("CUDA device attribute is not a named constant");
-            if (*attribute == "cudaDevAttrWarpSize") queried = self.integralConstOfType(*outputType, 32);
+            if (*attribute == "cudaDevAttrWarpSize") queried = Remapper::integralConstOfType(*outputType, 32);
             else if (*attribute == "cudaDevAttrMultiProcessorCount")
-              queried = self.conform(r, Expr::ForeignCall("polyrt_device_compute_units", {packageContext()}, Type::IntU64()), *outputType);
-            else if (*attribute == "cudaDevAttrMaxSharedMemoryPerBlock" || *attribute == "cudaDevAttrMaxSharedMemoryPerBlockOptin")
               queried =
-                  self.conform(r, Expr::ForeignCall("polyrt_device_local_memory_bytes", {packageContext()}, Type::IntU64()), *outputType);
+                  Remapper::conform(r, Expr::ForeignCall("polyrt_device_compute_units", {packageContext()}, Type::IntU64()), *outputType);
+            else if (*attribute == "cudaDevAttrMaxSharedMemoryPerBlock" || *attribute == "cudaDevAttrMaxSharedMemoryPerBlockOptin")
+              queried = Remapper::conform(r, Expr::ForeignCall("polyrt_device_local_memory_bytes", {packageContext()}, Type::IntU64()),
+                                          *outputType);
             else if (*attribute == "cudaDevAttrMaxThreadsPerBlock")
-              queried = self.conform(r, Expr::ForeignCall("polyrt_device_max_threads_per_block_u64", {packageContext()}, Type::IntU64()),
-                                     *outputType);
-            else if (*attribute == "cudaDevAttrMaxGridDimX") queried = self.integralConstOfType(*outputType, 0x7fffffff);
+              queried = Remapper::conform(
+                  r, Expr::ForeignCall("polyrt_device_max_threads_per_block_u64", {packageContext()}, Type::IntU64()), *outputType);
+            else if (*attribute == "cudaDevAttrMaxGridDimX") queried = Remapper::integralConstOfType(*outputType, 0x7fffffff);
             else if (*attribute == "cudaDevAttrComputeCapabilityMajor")
-              queried = self.conform(r, Expr::ForeignCall("polyrt_device_cuda_architecture_major", {packageContext()}, Type::IntU64()),
-                                     *outputType);
+              queried = Remapper::conform(r, Expr::ForeignCall("polyrt_device_cuda_architecture_major", {packageContext()}, Type::IntU64()),
+                                          *outputType);
             else if (*attribute == "cudaDevAttrComputeCapabilityMinor")
-              queried = self.conform(r, Expr::ForeignCall("polyrt_device_cuda_architecture_minor", {packageContext()}, Type::IntU64()),
-                                     *outputType);
+              queried = Remapper::conform(r, Expr::ForeignCall("polyrt_device_cuda_architecture_minor", {packageContext()}, Type::IntU64()),
+                                          *outputType);
             else raise("Unsupported CUDA device attribute query: " + *attribute);
           }
           const auto stored = r.newVar(queried);
@@ -726,9 +740,9 @@ static Opt<MatchedCall> cudaHostQuery(const clang::CallExpr &call, const clang::
           if (pointer) r.push(Stmt::Update(*base, Term::IntU64Const(0), stored));
           else r.push(Stmt::Mut(*base, Expr::Alias(stored)));
         }
-        return self.integralConstOfType(self.handleType(expression->getType(), r), 0);
+        return Remapper::integralConstOfType(self.handleType(expression->getType(), r), 0);
       }},
-      false};
+      .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> cudaIgnoredHelper(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
@@ -742,8 +756,9 @@ static Opt<MatchedCall> cudaIgnoredHelper(const clang::CallExpr &call, const cla
   const bool sink = name == thrustTerminateWithMessage || name == cubVaPrintf || printInfo;
   if (!error && !sink) return {};
   const auto *expression = &call;
-  return MatchedCall{Lowering{[expression](Remapper &self, Remapper::RemapContext &r) { return unitAfterArguments(*expression, self, r); }},
-                     false};
+  return MatchedCall{
+      .lower = Lowering{[expression](Remapper &self, Remapper::RemapContext &r) { return unitAfterArguments(*expression, self, r); }},
+      .preservesExceptionMetadata = false};
 }
 
 Vector<CallPrism> cudaPrisms() {

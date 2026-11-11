@@ -994,7 +994,7 @@ class SpecialisationSuite extends munit.FunSuite {
       "erased.alias.launcher",
       args = List(callableArg),
       body = List(
-        p.Stmt.Var(local, Some(p.Expr.Alias(selectT(callableArg.named))), isMutable = false),
+        p.Stmt.Var(local, Some(p.Expr.Alias(selectT(callableArg.named)))),
         p.Stmt.Var(
           named("launch", p.Type.Unit0),
           Some(
@@ -1200,7 +1200,7 @@ class SpecialisationSuite extends munit.FunSuite {
       args = List(arg("value", argumentType)),
       tpeVars = List("Unused"),
       body = List(
-        p.Stmt.Var(named("marker"), Some(p.Expr.Alias(p.Term.IntS32Const(marker))), isMutable = false),
+        p.Stmt.Var(named("marker"), Some(p.Expr.Alias(p.Term.IntS32Const(marker)))),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       )
     )

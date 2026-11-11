@@ -61,8 +61,8 @@ object Clang {
     """(?s)\b([A-Za-z_][A-Za-z0-9_]*)\s*\([^;]*?\)\s+CL_(?:API|EXT)_SUFFIX__VERSION_([0-9])_([0-9])(?:_DEPRECATED)?\s*;""".r
   private val LeafDeclKinds = Set("TypedefDecl", "EnumDecl", "RecordDecl", "FunctionDecl")
 
-  private def withTempFile[A](prefix: String, suffix: String)(use: Path => A): A = {
-    val p = Files.createTempFile(prefix, suffix)
+  private def withTempFile[A](prefix: String)(use: Path => A): A = {
+    val p = Files.createTempFile(prefix, ".c")
     p.toFile.deleteOnExit()
     use(p)
   }
@@ -89,7 +89,7 @@ object Clang {
     // XXX Prepend stddef/stdint/stdbool so the filtered blob still parses on its own.
     val sourceText = "#include <stddef.h>\n#include <stdint.h>\n#include <stdbool.h>\n" + kept.mkString("\n") + "\n"
 
-    withTempFile("ewgen-ast-blob-", ".c") { astBlob =>
+    withTempFile("ewgen-ast-blob-") { astBlob =>
       Files.writeString(astBlob, stripCommentsPreserveLines(sourceText), StandardCharsets.UTF_8)
       val (rawFns, tys) = dumpAst(astBlob, flags, group.symPrefixes)
       val view          = SourceView(sourceText, sourceText.linesIterator.toVector)
@@ -173,7 +173,7 @@ object Clang {
   }
 
   private def runPreprocessor(headers: Vector[String], flags: Vector[String], extra: Vector[String]): String =
-    withTempFile("ewgen-", ".c") { wrapper =>
+    withTempFile("ewgen-") { wrapper =>
       val body = headers.map(h => s"""#include "$h"""").mkString("\n") + "\n"
       Files.writeString(wrapper, body, StandardCharsets.UTF_8)
       runProc(Vector("clang", "-E") ++ extra ++ flags ++ Vector(wrapper.toString))
@@ -275,7 +275,7 @@ object Clang {
       )
       val collected = kind match {
         case "FunctionDecl" if matched && inSourceSet && !node.isImplicit.getOrElse(false) =>
-          val qt = node.`type`.map(_.qualType).getOrElse("")
+          val qt = node.`type`.fold("")(_.qualType)
           next.copy(fns = next.fns :+ FunctionDecl(name, qt, span, "", "", None))
         case "TypedefDecl" | "EnumDecl" | "RecordDecl" if inSourceSet && begin > 0 && end >= begin =>
           next.copy(tys = next.tys :+ TypeDecl(newFile, span))

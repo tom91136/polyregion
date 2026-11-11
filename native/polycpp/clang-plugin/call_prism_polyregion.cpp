@@ -1,3 +1,4 @@
+#include <cstddef>
 #include <string_view>
 
 #include "clang/AST/Decl.h"
@@ -15,7 +16,7 @@ static Opt<MatchedCall> polyregionIntrinsic(const clang::CallExpr &call, const c
 
   const auto builtinName = assertion ? std::string{"assert"} : "gpu_" + qualifiedName.substr(prefix.size());
   const auto *expression = &call;
-  return MatchedCall{Lowering{[expression, builtinName](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+  return MatchedCall{.lower = Lowering{[expression, builtinName](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
                        const auto args = lowerArguments(*expression, self, r);
                        const auto resultType = [&] { return self.handleType(expression->getType(), r); };
                        const auto poison = [&] { return Expr::Alias(Term::Poison(resultType())).widen(); };
@@ -68,7 +69,7 @@ static Opt<MatchedCall> polyregionIntrinsic(const clang::CallExpr &call, const c
                        if (builtinName == "assert") return spec(2, [&] { return Spec::Assert(args[0], args[1]); });
                        return poison();
                      }},
-                     false};
+                     .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> usmHostAccess(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
@@ -77,22 +78,22 @@ static Opt<MatchedCall> usmHostAccess(const clang::CallExpr &call, const clang::
   const bool release = name == "polyrt_device_usm_host_release" && call.getNumArgs() == 5;
   if (!acquire && !release) return {};
   const auto *expression = &call;
-  return MatchedCall{Lowering{[expression, acquire, name](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+  return MatchedCall{.lower = Lowering{[expression, acquire, name](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
                        const auto raw = Type::Ptr(Type::IntU8(), TypeSpace::Global()).widen();
                        // The source-level context is polyrt_context_current(). Package programs instead receive their
                        // execution context through the package ABI, so do not lower the source expression separately.
-                       const auto remote = r.newVar(self.conform(r, self.handleExpr(expression->getArg(1), r), raw));
+                       const auto remote = r.newVar(Remapper::conform(r, self.handleExpr(expression->getArg(1), r), raw));
                        if (acquire) {
-                         const auto bytes = r.newVar(self.conform(r, self.handleExpr(expression->getArg(2), r), Type::IntU64()));
-                         const auto mode = r.newVar(self.conform(r, self.handleExpr(expression->getArg(3), r), Type::IntS32()));
+                         const auto bytes = r.newVar(Remapper::conform(r, self.handleExpr(expression->getArg(2), r), Type::IntU64()));
+                         const auto mode = r.newVar(Remapper::conform(r, self.handleExpr(expression->getArg(3), r), Type::IntS32()));
                          return Expr::ForeignCall(name, {packageContext(), remote, bytes, mode}, self.handleType(expression->getType(), r));
                        }
-                       const auto local = r.newVar(self.conform(r, self.handleExpr(expression->getArg(2), r), raw));
-                       const auto bytes = r.newVar(self.conform(r, self.handleExpr(expression->getArg(3), r), Type::IntU64()));
-                       const auto mode = r.newVar(self.conform(r, self.handleExpr(expression->getArg(4), r), Type::IntS32()));
+                       const auto local = r.newVar(Remapper::conform(r, self.handleExpr(expression->getArg(2), r), raw));
+                       const auto bytes = r.newVar(Remapper::conform(r, self.handleExpr(expression->getArg(3), r), Type::IntU64()));
+                       const auto mode = r.newVar(Remapper::conform(r, self.handleExpr(expression->getArg(4), r), Type::IntS32()));
                        return Expr::ForeignCall(name, {packageContext(), remote, local, bytes, mode}, Type::Unit0());
                      }},
-                     false};
+                     .preservesExceptionMetadata = false};
 }
 
 Vector<CallPrism> polyregionPrisms() { return {polyregionIntrinsic, usmHostAccess}; }

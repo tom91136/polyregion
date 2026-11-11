@@ -56,13 +56,13 @@ private:
 
 public:
   void attempt(const std::optional<Device> &on, Attempt a) {
-    const std::lock_guard lock(mutex);
+    const std::scoped_lock lock(mutex);
     if (on) device = on;
     attempts.push_back(std::move(a));
   }
 
   std::string line() const {
-    const std::lock_guard lock(mutex);
+    const std::scoped_lock lock(mutex);
     constexpr std::string_view prefix = "polyrt: no compatible target: ";
     const auto name = device ? device->name : std::string{};
     const auto lacks = detailOf("lacks");
@@ -78,7 +78,7 @@ public:
   }
 
   std::string record() const {
-    const std::lock_guard lock(mutex);
+    const std::scoped_lock lock(mutex);
     const auto dev = device ? "{\"platform\":" + quote(device->platform) + ",\"name\":" + quote(device->name)
                                   + ",\"kind\":" + quote(device->kind) + ",\"format\":" + quote(device->format) + "}"
                             : std::string("null");

@@ -1,12 +1,19 @@
 #include "rewriter.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <cstdint>
 #include <cstdlib>
+#include <functional>
 #include <future>
+#include <iterator>
 #include <memory>
 #include <optional>
+#include <string>
+#include <type_traits>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "flang/Optimizer/Dialect/FIROps.h"
@@ -202,8 +209,8 @@ class Binder {
           }
           if (!extents.empty()) {
             Value bytes = intConst(B, i64Ty(B), elemBytes);
-            for (auto extent : extents) {
-              auto extI64 = fir::ConvertOp::create(B, uLoc(B), i64Ty(B), extent).getResult();
+            for (const auto extent : extents) {
+              const auto extI64 = fir::ConvertOp::create(B, uLoc(B), i64Ty(B), extent).getResult();
               bytes = LLVM::MulOp::create(B, uLoc(B), bytes, extI64).getResult();
             }
             witnesses.push_back({llvmPtr, bytes});
@@ -264,7 +271,7 @@ class Binder {
             .dependent = {},
             .temporary = {},
         });
-      } else if (auto heapTy = llvm::dyn_cast<fir::HeapType>(val.getType())) {
+      } else if (const auto heapTy = llvm::dyn_cast<fir::HeapType>(val.getType())) {
         const auto refTy = fir::ReferenceType::get(heapTy.getEleTy());
         const auto refVal = fir::ConvertOp::create(B, uLoc(B), refTy, val).getResult();
         bindRef(B, refVal, layout, fields, false);
@@ -296,7 +303,7 @@ public:
                       captureFields | map([](const auto &f) { return f.fieldPtr.getType(); }) | prepend(preludeTy) | to_vector()),
         reductionFields(region.reductions ^ map([&](const auto &rd) { return ReductionField{rd, bindScalarRefOrBox(B, rd.value)}; })) {}
 
-  Type structType() const { return captureMirror.ty; }
+  [[nodiscard]] Type structType() const { return captureMirror.ty; }
 
   Value createCapture(OpBuilder &B, ModuleOp &M) const {
     const auto annotationConst = strConst(B, M, POLYREFLECT_TRACK_ANNOTATION);
@@ -351,32 +358,32 @@ namespace {
 // finite/infinity value of the type so any actual data wins on first comparison.
 mlir::Value reduceIdentity(OpBuilder &bb, mlir::Type ty, fir::ReduceOperationEnum op) {
   const auto loc1 = bb.getUnknownLoc();
-  if (auto ft = mlir::dyn_cast<mlir::FloatType>(ty)) {
+  if (const auto ft = mlir::dyn_cast<mlir::FloatType>(ty)) {
     switch (op) {
       case fir::ReduceOperationEnum::Add: return mlir::arith::ConstantOp::create(bb, loc1, bb.getFloatAttr(ft, 0.0));
       case fir::ReduceOperationEnum::Multiply: return mlir::arith::ConstantOp::create(bb, loc1, bb.getFloatAttr(ft, 1.0));
       case fir::ReduceOperationEnum::MAX: {
-        llvm::APFloat v = llvm::APFloat::getInf(ft.getFloatSemantics(), /*Negative=*/true);
+        const llvm::APFloat v = llvm::APFloat::getInf(ft.getFloatSemantics(), /*Negative=*/true);
         return mlir::arith::ConstantOp::create(bb, loc1, bb.getFloatAttr(ft, v));
       }
       case fir::ReduceOperationEnum::MIN: {
-        llvm::APFloat v = llvm::APFloat::getInf(ft.getFloatSemantics(), /*Negative=*/false);
+        const llvm::APFloat v = llvm::APFloat::getInf(ft.getFloatSemantics(), /*Negative=*/false);
         return mlir::arith::ConstantOp::create(bb, loc1, bb.getFloatAttr(ft, v));
       }
       default: break;
     }
   }
-  auto it = mlir::cast<mlir::IntegerType>(ty);
+  const auto it = mlir::cast<mlir::IntegerType>(ty);
   const auto bits = it.getWidth();
   switch (op) {
     case fir::ReduceOperationEnum::Add: return mlir::arith::ConstantOp::create(bb, loc1, bb.getIntegerAttr(it, 0));
     case fir::ReduceOperationEnum::Multiply: return mlir::arith::ConstantOp::create(bb, loc1, bb.getIntegerAttr(it, 1));
     case fir::ReduceOperationEnum::MAX: {
-      auto v = llvm::APInt::getSignedMinValue(bits);
+      const auto v = llvm::APInt::getSignedMinValue(bits);
       return mlir::arith::ConstantOp::create(bb, loc1, bb.getIntegerAttr(it, v));
     }
     case fir::ReduceOperationEnum::MIN: {
-      auto v = llvm::APInt::getSignedMaxValue(bits);
+      const auto v = llvm::APInt::getSignedMaxValue(bits);
       return mlir::arith::ConstantOp::create(bb, loc1, bb.getIntegerAttr(it, v));
     }
     default: break;
@@ -500,7 +507,7 @@ public:
   // lowers the loop to the linked core package call; the returned i1 is false at runtime when the package call could not run
   Value invokeCore(OpBuilder &B, clang::DiagnosticsEngine &diag, CoreSite &site, fir::DoLoopOp &doLoop,
                    std::vector<std::string> &bitcodeFiles) {
-    DataLayout L(M);
+    const DataLayout L(M);
     const auto &moduleId = site.moduleId;
     const auto &diagLoc = site.diagLoc;
     const auto &entryName = site.entryName;
@@ -660,7 +667,7 @@ public:
                        const auto [indirections, componentSize] = countIndirectionsAndComponentSize(m.name.tpe, table);
                        const auto ptrToTypeLayout =
                            polyast::extractComponent(m.name.tpe) ^ flat_map([&](auto t) {
-                             return primitiveTypeLayouts ^ get_maybe(t) ^ map([&](auto ptl) { return ptl.gep(B0); }) ^ or_else([&]() {
+                             return primitiveTypeLayouts ^ get_maybe(t) ^ map([&](auto ptl) { return ptl.gep(B0); }) ^ or_else([&] {
                                       return t.template get<polyast::Type::Struct>() ^ flat_map([&](const auto &s) {
                                                return structNameToTypeLayoutIdx //
                                                       ^ get_maybe(fqcn(s.name)) //
@@ -678,8 +685,8 @@ public:
                            ptrToTypeLayout ^ get_or_else(nullConst(B0)),
                            intConst(B0, i64Ty(B0), 0), /* readOnly: Fortran captures always synced back */
                            fbm                         //
-                               ^ filter([&](const auto &field, const auto &) { return field == m.name; })                      //
-                               ^ fold([](const auto &, const auto &v) -> Value { return v; }, [&]() { return nullConst(B0); }) //
+                               ^ filter([&](const auto &field, const auto &) { return field == m.name; })                    //
+                               ^ fold([](const auto &, const auto &v) -> Value { return v; }, [&] { return nullConst(B0); }) //
                        };
                      });
             });
@@ -744,18 +751,18 @@ public:
 
     binder.recordTemporariesAndDependents(B);
 
-    auto capture = binder.createCapture(B, M);
-    auto reductionsCount = binder.createReductionsCount(B);
-    auto reductions = binder.createReductions(B);
-    auto dispatch = dco.dispatch(B,
-                                 doLoop.getLowerBound(), //
-                                 doLoop.getUpperBound(), //
-                                 doLoop.getStep(),       //
-                                 kind,                   //
-                                 globalBundle.gep(B),    //
-                                 reductionsCount,        //
-                                 reductions,             //
-                                 capture);
+    const auto capture = binder.createCapture(B, M);
+    const auto reductionsCount = binder.createReductionsCount(B);
+    const auto reductions = binder.createReductions(B);
+    const auto dispatch = dco.dispatch(B,
+                                       doLoop.getLowerBound(), //
+                                       doLoop.getUpperBound(), //
+                                       doLoop.getStep(),       //
+                                       kind,                   //
+                                       globalBundle.gep(B),    //
+                                       reductionsCount,        //
+                                       reductions,             //
+                                       capture);
     auto noDispatch = arith::XOrIOp::create(B, uLoc(B), dispatch, boolConst(B, true));
     auto noDispatchIf = fir::IfOp::create(B, uLoc(B), noDispatch, true);
     {
@@ -881,7 +888,7 @@ void privatise(fir::DoLoopOp loop, fir::AllocaOp storage, Storage kind) {
     for (auto *user : aliases[i].getUsers()) {
       if (llvm::isa<fir::DeclareOp, hlfir::DeclareOp>(user)) {
         if (hasAliasingAttrs(user)) return;
-        for (auto result : user->getResults())
+        for (const auto result : user->getResults())
           aliases.insert(result);
       } else if (auto convert = llvm::dyn_cast<fir::ConvertOp>(user)) aliases.insert(convert.getResult());
       else {
@@ -916,7 +923,7 @@ void privatise(fir::DoLoopOp loop, fir::AllocaOp storage, Storage kind) {
   }
 
   OpBuilder B(loop.getBody(), loop.getBody()->begin());
-  Value local = fir::AllocaOp::create(B, storage.getLoc(), storage.getInType()).getResult();
+  const Value local = fir::AllocaOp::create(B, storage.getLoc(), storage.getInType()).getResult();
   for (auto alias : aliases) {
     const auto replacement =
         alias.getType() == local.getType() ? local : fir::ConvertOp::create(B, storage.getLoc(), alias.getType(), local).getResult();
@@ -933,7 +940,7 @@ void privatise(fir::DoLoopOp loop, fir::AllocaOp storage, Storage kind) {
       if (auto load = llvm::dyn_cast<fir::LoadOp>(user)) loads.push_back(load);
       else if (llvm::isa<fir::DeclareOp, hlfir::DeclareOp, fir::ConvertOp>(user)) {
         forwarding.push_back(user);
-        for (auto result : user->getResults())
+        for (const auto result : user->getResults())
           pending.push_back(result);
       } else if (auto store = llvm::dyn_cast<fir::StoreOp>(user); store && !definition && store.getMemref() == value) definition = store;
       else return;
@@ -968,7 +975,7 @@ void privatiseLoopStorage(fir::DoLoopOp loop) {
     auto alloca = outsideAlloca(store.getMemref());
     if (alloca && llvm::isa<IntegerType>(alloca.getInType()) && !(indices ^ contains(alloca))) indices.push_back(alloca);
   });
-  for (auto storage : indices)
+  for (const auto storage : indices)
     privatise(loop, storage, Storage::Index);
 
   llvm::SmallVector<fir::AllocaOp> scalars;
@@ -980,7 +987,7 @@ void privatiseLoopStorage(fir::DoLoopOp loop) {
     if (auto store = llvm::dyn_cast<fir::StoreOp>(op)) collect(store.getMemref());
     else if (auto assign = llvm::dyn_cast<hlfir::AssignOp>(op)) collect(assign.getLhs());
   });
-  for (auto storage : scalars)
+  for (const auto storage : scalars)
     privatise(loop, storage, Storage::Scalar);
 }
 
@@ -1015,10 +1022,10 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
       llvm::DenseSet<mlir::func::FuncOp> seen;
       llvm::SmallVector<mlir::func::FuncOp> stack(callGraph[start].begin(), callGraph[start].end());
       while (!stack.empty()) {
-        auto f = stack.pop_back_val();
+        const auto f = stack.pop_back_val();
         if (f == start) return true;
         if (!seen.insert(f).second) continue;
-        for (auto g : callGraph[f])
+        for (const auto g : callGraph[f])
           stack.push_back(g);
       }
       return false;
@@ -1035,7 +1042,7 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
       });
     });
     for (auto [call, callee] : work) {
-      if (recursive.count(callee)) continue;
+      if (recursive ^ contains(callee)) continue;
       auto &calleeBody = callee.getBody();
       if (calleeBody.empty() || calleeBody.getBlocks().size() != 1) continue;
       OpBuilder builder(call);
@@ -1078,9 +1085,9 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
     // SMA mirroring); each thread writes its slot, host folds after. Supported ops: +, *, min, max.
     llvm::SmallVector<fir::ReduceOperationEnum> reduceOps;
     if (hasReduce) {
-      if (auto attrs = loopOp.getReduceAttrsAttr()) {
+      if (const auto attrs = loopOp.getReduceAttrsAttr()) {
         for (auto a : attrs.getValue()) {
-          auto ra = mlir::dyn_cast<fir::ReduceAttr>(a);
+          const auto ra = mlir::dyn_cast<fir::ReduceAttr>(a);
           if (!ra) {
             emit(diag, clang::DiagnosticsEngine::Error,
                  POLYREGION_DIAG_POLYFC "missing reduce attribute on `do concurrent ... reduce(...)`");
@@ -1110,18 +1117,18 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
     if (hasReduce) {
       idxOne = idxConst(B, 1);
       idxZero = idxConst(B, 0);
-      auto span = mlir::arith::AddIOp::create(B, loc, mlir::arith::SubIOp::create(B, loc, ubV, lbV), stepV).getResult();
+      const auto span = mlir::arith::AddIOp::create(B, loc, mlir::arith::SubIOp::create(B, loc, ubV, lbV), stepV).getResult();
       numIters = mlir::arith::MaxSIOp::create(B, loc, mlir::arith::DivSIOp::create(B, loc, span, stepV), idxZero).getResult();
       shapeVal = fir::ShapeOp::create(B, loc, mlir::ValueRange{numIters}).getResult();
-      for (auto rv : reduceVarsSnapshot) {
-        auto refTy = mlir::cast<fir::ReferenceType>(rv.getType());
+      for (const auto rv : reduceVarsSnapshot) {
+        const auto refTy = mlir::cast<fir::ReferenceType>(rv.getType());
         auto refEleTy = refTy.getEleTy();
         // XXX For allocatables, scratch holds scalar T (FIR rejects array<box<heap<T>>>) and we
         // rebox per-thread inside the loop body.
         mlir::Type scalarTy = refEleTy;
         bool isAllocatable = false;
-        if (auto boxTy = mlir::dyn_cast<fir::BoxType>(refEleTy))
-          if (auto heapTy = mlir::dyn_cast<fir::HeapType>(boxTy.getEleTy())) {
+        if (const auto boxTy = mlir::dyn_cast<fir::BoxType>(refEleTy))
+          if (const auto heapTy = mlir::dyn_cast<fir::HeapType>(boxTy.getEleTy())) {
             scalarTy = heapTy.getEleTy();
             isAllocatable = true;
           }
@@ -1131,14 +1138,14 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
           resultSlots.push_back(fir::AllocaOp::create(B, loc, scalarTy).getResult());
           continue;
         }
-        auto arrTy = fir::SequenceType::get({fir::SequenceType::getUnknownExtent()}, scalarTy);
-        auto boxArrTy = fir::BoxType::get(arrTy);
-        auto scratchHeap =
+        const auto arrTy = fir::SequenceType::get({fir::SequenceType::getUnknownExtent()}, scalarTy);
+        const auto boxArrTy = fir::BoxType::get(arrTy);
+        const auto scratchHeap =
             fir::AllocMemOp::create(B, loc, arrTy, llvm::StringRef{}, llvm::StringRef{}, mlir::ValueRange{}, mlir::ValueRange{numIters})
                 .getResult();
         // XXX Convert fir.heap -> fir.ref so the Binder's ref-type path accepts it at O3.
-        auto scratchRef = fir::ConvertOp::create(B, loc, fir::ReferenceType::get(arrTy), scratchHeap).getResult();
-        auto scratchBox = fir::EmboxOp::create(B, loc, boxArrTy, scratchRef, shapeVal).getResult();
+        const auto scratchRef = fir::ConvertOp::create(B, loc, fir::ReferenceType::get(arrTy), scratchHeap).getResult();
+        const auto scratchBox = fir::EmboxOp::create(B, loc, boxArrTy, scratchRef, shapeVal).getResult();
         // XXX identity-init happens in-kernel (see below); host-side init would race SMA's
         // mirror cache when the scratch host address gets reused across outer iterations.
         scratchBoxes.push_back(scratchBox);
@@ -1146,7 +1153,7 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
       }
     }
     llvm::SmallVector<mlir::Attribute> reduceAttrs;
-    if (auto attrs = loopOp.getReduceAttrsAttr()) reduceAttrs.assign(attrs.begin(), attrs.end());
+    if (const auto attrs = loopOp.getReduceAttrsAttr()) reduceAttrs.assign(attrs.begin(), attrs.end());
     auto unordered =
         fir::DoLoopOp::create(B, loc, lbV, ubV, stepV, //
                               /*unordered=*/true, /*finalCountValue=*/false,
@@ -1173,19 +1180,19 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
       for (auto [idx, src] : llvm::enumerate(srcReduceArgs)) {
         const auto scalarTy = scratchElemTys[idx];
         const auto rop = idx < reduceOps.size() ? reduceOps[idx] : fir::ReduceOperationEnum::Add;
-        auto localSlot = fir::AllocaOp::create(br, loc, scalarTy).getResult();
+        const auto localSlot = fir::AllocaOp::create(br, loc, scalarTy).getResult();
         fir::StoreOp::create(br, loc, reduceIdentity(br, scalarTy, rop), localSlot);
         localAccumSlots.push_back(localSlot);
         if (rvIsAllocatable[idx]) {
           // XXX per-thread box<heap<T>> over the local accumulator; flang loads through the box,
           // and the post-splice rewrite turns hlfir.assign into a direct fir.store.
           auto refEleTy = mlir::cast<fir::ReferenceType>(src.getType()).getEleTy();
-          auto boxTy = mlir::cast<fir::BoxType>(refEleTy);
-          auto heapTy = mlir::cast<fir::HeapType>(boxTy.getEleTy());
+          const auto boxTy = mlir::cast<fir::BoxType>(refEleTy);
+          const auto heapTy = mlir::cast<fir::HeapType>(boxTy.getEleTy());
           auto heapAddr = fir::ConvertOp::create(br, loc, heapTy, localSlot);
           auto fakeBox = fir::EmboxOp::create(br, loc, boxTy, heapAddr.getResult(), /*shape=*/mlir::Value{});
           auto fakeBoxStorage = fir::AllocaOp::create(br, loc, refEleTy);
-          auto fakeBoxStore = fir::StoreOp::create(br, loc, fakeBox.getResult(), fakeBoxStorage.getResult());
+          const auto fakeBoxStore = fir::StoreOp::create(br, loc, fakeBox.getResult(), fakeBoxStorage.getResult());
           fakeBoxStorageToSlot[fakeBoxStorage.getOperation()] = localSlot;
           fakeBoxSetupOps.push_back(fakeBoxStore);
           fakeBoxSetupOps.push_back(fakeBoxStorage);
@@ -1208,18 +1215,18 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
       for (auto [idx, localSlot] : llvm::enumerate(localAccumSlots)) {
         const auto scalarTy = scratchElemTys[idx];
         if (coreReduce) {
-          auto v = fir::LoadOp::create(dr, loc, localSlot).getResult();
+          const auto v = fir::LoadOp::create(dr, loc, localSlot).getResult();
           fir::StoreOp::create(dr, loc, v, resultSlots[idx])->setAttr(CoreReduceResultAttr, dr.getI64IntegerAttr(idx));
           continue;
         }
-        auto offset = mlir::arith::SubIOp::create(dr, loc, unordered.getInductionVar(), lbV).getResult();
-        auto position =
+        const auto offset = mlir::arith::SubIOp::create(dr, loc, unordered.getInductionVar(), lbV).getResult();
+        const auto position =
             mlir::arith::AddIOp::create(dr, loc, mlir::arith::DivSIOp::create(dr, loc, offset, stepV), idxConst(dr, 1)).getResult();
-        auto scratchSlot = fir::ArrayCoorOp::create(dr, loc, fir::ReferenceType::get(scalarTy), scratchBoxes[idx], shapeVal,
-                                                    /*slice=*/mlir::Value{}, mlir::ValueRange{position},
-                                                    /*typeparams=*/mlir::ValueRange{})
-                               .getResult();
-        auto v = fir::LoadOp::create(dr, loc, localSlot).getResult();
+        const auto scratchSlot = fir::ArrayCoorOp::create(dr, loc, fir::ReferenceType::get(scalarTy), scratchBoxes[idx], shapeVal,
+                                                          /*slice=*/mlir::Value{}, mlir::ValueRange{position},
+                                                          /*typeparams=*/mlir::ValueRange{})
+                                     .getResult();
+        const auto v = fir::LoadOp::create(dr, loc, localSlot).getResult();
         fir::StoreOp::create(dr, loc, v, scratchSlot);
       }
     }
@@ -1238,7 +1245,7 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
       unordered.walk([&](mlir::Operation *op) {
         if (op->getName().getStringRef() != "fir.declare" && op->getName().getStringRef() != "hlfir.declare") return;
         if (op->getNumOperands() < 1) return;
-        auto memref = chaseDef(op->getOperand(0));
+        const auto memref = chaseDef(op->getOperand(0));
         auto coor = memref.getDefiningOp<fir::ArrayCoorOp>();
         if (!coor) return;
         if (!(scratchBoxes ^ exists([&](const auto &sb) { return coor.getMemref() == sb; }))) return;
@@ -1273,19 +1280,19 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
       unordered.walk([&](fir::BoxAddrOp ba) {
         auto loadOp = ba.getVal().getDefiningOp<fir::LoadOp>();
         if (!loadOp) return;
-        auto memref = chaseRef(loadOp.getMemref());
-        if (fakeBoxStorageToSlot.find(memref.getDefiningOp()) == fakeBoxStorageToSlot.end()) return;
+        const auto memref = chaseRef(loadOp.getMemref());
+        if (!fakeBoxStorageToSlot.contains(memref.getDefiningOp())) return;
         baToReplace.push_back(ba);
       });
       for (auto ba : baToReplace) {
         auto loadOp = ba.getVal().getDefiningOp<fir::LoadOp>();
-        auto memref = chaseRef(loadOp.getMemref());
-        auto slot = fakeBoxStorageToSlot[memref.getDefiningOp()];
+        const auto memref = chaseRef(loadOp.getMemref());
+        const auto slot = fakeBoxStorageToSlot[memref.getDefiningOp()];
         for (auto &use : llvm::make_early_inc_range(ba.getResult().getUses())) {
           auto *user = use.getOwner();
           if (auto ld = llvm::dyn_cast<fir::LoadOp>(user)) {
             OpBuilder rb(ld);
-            auto newLoad = fir::LoadOp::create(rb, ld.getLoc(), slot).getResult();
+            const auto newLoad = fir::LoadOp::create(rb, ld.getLoc(), slot).getResult();
             ld.getResult().replaceAllUsesWith(newLoad);
             ld.erase();
           } else if (auto st = llvm::dyn_cast<fir::StoreOp>(user); st && st.getMemref() == ba.getResult()) {
@@ -1295,7 +1302,7 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
           } else {
             // Fallback for unexpected users: keep the typed convert.
             OpBuilder rb(user);
-            auto slotAsHeap = fir::ConvertOp::create(rb, ba.getLoc(), ba.getResult().getType(), slot).getResult();
+            const auto slotAsHeap = fir::ConvertOp::create(rb, ba.getLoc(), ba.getResult().getType(), slot).getResult();
             use.set(slotAsHeap);
           }
         }
@@ -1304,16 +1311,16 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
       }
       llvm::SmallVector<hlfir::AssignOp> assignToErase;
       unordered.walk([&](hlfir::AssignOp assign) {
-        auto lhsRoot = chaseRef(assign.getLhs());
-        auto it = fakeBoxStorageToSlot.find(lhsRoot.getDefiningOp());
+        const auto lhsRoot = chaseRef(assign.getLhs());
+        const auto it = fakeBoxStorageToSlot.find(lhsRoot.getDefiningOp());
         if (it == fakeBoxStorageToSlot.end()) return;
         OpBuilder rb(assign);
-        auto rloc = assign.getLoc();
+        const auto rloc = assign.getLoc();
         auto rhs = assign.getRhs();
         if (mlir::isa<fir::ReferenceType, fir::HeapType, fir::PointerType>(rhs.getType()))
           rhs = fir::LoadOp::create(rb, rloc, rhs).getResult();
-        else if (auto rhsBoxTy = mlir::dyn_cast<fir::BoxType>(rhs.getType())) {
-          auto rhsAddr = fir::BoxAddrOp::create(rb, rloc, fir::ReferenceType::get(rhsBoxTy.getEleTy()), rhs).getResult();
+        else if (const auto rhsBoxTy = mlir::dyn_cast<fir::BoxType>(rhs.getType())) {
+          const auto rhsAddr = fir::BoxAddrOp::create(rb, rloc, fir::ReferenceType::get(rhsBoxTy.getEleTy()), rhs).getResult();
           rhs = fir::LoadOp::create(rb, rloc, rhsAddr).getResult();
         }
         fir::StoreOp::create(rb, rloc, rhs, it->second);
@@ -1325,7 +1332,7 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
       unordered.walk([&](mlir::Operation *op) {
         if (op->getName().getStringRef() != "fir.declare" && op->getName().getStringRef() != "hlfir.declare") return;
         if (op->getNumOperands() < 1) return;
-        if (fakeBoxStorageToSlot.find(op->getOperand(0).getDefiningOp()) == fakeBoxStorageToSlot.end()) return;
+        if (!fakeBoxStorageToSlot.contains(op->getOperand(0).getDefiningOp())) return;
         declaresToErase.push_back(op);
       });
       declaresToErase ^ for_each([](const auto &d) { d->erase(); });
@@ -1348,27 +1355,27 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
         const auto op = idx < reduceOps.size() ? reduceOps[idx] : fir::ReduceOperationEnum::Add;
         mlir::Value effectiveRef = extRef;
         if (rvIsAllocatable[idx]) {
-          auto boxTy = mlir::cast<fir::BoxType>(mlir::cast<fir::ReferenceType>(extRef.getType()).getEleTy());
-          auto heapTy = mlir::cast<fir::HeapType>(boxTy.getEleTy());
-          auto boxVal = fir::LoadOp::create(B, loc, extRef).getResult();
-          auto heapAddr = fir::BoxAddrOp::create(B, loc, heapTy, boxVal).getResult();
+          const auto boxTy = mlir::cast<fir::BoxType>(mlir::cast<fir::ReferenceType>(extRef.getType()).getEleTy());
+          const auto heapTy = mlir::cast<fir::HeapType>(boxTy.getEleTy());
+          const auto boxVal = fir::LoadOp::create(B, loc, extRef).getResult();
+          const auto heapAddr = fir::BoxAddrOp::create(B, loc, heapTy, boxVal).getResult();
           effectiveRef = fir::ConvertOp::create(B, loc, fir::ReferenceType::get(scalarTy), heapAddr).getResult();
         }
         if (coreReduce) {
-          auto cur = fir::LoadOp::create(B, loc, effectiveRef).getResult();
-          auto delta = fir::LoadOp::create(B, loc, resultSlots[idx]).getResult();
+          const auto cur = fir::LoadOp::create(B, loc, effectiveRef).getResult();
+          const auto delta = fir::LoadOp::create(B, loc, resultSlots[idx]).getResult();
           fir::StoreOp::create(B, loc, reduceCombine(B, loc, scalarTy, op, cur, delta), effectiveRef);
           continue;
         }
         auto combineLoop = fir::DoLoopOp::create(B, loc, idxOne, numIters, idxOne, /*unordered=*/false, /*finalCountValue=*/false);
         OpBuilder bc(combineLoop.getBody(), combineLoop.getBody()->begin());
-        auto slot = fir::ArrayCoorOp::create(bc, loc, fir::ReferenceType::get(scalarTy), scratchBoxes[idx], shapeVal,
-                                             /*slice=*/mlir::Value{}, mlir::ValueRange{combineLoop.getInductionVar()},
-                                             /*typeparams=*/mlir::ValueRange{})
-                        .getResult();
-        auto delta = fir::LoadOp::create(bc, loc, slot).getResult();
-        auto cur = fir::LoadOp::create(bc, loc, effectiveRef).getResult();
-        auto folded = reduceCombine(bc, loc, scalarTy, op, cur, delta);
+        const auto slot = fir::ArrayCoorOp::create(bc, loc, fir::ReferenceType::get(scalarTy), scratchBoxes[idx], shapeVal,
+                                                   /*slice=*/mlir::Value{}, mlir::ValueRange{combineLoop.getInductionVar()},
+                                                   /*typeparams=*/mlir::ValueRange{})
+                              .getResult();
+        const auto delta = fir::LoadOp::create(bc, loc, slot).getResult();
+        const auto cur = fir::LoadOp::create(bc, loc, effectiveRef).getResult();
+        const auto folded = reduceCombine(bc, loc, scalarTy, op, cur, delta);
         fir::StoreOp::create(bc, loc, folded, effectiveRef);
       }
       // XXX disassociate from SMA before fir.freemem; libc recycles the host address and the
@@ -1377,9 +1384,9 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
       const auto voidTy = mlir::LLVM::LLVMVoidType::get(B.getContext());
       auto releaseFn = m.lookupSymbol<mlir::LLVM::LLVMFuncOp>(polydco::abi::Release);
       if (!releaseFn) releaseFn = defineFunc(m, polydco::abi::Release, voidTy, {llvmPtrTy});
-      for (auto h : scratchHeaps) {
-        auto i64Addr = fir::ConvertOp::create(B, loc, B.getI64Type(), h).getResult();
-        auto llvmPtr = mlir::LLVM::IntToPtrOp::create(B, loc, llvmPtrTy, i64Addr).getResult();
+      for (const auto h : scratchHeaps) {
+        const auto i64Addr = fir::ConvertOp::create(B, loc, B.getI64Type(), h).getResult();
+        const auto llvmPtr = mlir::LLVM::IntToPtrOp::create(B, loc, llvmPtrTy, i64Addr).getResult();
         mlir::LLVM::CallOp::create(B, loc, releaseFn, mlir::ValueRange{llvmPtr});
         fir::FreeMemOp::create(B, loc, h);
       }

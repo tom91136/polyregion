@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "llvm/Support/FileSystem.h"
@@ -147,8 +148,8 @@ extern "C" polyc_jit_status_t polyc_jit_compile(const uint8_t *program, size_t p
     };
     polyast::CompileResult result = [&] {
       if (specialise && specialiseLen) {
-        auto prog = applySpecialise(polyast::hashed_program_from_msgpack(program, program + programLen),
-                                    buildSpecialise(specialise, specialiseLen));
+        const auto prog = applySpecialise(polyast::hashed_program_from_msgpack(program, program + programLen),
+                                          buildSpecialise(specialise, specialiseLen));
         return compiler::compile(prog, options, static_cast<compiletime::OptLevel>(opt));
       }
       return compiler::compile(

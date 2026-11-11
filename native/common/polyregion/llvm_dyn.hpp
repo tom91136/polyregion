@@ -16,9 +16,9 @@ template <typename T> using arg0_type = decltype(arg0_helper(std::declval<T>()))
 
 template <typename T, typename U, typename... Fs> std::optional<T> visitDyn(U n, Fs... fs) {
   std::optional<T> result{};
-  auto _ = {[&]() {
+  const auto _ = {[&] {
     if (!result) {
-      if (auto x = llvm::dyn_cast_if_present<std::remove_pointer_t<details::arg0_type<Fs>>>(n)) {
+      if (const auto x = llvm::dyn_cast_if_present<std::remove_pointer_t<details::arg0_type<Fs>>>(n)) {
         result = T(fs(x));
       }
     }

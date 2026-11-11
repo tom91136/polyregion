@@ -5,7 +5,7 @@ import java.util.Locale
 import polyregion.ast.PolyAST as p
 
 private[ast] object CppInterfaceCodeGen {
-  import InterfaceCodeGen.Support.*
+  import InterfaceCodeGenSupport.*
 
   private val Keywords = Set(
     "alignas",

@@ -11,7 +11,7 @@ struct FDescExtraMirror {
   polyast::Named derivedType{"derivedType", polyast::Type::Ptr(polyast::Type::IntU8(), polyast::TypeSpace::Global())};
   polyast::Named typeParamValue{"typeParamValue", polyast::Type::IntS64()};
   static polyast::Type::Struct tpe();
-  polyast::StructDef def() const;
+  [[nodiscard]] polyast::StructDef def() const;
 };
 
 struct FDimMirror {
@@ -19,7 +19,7 @@ struct FDimMirror {
   polyast::Named extent{"extent", polyast::Type::IntS64()};
   polyast::Named stride{"stride", polyast::Type::IntS64()};
   static polyast::Type::Struct tpe();
-  polyast::StructDef def() const;
+  [[nodiscard]] polyast::StructDef def() const;
 };
 
 struct FBoxedMirror {
@@ -37,9 +37,9 @@ struct FBoxedMirror {
 
   explicit FBoxedMirror(const polyast::Type::Any &t, size_t ranks);
   FBoxedMirror();
-  polyast::Type::Any comp() const;
-  polyast::Type::Struct tpe() const;
-  polyast::StructDef def() const;
+  [[nodiscard]] polyast::Type::Any comp() const;
+  [[nodiscard]] polyast::Type::Struct tpe() const;
+  [[nodiscard]] polyast::StructDef def() const;
   friend bool operator==(const FBoxedMirror &lhs, const FBoxedMirror &rhs);
 };
 
@@ -53,12 +53,12 @@ struct FBoxed {
   polyast::Expr::Any base;
   FBoxedMirror mirror;
 
-  FBoxed(const polyast::Expr::Any &base, const FBoxedMirror &aggregate);
+  FBoxed(polyast::Expr::Any base, FBoxedMirror aggregate);
   FBoxed();
-  polyast::Type::Any comp() const;
-  polyast::Expr::Any addr() const;
-  polyast::Expr::Any dims() const;
-  polyast::Expr::Any dimAt(size_t rank) const;
+  [[nodiscard]] polyast::Type::Any comp() const;
+  [[nodiscard]] polyast::Expr::Any addr() const;
+  [[nodiscard]] polyast::Expr::Any dims() const;
+  [[nodiscard]] polyast::Expr::Any dimAt(size_t rank) const;
   friend bool operator==(const FBoxed &lhs, const FBoxed &rhs);
 };
 
@@ -70,7 +70,7 @@ struct FBoxedNone {
 struct FBoxedNoneMirror {
   polyast::Named addr{"addr", polyast::Type::Ptr(polyast::Type::IntU8(), polyast::TypeSpace::Global())};
   static polyast::Type::Struct tpe();
-  polyast::StructDef def() const;
+  [[nodiscard]] polyast::StructDef def() const;
   friend bool operator==(const FBoxedNoneMirror &lhs, const FBoxedNoneMirror &rhs);
 };
 
@@ -93,27 +93,27 @@ struct FTuple {
 
 struct FShapeShift {
   std::vector<polyast::Expr::Any> lowerBounds, extents;
-  size_t rank() const { return lowerBounds.size(); }
+  [[nodiscard]] size_t rank() const { return lowerBounds.size(); }
   friend bool operator==(const FShapeShift &lhs, const FShapeShift &rhs);
 };
 
 struct FShift {
   std::vector<polyast::Expr::Any> lowerBounds;
-  size_t rank() const;
-  FShapeShift asShapeShift() const;
+  [[nodiscard]] size_t rank() const;
+  [[nodiscard]] FShapeShift asShapeShift() const;
   friend bool operator==(const FShift &lhs, const FShift &rhs);
 };
 
 struct FShape {
   std::vector<polyast::Expr::Any> extents;
-  size_t rank() const;
-  FShapeShift asShapeShift() const;
+  [[nodiscard]] size_t rank() const;
+  [[nodiscard]] FShapeShift asShapeShift() const;
   friend bool operator==(const FShape &lhs, const FShape &rhs);
 };
 
 struct FSlice {
   std::vector<polyast::Expr::Any> lowerBounds, upperBounds, strides;
-  size_t rank() const;
+  [[nodiscard]] size_t rank() const;
   friend bool operator==(const FSlice &lhs, const FSlice &rhs);
 };
 

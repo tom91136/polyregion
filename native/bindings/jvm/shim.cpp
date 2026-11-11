@@ -1,6 +1,9 @@
+#include <cstdio>
 #include <cstdlib>
 #include <mutex>
+#include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "polyregion/dl.h"
 #include "polyregion/env_keys.h"
@@ -55,23 +58,23 @@ static std::unordered_map<polyregion_dl_handle, std::size_t> dlRefcount;
 void Natives::registerFilesToDropOnUnload0(JNIEnv *env, jclass, jobject file) { files.push_back(env->NewGlobalRef(file)); }
 
 static std::string resolveDlError() {
-  auto message = polyregion_dl_error();
+  const char *message = polyregion_dl_error();
   return message ? std::string(message) : "(no message reported)";
 }
 
 jlong Natives::dynamicLibraryLoad0(JNIEnv *env, jclass, jstring name) {
-  auto str = fromJni(env, name);
-  if (auto dylib = polyregion_dl_open(str.c_str()); !dylib) {
+  const auto str = fromJni(env, name);
+  if (auto *dylib = polyregion_dl_open(str.c_str()); !dylib) {
     throwGeneric(env, EX, "Cannot load library `" + str + "` :" + resolveDlError());
     return {};
   } else {
     bool firstLoad;
     {
-      std::lock_guard lock(dlMutex);
+      const std::scoped_lock lock(dlMutex);
       firstLoad = dlRefcount[dylib]++ == 0;
     }
     if (firstLoad) {
-      if (auto f = polyregion_dl_find(dylib, "JNI_OnLoad")) {
+      if (auto *f = polyregion_dl_find(dylib, "JNI_OnLoad")) {
         reinterpret_cast<jint (*)(JavaVM *, void *)>(f)(CurrentVM, nullptr);
       }
     }
@@ -80,11 +83,11 @@ jlong Natives::dynamicLibraryLoad0(JNIEnv *env, jclass, jstring name) {
 }
 
 void Natives::dynamicLibraryRelease0(JNIEnv *env, jclass, jlong handle) {
-  auto typedHandle = reinterpret_cast<polyregion_dl_handle>(handle);
+  auto *typedHandle = reinterpret_cast<polyregion_dl_handle>(handle);
   bool lastRelease;
   {
-    std::lock_guard lock(dlMutex);
-    auto it = dlRefcount.find(typedHandle);
+    const std::scoped_lock lock(dlMutex);
+    const auto it = dlRefcount.find(typedHandle);
     if (it == dlRefcount.end() || --it->second == 0) {
       lastRelease = true;
       if (it != dlRefcount.end()) dlRefcount.erase(it);
@@ -93,11 +96,11 @@ void Natives::dynamicLibraryRelease0(JNIEnv *env, jclass, jlong handle) {
     }
   }
   if (lastRelease) {
-    if (auto f = polyregion_dl_find(typedHandle, "JNI_OnUnload")) {
+    if (auto *f = polyregion_dl_find(typedHandle, "JNI_OnUnload")) {
       reinterpret_cast<void (*)(JavaVM *, void *)>(f)(CurrentVM, nullptr);
     }
   }
-  if (auto code = polyregion_dl_close(typedHandle); code != 0) {
+  if (const auto code = polyregion_dl_close(typedHandle); code != 0) {
     throwGeneric(env, EX, "Cannot unload module:" + resolveDlError());
   }
 }

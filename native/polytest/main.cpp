@@ -1,5 +1,8 @@
 #include <cstdio>
+#include <cstdlib>
+#include <initializer_list>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "llvm/ADT/SmallString.h"
@@ -18,19 +21,19 @@ namespace {
 struct Suite {
   std::vector<std::pair<std::string, std::string>> values;
 
-  std::string get(const std::string &key, const std::string &fallback = {}) const {
+  [[nodiscard]] std::string get(const std::string &key, const std::string &fallback = {}) const {
     std::string value = fallback;
     for (const auto &[k, v] : values)
       if (k == key) value = v;
     return value;
   }
-  std::vector<std::string> all(const std::string &key) const {
+  [[nodiscard]] std::vector<std::string> all(const std::string &key) const {
     std::vector<std::string> out;
     for (const auto &[k, v] : values)
       if (k == key) out.emplace_back(v ^ starts_with(":") ? v ^ drop(1) : v);
     return out;
   }
-  std::vector<std::pair<std::string, std::string>> pairs(const std::string &key) const {
+  [[nodiscard]] std::vector<std::pair<std::string, std::string>> pairs(const std::string &key) const {
     return all(key) ^ collect([](const auto &v) { return v ^ split_once('='); });
   }
 };
@@ -69,7 +72,7 @@ int main(int argc, const char **argv) {
   for (const auto &[key, value] : suite.pairs("POLYTEST_DEFAULT_ENV"))
     polyregion::env::put(key.c_str(), value.c_str(), false);
 
-#if defined(_WIN32)
+#ifdef _WIN32
   prependEnv("PATH", distPath(root, {"lib", "polycpp", "lib"}) + ";" + distPath(root, {"lib"}) + ";" + bin, ';');
   constexpr auto exeSuffix = ".exe";
   constexpr auto stdparRt = "static";

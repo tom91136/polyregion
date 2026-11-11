@@ -3,6 +3,8 @@ package polyregion.ast
 import cats.syntax.all.*
 import polyregion.ast.CppStructGen.*
 
+import scala.annotation.tailrec
+
 private[polyregion] case class CppMsgPackCodecGen(
     namespace: List[String],
     forwardDecls: List[String],
@@ -34,6 +36,28 @@ private[polyregion] object CppMsgPackCodecGen {
       Root(stem, summon[ToCppType[T]](), Envelope.Versioned(schema, payloadLabel, hashLabel))
   }
 
+  case class Reachable(standalone: Set[String], fields: Set[String])
+
+  def reachable(structs: List[StructNode], roots: List[Root]): Reachable = {
+    def flatten(s: StructNode): List[StructNode] = s :: s.variants.flatMap(flatten)
+    def refs(t: CppType): List[String] =
+      if (t.kind == CppType.Kind.StdLib) t.ctors.flatMap(refs) else t.ref() :: Nil
+    val nodes = structs.flatMap(flatten).map(n => n.tpe.ref() -> n).toMap
+    @tailrec def go(pending: List[String], acc: Reachable): Reachable = pending match {
+      case Nil                                         => acc
+      case key :: rest if acc.standalone.contains(key) => go(rest, acc)
+      case key :: rest =>
+        val withFields = nodes.get(key).toList.flatMap { n =>
+          if (n.tpe.kind == CppType.Kind.Base) n.variants else n :: Nil
+        }
+        go(
+          withFields.flatMap(_.members.flatMap((_, t) => refs(t))) ::: rest,
+          Reachable(acc.standalone + key, acc.fields ++ withFields.map(_.tpe.ref()))
+        )
+    }
+    go(roots.flatMap(r => refs(r.tpe)), Reachable(Set.empty, Set.empty))
+  }
+
   private def fromMsgpackFn(t: CppType)       = t.ref(qualified = false).toLowerCase + "_from_msgpack"
   private def toMsgpackFn(t: CppType)         = t.ref(qualified = false).toLowerCase + "_to_msgpack"
   private def fromMsgpackFieldsFn(t: CppType) = t.ref(qualified = false).toLowerCase + "_fields_from_msgpack"
@@ -49,41 +73,41 @@ private[polyregion] object CppMsgPackCodecGen {
       case CppType.Kind.StdLib =>
         (tpe.namespace ::: tpe.name :: Nil, tpe.ctors) match {
           case ("std" :: "optional" :: Nil, x :: Nil) =>
-            s"${tpe.ref(qualified = true)} $name;" ::
+            s"${tpe.ref()} $name;" ::
               s"if(!r_.tryReadNil()) {" ::
               readValue(x, s"${name}_value").map("  " + _) :::
-              s"  $name = std::move(${name}_value);" ::
+              s"  $name = ${consume(x, s"${name}_value")};" ::
               "}" :: Nil
           case ("std" :: "vector" :: Nil, x :: Nil) =>
-            s"${tpe.ref(qualified = true)} $name;" ::
+            s"${tpe.ref()} $name;" ::
               "{" ::
-              s"  auto ${name}_size = r_.readArrayHeader();" ::
+              s"  const auto ${name}_size = r_.readArrayHeader();" ::
               s"  $name.reserve(${name}_size);" ::
-              s"  for(size_t ${name}_idx = 0; ${name}_idx < ${name}_size; ++${name}_idx) {" ::
-              readValue(x, s"${name}_elem").map("    " + _) :::
-              s"    ${name}.emplace_back(std::move(${name}_elem));" ::
-              "  }" ::
+              readArrayElems(x, name, "emplace_back") :::
               "}" :: Nil
           case ("std" :: "set" :: Nil, x :: Nil) =>
-            s"${tpe.ref(qualified = true)} $name;" ::
+            s"${tpe.ref()} $name;" ::
               "{" ::
-              s"  auto ${name}_size = r_.readArrayHeader();" ::
-              s"  for(size_t ${name}_idx = 0; ${name}_idx < ${name}_size; ++${name}_idx) {" ::
-              readValue(x, s"${name}_elem").map("    " + _) :::
-              s"    ${name}.emplace(std::move(${name}_elem));" ::
-              "  }" ::
+              s"  const auto ${name}_size = r_.readArrayHeader();" ::
+              readArrayElems(x, name, "emplace") :::
               "}" :: Nil
-          case ("std" :: "string" :: Nil, Nil) => s"auto $name = r_.readString();" :: Nil
-          case ("bool" :: Nil, Nil)            => s"auto $name = r_.readBoolean();" :: Nil
-          case ("float" :: Nil, Nil)           => s"auto $name = r_.readFloat32();" :: Nil
-          case ("double" :: Nil, Nil)          => s"auto $name = r_.readFloat64();" :: Nil
-          case ("int64_t" :: Nil, Nil)         => s"auto $name = r_.readInt64();" :: Nil
-          case _ if isInt32Like(tpe) =>
-            s"auto $name = static_cast<${tpe.ref(qualified = true)}>(r_.readInt32());" :: Nil
-          case _ => s"auto $name = r_.readInt32();" :: Nil
+          case ("std" :: "string" :: Nil, Nil) => declare(tpe, name, "r_.readString()") :: Nil
+          case ("bool" :: Nil, Nil)            => declare(tpe, name, "r_.readBoolean()") :: Nil
+          case ("float" :: Nil, Nil)           => declare(tpe, name, "r_.readFloat32()") :: Nil
+          case ("double" :: Nil, Nil)          => declare(tpe, name, "r_.readFloat64()") :: Nil
+          case ("int64_t" :: Nil, Nil)         => declare(tpe, name, "r_.readInt64()") :: Nil
+          case _ if isInt32Like(tpe) && tpe.name != "int32_t" =>
+            declare(tpe, name, s"static_cast<${tpe.ref()}>(r_.readInt32())") :: Nil
+          case _ => declare(tpe, name, "r_.readInt32()") :: Nil
         }
-      case _ => s"auto $name = ${tpe.ns(fromMsgpackFn(tpe))}(r_);" :: Nil
+      case _ => declare(tpe, name, s"${tpe.ns(fromMsgpackFn(tpe))}(r_)") :: Nil
     }
+
+  private def readArrayElems(x: CppType, name: String, insert: String): List[String] =
+    s"  for(size_t ${name}_idx = 0; ${name}_idx < ${name}_size; ++${name}_idx) {" ::
+      readValue(x, s"${name}_elem").map("    " + _) :::
+      s"    $name.$insert(${consume(x, s"${name}_elem")});" ::
+      "  }" :: Nil
 
   private def writeValue(tpe: CppType, value: String, depth: Int = 0): List[String] =
     tpe.kind match {
@@ -106,43 +130,48 @@ private[polyregion] object CppMsgPackCodecGen {
           case ("float" :: Nil, Nil)           => s"w_.writeFloat32($value);" :: Nil
           case ("double" :: Nil, Nil)          => s"w_.writeFloat64($value);" :: Nil
           case ("int64_t" :: Nil, Nil)         => s"w_.writeInt64($value);" :: Nil
+          case _ if tpe.name == "int32_t"      => s"w_.writeInt32($value);" :: Nil
           case _                               => s"w_.writeInt32(static_cast<int32_t>($value));" :: Nil
         }
       case _ => s"${tpe.ns(toMsgpackFn(tpe))}(w_, $value);" :: Nil
     }
 
-  private def readFieldsBody(s: StructNode, countExpr: String): List[String] = {
-    val ctorInvocation = s.members match {
-      case (name, _) :: Nil => s"${s.tpe.ref(qualified = true)}($name)"
-      case _                => s.members.map(_._1).mkString("{", ", ", "}")
-    }
-    s"if($countExpr != ${s.members.size}) throw std::runtime_error(\"Expected ${s.tpe.ref(qualified = true)} with ${s.members.size} field(s)\");" ::
+  private def readFieldsBody(s: StructNode, countExpr: String): List[String] =
+    s"if($countExpr != ${s.members.size}) throw std::runtime_error(\"Expected ${s.tpe.ref()} with ${s.members.size} field(s)\");" ::
       s.members.flatMap { case (name, tpe) => readValue(tpe, name) } :::
-      s"return $ctorInvocation;" :: Nil
-  }
+      s"return ${s.ctorInvocation};" :: Nil
 
   private def writeFieldsBody(s: StructNode): List[String] =
     s.members.flatMap { case (name, tpe) => writeValue(tpe, s"x_.$name") }
 
-  def emit(s: StructNode): List[CppMsgPackCodecGen] = {
+  private def msgpackDecls(tpe: CppType): List[String] =
+    s"${tpe.ref()} ${fromMsgpackFn(tpe)}(MsgpackReader &);" ::
+      s"void ${toMsgpackFn(tpe)}(MsgpackWriter &, const ${tpe.ref()} &);" :: Nil
+
+  def emit(reachable: Reachable)(s: StructNode): List[CppMsgPackCodecGen] = {
+    val standalone = reachable.standalone.contains(s.tpe.ref())
+    val fields     = reachable.fields.contains(s.tpe.ref())
+    val fieldsTo   = fields && (s.members.nonEmpty || standalone)
     val forwardDecls =
-      if (s.tpe.kind == CppType.Kind.Base)
-        s"${s.tpe.ref(qualified = true)} ${fromMsgpackFn(s.tpe)}(MsgpackReader &);" ::
-          s"void ${toMsgpackFn(s.tpe)}(MsgpackWriter &, const ${s.tpe.ref(qualified = true)} &);" :: Nil
-      else
-        s"${s.tpe.ref(qualified = true)} ${fromMsgpackFieldsFn(s.tpe)}(MsgpackReader &, size_t);" ::
-          s"void ${toMsgpackFieldsFn(s.tpe)}(MsgpackWriter &, const ${s.tpe.ref(qualified = true)} &);" ::
-          s"${s.tpe.ref(qualified = true)} ${fromMsgpackFn(s.tpe)}(MsgpackReader &);" ::
-          s"void ${toMsgpackFn(s.tpe)}(MsgpackWriter &, const ${s.tpe.ref(qualified = true)} &);" :: Nil
+      (if (fields) s"${s.tpe.ref()} ${fromMsgpackFieldsFn(s.tpe)}(MsgpackReader &, size_t);" :: Nil else Nil) :::
+        (if (fieldsTo) s"void ${toMsgpackFieldsFn(s.tpe)}(MsgpackWriter &, const ${s.tpe.ref()} &);" :: Nil
+         else Nil) :::
+        (if (standalone) msgpackDecls(s.tpe) else Nil)
 
     val impls =
-      if (s.tpe.kind == CppType.Kind.Base) {
+      if (s.tpe.kind == CppType.Kind.Base && !standalone) Nil
+      else if (s.tpe.kind == CppType.Kind.Base) {
         val fromCases = s.variants.zipWithIndex.map { case (c, i) =>
           s"case $i: return ${c.tpe.ns(fromMsgpackFieldsFn(c.tpe))}(r_, n_ - 1);"
         }
-        val fromNullaryCases = s.variants.zipWithIndex.map { case (c, i) =>
-          if (c.members.isEmpty) s"case $i: return ${c.tpe.ns(fromMsgpackFieldsFn(c.tpe))}(r_, 0);"
-          else s"case $i: throw std::runtime_error(\"Expected array payload for non-nullary sum ordinal\");"
+        val (nullaryVariants, payloadVariants) = s.variants.zipWithIndex.partition { case (c, _) => c.members.isEmpty }
+        val payloadCases =
+          if (payloadVariants.isEmpty) Nil
+          else
+            payloadVariants.map { case (_, i) => s"case $i:" } :::
+              "  throw std::runtime_error(\"Expected array payload for non-nullary sum ordinal\");" :: Nil
+        val fromNullaryCases = payloadCases ::: nullaryVariants.map { case (c, i) =>
+          s"case $i: return ${c.tpe.ns(fromMsgpackFieldsFn(c.tpe))}(r_, 0);"
         }
         val toCases = s.variants.zipWithIndex
           .map { case (c, i) =>
@@ -152,21 +181,21 @@ private[polyregion] object CppMsgPackCodecGen {
                 s"w_.writeArrayHeader(${c.members.size + 1});" ::
                   s"w_.writeInt32($i);" ::
                   s"${c.tpe.ns(toMsgpackFieldsFn(c.tpe))}(w_, y_);" :: Nil
-            s"[&](const ${c.tpe.ref(qualified = true)} &y_) -> void {" :: body.map("  " + _) ::: "}" :: Nil
+            s"[&](const ${c.tpe.ref()} &y_) -> void {" :: body.map("  " + _) ::: "}" :: Nil
           }
           .intercalate("," :: Nil)
         "" ::
-          s"${s.tpe.ref(qualified = true)} ${s.tpe.ns(fromMsgpackFn(s.tpe))}(MsgpackReader& r_) {" ::
+          s"${s.tpe.ref()} ${fromMsgpackFn(s.tpe)}(MsgpackReader& r_) {" ::
           "  if(r_.nextIsArray()) {" ::
-          "    auto n_ = r_.readArrayHeader();" ::
+          "    const auto n_ = r_.readArrayHeader();" ::
           "    if(n_ == 0) throw std::runtime_error(\"Expected non-empty sum payload\");" ::
-          "    auto ord_ = r_.readInt32();" ::
+          "    const auto ord_ = r_.readInt32();" ::
           "    switch(ord_) {" ::
           fromCases.map("      " + _) :::
           "      default: throw std::out_of_range(\"Bad ordinal \" + std::to_string(ord_));" ::
           "    }" ::
           "  } else {" ::
-          "    auto ord_ = r_.readInt32();" ::
+          "    const auto ord_ = r_.readInt32();" ::
           "    switch(ord_) {" ::
           fromNullaryCases.map("      " + _) :::
           "      default: throw std::out_of_range(\"Bad ordinal \" + std::to_string(ord_));" ::
@@ -174,36 +203,42 @@ private[polyregion] object CppMsgPackCodecGen {
           "  }" ::
           "}" ::
           "" ::
-          s"void ${s.tpe.ns(toMsgpackFn(s.tpe))}(MsgpackWriter& w_, const ${s.tpe.ref(qualified = true)}& x_) {" ::
+          s"void ${toMsgpackFn(s.tpe)}(MsgpackWriter& w_, const ${s.tpe.ref()}& x_) {" ::
           "  x_.match_total(" ::
           toCases.map("    " + _) :::
           "  );" ::
           "}" :: Nil
-      } else
-        "" ::
-          s"${s.tpe.ref(qualified = true)} ${s.tpe.ns(fromMsgpackFieldsFn(s.tpe))}(MsgpackReader& r_, size_t n_) {" ::
-          readFieldsBody(s, "n_").map("  " + _) :::
-          "}" ::
+      } else {
+        val fieldsFromImpls =
           "" ::
-          s"void ${s.tpe.ns(toMsgpackFieldsFn(s.tpe))}(MsgpackWriter& w_, const ${s.tpe.ref(qualified = true)}& x_) {" ::
-          writeFieldsBody(s).map("  " + _) :::
-          "}" ::
+            s"${s.tpe.ref()} ${fromMsgpackFieldsFn(s.tpe)}(MsgpackReader& r_, size_t n_) {" ::
+            readFieldsBody(s, "n_").map("  " + _) :::
+            "}" :: Nil
+        val fieldsToImpls =
           "" ::
-          s"${s.tpe.ref(qualified = true)} ${s.tpe.ns(fromMsgpackFn(s.tpe))}(MsgpackReader& r_) {" ::
-          "  auto n_ = r_.readArrayHeader();" ::
-          s"  return ${s.tpe.ns(fromMsgpackFieldsFn(s.tpe))}(r_, n_);" ::
-          "}" ::
+            s"void ${toMsgpackFieldsFn(s.tpe)}(MsgpackWriter& w_, const ${s.tpe.ref()}& x_) {" ::
+            writeFieldsBody(s).map("  " + _) :::
+            "}" :: Nil
+        val standaloneImpls =
           "" ::
-          s"void ${s.tpe.ns(toMsgpackFn(s.tpe))}(MsgpackWriter& w_, const ${s.tpe.ref(qualified = true)}& x_) {" ::
-          s"  w_.writeArrayHeader(${s.members.size});" ::
-          s"  ${s.tpe.ns(toMsgpackFieldsFn(s.tpe))}(w_, x_);" ::
-          "}" :: Nil
+            s"${s.tpe.ref()} ${fromMsgpackFn(s.tpe)}(MsgpackReader& r_) {" ::
+            "  const auto n_ = r_.readArrayHeader();" ::
+            s"  return ${s.tpe.ns(fromMsgpackFieldsFn(s.tpe))}(r_, n_);" ::
+            "}" ::
+            "" ::
+            s"void ${toMsgpackFn(s.tpe)}(MsgpackWriter& w_, const ${s.tpe.ref()}& x_) {" ::
+            s"  w_.writeArrayHeader(${s.members.size});" ::
+            s"  ${s.tpe.ns(toMsgpackFieldsFn(s.tpe))}(w_, x_);" ::
+            "}" :: Nil
+        (if (fields) fieldsFromImpls else Nil) ::: (if (fieldsTo) fieldsToImpls else Nil) :::
+          (if (standalone) standaloneImpls else Nil)
+      }
 
-    s.variants.flatMap(emit) :+ CppMsgPackCodecGen(s.tpe.namespace, forwardDecls, impls)
+    s.variants.flatMap(emit(reachable)) :+ CppMsgPackCodecGen(s.tpe.namespace, forwardDecls, impls)
   }
 
   def rootDecls(root: Root): List[String] = {
-    val tpe = root.tpe.ref(qualified = true)
+    val tpe = root.tpe.ref()
     s"[[nodiscard]] POLYREGION_EXPORT std::vector<uint8_t> ${root.stem}_to_msgpack(const $tpe&);" ::
       s"[[nodiscard]] POLYREGION_EXPORT $tpe ${root.stem}_from_msgpack(const uint8_t*, const uint8_t*);" ::
       s"[[nodiscard]] POLYREGION_EXPORT $tpe ${root.stem}_from_msgpack(const std::vector<uint8_t>&);" :: Nil
@@ -217,7 +252,7 @@ private[polyregion] object CppMsgPackCodecGen {
   }
 
   def rootImpl(root: Root): List[String] = {
-    val tpe = root.tpe.ref(qualified = true)
+    val tpe = root.tpe.ref()
     val envelopeWrite = root.envelope match {
       case Envelope.Raw => Nil
       case Envelope.Versioned(schema, _, _) =>
@@ -227,9 +262,9 @@ private[polyregion] object CppMsgPackCodecGen {
       case Envelope.Raw => Nil
       case Envelope.Versioned(schema, payloadLabel, hashLabel) =>
         val hash = schemaHash(schema)
-        s"auto n_ = r_.readArrayHeader();" ::
+        s"const auto n_ = r_.readArrayHeader();" ::
           s"if(n_ != 2) throw std::runtime_error(\"Expected versioned $payloadLabel array of size 2\");" ::
-          "auto hash_ = r_.readString();" ::
+          "const auto hash_ = r_.readString();" ::
           s"if(hash_ != $hash) throw std::runtime_error(\"Expecting $hashLabel hash to be \" + std::string($hash) + \", but was \" + hash_);" :: Nil
     }
     "" ::

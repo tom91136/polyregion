@@ -43,12 +43,13 @@ object ArenaLower extends ProgramPass {
 
     def slot(root: p.Named, steps: List[p.PathStep]): Option[(Int, AddressRefinement.AddressValue)] =
       localRoot(root).flatMap { case (symbol, prefix) =>
-        val suffix = if (steps.headOption.contains(p.PathStep.Deref)) steps.tail else steps
-        val path   = prefix ++ suffix
+        val suffix      = if (steps.headOption.contains(p.PathStep.Deref)) steps.tail else steps
+        val path        = prefix ++ suffix
+        val depthOffset = steps.size - suffix.size - prefix.size
         analysis.slots.iterator
           .collect {
             case (Query.Slot(`symbol`, candidate), pointer) if AddressRefinement.slotPrefix(candidate, path) =>
-              (candidate.size - prefix.size + steps.size - suffix.size) -> pointer
+              (candidate.size + depthOffset) -> pointer
           }
           .toList
           .groupBy(_._1)
@@ -83,7 +84,7 @@ object ArenaLower extends ProgramPass {
     case p.Type.Ptr(_, s) => s
     case _                => p.Type.Space.Global
   }
-  private def isPtr(t: p.Type): Boolean = t match { case _: p.Type.Ptr => true; case _ => false }
+  private def isPtr(t: p.Type): Boolean = t match { case p.Type.Ptr(_, _) => true; case _ => false }
   private def canBeArenaOffset(t: p.Type): Boolean = t match {
     case p.Type.Ptr(_, p.Type.Space.Global) => true
     case _                                  => false
@@ -133,10 +134,10 @@ object ArenaLower extends ProgramPass {
       val localAggregates = statements.iterator.collect {
         case p.Stmt.Var(n, _, _) if !isPtr(n.tpe) => n.symbol
       }.toSet
-      val state     = ArenaState(localAggregates, solve(f).requireSolved)
-      val arena8    = p.Named("#arena_base", BytePtr)
-      val rewritten = mapStmtsRec(f.body)(rwLeaf(members, state, arena8))
-      val capDecl   = p.Stmt.Var(capN, Some(p.Expr.Cast(sel(arena8), capN.tpe)), isMutable = false)
+      val state                           = ArenaState(localAggregates, solve(f).requireSolved)
+      val arena8                          = p.Named("#arena_base", BytePtr)
+      val rewritten                       = mapStmtsRec(f.body)(rwLeaf(members, state, arena8))
+      val capDecl                         = p.Stmt.Var(capN, Some(p.Expr.Cast(sel(arena8), capN.tpe)))
       def replaceCapture(a: p.Arg): p.Arg = if (a.named == capN) a.copy(named = arena8, boundary = None) else a
       f.copy(
         decl = f.decl.copy(
@@ -215,17 +216,17 @@ object ArenaLower extends ProgramPass {
       if (t.tpe == U64) (t, Nil)
       else {
         val n = p.Named(s"#ao${ctr.incrementAndGet()}", U64);
-        (sel(n), List(p.Stmt.Var(n, Some(p.Expr.Cast(t, U64)), isMutable = false)))
+        (sel(n), List(p.Stmt.Var(n, Some(p.Expr.Cast(t, U64)))))
       }
     def emitU64(t: p.Term): p.Term = {
       val (u, ss) = toU64(t); pre ++= ss; u
     }
     def bind(hint: String, e: p.Expr): p.Term = {
-      val n = p.Named(s"#$hint${ctr.incrementAndGet()}", e.tpe); pre += p.Stmt.Var(n, Some(e), isMutable = false);
+      val n = p.Named(s"#$hint${ctr.incrementAndGet()}", e.tpe); pre += p.Stmt.Var(n, Some(e));
       sel(n)
     }
     def byteSize(t: p.Type): p.Term =
-      scalarBytes(t).fold(bind("sz", p.Expr.SizeOf(t)))(n => p.Term.IntU64Const(n.toLong))
+      scalarBytes(t).fold(bind("sz", p.Expr.SizeOf(t)))(n => p.Term.IntU64Const(n))
     def offsetAt(base: p.Term, idx: Option[p.Term], comp: p.Type): p.Term =
       idx.fold(emitU64(base)) { i =>
         val scaled = bind("om", p.Expr.IntrOp(p.Intr.Mul(emitU64(rwTerm(i)), byteSize(comp), U64)))
@@ -240,11 +241,10 @@ object ArenaLower extends ProgramPass {
       val ep = p.Named(s"#ae${ctr.incrementAndGet()}", BytePtr)
       pre += p.Stmt.Var(
         ep,
-        Some(p.Expr.RefTo(sel(arena8), Some(off), p.Type.IntS8, p.Type.Space.Global, p.Region.Rooted(arena8))),
-        isMutable = false
+        Some(p.Expr.RefTo(sel(arena8), Some(off), p.Type.IntS8, p.Type.Space.Global, p.Region.Rooted(arena8)))
       )
       val b = p.Named(s"#ab${ctr.incrementAndGet()}", baseTpe)
-      pre += p.Stmt.Var(b, Some(p.Expr.Cast(sel(ep), baseTpe)), isMutable = false)
+      pre += p.Stmt.Var(b, Some(p.Expr.Cast(sel(ep), baseTpe)))
       arenaBases += b.symbol
       b
     }
@@ -300,15 +300,14 @@ object ArenaLower extends ProgramPass {
         val real = p.Named(s"#ar${ctr.incrementAndGet()}", p.Type.Ptr(comp, sp))
         pre += p.Stmt.Var(
           real,
-          Some(p.Expr.RefTo(rwTerm(t), idx.map(rwTerm), comp, sp, p.Region.Opaque)),
-          isMutable = false
+          Some(p.Expr.RefTo(rwTerm(t), idx.map(rwTerm), comp, sp, p.Region.Opaque))
         )
         val ra = p.Named(s"#aru${ctr.incrementAndGet()}", U64);
-        pre += p.Stmt.Var(ra, Some(p.Expr.Cast(sel(real), U64)), isMutable = false)
+        pre += p.Stmt.Var(ra, Some(p.Expr.Cast(sel(real), U64)))
         val ba = p.Named(s"#arb${ctr.incrementAndGet()}", U64);
-        pre += p.Stmt.Var(ba, Some(p.Expr.Cast(sel(arena8), U64)), isMutable = false)
+        pre += p.Stmt.Var(ba, Some(p.Expr.Cast(sel(arena8), U64)))
         val off = p.Named(s"#aro${ctr.incrementAndGet()}", U64)
-        pre += p.Stmt.Var(off, Some(p.Expr.IntrOp(p.Intr.Sub(sel(ra), sel(ba), U64))), isMutable = false)
+        pre += p.Stmt.Var(off, Some(p.Expr.IntrOp(p.Intr.Sub(sel(ra), sel(ba), U64))))
         p.Expr.Cast(sel(off), p.Type.Ptr(comp, p.Type.Space.Global))
       case p.Expr.RefTo(t, idx, comp, sp, r)     => p.Expr.RefTo(rwTerm(t), idx.map(rwTerm), comp, sp, r)
       case p.Expr.Alloc(c, sz, sp, r)            => p.Expr.Alloc(c, rwTerm(sz), sp, r)
@@ -382,7 +381,7 @@ object ArenaLower extends ProgramPass {
     // pointer slots hold real arena addresses like any other pointer stored into a local aggregate. a pointer to
     // plain data is bound as its own launch argument and patched into the copy instead
     def bearsPointers(tpe: p.Type, seen: Set[p.Sym]): Boolean = tpe match {
-      case _: p.Type.Ptr                   => true
+      case p.Type.Ptr(_, _)                => true
       case p.Type.Arr(c, _, _)             => bearsPointers(c, seen)
       case p.Type.Struct(s, _) if !seen(s) => members.getOrElse(s, Nil).exists(m => bearsPointers(m.tpe, seen + s))
       case _                               => false
@@ -407,18 +406,17 @@ object ArenaLower extends ProgramPass {
         Some((n, steps, tpe))
       case _ => None
     }
-    val rebased = copied.toList.flatMap { (n, steps, tpe) =>
-      pointerSlots(tpe, 8).flatMap { (path, slotTpe) =>
+    val rebased = ListBuffer.empty[p.Stmt]
+    copied.toList.foreach { (n, steps, tpe) =>
+      pointerSlots(tpe, 8).foreach { (path, slotTpe) =>
         val slot: p.Term.Select = p.Term.Select(n, steps ++ path, slotTpe)
         val body                = ListBuffer.empty[p.Stmt]
         val nonNull             = p.Named(s"#an${ctr.incrementAndGet()}", p.Type.Bool1)
         val (off, offPre)       = toU64(slot)
         val real                = resolveAddress(off, slotTpe, body)
-        offPre :::
-          List(
-            p.Stmt.Var(nonNull, Some(p.Expr.IntrOp(p.Intr.LogicNeq(off, p.Term.IntU64Const(0)))), isMutable = false),
-            p.Stmt.Cond(sel(nonNull), body.toList :+ p.Stmt.Mut(slot, p.Expr.Alias(sel(real))), Nil)
-          )
+        rebased ++= offPre
+        rebased += p.Stmt.Var(nonNull, Some(p.Expr.IntrOp(p.Intr.LogicNeq(off, p.Term.IntU64Const(0)))))
+        rebased += p.Stmt.Cond(sel(nonNull), body.toList :+ p.Stmt.Mut(slot, p.Expr.Alias(sel(real))), Nil)
       }
     }
     ((pre += out) ++= rebased).toList

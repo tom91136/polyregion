@@ -1,5 +1,14 @@
 #include "llvm_vulkan.h"
 
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <tuple>
+#include <utility>
+#include <vector>
+
 #include "llvm/ADT/FloatingPointMode.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/GlobalVariable.h"
@@ -34,7 +43,7 @@ llvm::Value *VulkanLowering::i64Zero() const { return llvm::ConstantInt::get(cg.
 llvm::Value *VulkanLowering::bufferHandle(llvm::Type *elemTy, unsigned binding, const std::string &name) {
   auto *arrTy = llvm::ArrayType::get(elemTy, 0);
   // VulkanBuffer type params are (StorageClass, isWritable)
-  auto *handleTy = llvm::TargetExtType::get(cg.C.actual, "spirv.VulkanBuffer", {arrTy}, {VkStorageClassStorageBuffer, /*writable*/ 1u});
+  auto *handleTy = llvm::TargetExtType::get(cg.C.actual, "spirv.VulkanBuffer", {arrTy}, {VkStorageClassStorageBuffer, /*writable*/ 1U});
   auto *nameStr = cg.B.CreateGlobalString(name, "." + name);
   return cg.B.CreateIntrinsic(llvm::Intrinsic::spv_resource_handlefrombinding, {handleTy},
                               {/*set*/ cg.B.getInt32(0), /*binding*/ cg.B.getInt32(binding),
@@ -42,7 +51,7 @@ llvm::Value *VulkanLowering::bufferHandle(llvm::Type *elemTy, unsigned binding, 
 }
 
 llvm::Value *VulkanLowering::uniformBlockHandle(llvm::Type *blockTy, unsigned binding, const std::string &name) {
-  auto *handleTy = llvm::TargetExtType::get(cg.C.actual, "spirv.VulkanBuffer", {blockTy}, {2u /*StorageClass::Uniform*/, /*read-only*/ 0u});
+  auto *handleTy = llvm::TargetExtType::get(cg.C.actual, "spirv.VulkanBuffer", {blockTy}, {2U /*StorageClass::Uniform*/, /*read-only*/ 0U});
   auto *nameStr = cg.B.CreateGlobalString(name, "." + name);
   return cg.B.CreateIntrinsic(llvm::Intrinsic::spv_resource_handlefrombinding, {handleTy},
                               {/*set*/ cg.B.getInt32(0), /*binding*/ cg.B.getInt32(binding),
@@ -57,7 +66,7 @@ llvm::Value *VulkanLowering::bufferElementPtr(const AnyType &ptrTpe, llvm::Value
   return cg.B.CreateAddrSpaceCast(ptr, cg.B.getPtrTy(cg.C.GlobalAS));
 }
 
-llvm::Value *VulkanLowering::handleOf(const Term::Select &select) {
+llvm::Value *VulkanLowering::handleOf(const Term::Select &select) const {
   if (!select.steps.empty()) return nullptr;
   return bufferHandles                   //
          ^ get_maybe(select.root.symbol) //
@@ -101,7 +110,7 @@ std::optional<std::tuple<llvm::Value *, llvm::Type *, std::vector<llvm::Value *>
 std::pair<llvm::ArrayType *, std::vector<uint64_t>> VulkanLowering::flattenArray(llvm::Type *arrTy) {
   std::vector<uint64_t> dims;
   llvm::Type *t = arrTy;
-  while (auto *a = llvm::dyn_cast<llvm::ArrayType>(t)) {
+  while (const auto *a = llvm::dyn_cast<llvm::ArrayType>(t)) {
     dims.push_back(a->getNumElements());
     t = a->getElementType();
   }
@@ -139,28 +148,28 @@ llvm::Value *VulkanLowering::scalarValueOf(const Term::Select &select) {
   auto *ptr = cg.B.CreateIntrinsic(llvm::Intrinsic::spv_resource_getpointer, {cg.B.getPtrTy(VkUniformAS), scalarBlock->getType()},
                                    {scalarBlock, cg.B.getInt32(memberIdx)});
   if (tpe.is<Type::Bool1>())
-    return cg.B.CreateICmpNE(cg.C.load(cg.B, ptr, ty), llvm::ConstantInt::get(llvm::Type::getInt1Ty(cg.C.actual), 0, true));
-  return cg.C.load(cg.B, ptr, ty);
+    return cg.B.CreateICmpNE(cg.B.CreateLoad(ty, ptr), llvm::ConstantInt::get(llvm::Type::getInt1Ty(cg.C.actual), 0, true));
+  return cg.B.CreateLoad(ty, ptr);
 }
 
 void VulkanLowering::physicalFieldCopy(llvm::Value *dst, llvm::Value *src, llvm::Type *rootTy, llvm::Type *tpe,
                                        std::vector<llvm::Value *> idxs) {
-  if (auto *s = llvm::dyn_cast<llvm::StructType>(tpe)) {
+  if (const auto *s = llvm::dyn_cast<llvm::StructType>(tpe)) {
     for (unsigned i = 0; i < s->getNumElements(); ++i)
       physicalFieldCopy(dst, src, rootTy, s->getElementType(i), idxs ^ append(llvm::ConstantInt::get(cg.C.i32Ty(), i)));
-  } else if (auto *a = llvm::dyn_cast<llvm::ArrayType>(tpe)) {
+  } else if (const auto *a = llvm::dyn_cast<llvm::ArrayType>(tpe)) {
     for (uint64_t i = 0; i < a->getNumElements(); ++i)
       physicalFieldCopy(dst, src, rootTy, a->getElementType(), idxs ^ append(llvm::ConstantInt::get(cg.C.i32Ty(), i)));
   } else {
     auto *dstP = cg.B.CreateInBoundsGEP(rootTy, dst, idxs, "vkcopy_dst");
     auto *srcP = cg.B.CreateInBoundsGEP(rootTy, src, idxs, "vkcopy_src");
-    const auto _ = cg.C.store(cg.B, cg.C.load(cg.B, srcP, tpe), dstP);
+    cg.B.CreateStore(cg.B.CreateLoad(tpe, srcP), dstP);
   }
 }
 
 void VulkanLowering::physicalFieldZero(llvm::Value *dst, llvm::Type *rootTy, llvm::Type *tpe, std::vector<llvm::Value *> idxs) {
   if (auto *s = llvm::dyn_cast<llvm::StructType>(tpe)) {
-    iota(0u, s->getNumElements()) | for_each([&](const auto &i) {
+    iota(0U, s->getNumElements()) | for_each([&](const auto &i) {
       physicalFieldZero(dst, rootTy, s->getElementType(i), idxs ^ append(llvm::ConstantInt::get(cg.C.i32Ty(), i)));
     });
   } else if (auto *a = llvm::dyn_cast<llvm::ArrayType>(tpe)) {
@@ -169,7 +178,7 @@ void VulkanLowering::physicalFieldZero(llvm::Value *dst, llvm::Type *rootTy, llv
     });
   } else {
     auto *ptr = cg.B.CreateInBoundsGEP(rootTy, dst, idxs, "vkzero_dst");
-    const auto _ = cg.C.store(cg.B, llvm::Constant::getNullValue(tpe), ptr);
+    cg.B.CreateStore(llvm::Constant::getNullValue(tpe), ptr);
   }
 }
 
@@ -192,7 +201,7 @@ void VulkanLowering::structFieldCopy(llvm::Value *dst, llvm::Value *src, llvm::T
     auto *scalarTy = tpe.template is<Type::Bool1>() ? llvm::Type::getInt8Ty(cg.C.actual) : cg.resolveType(tpe);
     auto *dstP = cg.B.CreateInBoundsGEP(rootTy, dst, idxs, "vkcopy_dst");
     auto *srcP = cg.B.CreateInBoundsGEP(rootTy, src, idxs, "vkcopy_src");
-    const auto _ = cg.C.store(cg.B, cg.C.load(cg.B, srcP, scalarTy), dstP);
+    cg.B.CreateStore(cg.B.CreateLoad(scalarTy, srcP), dstP);
   }
 }
 
@@ -212,7 +221,7 @@ void VulkanLowering::structFieldZero(llvm::Value *dst, llvm::Type *rootTy, const
   } else {
     auto *scalarTy = tpe.template is<Type::Bool1>() ? llvm::Type::getInt8Ty(cg.C.actual) : cg.resolveType(tpe);
     auto *ptr = cg.B.CreateInBoundsGEP(rootTy, dst, idxs, "vkzero_dst");
-    const auto _ = cg.C.store(cg.B, llvm::Constant::getNullValue(scalarTy), ptr);
+    cg.B.CreateStore(llvm::Constant::getNullValue(scalarTy), ptr);
   }
 }
 
@@ -230,13 +239,13 @@ std::optional<ValPtr> VulkanLowering::mkIndex(const Term::Select &lhs, const Ter
   if (auto p = lhs.tpe.template get<Type::Ptr>()) compTpe = p->comp;
   else if (auto a = lhs.tpe.template get<Type::Arr>()) compTpe = a->comp;
   if (!compTpe) return std::nullopt;
-  const auto ty = cg.resolveType(*compTpe);
+  auto *const ty = cg.resolveType(*compTpe);
   if (compTpe->template is<Type::Bool1>()) {
     auto *physicalTy = llvm::Type::getInt8Ty(cg.C.actual);
-    return ValPtr{B.CreateICmpNE(cg.C.load(B, ptr, physicalTy), llvm::ConstantInt::get(physicalTy, 0, true))};
+    return ValPtr{B.CreateICmpNE(B.CreateLoad(physicalTy, ptr), llvm::ConstantInt::get(physicalTy, 0, true))};
   }
   if (compTpe->template is<Type::Struct>()) return ValPtr{ptr};
-  return ValPtr{cg.C.load(B, ptr, ty)};
+  return B.CreateLoad(ty, ptr);
 }
 
 std::optional<ValPtr> VulkanLowering::mkRefTo(const Term::Select &lhs, const Opt<Term::Any> &idx) {
@@ -252,9 +261,8 @@ bool VulkanLowering::mkUpdate(const Term::Select &lhs, const Term::Any &idx, con
     cg.copyStruct(ptr, cg.mkTermVal(value), value.tpe());
     return true;
   }
-  const auto valTy = value.tpe().template is<Type::Bool1>() ? llvm::Type::getInt8Ty(cg.C.actual) : cg.resolveType(value.tpe());
-  const auto _ =
-      cg.C.store(B, value.tpe().template is<Type::Bool1>() ? B.CreateZExt(cg.mkTermVal(value), valTy) : cg.mkTermVal(value), ptr);
+  auto *const valTy = value.tpe().template is<Type::Bool1>() ? llvm::Type::getInt8Ty(cg.C.actual) : cg.resolveType(value.tpe());
+  B.CreateStore(value.tpe().template is<Type::Bool1>() ? B.CreateZExt(cg.mkTermVal(value), valTy) : cg.mkTermVal(value), ptr);
   return true;
 }
 
@@ -308,7 +316,7 @@ bool VulkanLowering::defineLocalString(CodeGen &, const std::string &symbol, con
   for (size_t k = 0; k < n; ++k) {
     const uint8_t byte = k < bytes.size() ? static_cast<uint8_t>(bytes[k]) : 0;
     auto *gep = B.CreateInBoundsGEP(arrTy, base, {B.getInt32(0), B.getInt32(static_cast<unsigned>(k))});
-    const auto _ = cg.C.store(B, llvm::ConstantInt::get(elemTy, byte), gep);
+    B.CreateStore(llvm::ConstantInt::get(elemTy, byte), gep);
   }
   // register as a local array so s[i] resolves through the logical access chain instead of a bare pointer GEP
   localBases.insert_or_assign(symbol, std::tuple{elemTpe, static_cast<llvm::Type *>(arrTy), static_cast<llvm::Value *>(base)});
@@ -342,7 +350,7 @@ bool VulkanLowering::bindEntryArgs(llvm::Function &llvmFn, const std::vector<Arg
                          auto *base = bufferElementPtr(arg.named.tpe, handle, i64Zero());
                          if (byValue(arg)) return std::tuple{arg.named.symbol, arg.named.tpe, handle, base};
                          auto *slot = cg.C.allocaAS(B, base->getType(), cg.C.AllocaAS, arg.named.symbol + "_base");
-                         auto _ = cg.C.store(B, base, slot);
+                         B.CreateStore(base, slot);
                          return std::tuple{arg.named.symbol, arg.named.tpe, handle, slot};
                        }) //
                      | to_vector();
@@ -381,13 +389,13 @@ bool VulkanLowering::bindEntryArgs(llvm::Function &llvmFn, const std::vector<Arg
     cg.stackVarPtrs ^= concat(copied ^ map([&](const auto &symbol, const auto &tpe) {
                                 auto *value = scalarValueOf(Term::Select(Named(symbol, tpe), {}, tpe));
                                 auto *slot = cg.C.allocaAS(B, value->getType(), cg.C.AllocaAS, symbol + "_stack_ptr");
-                                auto _ = cg.C.store(B, value, slot);
+                                B.CreateStore(value, slot);
                                 return std::pair{symbol, std::pair{tpe, static_cast<llvm::Value *>(slot)}};
                               }));
     copied | for_each([&](const auto &symbol, const auto &) { scalarSlots.erase(symbol); });
   }
-  for (auto &stmt : fn.body)
-    auto _ = cg.mkStmt(stmt, llvmFn);
+  for (const auto &stmt : fn.body)
+    const auto _ = cg.mkStmt(stmt, llvmFn);
   if (auto *bb = B.GetInsertBlock(); bb && bb->getTerminator() == nullptr) B.CreateUnreachable();
   return true;
 }

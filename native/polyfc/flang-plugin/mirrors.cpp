@@ -1,5 +1,7 @@
 #include "mirrors.h"
 
+#include <array>
+
 #include "polyregion/conventions.h"
 
 #include "ast.h"

@@ -18,7 +18,9 @@ object RefOutliner {
     case _              => None               // we got a non ref node, give up
   }
 
-  def outline(using q: Quoted)(sink: Log, term: q.Term) //
+  def outline(using
+      q: Quoted
+  )(sink: Log, term: q.Term) //
       : Result[(List[(q.Ident, q.Ref, q.Retyped)], q.ClsWitnesses)] = for {
 
     log <- sink.subLog(s"Outline").success
@@ -40,9 +42,11 @@ object RefOutliner {
     // Drop anything that isn't a val ref and resolve root ident.
     normalisedForeignValRefs = (for {
       s <- foreignRefs // .distinctBy(_.symbol)
-      if !s.symbol.flags.is(q.Flags.Module) && (
-        s.symbol.isValDef ||
-          (s.symbol.isDefDef && s.symbol.flags.is(q.Flags.FieldAccessor))
+      sym   = s.symbol
+      flags = sym.flags
+      if !flags.is(q.Flags.Module) && (
+        sym.isValDef ||
+          (sym.isDefDef && flags.is(q.Flags.FieldAccessor))
       )
 
       (root, path) <- idents(s) // s === root.$path
@@ -75,9 +79,10 @@ object RefOutliner {
 
     _ = log.info(
       "Foreign Refs",
-      foreignRefs.map(x =>
-        s"${x.show}(symbol=${x.symbol}, owner=${Try(x.symbol.owner)}) ~> $x, tpe=${x.tpe.widenTermRefByName.show}"
-      )*
+      foreignRefs.map { x =>
+        val sym = x.symbol
+        s"${x.show}(symbol=$sym, owner=${Try(sym.owner)}) ~> $x, tpe=${x.tpe.widenTermRefByName.show}"
+      }*
     )
     _ = log.info(
       "Normalised",
@@ -87,7 +92,10 @@ object RefOutliner {
     )
     _ = log.info(
       "Root collapsed",
-      sharedValRefs.map((root, x) => s"${x.show}(symbol=${x.symbol}, owner=${x.symbol.owner}, root=$root)")*
+      sharedValRefs.map { (root, x) =>
+        val sym = x.symbol
+        s"${x.show}(symbol=$sym, owner=${sym.owner}, root=$root)"
+      }*
     )
 //    _ = println(log.render().mkString("\n"))
 //
@@ -125,7 +133,8 @@ object RefOutliner {
     _ = log.info(
       s"Typed",
       filteredTypedRefs.map { case (root, ref, value -> tpe) =>
-        s"${ref.show}(symbol=${ref.symbol}, owner=${ref.symbol.owner}, root=${root}${
+        val sym = ref.symbol
+        s"${ref.show}(symbol=$sym, owner=${sym.owner}, root=${root}${
             if (root == ref) ";self"
             else ""
           }) : ${tpe} = ${value}"

@@ -1031,14 +1031,17 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
       List(f32Ptr, f32Ptr, p.Type.IntS32, p.Type.FnRef(lambda.name)),
       p.Type.Unit0
     )
-    def implementation(name: String, size: Option[Int]) = public.copy(
-      name = p.Sym(List("implementation", name)),
-      tpeVars = List(p.Type.Var("Element", size)),
-      args = public.args.map(_.modifyAll[p.Type] {
-        case p.Type.Var("T", _) => p.Type.Var("Element", size)
-        case other              => other
-      })
-    )
+    def implementation(name: String, size: Option[Int]) = {
+      val element: p.Type.Var = p.Type.Var("Element", size)
+      public.copy(
+        name = p.Sym(List("implementation", name)),
+        tpeVars = List(element),
+        args = public.args.map(_.modifyAll[p.Type] {
+          case p.Type.Var("T", _) => element
+          case other              => other
+        })
+      )
+    }
     def variant(decl: p.FunctionDecl, capabilities: List[String] = List("gpu")) = p.Function(
       decl,
       Nil,

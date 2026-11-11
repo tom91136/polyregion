@@ -24,15 +24,15 @@ template <typename F> static void waitAll(F f, size_t timeoutMillis = 10000) {
   std::condition_variable cv;
   std::mutex mutex;
 
-  const auto countdown = [&]() {
-    std::lock_guard lock(mutex);
+  const auto countdown = [&] {
+    const std::scoped_lock lock(mutex);
     pending--;
     cv.notify_all();
   };
-  auto now = std::chrono::system_clock::now();
+  const auto now = std::chrono::system_clock::now();
   f(countdown);
   std::unique_lock lock(mutex);
-  if (!cv.wait_until(lock, now + std::chrono::milliseconds(timeoutMillis), [&]() { return pending == 0; }))
+  if (!cv.wait_until(lock, now + std::chrono::milliseconds(timeoutMillis), [&] { return pending == 0; }))
     details::waitTimeout("waitAll", timeoutMillis);
 }
 
@@ -43,19 +43,19 @@ template <typename... Fs> static void waitAll(size_t timeoutMillis = 10000, Fs &
 template <typename F> static void waitAllN(F f, size_t timeoutMillis = 10000) {
   std::atomic_size_t pending{0};
   std::condition_variable cv;
-  auto now = std::chrono::system_clock::now();
+  const auto now = std::chrono::system_clock::now();
   std::mutex mutex;
 
-  f([&]() {
+  f([&] {
     pending++;
-    return [&]() {
-      std::lock_guard lock(mutex);
+    return [&] {
+      const std::scoped_lock lock(mutex);
       pending--;
       cv.notify_all();
     };
   });
   std::unique_lock<std::mutex> lock(mutex);
-  if (!cv.wait_until(lock, now + std::chrono::milliseconds(timeoutMillis), [&]() { return pending == 0; }))
+  if (!cv.wait_until(lock, now + std::chrono::milliseconds(timeoutMillis), [&] { return pending == 0; }))
     details::waitTimeout("waitAllN", timeoutMillis);
 }
 
@@ -63,7 +63,7 @@ template <typename T = int64_t> //
 std::pair<std::vector<T>, std::vector<T>> splitStaticExclusive(T start, T end, T N) {
   static_assert(std::is_signed_v<T>, "Numeric type must be signed");
   assert(N >= 0);
-  auto range = std::abs(end - start);
+  const auto range = std::abs(end - start);
   if (range == 0) return {{}, {}};
   else if (N == 1) return {{start}, {end}};
   else if (range < N) {
@@ -77,11 +77,11 @@ std::pair<std::vector<T>, std::vector<T>> splitStaticExclusive(T start, T end, T
   } else {
     std::vector<T> xs(N);
     std::vector<T> ys(N);
-    auto k = range / N;
-    auto m = range % N;
+    const auto k = range / N;
+    const auto m = range % N;
     for (T i = 0; i < N; ++i) {
-      auto a = i * k + std::min(i, m);
-      auto b = (i + 1) * k + std::min((i + 1), m);
+      const auto a = (i * k) + std::min(i, m);
+      const auto b = ((i + 1) * k) + std::min((i + 1), m);
       xs[i] = start + a;
       ys[i] = start + b;
     }

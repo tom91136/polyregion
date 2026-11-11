@@ -68,7 +68,9 @@ inline bool hasFeature(const Device &d, const std::string &f) {
 }
 
 inline Image imageOf(const llvm::json::Object &o) {
-  return {o.getString("kind").value_or("").str(), o.getString("format").value_or("").str(), strings(o.getArray("features"))};
+  return {.kind = o.getString("kind").value_or("").str(),
+          .format = o.getString("format").value_or("").str(),
+          .features = strings(o.getArray("features"))};
 }
 
 inline std::string show(const Image &i) { return fmt::format("{}/{}[{}]", i.kind, i.format, i.features ^ mk_string(",")); }
@@ -91,8 +93,9 @@ inline std::optional<Inventory> parseInventory(const std::string &text) {
     if (const auto *ds = o->getArray("devices"))
       for (const auto &d : *ds)
         if (const auto *dobj = d.getAsObject())
-          inv.devices.push_back({dobj->getString("name").value_or("").str(), dobj->getString("format").value_or("").str(),
-                                 detail::strings(dobj->getArray("features"))});
+          inv.devices.push_back({.name = dobj->getString("name").value_or("").str(),
+                                 .format = dobj->getString("format").value_or("").str(),
+                                 .features = detail::strings(dobj->getArray("features"))});
     return inv;
   }
   return std::nullopt;
@@ -132,17 +135,20 @@ inline std::optional<Record> parseRecord(const std::string &stderrText) {
   if (!o) return std::nullopt;
   Record rec;
   if (const auto *d = o->getObject("device"))
-    rec.device = std::pair{d->getString("kind").value_or("").str(),
-                           Device{d->getString("name").value_or("").str(), d->getString("format").value_or("").str(), {}}};
+    rec.device = std::pair{
+        d->getString("kind").value_or("").str(),
+        Device{.name = d->getString("name").value_or("").str(), .format = d->getString("format").value_or("").str(), .features = {}}};
   if (const auto *as = o->getArray("attempts"))
     for (const auto &a : *as)
       if (const auto *aobj = a.getAsObject())
-        rec.attempts.push_back({aobj->getString("module").value_or("").str(), aobj->getString("outcome").value_or("").str(),
-                                detail::imageOf(*aobj), detail::strings(aobj->getArray("detail"))});
+        rec.attempts.push_back({.module = aobj->getString("module").value_or("").str(),
+                                .outcome = aobj->getString("outcome").value_or("").str(),
+                                .image = detail::imageOf(*aobj),
+                                .detail = detail::strings(aobj->getArray("detail"))});
   return rec;
 }
 
-inline Verdict reject(std::string reason) { return {false, std::move(reason)}; }
+inline Verdict reject(std::string reason) { return {.justified = false, .reason = std::move(reason)}; }
 
 inline Verdict judge(const std::string &selector, const std::optional<Inventory> &inventory, const Manifest &manifest,
                      const std::string &stderrText, const std::vector<std::string> &runFeatures) {
@@ -221,8 +227,9 @@ inline Verdict judge(const std::string &selector, const std::optional<Inventory>
     }
   }
   if (notes.empty()) return reject(unreachable);
-  return {true, fmt::format("polyrt: no compatible target: {} lacks a feature its image or run requires ({})", device.name,
-                            notes ^ distinct() ^ mk_string("; "))};
+  return {.justified = true,
+          .reason = fmt::format("polyrt: no compatible target: {} lacks a feature its image or run requires ({})", device.name,
+                                notes ^ distinct() ^ mk_string("; "))};
 }
 
 } // namespace polyregion::polytest::skip

@@ -21,7 +21,7 @@ import polyregion.ast.Traversal.*
 //   return before the end of the kernel                 ->  declined
 //   a loop with lane-varying exits                      ->  nothing assigned in it agrees
 private[pass] object GroupUniform {
-  import GroupFission.{Lanes, Lid, isBarrier, sel, u32}
+  import GroupVocabulary.{Lanes, Lid, isBarrier, sel, u32}
   import GroupState.*
 
   private type Note = (Option[p.SourcePosition], Option[String])
@@ -44,7 +44,7 @@ private[pass] object GroupUniform {
     body.exists(_.collectFirst_[p.Stmt] { case p.Stmt.Mut(p.Term.Select(root, _, _), _) if root == i => () }.isDefined)
 
   // symbols of the variables whose value is the same in every lane at every point
-  private def agreeing(prepared: GroupFission.Prepared, defs: List[p.StructDef]): p.Term => Boolean = {
+  private def agreeing(prepared: GroupVocabulary.Prepared, defs: List[p.StructDef]): p.Term => Boolean = {
     val defMap   = defs.map(d => d.name -> d).toMap
     val fix      = fixed(prepared)
     val body     = prepared.body
@@ -52,23 +52,19 @@ private[pass] object GroupUniform {
     val declared = mutable.LinkedHashMap.empty[String, p.Named]
     body.foreach(_.collectWhere[p.Stmt] {
       case p.Stmt.Var(n, _, _)            => declared.getOrElseUpdate(n.symbol, n)
-      case p.Stmt.ForRange(i, _, _, _, _) => declared.getOrElseUpdate(i.symbol, i)
+      case p.Stmt.ForRange(induction = i) => declared.getOrElseUpdate(i.symbol, i)
     })
     val agree = mutable.Set.from(declared.collect { case (sym, n) if scalar(n.tpe) && !aliased(sym) => sym })
 
-    def term(t: p.Term): Boolean = t match {
-      case p.Term.Select(root, steps, _) =>
-        (steps.isEmpty && agree(root.symbol)) || (fix(root.symbol) && fieldPath(defMap, root.tpe, steps))
-      case _ => true
-    }
+    def term(t: p.Term): Boolean = stableTerm(defMap, fix, agree)(t)
     def expr(e: p.Expr): Boolean = e match {
-      case p.Expr.Alias(t)      => term(t)
-      case p.Expr.IntrOp(op)    => op.terms.forall(term)
-      case p.Expr.MathOp(op)    => op.terms.forall(term)
-      case p.Expr.Cast(t, _)    => term(t)
-      case p.Expr.BitCast(t, _) => term(t)
-      case _: p.Expr.SizeOf     => true
-      case _: p.Expr.OffsetOf   => true
+      case p.Expr.Alias(t)       => term(t)
+      case p.Expr.IntrOp(op)     => op.terms.forall(term)
+      case p.Expr.MathOp(op)     => op.terms.forall(term)
+      case p.Expr.Cast(t, _)     => term(t)
+      case p.Expr.BitCast(t, _)  => term(t)
+      case p.Expr.SizeOf(_)      => true
+      case p.Expr.OffsetOf(_, _) => true
       case p.Expr.SpecOp(
             op @ (_: p.Spec.GpuGroupIdx | _: p.Spec.GpuGroupSize | _: p.Spec.GpuLocalSize | _: p.Spec.GpuGlobalSize)
           ) =>
@@ -87,7 +83,7 @@ private[pass] object GroupUniform {
     def drop(sym: String): Unit = if (agree.remove(sym)) changed = true
     def walk(stmts: List[p.Stmt], ctrl: Boolean): Unit = stmts.foreach {
       case p.Stmt.Var(n, Some(e), _) => if (!(ctrl && expr(e))) drop(n.symbol)
-      case p.Stmt.Mut(p.Term.Select(root, steps, _), e) if GroupFission.ownStorage(root, steps) =>
+      case p.Stmt.Mut(p.Term.Select(root, steps, _), e) if GroupVocabulary.ownStorage(root, steps) =>
         if (!(ctrl && expr(e))) drop(root.symbol)
       case p.Stmt.Cond(c, t, f) =>
         val next = ctrl && term(c)
@@ -171,15 +167,15 @@ private[pass] object GroupUniform {
   }
 
   private def runs(pieces: List[Piece]): Int = pieces.map {
-    case Piece.Run(_)                  => 1
-    case Piece.If(_, t, f, _)          => runs(t) + runs(f)
-    case Piece.Loop(_, body, _)        => runs(body)
-    case Piece.Range(_, _, _, _, b, _) => runs(b)
+    case Piece.Run(_)           => 1
+    case Piece.If(_, t, f, _)   => runs(t) + runs(f)
+    case Piece.Loop(_, body, _) => runs(body)
+    case Piece.Range(body = b)  => runs(b)
   }.sum
 
-  def apply(prepared: GroupFission.Prepared, defs: List[p.StructDef]): Either[String, GroupRegions.Lowered] = {
+  def apply(prepared: GroupVocabulary.Prepared, defs: List[p.StructDef]): Either[String, GroupRegions.Lowered] = {
     val body = prepared.body match {
-      case init :+ p.Stmt.Return(_: p.Expr.Alias) => Right(init)
+      case init :+ p.Stmt.Return(p.Expr.Alias(_)) => Right(init)
       case _                                      => Left("the kernel does not end in a plain return")
     }
     for {

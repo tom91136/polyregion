@@ -4,6 +4,8 @@ import scala.collection.mutable.ListBuffer
 
 import polyregion.ast.Traversal.*
 import polyregion.ast.{Log, PolyAST as p, *, given}
+import polyregion.ast.pass.TypeOps.pathType
+import polyregion.ast.pass.TypeOps.width
 
 // makes the physical type of every source lvalue explicit. a Select is first typed as its declared storage;
 // consumers that intentionally view equal-width scalar bits through another type receive an explicit BitCast.
@@ -18,52 +20,13 @@ object SourceSelectionLegalise extends ProgramPass {
 
   override def phase: p.Pass.Phase = p.Pass.Phase.PostMono
 
-  private def width(tpe: p.Type): Option[Int] = tpe match {
-    case p.Type.Bool1 | p.Type.IntU8 | p.Type.IntS8     => Some(1)
-    case p.Type.IntU16 | p.Type.IntS16 | p.Type.Float16 => Some(2)
-    case p.Type.IntU32 | p.Type.IntS32 | p.Type.Float32 => Some(4)
-    case p.Type.IntU64 | p.Type.IntS64 | p.Type.Float64 => Some(8)
-    case _                                              => None
-  }
-
   override def apply(program: p.Program, log: Log): p.Program = {
     val definitions = program.defs.map(definition => definition.name -> definition).toMap
 
-    def memberType(owner: p.Type, field: String): p.Type = {
-      val structure = owner match {
-        case value: p.Type.Struct                => value
-        case p.Type.Ptr(value: p.Type.Struct, _) => value
-        case other => throw IllegalArgumentException(s"field $field selected on non-struct type ${other.repr}")
-      }
-      definitions
-        .get(structure.name)
-        .flatMap(_.members.find(_.symbol == field))
-        .map(_.tpe)
-        .getOrElse(throw IllegalArgumentException(s"field $field not found on ${structure.name.fqcn}"))
-    }
-
-    def storageType(select: p.Term.Select): p.Type = select.steps.foldLeft(select.root.tpe) {
-      case (current, p.PathStep.Field(field)) => memberType(current, field)
-      case (p.Type.Ptr(component, _), p.PathStep.Deref | _: p.PathStep.Index | _: p.PathStep.IndexDyn) => component
-      case (p.Type.Arr(component, _, _), _: p.PathStep.Index | _: p.PathStep.IndexDyn)                 => component
-      case (current, step) => throw IllegalArgumentException(s"cannot apply ${step.repr} to ${current.repr}")
-    }
+    def storageType(select: p.Term.Select): p.Type = pathType(definitions, select.root.tpe, select.steps)
 
     def legalise(function: p.Function): p.Function = {
-      val occupied = scala.collection.mutable.Set.from(
-        (function.receiver.toList ::: function.args ::: function.moduleCaptures ::: function.termCaptures)
-          .map(_.named.symbol) :::
-          function.collectAll[p.Stmt].flatMap {
-            case p.Stmt.Var(name, _, _)                 => List(name.symbol)
-            case p.Stmt.ForRange(induction, _, _, _, _) => List(induction.symbol)
-            case _                                      => Nil
-          }
-      )
-      val candidates = Iterator.from(0).map(index => s"#source_view_$index")
-      def fresh(tpe: p.Type): p.Named = {
-        val symbol = candidates.find(occupied.add).get
-        p.Named(symbol, tpe)
-      }
+      val fresh = Binders.freshNamer(function, "#source_view_")
 
       def sameStorage(storage: p.Type, view: p.Type): Boolean = {
         def erase(t: p.Type): p.Type = t match {
@@ -76,8 +39,8 @@ object SourceSelectionLegalise extends ProgramPass {
 
       def conversion(value: p.Term, from: p.Type, to: p.Type): p.Expr = (from, to) match {
         case _ if from == p.Type.Bool1 || to == p.Type.Bool1       => p.Expr.Cast(value, to)
-        case (_: p.Type.Ptr, _) if sameStorage(from, to)           => p.Expr.Cast(value, to)
-        case (_: p.Type.Arr, _) if sameStorage(from, to)           => p.Expr.Alias(value)
+        case (p.Type.Ptr(_, _), _) if sameStorage(from, to)        => p.Expr.Cast(value, to)
+        case (p.Type.Arr(_, _, _), _) if sameStorage(from, to)     => p.Expr.Alias(value)
         case _ if width(from).nonEmpty && width(from) == width(to) => p.Expr.BitCast(value, to)
         case _ => throw IllegalArgumentException(s"source selection cannot view ${from.repr} as ${to.repr}")
       }
@@ -166,20 +129,7 @@ object SourceSelectionLegalise extends ProgramPass {
           val prefix  = ListBuffer.empty[p.Stmt]
           val lowered = lowerExpr(value, prefix)
           prefix.toList :+ returned.copy(value = lowered)
-        case annotated @ p.Stmt.Annotated(inner, _, _) =>
-          lowerBlock(List(inner)) match {
-            case init :+ last => init :+ annotated.copy(inner = last)
-            case Nil          => Nil
-            case other        => other
-          }
-        case tried @ p.Stmt.Try(body, handlers, fin) =>
-          List(
-            tried.copy(
-              body = lowerBlock(body),
-              handlers = handlers.map(h => h.copy(body = lowerBlock(h.body))),
-              fin = lowerBlock(fin)
-            )
-          )
+        case nested @ (p.Stmt.Annotated(_, _, _) | p.Stmt.Try(_, _, _)) => Binders.lowerNested(lowerBlock)(nested)
         case raised @ p.Stmt.Raise(value, _, cleanup) =>
           val prefix  = ListBuffer.empty[p.Stmt]
           val lowered = lowerTerm(value, prefix)

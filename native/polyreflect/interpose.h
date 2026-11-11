@@ -10,7 +10,7 @@ public:
   bool verbose;
 
   explicit InterposePass(bool verbose);
-  llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &);
+  llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &) const;
 };
 
 class RecordAllocPass : public llvm::PassInfoMixin<RecordAllocPass> {
@@ -18,7 +18,7 @@ public:
   bool verbose;
 
   explicit RecordAllocPass(bool verbose);
-  llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &);
+  llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &) const;
 };
 
 } // namespace polyregion::polyreflect

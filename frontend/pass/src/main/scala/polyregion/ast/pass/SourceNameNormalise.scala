@@ -40,8 +40,11 @@ final case class SourceNameNormalise(metalKeywords: Boolean = false) extends Pro
     private val used = scala.collection.mutable.Set.empty[String]
 
     def allocate(raw: String): String = {
-      val base = identifier(raw)
-      (Iterator.single(base) ++ Iterator.from(1).map(index => s"${base}_$index")).find(used.add).get
+      val base       = identifier(raw)
+      val candidates = Iterator.single(base) ++ Iterator.from(1).map(index => s"${base}_$index")
+      var candidate  = candidates.next()
+      while (!used.add(candidate)) candidate = candidates.next()
+      candidate
     }
   }
 
@@ -83,8 +86,7 @@ final case class SourceNameNormalise(metalKeywords: Boolean = false) extends Pro
             val next = owner
               .flatMap(definitions.get)
               .flatMap(_.members.find(_.symbol == name))
-              .map(_.tpe)
-              .getOrElse(p.Type.Nothing)
+              .fold[p.Type](p.Type.Nothing)(_.tpe)
             val renamed = owner.flatMap(fieldNames.get).flatMap(_.get(name)).getOrElse(identifier(name))
             next -> (p.PathStep.Field(renamed) :: renamedSteps)
           case ((current, renamedSteps), step @ (p.PathStep.Deref | _: p.PathStep.Index | _: p.PathStep.IndexDyn)) =>
@@ -134,9 +136,8 @@ final case class SourceNameNormalise(metalKeywords: Boolean = false) extends Pro
           .modifyAll[p.Type](renameType)
           .copy(
             name = structNames(definition.name),
-            members = definition.members.map(member =>
-              member.modifyAll[p.Type](renameType).copy(symbol = fields(member.symbol))
-            )
+            members = definition.members
+              .map(member => member.modifyAll[p.Type](renameType).copy(symbol = fields(member.symbol)))
           )
       }
     )

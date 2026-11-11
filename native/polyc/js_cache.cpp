@@ -1,5 +1,10 @@
 #include "js_cache.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <string_view>
+
 #include "llvm/TargetParser/Host.h"
 #include "llvm/TargetParser/Triple.h"
 

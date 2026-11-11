@@ -12,13 +12,13 @@ namespace polyregion::polyfront {
 
 template <typename Diag, std::size_t N, typename... Args>
 void emit(Diag &diag, typename Diag::Level level, const char (&fmt)[N], Args &&...args) {
-  auto b = diag.Report(diag.getCustomDiagID(level, fmt));
+  const auto b = diag.Report(diag.getCustomDiagID(level, fmt));
   (void)(b << ... << std::forward<Args>(args));
 }
 
 template <typename Diag, typename Loc, std::size_t N, typename... Args>
 void emit(Diag &diag, Loc loc, typename Diag::Level level, const char (&fmt)[N], Args &&...args) {
-  auto b = diag.Report(loc, diag.getCustomDiagID(level, fmt));
+  const auto b = diag.Report(loc, diag.getCustomDiagID(level, fmt));
   (void)(b << ... << std::forward<Args>(args));
 }
 

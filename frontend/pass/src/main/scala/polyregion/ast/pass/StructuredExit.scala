@@ -68,6 +68,7 @@ object StructuredExit extends ProgramPass {
 
   private val BoundaryKind = p.ExceptionKind(p.Type.Nothing, p.Conventions.ElementBoundary)
 
+  @SuppressWarnings(Array("bonsai:test-only-member"))
   private[pass] def elementBoundary(body: List[p.Stmt]): p.Stmt =
     p.Stmt.Try(body, List(p.Handler(Some(BoundaryKind), None, Nil)), Nil)
 
@@ -79,16 +80,23 @@ object StructuredExit extends ProgramPass {
   private def swallows(t: p.Stmt.Try): Boolean = isBoundary(t) && !t.body.exists(containsBarrier)
 
   private def declarations(body: List[p.Stmt]): List[p.Named] = body.flatMap {
-    case p.Stmt.Var(n, _, _)            => List(n)
-    case p.Stmt.While(_, b)             => declarations(b)
-    case p.Stmt.ForRange(i, _, _, _, b) => i :: declarations(b)
-    case p.Stmt.Cond(_, t, f)           => declarations(t) ::: declarations(f)
-    case p.Stmt.Raise(_, _, cleanup)    => declarations(cleanup)
+    case p.Stmt.Var(n, _, _)                      => List(n)
+    case p.Stmt.While(_, b)                       => declarations(b)
+    case p.Stmt.ForRange(induction = i, body = b) => i :: declarations(b)
+    case p.Stmt.Cond(_, t, f)                     => declarations(t) ::: declarations(f)
+    case p.Stmt.Raise(_, _, cleanup)              => declarations(cleanup)
     case p.Stmt.Try(b, hs, fin) =>
       declarations(b) ::: hs.flatMap(h => h.binder.toList ::: declarations(h.body)) ::: declarations(fin)
     case p.Stmt.Annotated(inner, _, _) => declarations(List(inner))
     case _                             => Nil
   }
+
+  private def renameDeclared(stmts: List[p.Stmt], rename: p.Named => p.Named): List[p.Stmt] = stmts
+    .modifyAll[p.Term] {
+      case p.Term.Select(root, steps, tpe) => p.Term.Select(rename(root), steps, tpe)
+      case other                           => other
+    }
+    .modifyAll[p.Stmt](Binders.renameBinders(rename))
 
   private final class FinallySymbols(body: List[p.Stmt]) {
     private var counter = 0L
@@ -116,27 +124,17 @@ object StructuredExit extends ProgramPass {
       val declared           = declarations(stmts)
       val names              = declared.distinct.map(n => n -> n.copy(symbol = symbols.fresh(n.symbol))).toMap
       def rename(n: p.Named) = names.getOrElse(n, n)
-      stmts
-        .modifyAll[p.Term] {
-          case p.Term.Select(root, steps, tpe) => p.Term.Select(rename(root), steps, tpe)
-          case x                               => x
-        }
-        .modifyAll[p.Stmt] {
-          case p.Stmt.Var(n, expr, mut)            => p.Stmt.Var(rename(n), expr, mut)
-          case p.Stmt.ForRange(i, lb, ub, step, b) => p.Stmt.ForRange(rename(i), lb, ub, step, b)
-          case p.Stmt.Try(b, hs, fin) =>
-            p.Stmt.Try(b, hs.map(h => h.copy(binder = h.binder.map(rename))), fin)
-          case x => x
-        }
+      renameDeclared(stmts, rename)
     }
 
-    def rewrite(body: List[p.Stmt], cleanups: List[(List[p.Stmt], Int)], loopDepth: Int): List[p.Stmt] =
+    def rewrite(body: List[p.Stmt], cleanups: List[(List[p.Stmt], Int)], loopDepth: Int): List[p.Stmt] = {
+      val enclosing = cleanups.filter(_._2 >= loopDepth)
       body.flatMap {
         case r: p.Stmt.Return => cleanups.flatMap((fin, _) => freshCopy(fin)) :+ r
         case p.Stmt.Break =>
-          cleanups.filter(_._2 >= loopDepth).flatMap((fin, _) => freshCopy(fin)) :+ p.Stmt.Break
+          enclosing.flatMap((fin, _) => freshCopy(fin)) :+ p.Stmt.Break
         case p.Stmt.Cont =>
-          cleanups.filter(_._2 >= loopDepth).flatMap((fin, _) => freshCopy(fin)) :+ p.Stmt.Cont
+          enclosing.flatMap((fin, _) => freshCopy(fin)) :+ p.Stmt.Cont
         case p.Stmt.Cond(c, t, f) =>
           List(p.Stmt.Cond(c, rewrite(t, cleanups, loopDepth), rewrite(f, cleanups, loopDepth)))
         case p.Stmt.While(c, b) => List(p.Stmt.While(c, rewrite(b, cleanups, loopDepth + 1)))
@@ -172,13 +170,14 @@ object StructuredExit extends ProgramPass {
           rewrite(List(inner), cleanups, loopDepth).map(p.Stmt.Annotated(_, pos, comment))
         case other => List(other)
       }
+    }
 
     rewrite(stmts, Nil, 0)
   }
 
   private def isAssert(s: p.Stmt): Boolean = s match {
-    case p.Stmt.Var(_, Some(p.Expr.SpecOp(_: p.Spec.Assert)), _) => true
-    case _                                                       => false
+    case p.Stmt.Var(_, Some(p.Expr.SpecOp(p.Spec.Assert(_, _))), _) => true
+    case _                                                          => false
   }
 
   private def isBarrier(s: p.Stmt): Boolean = s match {
@@ -239,9 +238,9 @@ object StructuredExit extends ProgramPass {
         }
 
     private def convertible(raised: p.Type, caught: p.Type): Boolean = (raised, caught) match {
-      case (s: p.Type.Struct, _: p.Type.Struct) =>
+      case (s: p.Type.Struct, p.Type.Struct(_, _)) =>
         byName.get(s.name).exists(_.parents.contains(caught)) && projection(raised, caught).isDefined
-      case (p.Type.Ptr(p.Type.Nothing, p.Type.Space.Constant), _: p.Type.Ptr)           => true
+      case (p.Type.Ptr(p.Type.Nothing, p.Type.Space.Constant), p.Type.Ptr(_, _))        => true
       case (p.Type.Ptr(from, _), p.Type.Ptr(p.Type.Unit0, _)) if from != p.Type.Nothing => true
       case (p.Type.Ptr(from: p.Type.Struct, _), p.Type.Ptr(to: p.Type.Struct, _)) =>
         byName.get(from.name).exists(_.parents.contains(to)) && projection(from, to).isDefined
@@ -252,13 +251,13 @@ object StructuredExit extends ProgramPass {
       handler.caught.forall(_.catches(raised)(convertible))
 
     private def rethrowsCurrent(stmts: List[p.Stmt]): Boolean = stmts.exists {
-      case p.Stmt.Rethrow                 => true
-      case p.Stmt.Cond(_, t, f)           => rethrowsCurrent(t) || rethrowsCurrent(f)
-      case p.Stmt.While(_, b)             => rethrowsCurrent(b)
-      case p.Stmt.ForRange(_, _, _, _, b) => rethrowsCurrent(b)
-      case p.Stmt.Annotated(inner, _, _)  => rethrowsCurrent(List(inner))
-      case p.Stmt.Try(body, _, fin)       => rethrowsCurrent(body) || rethrowsCurrent(fin)
-      case _                              => false
+      case p.Stmt.Rethrow                => true
+      case p.Stmt.Cond(_, t, f)          => rethrowsCurrent(t) || rethrowsCurrent(f)
+      case p.Stmt.While(_, b)            => rethrowsCurrent(b)
+      case p.Stmt.ForRange(body = b)     => rethrowsCurrent(b)
+      case p.Stmt.Annotated(inner, _, _) => rethrowsCurrent(List(inner))
+      case p.Stmt.Try(body, _, fin)      => rethrowsCurrent(body) || rethrowsCurrent(fin)
+      case _                             => false
     }
 
     private def unhandled(t: p.Stmt.Try): Set[p.ExceptionKind] = raised(t.body).filter { thrown =>
@@ -272,7 +271,7 @@ object StructuredExit extends ProgramPass {
       case p.Stmt.Rethrow                    => Set.empty
       case p.Stmt.Cond(_, t, f)              => raised(t) ++ raised(f)
       case p.Stmt.While(_, b)                => raised(b)
-      case p.Stmt.ForRange(_, _, _, _, b)    => raised(b)
+      case p.Stmt.ForRange(body = b)         => raised(b)
       case p.Stmt.Annotated(inner, _, _)     => raised(inner)
       case t: p.Stmt.Try if swallows(t)      => Set.empty
       case t: p.Stmt.Try                     => unhandled(t) ++ raised(t.handlers.flatMap(_.body)) ++ raised(t.fin)
@@ -284,14 +283,14 @@ object StructuredExit extends ProgramPass {
     def mayExit(s: p.Stmt): Boolean      = s.collectFirst_[p.Stmt] { case x if exits(x) => x }.isDefined
 
     def escapes(s: p.Stmt): Boolean = s match {
-      case _ if exits(s)                  => true
-      case _: p.Stmt.Raise                => true
-      case p.Stmt.Rethrow                 => true
-      case p.Stmt.Cond(_, t, f)           => t.exists(escapes) || f.exists(escapes)
-      case p.Stmt.While(_, b)             => b.exists(escapes)
-      case p.Stmt.ForRange(_, _, _, _, b) => b.exists(escapes)
-      case p.Stmt.Annotated(inner, _, _)  => escapes(inner)
-      case t: p.Stmt.Try if swallows(t)   => false
+      case _ if exits(s)                 => true
+      case p.Stmt.Raise(_, _, _)         => true
+      case p.Stmt.Rethrow                => true
+      case p.Stmt.Cond(_, t, f)          => t.exists(escapes) || f.exists(escapes)
+      case p.Stmt.While(_, b)            => b.exists(escapes)
+      case p.Stmt.ForRange(body = b)     => b.exists(escapes)
+      case p.Stmt.Annotated(inner, _, _) => escapes(inner)
+      case t: p.Stmt.Try if swallows(t)  => false
       case t: p.Stmt.Try =>
         t.body.exists(mayExit) || t.handlers.exists(_.body.exists(escapes)) || t.fin.exists(escapes) ||
         unhandled(t).nonEmpty
@@ -303,8 +302,8 @@ object StructuredExit extends ProgramPass {
 
     def hasBarrierEscape(s: p.Stmt): Boolean = s
       .collectFirst_[p.Stmt] {
-        case l @ p.Stmt.While(_, b) if b.exists(escapes) && b.exists(containsBarrier)             => l
-        case l @ p.Stmt.ForRange(_, _, _, _, b) if b.exists(escapes) && b.exists(containsBarrier) => l
+        case l @ p.Stmt.While(_, b) if b.exists(escapes) && b.exists(containsBarrier)        => l
+        case l @ p.Stmt.ForRange(body = b) if b.exists(escapes) && b.exists(containsBarrier) => l
       }
       .isDefined
   }
@@ -333,7 +332,7 @@ object StructuredExit extends ProgramPass {
     stmts.exists {
       case p.Stmt.Mut(p.Term.Select(root, Nil, _), _) if root.symbol == ExceptionWhatSym => false
       case p.Stmt.While(_, body)                                                         => observesExceptionWhat(body)
-      case p.Stmt.ForRange(_, _, _, _, body)                                             => observesExceptionWhat(body)
+      case p.Stmt.ForRange(body = body)                                                  => observesExceptionWhat(body)
       case p.Stmt.Cond(_, ifTrue, ifFalse) => observesExceptionWhat(ifTrue) || observesExceptionWhat(ifFalse)
       case p.Stmt.Try(body, handlers, fin) =>
         observesExceptionWhat(body) || handlers.exists(h => observesExceptionWhat(h.body)) || observesExceptionWhat(fin)
@@ -361,10 +360,10 @@ object StructuredExit extends ProgramPass {
 
     private def freshCopy(stmts: List[p.Stmt]): List[p.Stmt] = {
       def declarations(body: List[p.Stmt]): List[p.Named] = body.flatMap {
-        case p.Stmt.Var(n, _, _)            => List(n)
-        case p.Stmt.While(_, b)             => declarations(b)
-        case p.Stmt.ForRange(i, _, _, _, b) => i :: declarations(b)
-        case p.Stmt.Cond(_, t, f)           => declarations(t) ::: declarations(f)
+        case p.Stmt.Var(n, _, _)                      => List(n)
+        case p.Stmt.While(_, b)                       => declarations(b)
+        case p.Stmt.ForRange(induction = i, body = b) => i :: declarations(b)
+        case p.Stmt.Cond(_, t, f)                     => declarations(t) ::: declarations(f)
         case p.Stmt.Try(b, hs, fin) =>
           declarations(b) ::: hs.flatMap(h => h.binder.toList ::: declarations(h.body)) ::: declarations(fin)
         case p.Stmt.Annotated(inner, _, _) => declarations(List(inner))
@@ -372,29 +371,18 @@ object StructuredExit extends ProgramPass {
       }
       val names                       = declarations(stmts).distinct.map(n => n -> fresh(n.tpe)).toMap
       def rename(n: p.Named): p.Named = names.getOrElse(n, n)
-      stmts
-        .modifyAll[p.Term] {
-          case p.Term.Select(root, steps, tpe) => p.Term.Select(rename(root), steps, tpe)
-          case other                           => other
-        }
-        .modifyAll[p.Stmt] {
-          case p.Stmt.Var(n, expr, mut)            => p.Stmt.Var(rename(n), expr, mut)
-          case p.Stmt.ForRange(i, lb, ub, step, b) => p.Stmt.ForRange(rename(i), lb, ub, step, b)
-          case p.Stmt.Try(b, hs, fin) =>
-            p.Stmt.Try(b, hs.map(h => h.copy(binder = h.binder.map(rename))), fin)
-          case other => other
-        }
+      renameDeclared(stmts, rename)
     }
 
     private def let(tpe: p.Type, e: p.Expr, into: ListBuffer[p.Stmt]): p.Term = {
       val n = fresh(tpe)
-      into += p.Stmt.Var(n, Some(e), isMutable = false)
+      into += p.Stmt.Var(n, Some(e))
       sel(n)
     }
 
     private def ifThen(test: p.Expr, taken: List[p.Stmt], els: List[p.Stmt]): List[p.Stmt] = {
       val c = fresh(p.Type.Bool1)
-      List(p.Stmt.Var(c, Some(test), isMutable = false), p.Stmt.Cond(sel(c), taken, els))
+      List(p.Stmt.Var(c, Some(test)), p.Stmt.Cond(sel(c), taken, els))
     }
 
     private def selectTag(
@@ -435,8 +423,7 @@ object StructuredExit extends ProgramPass {
             p.Stmt.Var(messageBuffer, None, isMutable = true),
             p.Stmt.Var(
               p.Named(ExceptionWhatSym, ExceptionWhatPtr),
-              Some(messageRef(messageBuffer)),
-              isMutable = false
+              Some(messageRef(messageBuffer))
             )
           )
         )
@@ -497,7 +484,7 @@ object StructuredExit extends ProgramPass {
           p.Term.IntU32Const(MessageLimit),
           p.Term.IntU32Const(1),
           List(
-            p.Stmt.Var(ch, Some(p.Expr.Index(sel(source), sel(i), p.Type.IntS8)), isMutable = false),
+            p.Stmt.Var(ch, Some(p.Expr.Index(sel(source), sel(i), p.Type.IntS8))),
             p.Stmt.Update(sel(target), sel(i), sel(ch))
           )
         )
@@ -561,21 +548,29 @@ object StructuredExit extends ProgramPass {
         code: p.Term
     ): (List[p.Stmt], Boolean) = {
       var found = false
-      def rewrite(body: List[p.Stmt]): List[p.Stmt] = body.flatMap {
-        case p.Stmt.Rethrow =>
-          found = true
-          List(
-            p.Stmt.Mut(marker, p.Expr.Alias(p.Term.Bool1Const(true))),
-            p.Stmt.Mut(sel(p.Named(ExceptionWhatSym, ExceptionWhatPtr)), p.Expr.Alias(what)),
-            p.Stmt.Mut(sel(p.Named(ExceptionCodeSym, p.Type.IntS32)), p.Expr.Alias(code)),
-            p.Stmt.Raise(value, raised.exceptionKind, raised.cleanup)
-          )
-        case p.Stmt.Cond(c, t, f)            => List(p.Stmt.Cond(c, rewrite(t), rewrite(f)))
-        case p.Stmt.While(c, b)              => List(p.Stmt.While(c, rewrite(b)))
-        case p.Stmt.ForRange(i, l, u, s, b)  => List(p.Stmt.ForRange(i, l, u, s, rewrite(b)))
-        case p.Stmt.Try(b, hs, fin)          => List(p.Stmt.Try(rewrite(b), hs, rewrite(fin)))
-        case p.Stmt.Annotated(inner, pos, c) => rewrite(List(inner)).map(p.Stmt.Annotated(_, pos, c))
-        case other                           => List(other)
+
+      val whatNamed = p.Named(ExceptionWhatSym, ExceptionWhatPtr)
+      val codeNamed = p.Named(ExceptionCodeSym, p.Type.IntS32)
+      val raiseStmt = p.Stmt.Raise(value, raised.exceptionKind, raised.cleanup)
+      def rewrite(body: List[p.Stmt]): List[p.Stmt] = {
+        val out = List.newBuilder[p.Stmt]
+        body.foreach {
+          case p.Stmt.Rethrow =>
+            found = true
+            out ++= List(
+              p.Stmt.Mut(marker, p.Expr.Alias(p.Term.Bool1Const(true))),
+              p.Stmt.Mut(sel(whatNamed), p.Expr.Alias(what)),
+              p.Stmt.Mut(sel(codeNamed), p.Expr.Alias(code)),
+              raiseStmt
+            )
+          case p.Stmt.Cond(c, t, f)            => out += p.Stmt.Cond(c, rewrite(t), rewrite(f))
+          case p.Stmt.While(c, b)              => out += p.Stmt.While(c, rewrite(b))
+          case p.Stmt.ForRange(i, l, u, s, b)  => out += p.Stmt.ForRange(i, l, u, s, rewrite(b))
+          case p.Stmt.Try(b, hs, fin)          => out += p.Stmt.Try(rewrite(b), hs, rewrite(fin))
+          case p.Stmt.Annotated(inner, pos, c) => out ++= rewrite(List(inner)).map(p.Stmt.Annotated(_, pos, c))
+          case other                           => out += other
+        }
+        out.result()
       }
       rewrite(stmts) -> found
     }
@@ -656,15 +651,15 @@ object StructuredExit extends ProgramPass {
           case other => List(other)
         }
 
-        List(p.Stmt.Var(savedFlag, Some(p.Expr.Alias(asserted)), isMutable = false)) :::
-          savedTag.toList.map(t => p.Stmt.Var(t, Some(p.Expr.Alias(tagSel)), isMutable = false)) :::
+        List(p.Stmt.Var(savedFlag, Some(p.Expr.Alias(asserted)))) :::
+          savedTag.toList.map(t => p.Stmt.Var(t, Some(p.Expr.Alias(tagSel)))) :::
           savedWhat.toList.flatMap(t => p.Stmt.Var(t, None, isMutable = true) :: copyBuffer(messageBuffer, t)) :::
           savedCode.toList.map(t =>
-            p.Stmt.Var(t, Some(p.Expr.Alias(sel(p.Named(ExceptionCodeSym, p.Type.IntS32)))), isMutable = false)
+            p.Stmt.Var(t, Some(p.Expr.Alias(sel(p.Named(ExceptionCodeSym, p.Type.IntS32)))))
           ) :::
           slotDecls ::: saveSlots :::
           List(p.Stmt.Mut(asserted, p.Expr.Alias(p.Term.Bool1Const(false)))) :::
-          Option.when(tags.nonEmpty)(p.Stmt.Mut(tagSel, p.Expr.Alias(p.Term.IntS32Const(AssertTag)))).toList :::
+          assertTag :::
           discardBeforeAbrupt(guard(fin)) :::
           ifThen(p.Expr.Alias(asserted), discardPending, restore)
       }
@@ -712,18 +707,16 @@ object StructuredExit extends ProgramPass {
                     nonNull,
                     p.Stmt.Var(
                       binder,
-                      Some(p.Expr.RefTo(projected, None, toComp, to.space, p.Region.Opaque)),
-                      isMutable = false
+                      Some(p.Expr.RefTo(projected, None, toComp, to.space, p.Region.Opaque))
                     ) :: projectedBody,
                     p.Stmt.Var(
                       nullBinder,
-                      Some(p.Expr.Alias(p.Term.NullPtrConst(to.comp, to.space, p.Region.Opaque))),
-                      isMutable = false
+                      Some(p.Expr.Alias(p.Term.NullPtrConst(to.comp, to.space, p.Region.Opaque)))
                     ) :: nullBody
                   )
                 case _ => throw IllegalStateException(s"invalid pointer handler conversion ${from.repr} -> ${to.repr}")
               }
-              p.Stmt.Var(binder, Some(init), isMutable = false) :: body
+              p.Stmt.Var(binder, Some(init)) :: body
             case _ =>
               val source = p.Term.Select(slot, flow.projection(thrown.tpe, caught).get, caught)
               val init = binder.tpe match {
@@ -731,7 +724,7 @@ object StructuredExit extends ProgramPass {
                   p.Expr.RefTo(source, None, caught, space, p.Region.Rooted(slot))
                 case _ => p.Expr.Alias(source)
               }
-              p.Stmt.Var(binder, Some(init), isMutable = false) :: body
+              p.Stmt.Var(binder, Some(init)) :: body
           }
         case _ => body
       }
@@ -743,7 +736,7 @@ object StructuredExit extends ProgramPass {
           .when(
             handler.body.collectFirst_[p.Term] { case s @ p.Term.Select(root, _, _) if root == state => s }.isDefined
           )(
-            p.Stmt.Var(state, Some(p.Expr.Alias(value)), isMutable = false)
+            p.Stmt.Var(state, Some(p.Expr.Alias(value)))
           )
           .toList
       }
@@ -753,12 +746,14 @@ object StructuredExit extends ProgramPass {
         handlers: List[p.Handler],
         fin: List[p.Stmt]
     ): List[p.Stmt] = {
-      val raised = flow.raised(body)
+      val raised     = flow.raised(body)
+      val raisedList = raised.toList
+      val codeNamed  = p.Named(ExceptionCodeSym, p.Type.IntS32)
       val chain =
         if (raised.isEmpty) Nil
         else
           handlers.foldRight(List.empty[p.Stmt]) { (h, nextHandler) =>
-            val matches = raised.toList.filter(flow.catches(h, _)).sortBy(tagOf)
+            val matches = raisedList.filter(flow.catches(h, _)).sortBy(tagOf)
             selectTag(
               tagSel,
               matches.map { thrown =>
@@ -768,9 +763,9 @@ object StructuredExit extends ProgramPass {
                 val savedCode    = fresh(p.Type.IntS32)
                 val rethrowing   = fresh(p.Type.Bool1)
                 val info         = this.raised(thrown)
-                val what = savedWhatPtr
-                  .map(sel)
-                  .getOrElse(p.Term.NullPtrConst(p.Type.IntS8, p.Type.Space.Private, p.Region.Opaque))
+                val what = savedWhatPtr.fold[p.Term](
+                  p.Term.NullPtrConst(p.Type.IntS8, p.Type.Space.Private, p.Region.Opaque)
+                )(sel)
                 val (handlerBody, rethrows) =
                   materialiseRethrow(h.body, sel(saved), info, sel(rethrowing), what, sel(savedCode))
                 val cleanup = cleanupFor(thrown, saved)
@@ -781,24 +776,21 @@ object StructuredExit extends ProgramPass {
                 val protectedBody =
                   if (finalizer.isEmpty) handlerBody
                   else materialiseFinally(List(p.Stmt.Try(handlerBody, Nil, finalizer)), finallySymbols)
-                val setup = List(p.Stmt.Var(saved, Some(p.Expr.Alias(sel(slotOf(thrown)))), isMutable = false)) :::
-                  savedWhat.toList.flatMap(t =>
-                    p.Stmt.Var(t, None, isMutable = true) :: copyBuffer(messageBuffer, t)
-                  ) :::
+                val setup = List(p.Stmt.Var(saved, Some(p.Expr.Alias(sel(slotOf(thrown)))))) :::
+                  savedWhat.toList
+                    .flatMap(t => p.Stmt.Var(t, None, isMutable = true) :: copyBuffer(messageBuffer, t)) :::
                   savedWhat
                     .zip(savedWhatPtr)
                     .toList
-                    .map((buffer, ptr) => p.Stmt.Var(ptr, Some(messageRef(buffer)), isMutable = false)) :::
+                    .map((buffer, ptr) => p.Stmt.Var(ptr, Some(messageRef(buffer)))) :::
                   List(
                     p.Stmt.Var(
                       savedCode,
-                      Some(p.Expr.Alias(sel(p.Named(ExceptionCodeSym, p.Type.IntS32)))),
-                      isMutable = false
+                      Some(p.Expr.Alias(sel(codeNamed)))
                     )
                   ) :::
-                  savedWhatPtr.toList.flatMap(t =>
-                    handlerState(h, p.Conventions.ExceptionWhatSuffix, ExceptionWhatPtr, sel(t))
-                  ) :::
+                  savedWhatPtr.toList
+                    .flatMap(t => handlerState(h, p.Conventions.ExceptionWhatSuffix, ExceptionWhatPtr, sel(t))) :::
                   handlerState(h, p.Conventions.ExceptionCodeSuffix, p.Type.IntS32, sel(savedCode)) :::
                   Option
                     .when(rethrows)(

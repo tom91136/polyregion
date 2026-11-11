@@ -3,7 +3,9 @@ package polyregion.ast
 import polyregion.ast.PolyAST as p
 
 private[ast] object ScalaInterfaceCodeGen {
-  import InterfaceCodeGen.Support.*
+  import InterfaceCodeGenSupport.*
+
+  private val ProjectedBuiltinTypes = Set("Array", "Boolean", "Byte", "Double", "Float", "Int", "Long", "Short", "Unit")
 
   private val Keywords = Set(
     "abstract",
@@ -74,8 +76,8 @@ private[ast] object ScalaInterfaceCodeGen {
     case p.Type.Exec(Nil, Nil, rtn) => s"() => ${tpe(rtn)}"
     case p.Type.Exec(Nil, List(arg), rtn) =>
       val parameter = arg match {
-        case _: p.Type.Exec => s"(${tpe(arg)})"
-        case _              => tpe(arg)
+        case p.Type.Exec(_, _, _) => s"(${tpe(arg)})"
+        case _                    => tpe(arg)
       }
       s"$parameter => ${tpe(rtn)}"
     case p.Type.Exec(Nil, args, rtn) => s"(${args.map(tpe).mkString(", ")}) => ${tpe(rtn)}"
@@ -86,7 +88,7 @@ private[ast] object ScalaInterfaceCodeGen {
   private def declaration(
       interfaceDef: p.Interface,
       decl: p.FunctionDecl,
-      config: InterfaceCodeGen.ScalaConfig
+      config: ScalaConfig
   ): String = {
     val tpeVars    = if (decl.tpeVars.nonEmpty) decl.tpeVars.map(_.name).mkString("[", ", ", "]") else ""
     val parameters = decl.args.map(arg => s"${arg.named.symbol}: ${tpe(arg.named.tpe)}")
@@ -104,7 +106,7 @@ private[ast] object ScalaInterfaceCodeGen {
       )}")""".stripMargin
   }
 
-  def apply(interfaceDef: p.Interface, config: InterfaceCodeGen.ScalaConfig): String = {
+  def apply(interfaceDef: p.Interface, config: ScalaConfig): String = {
     if (config.packageName.isEmpty) fail("Scala package name is empty")
     config.packageName.split('.').foreach(identifier(_, "package"))
     identifier(config.objectName, "object")
@@ -115,7 +117,7 @@ private[ast] object ScalaInterfaceCodeGen {
       decl.tpeVars.foreach { variable =>
         val name = variable.name
         identifier(name, "type variable")
-        if (Set("Array", "Boolean", "Byte", "Double", "Float", "Int", "Long", "Short", "Unit")(name))
+        if (ProjectedBuiltinTypes(name))
           fail(s"Scala type variable `$name` shadows a projected built-in type")
       }
       decl.args.foreach(arg => identifier(arg.named.symbol, "parameter"))

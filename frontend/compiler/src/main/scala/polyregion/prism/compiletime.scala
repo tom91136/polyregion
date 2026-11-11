@@ -51,7 +51,10 @@ object compiletime {
     f
   }
 
-  private def derivePackedTypeMirrorsImpl[T <: Tuple](using Q: Quotes, t: Type[T])(
+  private def derivePackedTypeMirrorsImpl[T <: Tuple](using
+      Q: Quotes,
+      t: Type[T]
+  )(
       termPrisms: Expr[List[TermPrism[Any, Any]]]
   ): Expr[List[Prism]] = {
     implicit val q = Quoted(Q)
@@ -123,8 +126,9 @@ object compiletime {
   private def extractMethodTypes(using q: Quoted) //
   (clsTpe: q.TypeRepr): Result[(q.Symbol, List[(q.Symbol, q.DefDef)])] =
     clsTpe.classSymbol.failIfEmpty(s"No class symbol for ${clsTpe}").flatMap { sym =>
-      debug(s"$sym ${sym.methodMembers.toList}")
-      sym.methodMembers
+      val methodMembers = sym.methodMembers
+      debug(s"$sym $methodMembers")
+      methodMembers
         .filter { m =>
           val flags = m.flags
           flags.is(q.Flags.Method) && !(
@@ -231,15 +235,16 @@ object compiletime {
     val m = for {
       (sourceSym, sourceMethods) <- extractMethodTypes(source)
       (mirrorSym, mirrorMethods) <- extractMethodTypes(mirror)
-
+      sourceFullName = sourceSym.fullName
       _ = debug(
-        s">>## ${sourceSym.fullName}(m=${sourceMethods.size})  -> ${mirrorSym.fullName}(m=${mirrorMethods.size}) "
+        s">>## ${sourceFullName}(m=${sourceMethods.size})  -> ${mirrorSym.fullName}(m=${mirrorMethods.size}) "
       )
       mirrorStruct <- Retyper.structDef0(mirrorSym)
       sourceMethodTable = sourceMethods.groupBy(_._1.name)
       _                 = debug(s"Source Symbols:\n${sourceMethodTable.mkString("\n\t")}")
       mirroredMethods <- mirrorMethods.flatTraverse { case (reflectedSym, reflectedDef) =>
-        sourceMethodTable.get(reflectedSym.name) match {
+        val reflectedName = reflectedSym.name
+        sourceMethodTable.get(reflectedName) match {
           case None => // Extra method on mirror, check that it's private.
             if (reflectedSym.flags.is(q.Flags.Private)) Nil.success
             else
@@ -250,7 +255,7 @@ object compiletime {
                 .map(_._1.fullName)
                 .distinct
                 .failIfNotSingleton(
-                  s"Expected all method name matching ${reflectedSym.name} from ${sourceSym} to be the same"
+                  s"Expected all method name matching ${reflectedName} from ${sourceSym} to be the same"
                 )
               reflectedSig <- Compiler.deriveSignature(reflectedDef)
               // Map the mirrored method to use the source types first, otherwise we're comparing different classes entirely.
@@ -277,7 +282,7 @@ object compiletime {
                 case Nil =>
                   val considered = sourceSigs.map("\t(no-match)=>" + _._2.repr).mkString("\n")
 
-                  debug(sourceSigs(0)._2.copy(receiver = None))
+                  debug(sourceSigs.head._2.copy(receiver = None))
                   debug(reflectedSigWithSourceTpes.copy(receiver = None).copy(receiver = None))
 
                   (s"Overload resolution for ${reflectedSym} with resulted in no match, the following signatures were considered (mirror is the requirement):" +
@@ -336,7 +341,7 @@ object compiletime {
       parents = source.baseClasses.map(c => p.Sym(c.fullName))
 
     } yield p.Mirror(
-      source = p.Sym(sourceSym.fullName),
+      source = p.Sym(sourceFullName),
       sourceParents = parents,
       structDef = mirrorStruct,
       functions = functions,

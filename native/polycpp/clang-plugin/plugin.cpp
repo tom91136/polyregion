@@ -1,7 +1,10 @@
 
+#include <cstddef>
+#include <cstdlib>
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "clang/Basic/CodeGenOptions.h"

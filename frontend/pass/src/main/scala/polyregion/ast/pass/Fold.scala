@@ -5,10 +5,10 @@ import polyregion.ast.{PolyAST as p, *, given}
 object Fold {
 
   def isConstTerm(t: p.Term): Boolean = t match {
-    case _: p.Term.Float16Const | _: p.Term.Float32Const | _: p.Term.Float64Const | _: p.Term.IntU8Const |
-        _: p.Term.IntU16Const | _: p.Term.IntU32Const | _: p.Term.IntU64Const | _: p.Term.IntS8Const |
-        _: p.Term.IntS16Const | _: p.Term.IntS32Const | _: p.Term.IntS64Const | _: p.Term.Bool1Const |
-        p.Term.Unit0Const | _: p.Term.NullPtrConst =>
+    case p.Term.Float16Const(_) | p.Term.Float32Const(_) | p.Term.Float64Const(_) | p.Term.IntU8Const(_) |
+        p.Term.IntU16Const(_) | p.Term.IntU32Const(_) | p.Term.IntU64Const(_) | p.Term.IntS8Const(_) |
+        p.Term.IntS16Const(_) | p.Term.IntS32Const(_) | p.Term.IntS64Const(_) | p.Term.Bool1Const(_) |
+        p.Term.Unit0Const | p.Term.NullPtrConst(_, _, _) =>
       true
     case _ => false
   }
@@ -59,16 +59,18 @@ object Fold {
   private def foldUnaryNumeric(x: p.Term, t: p.Type)(longF: Long => Long)(doubleF: Double => Double): Option[p.Term] =
     asLong(x).flatMap(v => intTerm(t, longF(v))).orElse(asDouble(x).flatMap(v => floatTerm(t, doubleF(v))))
 
+  private def foldDouble(x: p.Term, y: p.Term, t: p.Type)(doubleF: (Double, Double) => Double): Option[p.Term] =
+    (asDouble(x), asDouble(y)) match {
+      case (Some(a), Some(b)) => floatTerm(t, doubleF(a, b))
+      case _                  => None
+    }
+
   private def foldBinNumeric(x: p.Term, y: p.Term, t: p.Type)(longF: (Long, Long) => Long)(
       doubleF: (Double, Double) => Double
   ): Option[p.Term] =
     (asLong(x), asLong(y)) match {
       case (Some(a), Some(b)) if t.kind == p.Type.Kind.Integral => intTerm(t, longF(a, b))
-      case _ =>
-        (asDouble(x), asDouble(y)) match {
-          case (Some(a), Some(b)) => floatTerm(t, doubleF(a, b))
-          case _                  => None
-        }
+      case _                                                    => foldDouble(x, y, t)(doubleF)
     }
 
   // like foldBinNumeric but refuses to fold an integral divide/remainder by zero (left to trap at runtime)
@@ -78,11 +80,7 @@ object Fold {
     (asLong(x), asLong(y)) match {
       case (Some(_), Some(0L)) if t.kind == p.Type.Kind.Integral => None
       case (Some(a), Some(b)) if t.kind == p.Type.Kind.Integral  => intTerm(t, longF(a, b))
-      case _ =>
-        (asDouble(x), asDouble(y)) match {
-          case (Some(a), Some(b)) => floatTerm(t, doubleF(a, b))
-          case _                  => None
-        }
+      case _                                                     => foldDouble(x, y, t)(doubleF)
     }
 
   private def foldBits(x: p.Term, y: p.Term, t: p.Type)(f: (Long, Long) => Long): Option[p.Term] =
@@ -195,7 +193,7 @@ object Fold {
   private def isTrueB(t: p.Term): Boolean  = t == p.Term.Bool1Const(true)
   private def isFalseB(t: p.Term): Boolean = t == p.Term.Bool1Const(false)
   private def sameSelect(x: p.Term, y: p.Term): Boolean =
-    x == y && (x match { case _: p.Term.Select => true; case _ => false })
+    x == y && (x match { case p.Term.Select(_, _, _) => true; case _ => false })
 
   def trySimplifyIntr(op: p.Intr): Option[p.Term] = op match {
     case p.Intr.Add(x, y, _) => if (isZeroI(y)) Some(x) else if (isZeroI(x)) Some(y) else None
@@ -222,14 +220,12 @@ object Fold {
     case p.Intr.LogicAnd(x, y) =>
       if (isFalseB(x) || isFalseB(y)) Some(p.Term.Bool1Const(false))
       else if (isTrueB(x)) Some(y)
-      else if (isTrueB(y)) Some(x)
-      else if (sameSelect(x, y)) Some(x)
+      else if (isTrueB(y) || sameSelect(x, y)) Some(x)
       else None
     case p.Intr.LogicOr(x, y) =>
       if (isTrueB(x) || isTrueB(y)) Some(p.Term.Bool1Const(true))
       else if (isFalseB(x)) Some(y)
-      else if (isFalseB(y)) Some(x)
-      else if (sameSelect(x, y)) Some(x)
+      else if (isFalseB(y) || sameSelect(x, y)) Some(x)
       else None
 
     // x < x and x > x are false for every value (including NaN); the others would be wrong for NaN

@@ -5,20 +5,21 @@ namespace polyregion::polyast {
 Sym::Sym(std::vector<std::string> fqn) noexcept : fqn(std::move(fqn)) {}
 size_t Sym::hash_code() const {
   size_t seed = 0;
-  seed ^= std::hash<decltype(fqn)>()(fqn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(fqn)>()(fqn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Sym Sym::withFqn(const std::vector<std::string> &v_) const { return Sym(v_); }
 POLYREGION_EXPORT bool Sym::operator!=(const Sym &rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool Sym::operator==(const Sym &rhs) const { return (fqn == rhs.fqn); }
 
 SourcePosition::SourcePosition(std::string file, int32_t line, std::optional<int32_t> col) noexcept
-    : file(std::move(file)), line(line), col(std::move(col)) {}
+    : file(std::move(file)), line(line), col(col) {}
 size_t SourcePosition::hash_code() const {
   size_t seed = 0;
-  seed ^= std::hash<decltype(file)>()(file) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(line)>()(line) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(col)>()(col) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(file)>()(file) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(line)>()(line) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(col)>()(col) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 SourcePosition SourcePosition::withFile(const std::string &v_) const { return SourcePosition(v_, line, col); }
@@ -31,10 +32,8 @@ POLYREGION_EXPORT bool SourcePosition::operator==(const SourcePosition &rhs) con
 
 Origin::Origin(std::optional<SourcePosition> pos, std::optional<std::string> source, std::optional<Sym> inlinedFrom) noexcept
     : pos(std::move(pos)), source(std::move(source)), inlinedFrom(std::move(inlinedFrom)) {}
-size_t Origin::hash_code() const {
-  size_t seed = 0;
-  return seed;
-}
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+size_t Origin::hash_code() const { return 0; }
 Origin Origin::withPos(const std::optional<SourcePosition> &v_) const { return Origin(v_, source, inlinedFrom); }
 Origin Origin::withSource(const std::optional<std::string> &v_) const { return Origin(pos, v_, inlinedFrom); }
 Origin Origin::withInlinedFrom(const std::optional<Sym> &v_) const { return Origin(pos, source, v_); }
@@ -45,9 +44,9 @@ Named::Named(std::string symbol, Type::Any tpe, Origin origin) noexcept
     : symbol(std::move(symbol)), tpe(std::move(tpe)), origin(std::move(origin)) {}
 size_t Named::hash_code() const {
   size_t seed = 0;
-  seed ^= std::hash<decltype(symbol)>()(symbol) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(tpe)>()(tpe) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(origin)>()(origin) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(symbol)>()(symbol) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(tpe)>()(tpe) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(origin)>()(origin) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Named Named::withSymbol(const std::string &v_) const { return Named(v_, tpe, origin); }
@@ -65,12 +64,9 @@ bool TypeKind::Any::operator==(const Any &rhs) const { return _v->operator==(*rh
 bool TypeKind::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v); }
 bool TypeKind::Any::operator<(const Any &rhs) const { return _v->operator<(*rhs._v); };
 
-TypeKind::None::None() noexcept : TypeKind::Base() {}
+TypeKind::None::None() = default;
 uint32_t TypeKind::None::id() const { return variant_id; };
-size_t TypeKind::None::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t TypeKind::None::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool TypeKind::None::operator==(const TypeKind::None &rhs) const { return true; }
 POLYREGION_EXPORT bool TypeKind::None::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -81,12 +77,9 @@ POLYREGION_EXPORT bool TypeKind::None::operator<(const Base &rhs_) const { retur
 TypeKind::None::operator TypeKind::Any() const { return std::static_pointer_cast<Base>(std::make_shared<None>(*this)); }
 TypeKind::Any TypeKind::None::widen() const { return Any(*this); };
 
-TypeKind::Ref::Ref() noexcept : TypeKind::Base() {}
+TypeKind::Ref::Ref() = default;
 uint32_t TypeKind::Ref::id() const { return variant_id; };
-size_t TypeKind::Ref::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t TypeKind::Ref::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool TypeKind::Ref::operator==(const TypeKind::Ref &rhs) const { return true; }
 POLYREGION_EXPORT bool TypeKind::Ref::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -97,12 +90,9 @@ POLYREGION_EXPORT bool TypeKind::Ref::operator<(const Base &rhs_) const { return
 TypeKind::Ref::operator TypeKind::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Ref>(*this)); }
 TypeKind::Any TypeKind::Ref::widen() const { return Any(*this); };
 
-TypeKind::Integral::Integral() noexcept : TypeKind::Base() {}
+TypeKind::Integral::Integral() = default;
 uint32_t TypeKind::Integral::id() const { return variant_id; };
-size_t TypeKind::Integral::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t TypeKind::Integral::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool TypeKind::Integral::operator==(const TypeKind::Integral &rhs) const { return true; }
 POLYREGION_EXPORT bool TypeKind::Integral::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -113,12 +103,9 @@ POLYREGION_EXPORT bool TypeKind::Integral::operator<(const Base &rhs_) const { r
 TypeKind::Integral::operator TypeKind::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Integral>(*this)); }
 TypeKind::Any TypeKind::Integral::widen() const { return Any(*this); };
 
-TypeKind::Fractional::Fractional() noexcept : TypeKind::Base() {}
+TypeKind::Fractional::Fractional() = default;
 uint32_t TypeKind::Fractional::id() const { return variant_id; };
-size_t TypeKind::Fractional::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t TypeKind::Fractional::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool TypeKind::Fractional::operator==(const TypeKind::Fractional &rhs) const { return true; }
 POLYREGION_EXPORT bool TypeKind::Fractional::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -136,12 +123,9 @@ bool TypeSpace::Any::operator==(const Any &rhs) const { return _v->operator==(*r
 bool TypeSpace::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v); }
 bool TypeSpace::Any::operator<(const Any &rhs) const { return _v->operator<(*rhs._v); };
 
-TypeSpace::Global::Global() noexcept : TypeSpace::Base() {}
+TypeSpace::Global::Global() = default;
 uint32_t TypeSpace::Global::id() const { return variant_id; };
-size_t TypeSpace::Global::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t TypeSpace::Global::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool TypeSpace::Global::operator==(const TypeSpace::Global &rhs) const { return true; }
 POLYREGION_EXPORT bool TypeSpace::Global::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -152,12 +136,9 @@ POLYREGION_EXPORT bool TypeSpace::Global::operator<(const Base &rhs_) const { re
 TypeSpace::Global::operator TypeSpace::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Global>(*this)); }
 TypeSpace::Any TypeSpace::Global::widen() const { return Any(*this); };
 
-TypeSpace::Local::Local() noexcept : TypeSpace::Base() {}
+TypeSpace::Local::Local() = default;
 uint32_t TypeSpace::Local::id() const { return variant_id; };
-size_t TypeSpace::Local::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t TypeSpace::Local::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool TypeSpace::Local::operator==(const TypeSpace::Local &rhs) const { return true; }
 POLYREGION_EXPORT bool TypeSpace::Local::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -168,12 +149,9 @@ POLYREGION_EXPORT bool TypeSpace::Local::operator<(const Base &rhs_) const { ret
 TypeSpace::Local::operator TypeSpace::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Local>(*this)); }
 TypeSpace::Any TypeSpace::Local::widen() const { return Any(*this); };
 
-TypeSpace::Private::Private() noexcept : TypeSpace::Base() {}
+TypeSpace::Private::Private() = default;
 uint32_t TypeSpace::Private::id() const { return variant_id; };
-size_t TypeSpace::Private::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t TypeSpace::Private::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool TypeSpace::Private::operator==(const TypeSpace::Private &rhs) const { return true; }
 POLYREGION_EXPORT bool TypeSpace::Private::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -184,12 +162,9 @@ POLYREGION_EXPORT bool TypeSpace::Private::operator<(const Base &rhs_) const { r
 TypeSpace::Private::operator TypeSpace::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Private>(*this)); }
 TypeSpace::Any TypeSpace::Private::widen() const { return Any(*this); };
 
-TypeSpace::Constant::Constant() noexcept : TypeSpace::Base() {}
+TypeSpace::Constant::Constant() = default;
 uint32_t TypeSpace::Constant::id() const { return variant_id; };
-size_t TypeSpace::Constant::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t TypeSpace::Constant::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool TypeSpace::Constant::operator==(const TypeSpace::Constant &rhs) const { return true; }
 POLYREGION_EXPORT bool TypeSpace::Constant::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -209,10 +184,7 @@ bool Type::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._
 
 Type::Float16::Float16() noexcept : Type::Base(TypeKind::Fractional()) {}
 uint32_t Type::Float16::id() const { return variant_id; };
-size_t Type::Float16::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t Type::Float16::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool Type::Float16::operator==(const Type::Float16 &rhs) const { return true; }
 POLYREGION_EXPORT bool Type::Float16::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -223,10 +195,7 @@ Type::Any Type::Float16::widen() const { return Any(*this); };
 
 Type::Float32::Float32() noexcept : Type::Base(TypeKind::Fractional()) {}
 uint32_t Type::Float32::id() const { return variant_id; };
-size_t Type::Float32::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t Type::Float32::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool Type::Float32::operator==(const Type::Float32 &rhs) const { return true; }
 POLYREGION_EXPORT bool Type::Float32::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -237,10 +206,7 @@ Type::Any Type::Float32::widen() const { return Any(*this); };
 
 Type::Float64::Float64() noexcept : Type::Base(TypeKind::Fractional()) {}
 uint32_t Type::Float64::id() const { return variant_id; };
-size_t Type::Float64::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t Type::Float64::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool Type::Float64::operator==(const Type::Float64 &rhs) const { return true; }
 POLYREGION_EXPORT bool Type::Float64::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -251,10 +217,7 @@ Type::Any Type::Float64::widen() const { return Any(*this); };
 
 Type::IntU8::IntU8() noexcept : Type::Base(TypeKind::Integral()) {}
 uint32_t Type::IntU8::id() const { return variant_id; };
-size_t Type::IntU8::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t Type::IntU8::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool Type::IntU8::operator==(const Type::IntU8 &rhs) const { return true; }
 POLYREGION_EXPORT bool Type::IntU8::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -265,10 +228,7 @@ Type::Any Type::IntU8::widen() const { return Any(*this); };
 
 Type::IntU16::IntU16() noexcept : Type::Base(TypeKind::Integral()) {}
 uint32_t Type::IntU16::id() const { return variant_id; };
-size_t Type::IntU16::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t Type::IntU16::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool Type::IntU16::operator==(const Type::IntU16 &rhs) const { return true; }
 POLYREGION_EXPORT bool Type::IntU16::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -279,10 +239,7 @@ Type::Any Type::IntU16::widen() const { return Any(*this); };
 
 Type::IntU32::IntU32() noexcept : Type::Base(TypeKind::Integral()) {}
 uint32_t Type::IntU32::id() const { return variant_id; };
-size_t Type::IntU32::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t Type::IntU32::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool Type::IntU32::operator==(const Type::IntU32 &rhs) const { return true; }
 POLYREGION_EXPORT bool Type::IntU32::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -293,10 +250,7 @@ Type::Any Type::IntU32::widen() const { return Any(*this); };
 
 Type::IntU64::IntU64() noexcept : Type::Base(TypeKind::Integral()) {}
 uint32_t Type::IntU64::id() const { return variant_id; };
-size_t Type::IntU64::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t Type::IntU64::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool Type::IntU64::operator==(const Type::IntU64 &rhs) const { return true; }
 POLYREGION_EXPORT bool Type::IntU64::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -307,10 +261,7 @@ Type::Any Type::IntU64::widen() const { return Any(*this); };
 
 Type::IntS8::IntS8() noexcept : Type::Base(TypeKind::Integral()) {}
 uint32_t Type::IntS8::id() const { return variant_id; };
-size_t Type::IntS8::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t Type::IntS8::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool Type::IntS8::operator==(const Type::IntS8 &rhs) const { return true; }
 POLYREGION_EXPORT bool Type::IntS8::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -321,10 +272,7 @@ Type::Any Type::IntS8::widen() const { return Any(*this); };
 
 Type::IntS16::IntS16() noexcept : Type::Base(TypeKind::Integral()) {}
 uint32_t Type::IntS16::id() const { return variant_id; };
-size_t Type::IntS16::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t Type::IntS16::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool Type::IntS16::operator==(const Type::IntS16 &rhs) const { return true; }
 POLYREGION_EXPORT bool Type::IntS16::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -335,10 +283,7 @@ Type::Any Type::IntS16::widen() const { return Any(*this); };
 
 Type::IntS32::IntS32() noexcept : Type::Base(TypeKind::Integral()) {}
 uint32_t Type::IntS32::id() const { return variant_id; };
-size_t Type::IntS32::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t Type::IntS32::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool Type::IntS32::operator==(const Type::IntS32 &rhs) const { return true; }
 POLYREGION_EXPORT bool Type::IntS32::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -349,10 +294,7 @@ Type::Any Type::IntS32::widen() const { return Any(*this); };
 
 Type::IntS64::IntS64() noexcept : Type::Base(TypeKind::Integral()) {}
 uint32_t Type::IntS64::id() const { return variant_id; };
-size_t Type::IntS64::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t Type::IntS64::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool Type::IntS64::operator==(const Type::IntS64 &rhs) const { return true; }
 POLYREGION_EXPORT bool Type::IntS64::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -363,10 +305,7 @@ Type::Any Type::IntS64::widen() const { return Any(*this); };
 
 Type::Nothing::Nothing() noexcept : Type::Base(TypeKind::None()) {}
 uint32_t Type::Nothing::id() const { return variant_id; };
-size_t Type::Nothing::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t Type::Nothing::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool Type::Nothing::operator==(const Type::Nothing &rhs) const { return true; }
 POLYREGION_EXPORT bool Type::Nothing::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -377,10 +316,7 @@ Type::Any Type::Nothing::widen() const { return Any(*this); };
 
 Type::Unit0::Unit0() noexcept : Type::Base(TypeKind::None()) {}
 uint32_t Type::Unit0::id() const { return variant_id; };
-size_t Type::Unit0::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t Type::Unit0::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool Type::Unit0::operator==(const Type::Unit0 &rhs) const { return true; }
 POLYREGION_EXPORT bool Type::Unit0::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -391,10 +327,7 @@ Type::Any Type::Unit0::widen() const { return Any(*this); };
 
 Type::Bool1::Bool1() noexcept : Type::Base(TypeKind::Integral()) {}
 uint32_t Type::Bool1::id() const { return variant_id; };
-size_t Type::Bool1::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t Type::Bool1::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool Type::Bool1::operator==(const Type::Bool1 &rhs) const { return true; }
 POLYREGION_EXPORT bool Type::Bool1::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -408,8 +341,8 @@ Type::Struct::Struct(Sym name, std::vector<Type::Any> args) noexcept
 uint32_t Type::Struct::id() const { return variant_id; };
 size_t Type::Struct::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(args)>()(args) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(args)>()(args) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Type::Struct Type::Struct::withName(const Sym &v_) const { return Type::Struct(v_, args); }
@@ -430,8 +363,8 @@ Type::Ptr::Ptr(Type::Any comp, TypeSpace::Any space) noexcept
 uint32_t Type::Ptr::id() const { return variant_id; };
 size_t Type::Ptr::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(comp)>()(comp) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(space)>()(space) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(comp)>()(comp) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(space)>()(space) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Type::Ptr Type::Ptr::withComp(const Type::Any &v_) const { return Type::Ptr(v_, space); }
@@ -449,9 +382,9 @@ Type::Arr::Arr(Type::Any comp, int32_t length, TypeSpace::Any space) noexcept
 uint32_t Type::Arr::id() const { return variant_id; };
 size_t Type::Arr::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(comp)>()(comp) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(length)>()(length) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(space)>()(space) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(comp)>()(comp) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(length)>()(length) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(space)>()(space) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Type::Arr Type::Arr::withComp(const Type::Any &v_) const { return Type::Arr(v_, length, space); }
@@ -468,12 +401,12 @@ Type::Arr::operator Type::Any() const { return std::static_pointer_cast<Base>(st
 Type::Any Type::Arr::widen() const { return Any(*this); };
 
 Type::Var::Var(std::string name, std::optional<int32_t> exactSizeInBytes) noexcept
-    : Type::Base(TypeKind::None()), name(std::move(name)), exactSizeInBytes(std::move(exactSizeInBytes)) {}
+    : Type::Base(TypeKind::None()), name(std::move(name)), exactSizeInBytes(exactSizeInBytes) {}
 uint32_t Type::Var::id() const { return variant_id; };
 size_t Type::Var::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(exactSizeInBytes)>()(exactSizeInBytes) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(exactSizeInBytes)>()(exactSizeInBytes) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Type::Var Type::Var::withName(const std::string &v_) const { return Type::Var(v_, exactSizeInBytes); }
@@ -493,9 +426,9 @@ Type::Exec::Exec(std::vector<Type::Var> tpeVars, std::vector<Type::Any> args, Ty
 uint32_t Type::Exec::id() const { return variant_id; };
 size_t Type::Exec::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(tpeVars)>()(tpeVars) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(args)>()(args) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(tpeVars)>()(tpeVars) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(args)>()(args) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Type::Exec Type::Exec::withTpeVars(const std::vector<Type::Var> &v_) const { return Type::Exec(v_, args, rtn); }
@@ -517,9 +450,10 @@ Type::FnRef::FnRef(Sym name) noexcept : Type::Base(TypeKind::None()), name(std::
 uint32_t Type::FnRef::id() const { return variant_id; };
 size_t Type::FnRef::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Type::FnRef Type::FnRef::withName(const Sym &v_) const { return Type::FnRef(v_); }
 POLYREGION_EXPORT bool Type::FnRef::operator==(const Type::FnRef &rhs) const { return (this->name == rhs.name); }
 POLYREGION_EXPORT bool Type::FnRef::operator==(const Base &rhs_) const {
@@ -536,13 +470,14 @@ bool PathStep::Any::operator==(const Any &rhs) const { return _v->operator==(*rh
 bool PathStep::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v); }
 bool PathStep::Any::operator<(const Any &rhs) const { return _v->operator<(*rhs._v); };
 
-PathStep::Field::Field(std::string name) noexcept : PathStep::Base(), name(std::move(name)) {}
+PathStep::Field::Field(std::string name) noexcept : name(std::move(name)) {}
 uint32_t PathStep::Field::id() const { return variant_id; };
 size_t PathStep::Field::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 PathStep::Field PathStep::Field::withName(const std::string &v_) const { return PathStep::Field(v_); }
 POLYREGION_EXPORT bool PathStep::Field::operator==(const PathStep::Field &rhs) const { return (this->name == rhs.name); }
 POLYREGION_EXPORT bool PathStep::Field::operator==(const Base &rhs_) const {
@@ -554,12 +489,9 @@ POLYREGION_EXPORT bool PathStep::Field::operator<(const Base &rhs_) const { retu
 PathStep::Field::operator PathStep::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Field>(*this)); }
 PathStep::Any PathStep::Field::widen() const { return Any(*this); };
 
-PathStep::Deref::Deref() noexcept : PathStep::Base() {}
+PathStep::Deref::Deref() = default;
 uint32_t PathStep::Deref::id() const { return variant_id; };
-size_t PathStep::Deref::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t PathStep::Deref::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool PathStep::Deref::operator==(const PathStep::Deref &rhs) const { return true; }
 POLYREGION_EXPORT bool PathStep::Deref::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -570,13 +502,14 @@ POLYREGION_EXPORT bool PathStep::Deref::operator<(const Base &rhs_) const { retu
 PathStep::Deref::operator PathStep::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Deref>(*this)); }
 PathStep::Any PathStep::Deref::widen() const { return Any(*this); };
 
-PathStep::Index::Index(int32_t idx) noexcept : PathStep::Base(), idx(idx) {}
+PathStep::Index::Index(int32_t idx) noexcept : idx(idx) {}
 uint32_t PathStep::Index::id() const { return variant_id; };
 size_t PathStep::Index::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(idx)>()(idx) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(idx)>()(idx) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 PathStep::Index PathStep::Index::withIdx(const int32_t &v_) const { return PathStep::Index(v_); }
 POLYREGION_EXPORT bool PathStep::Index::operator==(const PathStep::Index &rhs) const { return (this->idx == rhs.idx); }
 POLYREGION_EXPORT bool PathStep::Index::operator==(const Base &rhs_) const {
@@ -588,13 +521,14 @@ POLYREGION_EXPORT bool PathStep::Index::operator<(const Base &rhs_) const { retu
 PathStep::Index::operator PathStep::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Index>(*this)); }
 PathStep::Any PathStep::Index::widen() const { return Any(*this); };
 
-PathStep::IndexDyn::IndexDyn(Term::Any idx) noexcept : PathStep::Base(), idx(std::move(idx)) {}
+PathStep::IndexDyn::IndexDyn(Term::Any idx) noexcept : idx(std::move(idx)) {}
 uint32_t PathStep::IndexDyn::id() const { return variant_id; };
 size_t PathStep::IndexDyn::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(idx)>()(idx) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(idx)>()(idx) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 PathStep::IndexDyn PathStep::IndexDyn::withIdx(const Term::Any &v_) const { return PathStep::IndexDyn(v_); }
 POLYREGION_EXPORT bool PathStep::IndexDyn::operator==(const PathStep::IndexDyn &rhs) const { return (this->idx == rhs.idx); }
 POLYREGION_EXPORT bool PathStep::IndexDyn::operator==(const Base &rhs_) const {
@@ -613,13 +547,14 @@ bool Region::Any::operator==(const Any &rhs) const { return _v->operator==(*rhs.
 bool Region::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v); }
 bool Region::Any::operator<(const Any &rhs) const { return _v->operator<(*rhs._v); };
 
-Region::Rooted::Rooted(Named root) noexcept : Region::Base(), root(std::move(root)) {}
+Region::Rooted::Rooted(Named root) noexcept : root(std::move(root)) {}
 uint32_t Region::Rooted::id() const { return variant_id; };
 size_t Region::Rooted::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(root)>()(root) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(root)>()(root) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Region::Rooted Region::Rooted::withRoot(const Named &v_) const { return Region::Rooted(v_); }
 POLYREGION_EXPORT bool Region::Rooted::operator==(const Region::Rooted &rhs) const { return (this->root == rhs.root); }
 POLYREGION_EXPORT bool Region::Rooted::operator==(const Base &rhs_) const {
@@ -631,12 +566,9 @@ POLYREGION_EXPORT bool Region::Rooted::operator<(const Base &rhs_) const { retur
 Region::Rooted::operator Region::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Rooted>(*this)); }
 Region::Any Region::Rooted::widen() const { return Any(*this); };
 
-Region::Opaque::Opaque() noexcept : Region::Base() {}
+Region::Opaque::Opaque() = default;
 uint32_t Region::Opaque::id() const { return variant_id; };
-size_t Region::Opaque::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t Region::Opaque::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool Region::Opaque::operator==(const Region::Opaque &rhs) const { return true; }
 POLYREGION_EXPORT bool Region::Opaque::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -658,9 +590,10 @@ Term::Float16Const::Float16Const(float value) noexcept : Term::Base(Type::Float1
 uint32_t Term::Float16Const::id() const { return variant_id; };
 size_t Term::Float16Const::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Term::Float16Const Term::Float16Const::withValue(const float &v_) const { return Term::Float16Const(v_); }
 POLYREGION_EXPORT bool Term::Float16Const::operator==(const Term::Float16Const &rhs) const { return (this->value == rhs.value); }
 POLYREGION_EXPORT bool Term::Float16Const::operator==(const Base &rhs_) const {
@@ -674,9 +607,10 @@ Term::Float32Const::Float32Const(float value) noexcept : Term::Base(Type::Float3
 uint32_t Term::Float32Const::id() const { return variant_id; };
 size_t Term::Float32Const::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Term::Float32Const Term::Float32Const::withValue(const float &v_) const { return Term::Float32Const(v_); }
 POLYREGION_EXPORT bool Term::Float32Const::operator==(const Term::Float32Const &rhs) const { return (this->value == rhs.value); }
 POLYREGION_EXPORT bool Term::Float32Const::operator==(const Base &rhs_) const {
@@ -690,9 +624,10 @@ Term::Float64Const::Float64Const(double value) noexcept : Term::Base(Type::Float
 uint32_t Term::Float64Const::id() const { return variant_id; };
 size_t Term::Float64Const::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Term::Float64Const Term::Float64Const::withValue(const double &v_) const { return Term::Float64Const(v_); }
 POLYREGION_EXPORT bool Term::Float64Const::operator==(const Term::Float64Const &rhs) const { return (this->value == rhs.value); }
 POLYREGION_EXPORT bool Term::Float64Const::operator==(const Base &rhs_) const {
@@ -706,9 +641,10 @@ Term::IntU8Const::IntU8Const(int8_t value) noexcept : Term::Base(Type::IntU8()),
 uint32_t Term::IntU8Const::id() const { return variant_id; };
 size_t Term::IntU8Const::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Term::IntU8Const Term::IntU8Const::withValue(const int8_t &v_) const { return Term::IntU8Const(v_); }
 POLYREGION_EXPORT bool Term::IntU8Const::operator==(const Term::IntU8Const &rhs) const { return (this->value == rhs.value); }
 POLYREGION_EXPORT bool Term::IntU8Const::operator==(const Base &rhs_) const {
@@ -722,9 +658,10 @@ Term::IntU16Const::IntU16Const(uint16_t value) noexcept : Term::Base(Type::IntU1
 uint32_t Term::IntU16Const::id() const { return variant_id; };
 size_t Term::IntU16Const::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Term::IntU16Const Term::IntU16Const::withValue(const uint16_t &v_) const { return Term::IntU16Const(v_); }
 POLYREGION_EXPORT bool Term::IntU16Const::operator==(const Term::IntU16Const &rhs) const { return (this->value == rhs.value); }
 POLYREGION_EXPORT bool Term::IntU16Const::operator==(const Base &rhs_) const {
@@ -738,9 +675,10 @@ Term::IntU32Const::IntU32Const(int32_t value) noexcept : Term::Base(Type::IntU32
 uint32_t Term::IntU32Const::id() const { return variant_id; };
 size_t Term::IntU32Const::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Term::IntU32Const Term::IntU32Const::withValue(const int32_t &v_) const { return Term::IntU32Const(v_); }
 POLYREGION_EXPORT bool Term::IntU32Const::operator==(const Term::IntU32Const &rhs) const { return (this->value == rhs.value); }
 POLYREGION_EXPORT bool Term::IntU32Const::operator==(const Base &rhs_) const {
@@ -754,9 +692,10 @@ Term::IntU64Const::IntU64Const(int64_t value) noexcept : Term::Base(Type::IntU64
 uint32_t Term::IntU64Const::id() const { return variant_id; };
 size_t Term::IntU64Const::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Term::IntU64Const Term::IntU64Const::withValue(const int64_t &v_) const { return Term::IntU64Const(v_); }
 POLYREGION_EXPORT bool Term::IntU64Const::operator==(const Term::IntU64Const &rhs) const { return (this->value == rhs.value); }
 POLYREGION_EXPORT bool Term::IntU64Const::operator==(const Base &rhs_) const {
@@ -770,9 +709,10 @@ Term::IntS8Const::IntS8Const(int8_t value) noexcept : Term::Base(Type::IntS8()),
 uint32_t Term::IntS8Const::id() const { return variant_id; };
 size_t Term::IntS8Const::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Term::IntS8Const Term::IntS8Const::withValue(const int8_t &v_) const { return Term::IntS8Const(v_); }
 POLYREGION_EXPORT bool Term::IntS8Const::operator==(const Term::IntS8Const &rhs) const { return (this->value == rhs.value); }
 POLYREGION_EXPORT bool Term::IntS8Const::operator==(const Base &rhs_) const {
@@ -786,9 +726,10 @@ Term::IntS16Const::IntS16Const(int16_t value) noexcept : Term::Base(Type::IntS16
 uint32_t Term::IntS16Const::id() const { return variant_id; };
 size_t Term::IntS16Const::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Term::IntS16Const Term::IntS16Const::withValue(const int16_t &v_) const { return Term::IntS16Const(v_); }
 POLYREGION_EXPORT bool Term::IntS16Const::operator==(const Term::IntS16Const &rhs) const { return (this->value == rhs.value); }
 POLYREGION_EXPORT bool Term::IntS16Const::operator==(const Base &rhs_) const {
@@ -802,9 +743,10 @@ Term::IntS32Const::IntS32Const(int32_t value) noexcept : Term::Base(Type::IntS32
 uint32_t Term::IntS32Const::id() const { return variant_id; };
 size_t Term::IntS32Const::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Term::IntS32Const Term::IntS32Const::withValue(const int32_t &v_) const { return Term::IntS32Const(v_); }
 POLYREGION_EXPORT bool Term::IntS32Const::operator==(const Term::IntS32Const &rhs) const { return (this->value == rhs.value); }
 POLYREGION_EXPORT bool Term::IntS32Const::operator==(const Base &rhs_) const {
@@ -818,9 +760,10 @@ Term::IntS64Const::IntS64Const(int64_t value) noexcept : Term::Base(Type::IntS64
 uint32_t Term::IntS64Const::id() const { return variant_id; };
 size_t Term::IntS64Const::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Term::IntS64Const Term::IntS64Const::withValue(const int64_t &v_) const { return Term::IntS64Const(v_); }
 POLYREGION_EXPORT bool Term::IntS64Const::operator==(const Term::IntS64Const &rhs) const { return (this->value == rhs.value); }
 POLYREGION_EXPORT bool Term::IntS64Const::operator==(const Base &rhs_) const {
@@ -832,10 +775,7 @@ Term::Any Term::IntS64Const::widen() const { return Any(*this); };
 
 Term::Unit0Const::Unit0Const() noexcept : Term::Base(Type::Unit0()) {}
 uint32_t Term::Unit0Const::id() const { return variant_id; };
-size_t Term::Unit0Const::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t Term::Unit0Const::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool Term::Unit0Const::operator==(const Term::Unit0Const &rhs) const { return true; }
 POLYREGION_EXPORT bool Term::Unit0Const::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -848,9 +788,10 @@ Term::Bool1Const::Bool1Const(bool value) noexcept : Term::Base(Type::Bool1()), v
 uint32_t Term::Bool1Const::id() const { return variant_id; };
 size_t Term::Bool1Const::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Term::Bool1Const Term::Bool1Const::withValue(const bool &v_) const { return Term::Bool1Const(v_); }
 POLYREGION_EXPORT bool Term::Bool1Const::operator==(const Term::Bool1Const &rhs) const { return (this->value == rhs.value); }
 POLYREGION_EXPORT bool Term::Bool1Const::operator==(const Base &rhs_) const {
@@ -865,9 +806,9 @@ Term::NullPtrConst::NullPtrConst(Type::Any comp, TypeSpace::Any space, Region::A
 uint32_t Term::NullPtrConst::id() const { return variant_id; };
 size_t Term::NullPtrConst::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(comp)>()(comp) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(space)>()(space) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(region)>()(region) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(comp)>()(comp) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(space)>()(space) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(region)>()(region) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Term::NullPtrConst Term::NullPtrConst::withComp(const Type::Any &v_) const { return Term::NullPtrConst(v_, space, region); }
@@ -888,9 +829,10 @@ Term::StringConst::StringConst(std::string value) noexcept
 uint32_t Term::StringConst::id() const { return variant_id; };
 size_t Term::StringConst::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Term::StringConst Term::StringConst::withValue(const std::string &v_) const { return Term::StringConst(v_); }
 POLYREGION_EXPORT bool Term::StringConst::operator==(const Term::StringConst &rhs) const { return (this->value == rhs.value); }
 POLYREGION_EXPORT bool Term::StringConst::operator==(const Base &rhs_) const {
@@ -904,9 +846,10 @@ Term::Poison::Poison(Type::Any t) noexcept : Term::Base(t), t(std::move(t)) {}
 uint32_t Term::Poison::id() const { return variant_id; };
 size_t Term::Poison::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(t)>()(t) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(t)>()(t) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Term::Poison Term::Poison::withT(const Type::Any &v_) const { return Term::Poison(v_); }
 POLYREGION_EXPORT bool Term::Poison::operator==(const Term::Poison &rhs) const { return (this->t == rhs.t); }
 POLYREGION_EXPORT bool Term::Poison::operator==(const Base &rhs_) const {
@@ -920,9 +863,10 @@ Term::Defer::Defer(Type::Any t) noexcept : Term::Base(t), t(std::move(t)) {}
 uint32_t Term::Defer::id() const { return variant_id; };
 size_t Term::Defer::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(t)>()(t) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(t)>()(t) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Term::Defer Term::Defer::withT(const Type::Any &v_) const { return Term::Defer(v_); }
 POLYREGION_EXPORT bool Term::Defer::operator==(const Term::Defer &rhs) const { return (this->t == rhs.t); }
 POLYREGION_EXPORT bool Term::Defer::operator==(const Base &rhs_) const {
@@ -937,9 +881,9 @@ Term::Select::Select(Named root, std::vector<PathStep::Any> steps, Type::Any tpe
 uint32_t Term::Select::id() const { return variant_id; };
 size_t Term::Select::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(root)>()(root) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(steps)>()(steps) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(tpe)>()(tpe) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(root)>()(root) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(steps)>()(steps) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(tpe)>()(tpe) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Term::Select Term::Select::withRoot(const Named &v_) const { return Term::Select(v_, steps, tpe); }
@@ -969,9 +913,10 @@ Expr::Alias::Alias(Term::Any ref) noexcept : Expr::Base(ref.tpe()), ref(std::mov
 uint32_t Expr::Alias::id() const { return variant_id; };
 size_t Expr::Alias::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(ref)>()(ref) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(ref)>()(ref) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Expr::Alias Expr::Alias::withRef(const Term::Any &v_) const { return Expr::Alias(v_); }
 POLYREGION_EXPORT bool Expr::Alias::operator==(const Expr::Alias &rhs) const { return (this->ref == rhs.ref); }
 POLYREGION_EXPORT bool Expr::Alias::operator==(const Base &rhs_) const {
@@ -985,9 +930,10 @@ Expr::SpecOp::SpecOp(Spec::Any op) noexcept : Expr::Base(op.tpe()), op(std::move
 uint32_t Expr::SpecOp::id() const { return variant_id; };
 size_t Expr::SpecOp::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(op)>()(op) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(op)>()(op) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Expr::SpecOp Expr::SpecOp::withOp(const Spec::Any &v_) const { return Expr::SpecOp(v_); }
 POLYREGION_EXPORT bool Expr::SpecOp::operator==(const Expr::SpecOp &rhs) const { return (this->op == rhs.op); }
 POLYREGION_EXPORT bool Expr::SpecOp::operator==(const Base &rhs_) const {
@@ -1001,9 +947,10 @@ Expr::MathOp::MathOp(Math::Any op) noexcept : Expr::Base(op.tpe()), op(std::move
 uint32_t Expr::MathOp::id() const { return variant_id; };
 size_t Expr::MathOp::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(op)>()(op) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(op)>()(op) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Expr::MathOp Expr::MathOp::withOp(const Math::Any &v_) const { return Expr::MathOp(v_); }
 POLYREGION_EXPORT bool Expr::MathOp::operator==(const Expr::MathOp &rhs) const { return (this->op == rhs.op); }
 POLYREGION_EXPORT bool Expr::MathOp::operator==(const Base &rhs_) const {
@@ -1017,9 +964,10 @@ Expr::IntrOp::IntrOp(Intr::Any op) noexcept : Expr::Base(op.tpe()), op(std::move
 uint32_t Expr::IntrOp::id() const { return variant_id; };
 size_t Expr::IntrOp::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(op)>()(op) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(op)>()(op) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Expr::IntrOp Expr::IntrOp::withOp(const Intr::Any &v_) const { return Expr::IntrOp(v_); }
 POLYREGION_EXPORT bool Expr::IntrOp::operator==(const Expr::IntrOp &rhs) const { return (this->op == rhs.op); }
 POLYREGION_EXPORT bool Expr::IntrOp::operator==(const Base &rhs_) const {
@@ -1033,8 +981,8 @@ Expr::Cast::Cast(Term::Any from, Type::Any as) noexcept : Expr::Base(as), from(s
 uint32_t Expr::Cast::id() const { return variant_id; };
 size_t Expr::Cast::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(from)>()(from) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(as)>()(as) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(from)>()(from) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(as)>()(as) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Expr::Cast Expr::Cast::withFrom(const Term::Any &v_) const { return Expr::Cast(v_, as); }
@@ -1051,8 +999,8 @@ Expr::BitCast::BitCast(Term::Any from, Type::Any as) noexcept : Expr::Base(as), 
 uint32_t Expr::BitCast::id() const { return variant_id; };
 size_t Expr::BitCast::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(from)>()(from) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(as)>()(as) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(from)>()(from) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(as)>()(as) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Expr::BitCast Expr::BitCast::withFrom(const Term::Any &v_) const { return Expr::BitCast(v_, as); }
@@ -1072,9 +1020,9 @@ Expr::Index::Index(Term::Any lhs, Term::Any idx, Type::Any comp) noexcept
 uint32_t Expr::Index::id() const { return variant_id; };
 size_t Expr::Index::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(lhs)>()(lhs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(idx)>()(idx) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(comp)>()(comp) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(lhs)>()(lhs) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(idx)>()(idx) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(comp)>()(comp) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Expr::Index Expr::Index::withLhs(const Term::Any &v_) const { return Expr::Index(v_, idx, comp); }
@@ -1096,11 +1044,11 @@ Expr::RefTo::RefTo(Term::Any lhs, std::optional<Term::Any> idx, Type::Any comp, 
 uint32_t Expr::RefTo::id() const { return variant_id; };
 size_t Expr::RefTo::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(lhs)>()(lhs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(idx)>()(idx) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(comp)>()(comp) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(space)>()(space) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(region)>()(region) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(lhs)>()(lhs) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(idx)>()(idx) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(comp)>()(comp) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(space)>()(space) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(region)>()(region) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Expr::RefTo Expr::RefTo::withLhs(const Term::Any &v_) const { return Expr::RefTo(v_, idx, comp, space, region); }
@@ -1125,10 +1073,10 @@ Expr::Alloc::Alloc(Type::Any comp, Term::Any size, TypeSpace::Any space, Region:
 uint32_t Expr::Alloc::id() const { return variant_id; };
 size_t Expr::Alloc::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(comp)>()(comp) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(size)>()(size) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(space)>()(space) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(region)>()(region) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(comp)>()(comp) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(size)>()(size) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(space)>()(space) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(region)>()(region) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Expr::Alloc Expr::Alloc::withComp(const Type::Any &v_) const { return Expr::Alloc(v_, size, space, region); }
@@ -1152,11 +1100,11 @@ Expr::Invoke::Invoke(Type::Any callee, std::vector<Type::Any> tpeArgs, std::opti
 uint32_t Expr::Invoke::id() const { return variant_id; };
 size_t Expr::Invoke::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(callee)>()(callee) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(tpeArgs)>()(tpeArgs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(receiver)>()(receiver) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(args)>()(args) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(callee)>()(callee) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(tpeArgs)>()(tpeArgs) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(receiver)>()(receiver) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(args)>()(args) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Expr::Invoke Expr::Invoke::withCallee(const Type::Any &v_) const { return Expr::Invoke(v_, tpeArgs, receiver, args, rtn); }
@@ -1184,9 +1132,9 @@ Expr::ForeignCall::ForeignCall(std::string name, std::vector<Term::Any> args, Ty
 uint32_t Expr::ForeignCall::id() const { return variant_id; };
 size_t Expr::ForeignCall::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(args)>()(args) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(args)>()(args) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Expr::ForeignCall Expr::ForeignCall::withName(const std::string &v_) const { return Expr::ForeignCall(v_, args, rtn); }
@@ -1209,8 +1157,8 @@ Expr::OffsetOf::OffsetOf(Type::Any structTpe, std::string field) noexcept
 uint32_t Expr::OffsetOf::id() const { return variant_id; };
 size_t Expr::OffsetOf::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(structTpe)>()(structTpe) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(field)>()(field) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(structTpe)>()(structTpe) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(field)>()(field) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Expr::OffsetOf Expr::OffsetOf::withStructTpe(const Type::Any &v_) const { return Expr::OffsetOf(v_, field); }
@@ -1229,9 +1177,10 @@ Expr::SizeOf::SizeOf(Type::Any forTpe) noexcept : Expr::Base(Type::IntU64()), fo
 uint32_t Expr::SizeOf::id() const { return variant_id; };
 size_t Expr::SizeOf::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(forTpe)>()(forTpe) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(forTpe)>()(forTpe) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Expr::SizeOf Expr::SizeOf::withForTpe(const Type::Any &v_) const { return Expr::SizeOf(v_); }
 POLYREGION_EXPORT bool Expr::SizeOf::operator==(const Expr::SizeOf &rhs) const { return (this->forTpe == rhs.forTpe); }
 POLYREGION_EXPORT bool Expr::SizeOf::operator==(const Base &rhs_) const {
@@ -1244,8 +1193,8 @@ Expr::Any Expr::SizeOf::widen() const { return Any(*this); };
 Overload::Overload(std::vector<Type::Any> args, Type::Any rtn) noexcept : args(std::move(args)), rtn(std::move(rtn)) {}
 size_t Overload::hash_code() const {
   size_t seed = 0;
-  seed ^= std::hash<decltype(args)>()(args) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(args)>()(args) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Overload Overload::withArgs(const std::vector<Type::Any> &v_) const { return Overload(v_, rtn); }
@@ -1263,12 +1212,9 @@ bool AtomicOp::Any::operator==(const Any &rhs) const { return _v->operator==(*rh
 bool AtomicOp::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v); }
 bool AtomicOp::Any::operator<(const Any &rhs) const { return _v->operator<(*rhs._v); };
 
-AtomicOp::Xchg::Xchg() noexcept : AtomicOp::Base() {}
+AtomicOp::Xchg::Xchg() = default;
 uint32_t AtomicOp::Xchg::id() const { return variant_id; };
-size_t AtomicOp::Xchg::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t AtomicOp::Xchg::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool AtomicOp::Xchg::operator==(const AtomicOp::Xchg &rhs) const { return true; }
 POLYREGION_EXPORT bool AtomicOp::Xchg::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -1279,12 +1225,9 @@ POLYREGION_EXPORT bool AtomicOp::Xchg::operator<(const Base &rhs_) const { retur
 AtomicOp::Xchg::operator AtomicOp::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Xchg>(*this)); }
 AtomicOp::Any AtomicOp::Xchg::widen() const { return Any(*this); };
 
-AtomicOp::Add::Add() noexcept : AtomicOp::Base() {}
+AtomicOp::Add::Add() = default;
 uint32_t AtomicOp::Add::id() const { return variant_id; };
-size_t AtomicOp::Add::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t AtomicOp::Add::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool AtomicOp::Add::operator==(const AtomicOp::Add &rhs) const { return true; }
 POLYREGION_EXPORT bool AtomicOp::Add::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -1295,12 +1238,9 @@ POLYREGION_EXPORT bool AtomicOp::Add::operator<(const Base &rhs_) const { return
 AtomicOp::Add::operator AtomicOp::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Add>(*this)); }
 AtomicOp::Any AtomicOp::Add::widen() const { return Any(*this); };
 
-AtomicOp::Sub::Sub() noexcept : AtomicOp::Base() {}
+AtomicOp::Sub::Sub() = default;
 uint32_t AtomicOp::Sub::id() const { return variant_id; };
-size_t AtomicOp::Sub::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t AtomicOp::Sub::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool AtomicOp::Sub::operator==(const AtomicOp::Sub &rhs) const { return true; }
 POLYREGION_EXPORT bool AtomicOp::Sub::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -1311,12 +1251,9 @@ POLYREGION_EXPORT bool AtomicOp::Sub::operator<(const Base &rhs_) const { return
 AtomicOp::Sub::operator AtomicOp::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Sub>(*this)); }
 AtomicOp::Any AtomicOp::Sub::widen() const { return Any(*this); };
 
-AtomicOp::And::And() noexcept : AtomicOp::Base() {}
+AtomicOp::And::And() = default;
 uint32_t AtomicOp::And::id() const { return variant_id; };
-size_t AtomicOp::And::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t AtomicOp::And::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool AtomicOp::And::operator==(const AtomicOp::And &rhs) const { return true; }
 POLYREGION_EXPORT bool AtomicOp::And::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -1327,12 +1264,9 @@ POLYREGION_EXPORT bool AtomicOp::And::operator<(const Base &rhs_) const { return
 AtomicOp::And::operator AtomicOp::Any() const { return std::static_pointer_cast<Base>(std::make_shared<And>(*this)); }
 AtomicOp::Any AtomicOp::And::widen() const { return Any(*this); };
 
-AtomicOp::Or::Or() noexcept : AtomicOp::Base() {}
+AtomicOp::Or::Or() = default;
 uint32_t AtomicOp::Or::id() const { return variant_id; };
-size_t AtomicOp::Or::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t AtomicOp::Or::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool AtomicOp::Or::operator==(const AtomicOp::Or &rhs) const { return true; }
 POLYREGION_EXPORT bool AtomicOp::Or::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -1343,12 +1277,9 @@ POLYREGION_EXPORT bool AtomicOp::Or::operator<(const Base &rhs_) const { return 
 AtomicOp::Or::operator AtomicOp::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Or>(*this)); }
 AtomicOp::Any AtomicOp::Or::widen() const { return Any(*this); };
 
-AtomicOp::Xor::Xor() noexcept : AtomicOp::Base() {}
+AtomicOp::Xor::Xor() = default;
 uint32_t AtomicOp::Xor::id() const { return variant_id; };
-size_t AtomicOp::Xor::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t AtomicOp::Xor::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool AtomicOp::Xor::operator==(const AtomicOp::Xor &rhs) const { return true; }
 POLYREGION_EXPORT bool AtomicOp::Xor::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -1359,12 +1290,9 @@ POLYREGION_EXPORT bool AtomicOp::Xor::operator<(const Base &rhs_) const { return
 AtomicOp::Xor::operator AtomicOp::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Xor>(*this)); }
 AtomicOp::Any AtomicOp::Xor::widen() const { return Any(*this); };
 
-AtomicOp::Min::Min() noexcept : AtomicOp::Base() {}
+AtomicOp::Min::Min() = default;
 uint32_t AtomicOp::Min::id() const { return variant_id; };
-size_t AtomicOp::Min::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t AtomicOp::Min::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool AtomicOp::Min::operator==(const AtomicOp::Min &rhs) const { return true; }
 POLYREGION_EXPORT bool AtomicOp::Min::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -1375,12 +1303,9 @@ POLYREGION_EXPORT bool AtomicOp::Min::operator<(const Base &rhs_) const { return
 AtomicOp::Min::operator AtomicOp::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Min>(*this)); }
 AtomicOp::Any AtomicOp::Min::widen() const { return Any(*this); };
 
-AtomicOp::Max::Max() noexcept : AtomicOp::Base() {}
+AtomicOp::Max::Max() = default;
 uint32_t AtomicOp::Max::id() const { return variant_id; };
-size_t AtomicOp::Max::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t AtomicOp::Max::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool AtomicOp::Max::operator==(const AtomicOp::Max &rhs) const { return true; }
 POLYREGION_EXPORT bool AtomicOp::Max::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -1398,12 +1323,9 @@ bool MemScope::Any::operator==(const Any &rhs) const { return _v->operator==(*rh
 bool MemScope::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v); }
 bool MemScope::Any::operator<(const Any &rhs) const { return _v->operator<(*rhs._v); };
 
-MemScope::Subgroup::Subgroup() noexcept : MemScope::Base() {}
+MemScope::Subgroup::Subgroup() = default;
 uint32_t MemScope::Subgroup::id() const { return variant_id; };
-size_t MemScope::Subgroup::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t MemScope::Subgroup::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool MemScope::Subgroup::operator==(const MemScope::Subgroup &rhs) const { return true; }
 POLYREGION_EXPORT bool MemScope::Subgroup::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -1414,12 +1336,9 @@ POLYREGION_EXPORT bool MemScope::Subgroup::operator<(const Base &rhs_) const { r
 MemScope::Subgroup::operator MemScope::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Subgroup>(*this)); }
 MemScope::Any MemScope::Subgroup::widen() const { return Any(*this); };
 
-MemScope::Workgroup::Workgroup() noexcept : MemScope::Base() {}
+MemScope::Workgroup::Workgroup() = default;
 uint32_t MemScope::Workgroup::id() const { return variant_id; };
-size_t MemScope::Workgroup::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t MemScope::Workgroup::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool MemScope::Workgroup::operator==(const MemScope::Workgroup &rhs) const { return true; }
 POLYREGION_EXPORT bool MemScope::Workgroup::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -1430,12 +1349,9 @@ POLYREGION_EXPORT bool MemScope::Workgroup::operator<(const Base &rhs_) const { 
 MemScope::Workgroup::operator MemScope::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Workgroup>(*this)); }
 MemScope::Any MemScope::Workgroup::widen() const { return Any(*this); };
 
-MemScope::Device::Device() noexcept : MemScope::Base() {}
+MemScope::Device::Device() = default;
 uint32_t MemScope::Device::id() const { return variant_id; };
-size_t MemScope::Device::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t MemScope::Device::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool MemScope::Device::operator==(const MemScope::Device &rhs) const { return true; }
 POLYREGION_EXPORT bool MemScope::Device::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -1446,12 +1362,9 @@ POLYREGION_EXPORT bool MemScope::Device::operator<(const Base &rhs_) const { ret
 MemScope::Device::operator MemScope::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Device>(*this)); }
 MemScope::Any MemScope::Device::widen() const { return Any(*this); };
 
-MemScope::System::System() noexcept : MemScope::Base() {}
+MemScope::System::System() = default;
 uint32_t MemScope::System::id() const { return variant_id; };
-size_t MemScope::System::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t MemScope::System::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool MemScope::System::operator==(const MemScope::System &rhs) const { return true; }
 POLYREGION_EXPORT bool MemScope::System::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -1469,12 +1382,9 @@ bool MemOrder::Any::operator==(const Any &rhs) const { return _v->operator==(*rh
 bool MemOrder::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v); }
 bool MemOrder::Any::operator<(const Any &rhs) const { return _v->operator<(*rhs._v); };
 
-MemOrder::Relaxed::Relaxed() noexcept : MemOrder::Base() {}
+MemOrder::Relaxed::Relaxed() = default;
 uint32_t MemOrder::Relaxed::id() const { return variant_id; };
-size_t MemOrder::Relaxed::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t MemOrder::Relaxed::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool MemOrder::Relaxed::operator==(const MemOrder::Relaxed &rhs) const { return true; }
 POLYREGION_EXPORT bool MemOrder::Relaxed::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -1485,12 +1395,9 @@ POLYREGION_EXPORT bool MemOrder::Relaxed::operator<(const Base &rhs_) const { re
 MemOrder::Relaxed::operator MemOrder::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Relaxed>(*this)); }
 MemOrder::Any MemOrder::Relaxed::widen() const { return Any(*this); };
 
-MemOrder::Acquire::Acquire() noexcept : MemOrder::Base() {}
+MemOrder::Acquire::Acquire() = default;
 uint32_t MemOrder::Acquire::id() const { return variant_id; };
-size_t MemOrder::Acquire::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t MemOrder::Acquire::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool MemOrder::Acquire::operator==(const MemOrder::Acquire &rhs) const { return true; }
 POLYREGION_EXPORT bool MemOrder::Acquire::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -1501,12 +1408,9 @@ POLYREGION_EXPORT bool MemOrder::Acquire::operator<(const Base &rhs_) const { re
 MemOrder::Acquire::operator MemOrder::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Acquire>(*this)); }
 MemOrder::Any MemOrder::Acquire::widen() const { return Any(*this); };
 
-MemOrder::Release::Release() noexcept : MemOrder::Base() {}
+MemOrder::Release::Release() = default;
 uint32_t MemOrder::Release::id() const { return variant_id; };
-size_t MemOrder::Release::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t MemOrder::Release::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool MemOrder::Release::operator==(const MemOrder::Release &rhs) const { return true; }
 POLYREGION_EXPORT bool MemOrder::Release::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -1517,12 +1421,9 @@ POLYREGION_EXPORT bool MemOrder::Release::operator<(const Base &rhs_) const { re
 MemOrder::Release::operator MemOrder::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Release>(*this)); }
 MemOrder::Any MemOrder::Release::widen() const { return Any(*this); };
 
-MemOrder::AcqRel::AcqRel() noexcept : MemOrder::Base() {}
+MemOrder::AcqRel::AcqRel() = default;
 uint32_t MemOrder::AcqRel::id() const { return variant_id; };
-size_t MemOrder::AcqRel::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t MemOrder::AcqRel::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool MemOrder::AcqRel::operator==(const MemOrder::AcqRel &rhs) const { return true; }
 POLYREGION_EXPORT bool MemOrder::AcqRel::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -1533,12 +1434,9 @@ POLYREGION_EXPORT bool MemOrder::AcqRel::operator<(const Base &rhs_) const { ret
 MemOrder::AcqRel::operator MemOrder::Any() const { return std::static_pointer_cast<Base>(std::make_shared<AcqRel>(*this)); }
 MemOrder::Any MemOrder::AcqRel::widen() const { return Any(*this); };
 
-MemOrder::SeqCst::SeqCst() noexcept : MemOrder::Base() {}
+MemOrder::SeqCst::SeqCst() = default;
 uint32_t MemOrder::SeqCst::id() const { return variant_id; };
-size_t MemOrder::SeqCst::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t MemOrder::SeqCst::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool MemOrder::SeqCst::operator==(const MemOrder::SeqCst &rhs) const { return true; }
 POLYREGION_EXPORT bool MemOrder::SeqCst::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -1556,12 +1454,9 @@ bool Direction::Any::operator==(const Any &rhs) const { return _v->operator==(*r
 bool Direction::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v); }
 bool Direction::Any::operator<(const Any &rhs) const { return _v->operator<(*rhs._v); };
 
-Direction::LocalToRemote::LocalToRemote() noexcept : Direction::Base() {}
+Direction::LocalToRemote::LocalToRemote() = default;
 uint32_t Direction::LocalToRemote::id() const { return variant_id; };
-size_t Direction::LocalToRemote::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t Direction::LocalToRemote::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool Direction::LocalToRemote::operator==(const Direction::LocalToRemote &rhs) const { return true; }
 POLYREGION_EXPORT bool Direction::LocalToRemote::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -1572,12 +1467,9 @@ POLYREGION_EXPORT bool Direction::LocalToRemote::operator<(const Base &rhs_) con
 Direction::LocalToRemote::operator Direction::Any() const { return std::static_pointer_cast<Base>(std::make_shared<LocalToRemote>(*this)); }
 Direction::Any Direction::LocalToRemote::widen() const { return Any(*this); };
 
-Direction::RemoteToLocal::RemoteToLocal() noexcept : Direction::Base() {}
+Direction::RemoteToLocal::RemoteToLocal() = default;
 uint32_t Direction::RemoteToLocal::id() const { return variant_id; };
-size_t Direction::RemoteToLocal::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t Direction::RemoteToLocal::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool Direction::RemoteToLocal::operator==(const Direction::RemoteToLocal &rhs) const { return true; }
 POLYREGION_EXPORT bool Direction::RemoteToLocal::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -1588,12 +1480,9 @@ POLYREGION_EXPORT bool Direction::RemoteToLocal::operator<(const Base &rhs_) con
 Direction::RemoteToLocal::operator Direction::Any() const { return std::static_pointer_cast<Base>(std::make_shared<RemoteToLocal>(*this)); }
 Direction::Any Direction::RemoteToLocal::widen() const { return Any(*this); };
 
-Direction::RemoteToRemote::RemoteToRemote() noexcept : Direction::Base() {}
+Direction::RemoteToRemote::RemoteToRemote() = default;
 uint32_t Direction::RemoteToRemote::id() const { return variant_id; };
-size_t Direction::RemoteToRemote::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t Direction::RemoteToRemote::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool Direction::RemoteToRemote::operator==(const Direction::RemoteToRemote &rhs) const { return true; }
 POLYREGION_EXPORT bool Direction::RemoteToRemote::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -1623,8 +1512,8 @@ Spec::Assert::Assert(Term::Any code, Term::Any message) noexcept
 uint32_t Spec::Assert::id() const { return variant_id; };
 size_t Spec::Assert::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(code)>()(code) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(message)>()(message) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(code)>()(code) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(message)>()(message) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Spec::Assert Spec::Assert::withCode(const Term::Any &v_) const { return Spec::Assert(v_, message); }
@@ -1641,10 +1530,7 @@ Spec::Any Spec::Assert::widen() const { return Any(*this); };
 
 Spec::GpuBarrierGlobal::GpuBarrierGlobal() noexcept : Spec::Base({Overload({}, Type::Unit0())}, {}, Type::Unit0()) {}
 uint32_t Spec::GpuBarrierGlobal::id() const { return variant_id; };
-size_t Spec::GpuBarrierGlobal::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t Spec::GpuBarrierGlobal::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool Spec::GpuBarrierGlobal::operator==(const Spec::GpuBarrierGlobal &rhs) const { return true; }
 POLYREGION_EXPORT bool Spec::GpuBarrierGlobal::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -1655,10 +1541,7 @@ Spec::Any Spec::GpuBarrierGlobal::widen() const { return Any(*this); };
 
 Spec::GpuBarrierLocal::GpuBarrierLocal() noexcept : Spec::Base({Overload({}, Type::Unit0())}, {}, Type::Unit0()) {}
 uint32_t Spec::GpuBarrierLocal::id() const { return variant_id; };
-size_t Spec::GpuBarrierLocal::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t Spec::GpuBarrierLocal::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool Spec::GpuBarrierLocal::operator==(const Spec::GpuBarrierLocal &rhs) const { return true; }
 POLYREGION_EXPORT bool Spec::GpuBarrierLocal::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -1669,10 +1552,7 @@ Spec::Any Spec::GpuBarrierLocal::widen() const { return Any(*this); };
 
 Spec::GpuBarrierAll::GpuBarrierAll() noexcept : Spec::Base({Overload({}, Type::Unit0())}, {}, Type::Unit0()) {}
 uint32_t Spec::GpuBarrierAll::id() const { return variant_id; };
-size_t Spec::GpuBarrierAll::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t Spec::GpuBarrierAll::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool Spec::GpuBarrierAll::operator==(const Spec::GpuBarrierAll &rhs) const { return true; }
 POLYREGION_EXPORT bool Spec::GpuBarrierAll::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -1683,10 +1563,7 @@ Spec::Any Spec::GpuBarrierAll::widen() const { return Any(*this); };
 
 Spec::GpuFenceGlobal::GpuFenceGlobal() noexcept : Spec::Base({Overload({}, Type::Unit0())}, {}, Type::Unit0()) {}
 uint32_t Spec::GpuFenceGlobal::id() const { return variant_id; };
-size_t Spec::GpuFenceGlobal::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t Spec::GpuFenceGlobal::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool Spec::GpuFenceGlobal::operator==(const Spec::GpuFenceGlobal &rhs) const { return true; }
 POLYREGION_EXPORT bool Spec::GpuFenceGlobal::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -1697,10 +1574,7 @@ Spec::Any Spec::GpuFenceGlobal::widen() const { return Any(*this); };
 
 Spec::GpuFenceLocal::GpuFenceLocal() noexcept : Spec::Base({Overload({}, Type::Unit0())}, {}, Type::Unit0()) {}
 uint32_t Spec::GpuFenceLocal::id() const { return variant_id; };
-size_t Spec::GpuFenceLocal::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t Spec::GpuFenceLocal::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool Spec::GpuFenceLocal::operator==(const Spec::GpuFenceLocal &rhs) const { return true; }
 POLYREGION_EXPORT bool Spec::GpuFenceLocal::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -1711,10 +1585,7 @@ Spec::Any Spec::GpuFenceLocal::widen() const { return Any(*this); };
 
 Spec::GpuFenceAll::GpuFenceAll() noexcept : Spec::Base({Overload({}, Type::Unit0())}, {}, Type::Unit0()) {}
 uint32_t Spec::GpuFenceAll::id() const { return variant_id; };
-size_t Spec::GpuFenceAll::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t Spec::GpuFenceAll::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool Spec::GpuFenceAll::operator==(const Spec::GpuFenceAll &rhs) const { return true; }
 POLYREGION_EXPORT bool Spec::GpuFenceAll::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -1728,9 +1599,10 @@ Spec::GpuGlobalIdx::GpuGlobalIdx(Term::Any dim) noexcept
 uint32_t Spec::GpuGlobalIdx::id() const { return variant_id; };
 size_t Spec::GpuGlobalIdx::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(dim)>()(dim) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(dim)>()(dim) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Spec::GpuGlobalIdx Spec::GpuGlobalIdx::withDim(const Term::Any &v_) const { return Spec::GpuGlobalIdx(v_); }
 POLYREGION_EXPORT bool Spec::GpuGlobalIdx::operator==(const Spec::GpuGlobalIdx &rhs) const { return (this->dim == rhs.dim); }
 POLYREGION_EXPORT bool Spec::GpuGlobalIdx::operator==(const Base &rhs_) const {
@@ -1745,9 +1617,10 @@ Spec::GpuGlobalSize::GpuGlobalSize(Term::Any dim) noexcept
 uint32_t Spec::GpuGlobalSize::id() const { return variant_id; };
 size_t Spec::GpuGlobalSize::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(dim)>()(dim) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(dim)>()(dim) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Spec::GpuGlobalSize Spec::GpuGlobalSize::withDim(const Term::Any &v_) const { return Spec::GpuGlobalSize(v_); }
 POLYREGION_EXPORT bool Spec::GpuGlobalSize::operator==(const Spec::GpuGlobalSize &rhs) const { return (this->dim == rhs.dim); }
 POLYREGION_EXPORT bool Spec::GpuGlobalSize::operator==(const Base &rhs_) const {
@@ -1762,9 +1635,10 @@ Spec::GpuGroupIdx::GpuGroupIdx(Term::Any dim) noexcept
 uint32_t Spec::GpuGroupIdx::id() const { return variant_id; };
 size_t Spec::GpuGroupIdx::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(dim)>()(dim) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(dim)>()(dim) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Spec::GpuGroupIdx Spec::GpuGroupIdx::withDim(const Term::Any &v_) const { return Spec::GpuGroupIdx(v_); }
 POLYREGION_EXPORT bool Spec::GpuGroupIdx::operator==(const Spec::GpuGroupIdx &rhs) const { return (this->dim == rhs.dim); }
 POLYREGION_EXPORT bool Spec::GpuGroupIdx::operator==(const Base &rhs_) const {
@@ -1779,9 +1653,10 @@ Spec::GpuGroupSize::GpuGroupSize(Term::Any dim) noexcept
 uint32_t Spec::GpuGroupSize::id() const { return variant_id; };
 size_t Spec::GpuGroupSize::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(dim)>()(dim) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(dim)>()(dim) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Spec::GpuGroupSize Spec::GpuGroupSize::withDim(const Term::Any &v_) const { return Spec::GpuGroupSize(v_); }
 POLYREGION_EXPORT bool Spec::GpuGroupSize::operator==(const Spec::GpuGroupSize &rhs) const { return (this->dim == rhs.dim); }
 POLYREGION_EXPORT bool Spec::GpuGroupSize::operator==(const Base &rhs_) const {
@@ -1796,9 +1671,10 @@ Spec::GpuLocalIdx::GpuLocalIdx(Term::Any dim) noexcept
 uint32_t Spec::GpuLocalIdx::id() const { return variant_id; };
 size_t Spec::GpuLocalIdx::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(dim)>()(dim) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(dim)>()(dim) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Spec::GpuLocalIdx Spec::GpuLocalIdx::withDim(const Term::Any &v_) const { return Spec::GpuLocalIdx(v_); }
 POLYREGION_EXPORT bool Spec::GpuLocalIdx::operator==(const Spec::GpuLocalIdx &rhs) const { return (this->dim == rhs.dim); }
 POLYREGION_EXPORT bool Spec::GpuLocalIdx::operator==(const Base &rhs_) const {
@@ -1813,9 +1689,10 @@ Spec::GpuLocalSize::GpuLocalSize(Term::Any dim) noexcept
 uint32_t Spec::GpuLocalSize::id() const { return variant_id; };
 size_t Spec::GpuLocalSize::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(dim)>()(dim) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(dim)>()(dim) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Spec::GpuLocalSize Spec::GpuLocalSize::withDim(const Term::Any &v_) const { return Spec::GpuLocalSize(v_); }
 POLYREGION_EXPORT bool Spec::GpuLocalSize::operator==(const Spec::GpuLocalSize &rhs) const { return (this->dim == rhs.dim); }
 POLYREGION_EXPORT bool Spec::GpuLocalSize::operator==(const Base &rhs_) const {
@@ -1827,10 +1704,7 @@ Spec::Any Spec::GpuLocalSize::widen() const { return Any(*this); };
 
 Spec::GpuLaneIdx::GpuLaneIdx() noexcept : Spec::Base({Overload({}, Type::IntU32())}, {}, Type::IntU32()) {}
 uint32_t Spec::GpuLaneIdx::id() const { return variant_id; };
-size_t Spec::GpuLaneIdx::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t Spec::GpuLaneIdx::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool Spec::GpuLaneIdx::operator==(const Spec::GpuLaneIdx &rhs) const { return true; }
 POLYREGION_EXPORT bool Spec::GpuLaneIdx::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -1841,10 +1715,7 @@ Spec::Any Spec::GpuLaneIdx::widen() const { return Any(*this); };
 
 Spec::GpuSubgroupSize::GpuSubgroupSize() noexcept : Spec::Base({Overload({}, Type::IntU32())}, {}, Type::IntU32()) {}
 uint32_t Spec::GpuSubgroupSize::id() const { return variant_id; };
-size_t Spec::GpuSubgroupSize::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t Spec::GpuSubgroupSize::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool Spec::GpuSubgroupSize::operator==(const Spec::GpuSubgroupSize &rhs) const { return true; }
 POLYREGION_EXPORT bool Spec::GpuSubgroupSize::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -1859,11 +1730,11 @@ Spec::GpuShuffleDown::GpuShuffleDown(Term::Any value, Term::Any delta, Term::Any
 uint32_t Spec::GpuShuffleDown::id() const { return variant_id; };
 size_t Spec::GpuShuffleDown::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(delta)>()(delta) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(width)>()(width) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(mask)>()(mask) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(delta)>()(delta) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(width)>()(width) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(mask)>()(mask) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Spec::GpuShuffleDown Spec::GpuShuffleDown::withValue(const Term::Any &v_) const {
@@ -1898,11 +1769,11 @@ Spec::GpuShuffleUp::GpuShuffleUp(Term::Any value, Term::Any delta, Term::Any wid
 uint32_t Spec::GpuShuffleUp::id() const { return variant_id; };
 size_t Spec::GpuShuffleUp::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(delta)>()(delta) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(width)>()(width) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(mask)>()(mask) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(delta)>()(delta) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(width)>()(width) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(mask)>()(mask) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Spec::GpuShuffleUp Spec::GpuShuffleUp::withValue(const Term::Any &v_) const { return Spec::GpuShuffleUp(v_, delta, width, mask, rtn); }
@@ -1927,11 +1798,11 @@ Spec::GpuShuffleIdx::GpuShuffleIdx(Term::Any value, Term::Any srcLane, Term::Any
 uint32_t Spec::GpuShuffleIdx::id() const { return variant_id; };
 size_t Spec::GpuShuffleIdx::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(srcLane)>()(srcLane) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(width)>()(width) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(mask)>()(mask) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(srcLane)>()(srcLane) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(width)>()(width) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(mask)>()(mask) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Spec::GpuShuffleIdx Spec::GpuShuffleIdx::withValue(const Term::Any &v_) const { return Spec::GpuShuffleIdx(v_, srcLane, width, mask, rtn); }
@@ -1956,11 +1827,11 @@ Spec::GpuShuffleXor::GpuShuffleXor(Term::Any value, Term::Any laneMask, Term::An
 uint32_t Spec::GpuShuffleXor::id() const { return variant_id; };
 size_t Spec::GpuShuffleXor::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(laneMask)>()(laneMask) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(width)>()(width) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(mask)>()(mask) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(laneMask)>()(laneMask) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(width)>()(width) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(mask)>()(mask) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Spec::GpuShuffleXor Spec::GpuShuffleXor::withValue(const Term::Any &v_) const {
@@ -1994,9 +1865,10 @@ Spec::GpuSubgroupBarrier::GpuSubgroupBarrier(Term::Any mask) noexcept
 uint32_t Spec::GpuSubgroupBarrier::id() const { return variant_id; };
 size_t Spec::GpuSubgroupBarrier::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(mask)>()(mask) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(mask)>()(mask) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Spec::GpuSubgroupBarrier Spec::GpuSubgroupBarrier::withMask(const Term::Any &v_) const { return Spec::GpuSubgroupBarrier(v_); }
 POLYREGION_EXPORT bool Spec::GpuSubgroupBarrier::operator==(const Spec::GpuSubgroupBarrier &rhs) const { return (this->mask == rhs.mask); }
 POLYREGION_EXPORT bool Spec::GpuSubgroupBarrier::operator==(const Base &rhs_) const {
@@ -2012,8 +1884,8 @@ Spec::GpuBallot::GpuBallot(Term::Any mask, Term::Any pred) noexcept
 uint32_t Spec::GpuBallot::id() const { return variant_id; };
 size_t Spec::GpuBallot::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(mask)>()(mask) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(pred)>()(pred) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(mask)>()(mask) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(pred)>()(pred) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Spec::GpuBallot Spec::GpuBallot::withMask(const Term::Any &v_) const { return Spec::GpuBallot(v_, pred); }
@@ -2034,8 +1906,8 @@ Spec::GpuVoteAny::GpuVoteAny(Term::Any mask, Term::Any pred) noexcept
 uint32_t Spec::GpuVoteAny::id() const { return variant_id; };
 size_t Spec::GpuVoteAny::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(mask)>()(mask) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(pred)>()(pred) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(mask)>()(mask) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(pred)>()(pred) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Spec::GpuVoteAny Spec::GpuVoteAny::withMask(const Term::Any &v_) const { return Spec::GpuVoteAny(v_, pred); }
@@ -2056,8 +1928,8 @@ Spec::GpuVoteAll::GpuVoteAll(Term::Any mask, Term::Any pred) noexcept
 uint32_t Spec::GpuVoteAll::id() const { return variant_id; };
 size_t Spec::GpuVoteAll::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(mask)>()(mask) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(pred)>()(pred) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(mask)>()(mask) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(pred)>()(pred) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Spec::GpuVoteAll Spec::GpuVoteAll::withMask(const Term::Any &v_) const { return Spec::GpuVoteAll(v_, pred); }
@@ -2079,12 +1951,12 @@ Spec::GpuAtomicRMW::GpuAtomicRMW(AtomicOp::Any op, Term::Any ptr, Term::Any valu
 uint32_t Spec::GpuAtomicRMW::id() const { return variant_id; };
 size_t Spec::GpuAtomicRMW::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(op)>()(op) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(ptr)>()(ptr) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(scope)>()(scope) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(order)>()(order) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(op)>()(op) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(ptr)>()(ptr) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(scope)>()(scope) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(order)>()(order) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Spec::GpuAtomicRMW Spec::GpuAtomicRMW::withOp(const AtomicOp::Any &v_) const {
@@ -2117,12 +1989,12 @@ Spec::GpuAtomicCAS::GpuAtomicCAS(Term::Any ptr, Term::Any expected, Term::Any de
 uint32_t Spec::GpuAtomicCAS::id() const { return variant_id; };
 size_t Spec::GpuAtomicCAS::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(ptr)>()(ptr) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(expected)>()(expected) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(desired)>()(desired) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(scope)>()(scope) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(order)>()(order) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(ptr)>()(ptr) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(expected)>()(expected) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(desired)>()(desired) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(scope)>()(scope) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(order)>()(order) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Spec::GpuAtomicCAS Spec::GpuAtomicCAS::withPtr(const Term::Any &v_) const {
@@ -2159,9 +2031,9 @@ Spec::GpuGroupReduce::GpuGroupReduce(AtomicOp::Any op, Term::Any value, Type::An
 uint32_t Spec::GpuGroupReduce::id() const { return variant_id; };
 size_t Spec::GpuGroupReduce::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(op)>()(op) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(op)>()(op) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Spec::GpuGroupReduce Spec::GpuGroupReduce::withOp(const AtomicOp::Any &v_) const { return Spec::GpuGroupReduce(v_, value, rtn); }
@@ -2182,9 +2054,9 @@ Spec::GpuGroupInclusiveScan::GpuGroupInclusiveScan(AtomicOp::Any op, Term::Any v
 uint32_t Spec::GpuGroupInclusiveScan::id() const { return variant_id; };
 size_t Spec::GpuGroupInclusiveScan::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(op)>()(op) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(op)>()(op) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Spec::GpuGroupInclusiveScan Spec::GpuGroupInclusiveScan::withOp(const AtomicOp::Any &v_) const {
@@ -2213,9 +2085,9 @@ Spec::GpuGroupExclusiveScan::GpuGroupExclusiveScan(AtomicOp::Any op, Term::Any v
 uint32_t Spec::GpuGroupExclusiveScan::id() const { return variant_id; };
 size_t Spec::GpuGroupExclusiveScan::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(op)>()(op) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(op)>()(op) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Spec::GpuGroupExclusiveScan Spec::GpuGroupExclusiveScan::withOp(const AtomicOp::Any &v_) const {
@@ -2244,8 +2116,8 @@ Spec::GpuVolatileLoad::GpuVolatileLoad(Term::Any ptr, Type::Any rtn) noexcept
 uint32_t Spec::GpuVolatileLoad::id() const { return variant_id; };
 size_t Spec::GpuVolatileLoad::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(ptr)>()(ptr) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(ptr)>()(ptr) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Spec::GpuVolatileLoad Spec::GpuVolatileLoad::withPtr(const Term::Any &v_) const { return Spec::GpuVolatileLoad(v_, rtn); }
@@ -2265,8 +2137,8 @@ Spec::GpuVolatileStore::GpuVolatileStore(Term::Any ptr, Term::Any value) noexcep
 uint32_t Spec::GpuVolatileStore::id() const { return variant_id; };
 size_t Spec::GpuVolatileStore::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(ptr)>()(ptr) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(ptr)>()(ptr) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Spec::GpuVolatileStore Spec::GpuVolatileStore::withPtr(const Term::Any &v_) const { return Spec::GpuVolatileStore(v_, value); }
@@ -2296,17 +2168,17 @@ Spec::RemoteLaunch::RemoteLaunch(Term::Any context, Term::Any kernel, std::vecto
 uint32_t Spec::RemoteLaunch::id() const { return variant_id; };
 size_t Spec::RemoteLaunch::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(context)>()(context) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(kernel)>()(kernel) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(tpeArgs)>()(tpeArgs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(gridX)>()(gridX) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(gridY)>()(gridY) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(gridZ)>()(gridZ) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(blockX)>()(blockX) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(blockY)>()(blockY) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(blockZ)>()(blockZ) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(shmem)>()(shmem) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(args)>()(args) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(context)>()(context) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(kernel)>()(kernel) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(tpeArgs)>()(tpeArgs) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(gridX)>()(gridX) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(gridY)>()(gridY) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(gridZ)>()(gridZ) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(blockX)>()(blockX) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(blockY)>()(blockY) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(blockZ)>()(blockZ) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(shmem)>()(shmem) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(args)>()(args) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Spec::RemoteLaunch Spec::RemoteLaunch::withContext(const Term::Any &v_) const {
@@ -2363,8 +2235,8 @@ Spec::RemoteAlloc::RemoteAlloc(Term::Any context, Term::Any bytes) noexcept
 uint32_t Spec::RemoteAlloc::id() const { return variant_id; };
 size_t Spec::RemoteAlloc::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(context)>()(context) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(bytes)>()(bytes) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(context)>()(context) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(bytes)>()(bytes) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Spec::RemoteAlloc Spec::RemoteAlloc::withContext(const Term::Any &v_) const { return Spec::RemoteAlloc(v_, bytes); }
@@ -2385,8 +2257,8 @@ Spec::RemoteTempAlloc::RemoteTempAlloc(Term::Any context, Term::Any bytes) noexc
 uint32_t Spec::RemoteTempAlloc::id() const { return variant_id; };
 size_t Spec::RemoteTempAlloc::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(context)>()(context) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(bytes)>()(bytes) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(context)>()(context) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(bytes)>()(bytes) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Spec::RemoteTempAlloc Spec::RemoteTempAlloc::withContext(const Term::Any &v_) const { return Spec::RemoteTempAlloc(v_, bytes); }
@@ -2406,8 +2278,8 @@ Spec::RemoteFree::RemoteFree(Term::Any context, Term::Any ptr) noexcept
 uint32_t Spec::RemoteFree::id() const { return variant_id; };
 size_t Spec::RemoteFree::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(context)>()(context) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(ptr)>()(ptr) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(context)>()(context) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(ptr)>()(ptr) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Spec::RemoteFree Spec::RemoteFree::withContext(const Term::Any &v_) const { return Spec::RemoteFree(v_, ptr); }
@@ -2428,11 +2300,11 @@ Spec::RemoteMemcpy::RemoteMemcpy(Term::Any context, Term::Any dst, Term::Any src
 uint32_t Spec::RemoteMemcpy::id() const { return variant_id; };
 size_t Spec::RemoteMemcpy::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(context)>()(context) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(dst)>()(dst) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(src)>()(src) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(bytes)>()(bytes) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(direction)>()(direction) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(context)>()(context) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(dst)>()(dst) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(src)>()(src) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(bytes)>()(bytes) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(direction)>()(direction) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Spec::RemoteMemcpy Spec::RemoteMemcpy::withContext(const Term::Any &v_) const { return Spec::RemoteMemcpy(v_, dst, src, bytes, direction); }
@@ -2457,9 +2329,10 @@ Spec::RemoteSync::RemoteSync(Term::Any context) noexcept : Spec::Base({}, {conte
 uint32_t Spec::RemoteSync::id() const { return variant_id; };
 size_t Spec::RemoteSync::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(context)>()(context) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(context)>()(context) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Spec::RemoteSync Spec::RemoteSync::withContext(const Term::Any &v_) const { return Spec::RemoteSync(v_); }
 POLYREGION_EXPORT bool Spec::RemoteSync::operator==(const Spec::RemoteSync &rhs) const { return (this->context == rhs.context); }
 POLYREGION_EXPORT bool Spec::RemoteSync::operator==(const Base &rhs_) const {
@@ -2489,8 +2362,8 @@ Intr::BNot::BNot(Term::Any x, Type::Any rtn) noexcept
 uint32_t Intr::BNot::id() const { return variant_id; };
 size_t Intr::BNot::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Intr::BNot Intr::BNot::withX(const Term::Any &v_) const { return Intr::BNot(v_, rtn); }
@@ -2508,9 +2381,10 @@ Intr::LogicNot::LogicNot(Term::Any x) noexcept
 uint32_t Intr::LogicNot::id() const { return variant_id; };
 size_t Intr::LogicNot::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Intr::LogicNot Intr::LogicNot::withX(const Term::Any &v_) const { return Intr::LogicNot(v_); }
 POLYREGION_EXPORT bool Intr::LogicNot::operator==(const Intr::LogicNot &rhs) const { return (this->x == rhs.x); }
 POLYREGION_EXPORT bool Intr::LogicNot::operator==(const Base &rhs_) const {
@@ -2533,8 +2407,8 @@ Intr::Pos::Pos(Term::Any x, Type::Any rtn) noexcept
 uint32_t Intr::Pos::id() const { return variant_id; };
 size_t Intr::Pos::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Intr::Pos Intr::Pos::withX(const Term::Any &v_) const { return Intr::Pos(v_, rtn); }
@@ -2560,8 +2434,8 @@ Intr::Neg::Neg(Term::Any x, Type::Any rtn) noexcept
 uint32_t Intr::Neg::id() const { return variant_id; };
 size_t Intr::Neg::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Intr::Neg Intr::Neg::withX(const Term::Any &v_) const { return Intr::Neg(v_, rtn); }
@@ -2587,9 +2461,9 @@ Intr::Add::Add(Term::Any x, Term::Any y, Type::Any rtn) noexcept
 uint32_t Intr::Add::id() const { return variant_id; };
 size_t Intr::Add::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Intr::Add Intr::Add::withX(const Term::Any &v_) const { return Intr::Add(v_, y, rtn); }
@@ -2618,9 +2492,9 @@ Intr::Sub::Sub(Term::Any x, Term::Any y, Type::Any rtn) noexcept
 uint32_t Intr::Sub::id() const { return variant_id; };
 size_t Intr::Sub::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Intr::Sub Intr::Sub::withX(const Term::Any &v_) const { return Intr::Sub(v_, y, rtn); }
@@ -2649,9 +2523,9 @@ Intr::Mul::Mul(Term::Any x, Term::Any y, Type::Any rtn) noexcept
 uint32_t Intr::Mul::id() const { return variant_id; };
 size_t Intr::Mul::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Intr::Mul Intr::Mul::withX(const Term::Any &v_) const { return Intr::Mul(v_, y, rtn); }
@@ -2680,9 +2554,9 @@ Intr::Div::Div(Term::Any x, Term::Any y, Type::Any rtn) noexcept
 uint32_t Intr::Div::id() const { return variant_id; };
 size_t Intr::Div::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Intr::Div Intr::Div::withX(const Term::Any &v_) const { return Intr::Div(v_, y, rtn); }
@@ -2711,9 +2585,9 @@ Intr::Rem::Rem(Term::Any x, Term::Any y, Type::Any rtn) noexcept
 uint32_t Intr::Rem::id() const { return variant_id; };
 size_t Intr::Rem::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Intr::Rem Intr::Rem::withX(const Term::Any &v_) const { return Intr::Rem(v_, y, rtn); }
@@ -2742,9 +2616,9 @@ Intr::Min::Min(Term::Any x, Term::Any y, Type::Any rtn) noexcept
 uint32_t Intr::Min::id() const { return variant_id; };
 size_t Intr::Min::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Intr::Min Intr::Min::withX(const Term::Any &v_) const { return Intr::Min(v_, y, rtn); }
@@ -2773,9 +2647,9 @@ Intr::Max::Max(Term::Any x, Term::Any y, Type::Any rtn) noexcept
 uint32_t Intr::Max::id() const { return variant_id; };
 size_t Intr::Max::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Intr::Max Intr::Max::withX(const Term::Any &v_) const { return Intr::Max(v_, y, rtn); }
@@ -2801,9 +2675,9 @@ Intr::BAnd::BAnd(Term::Any x, Term::Any y, Type::Any rtn) noexcept
 uint32_t Intr::BAnd::id() const { return variant_id; };
 size_t Intr::BAnd::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Intr::BAnd Intr::BAnd::withX(const Term::Any &v_) const { return Intr::BAnd(v_, y, rtn); }
@@ -2829,9 +2703,9 @@ Intr::BOr::BOr(Term::Any x, Term::Any y, Type::Any rtn) noexcept
 uint32_t Intr::BOr::id() const { return variant_id; };
 size_t Intr::BOr::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Intr::BOr Intr::BOr::withX(const Term::Any &v_) const { return Intr::BOr(v_, y, rtn); }
@@ -2857,9 +2731,9 @@ Intr::BXor::BXor(Term::Any x, Term::Any y, Type::Any rtn) noexcept
 uint32_t Intr::BXor::id() const { return variant_id; };
 size_t Intr::BXor::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Intr::BXor Intr::BXor::withX(const Term::Any &v_) const { return Intr::BXor(v_, y, rtn); }
@@ -2885,9 +2759,9 @@ Intr::BSL::BSL(Term::Any x, Term::Any y, Type::Any rtn) noexcept
 uint32_t Intr::BSL::id() const { return variant_id; };
 size_t Intr::BSL::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Intr::BSL Intr::BSL::withX(const Term::Any &v_) const { return Intr::BSL(v_, y, rtn); }
@@ -2913,9 +2787,9 @@ Intr::BSR::BSR(Term::Any x, Term::Any y, Type::Any rtn) noexcept
 uint32_t Intr::BSR::id() const { return variant_id; };
 size_t Intr::BSR::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Intr::BSR Intr::BSR::withX(const Term::Any &v_) const { return Intr::BSR(v_, y, rtn); }
@@ -2941,9 +2815,9 @@ Intr::BZSR::BZSR(Term::Any x, Term::Any y, Type::Any rtn) noexcept
 uint32_t Intr::BZSR::id() const { return variant_id; };
 size_t Intr::BZSR::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Intr::BZSR Intr::BZSR::withX(const Term::Any &v_) const { return Intr::BZSR(v_, y, rtn); }
@@ -2969,8 +2843,8 @@ Intr::PopCount::PopCount(Term::Any x, Type::Any rtn) noexcept
 uint32_t Intr::PopCount::id() const { return variant_id; };
 size_t Intr::PopCount::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Intr::PopCount Intr::PopCount::withX(const Term::Any &v_) const { return Intr::PopCount(v_, rtn); }
@@ -2988,8 +2862,8 @@ Intr::LogicAnd::LogicAnd(Term::Any x, Term::Any y) noexcept
 uint32_t Intr::LogicAnd::id() const { return variant_id; };
 size_t Intr::LogicAnd::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Intr::LogicAnd Intr::LogicAnd::withX(const Term::Any &v_) const { return Intr::LogicAnd(v_, y); }
@@ -3007,8 +2881,8 @@ Intr::LogicOr::LogicOr(Term::Any x, Term::Any y) noexcept
 uint32_t Intr::LogicOr::id() const { return variant_id; };
 size_t Intr::LogicOr::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Intr::LogicOr Intr::LogicOr::withX(const Term::Any &v_) const { return Intr::LogicOr(v_, y); }
@@ -3033,8 +2907,8 @@ Intr::LogicEq::LogicEq(Term::Any x, Term::Any y) noexcept
 uint32_t Intr::LogicEq::id() const { return variant_id; };
 size_t Intr::LogicEq::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Intr::LogicEq Intr::LogicEq::withX(const Term::Any &v_) const { return Intr::LogicEq(v_, y); }
@@ -3059,8 +2933,8 @@ Intr::LogicNeq::LogicNeq(Term::Any x, Term::Any y) noexcept
 uint32_t Intr::LogicNeq::id() const { return variant_id; };
 size_t Intr::LogicNeq::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Intr::LogicNeq Intr::LogicNeq::withX(const Term::Any &v_) const { return Intr::LogicNeq(v_, y); }
@@ -3085,8 +2959,8 @@ Intr::LogicLte::LogicLte(Term::Any x, Term::Any y) noexcept
 uint32_t Intr::LogicLte::id() const { return variant_id; };
 size_t Intr::LogicLte::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Intr::LogicLte Intr::LogicLte::withX(const Term::Any &v_) const { return Intr::LogicLte(v_, y); }
@@ -3111,8 +2985,8 @@ Intr::LogicGte::LogicGte(Term::Any x, Term::Any y) noexcept
 uint32_t Intr::LogicGte::id() const { return variant_id; };
 size_t Intr::LogicGte::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Intr::LogicGte Intr::LogicGte::withX(const Term::Any &v_) const { return Intr::LogicGte(v_, y); }
@@ -3137,8 +3011,8 @@ Intr::LogicLt::LogicLt(Term::Any x, Term::Any y) noexcept
 uint32_t Intr::LogicLt::id() const { return variant_id; };
 size_t Intr::LogicLt::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Intr::LogicLt Intr::LogicLt::withX(const Term::Any &v_) const { return Intr::LogicLt(v_, y); }
@@ -3163,8 +3037,8 @@ Intr::LogicGt::LogicGt(Term::Any x, Term::Any y) noexcept
 uint32_t Intr::LogicGt::id() const { return variant_id; };
 size_t Intr::LogicGt::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Intr::LogicGt Intr::LogicGt::withX(const Term::Any &v_) const { return Intr::LogicGt(v_, y); }
@@ -3200,8 +3074,8 @@ Math::Abs::Abs(Term::Any x, Type::Any rtn) noexcept
 uint32_t Math::Abs::id() const { return variant_id; };
 size_t Math::Abs::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Math::Abs Math::Abs::withX(const Term::Any &v_) const { return Math::Abs(v_, rtn); }
@@ -3222,8 +3096,8 @@ Math::Sin::Sin(Term::Any x, Type::Any rtn) noexcept
 uint32_t Math::Sin::id() const { return variant_id; };
 size_t Math::Sin::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Math::Sin Math::Sin::withX(const Term::Any &v_) const { return Math::Sin(v_, rtn); }
@@ -3244,8 +3118,8 @@ Math::Cos::Cos(Term::Any x, Type::Any rtn) noexcept
 uint32_t Math::Cos::id() const { return variant_id; };
 size_t Math::Cos::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Math::Cos Math::Cos::withX(const Term::Any &v_) const { return Math::Cos(v_, rtn); }
@@ -3266,8 +3140,8 @@ Math::Tan::Tan(Term::Any x, Type::Any rtn) noexcept
 uint32_t Math::Tan::id() const { return variant_id; };
 size_t Math::Tan::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Math::Tan Math::Tan::withX(const Term::Any &v_) const { return Math::Tan(v_, rtn); }
@@ -3288,8 +3162,8 @@ Math::Asin::Asin(Term::Any x, Type::Any rtn) noexcept
 uint32_t Math::Asin::id() const { return variant_id; };
 size_t Math::Asin::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Math::Asin Math::Asin::withX(const Term::Any &v_) const { return Math::Asin(v_, rtn); }
@@ -3310,8 +3184,8 @@ Math::Acos::Acos(Term::Any x, Type::Any rtn) noexcept
 uint32_t Math::Acos::id() const { return variant_id; };
 size_t Math::Acos::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Math::Acos Math::Acos::withX(const Term::Any &v_) const { return Math::Acos(v_, rtn); }
@@ -3332,8 +3206,8 @@ Math::Atan::Atan(Term::Any x, Type::Any rtn) noexcept
 uint32_t Math::Atan::id() const { return variant_id; };
 size_t Math::Atan::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Math::Atan Math::Atan::withX(const Term::Any &v_) const { return Math::Atan(v_, rtn); }
@@ -3354,8 +3228,8 @@ Math::Sinh::Sinh(Term::Any x, Type::Any rtn) noexcept
 uint32_t Math::Sinh::id() const { return variant_id; };
 size_t Math::Sinh::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Math::Sinh Math::Sinh::withX(const Term::Any &v_) const { return Math::Sinh(v_, rtn); }
@@ -3376,8 +3250,8 @@ Math::Cosh::Cosh(Term::Any x, Type::Any rtn) noexcept
 uint32_t Math::Cosh::id() const { return variant_id; };
 size_t Math::Cosh::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Math::Cosh Math::Cosh::withX(const Term::Any &v_) const { return Math::Cosh(v_, rtn); }
@@ -3398,8 +3272,8 @@ Math::Tanh::Tanh(Term::Any x, Type::Any rtn) noexcept
 uint32_t Math::Tanh::id() const { return variant_id; };
 size_t Math::Tanh::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Math::Tanh Math::Tanh::withX(const Term::Any &v_) const { return Math::Tanh(v_, rtn); }
@@ -3420,8 +3294,8 @@ Math::Signum::Signum(Term::Any x, Type::Any rtn) noexcept
 uint32_t Math::Signum::id() const { return variant_id; };
 size_t Math::Signum::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Math::Signum Math::Signum::withX(const Term::Any &v_) const { return Math::Signum(v_, rtn); }
@@ -3442,8 +3316,8 @@ Math::Round::Round(Term::Any x, Type::Any rtn) noexcept
 uint32_t Math::Round::id() const { return variant_id; };
 size_t Math::Round::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Math::Round Math::Round::withX(const Term::Any &v_) const { return Math::Round(v_, rtn); }
@@ -3464,8 +3338,8 @@ Math::Ceil::Ceil(Term::Any x, Type::Any rtn) noexcept
 uint32_t Math::Ceil::id() const { return variant_id; };
 size_t Math::Ceil::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Math::Ceil Math::Ceil::withX(const Term::Any &v_) const { return Math::Ceil(v_, rtn); }
@@ -3486,8 +3360,8 @@ Math::Floor::Floor(Term::Any x, Type::Any rtn) noexcept
 uint32_t Math::Floor::id() const { return variant_id; };
 size_t Math::Floor::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Math::Floor Math::Floor::withX(const Term::Any &v_) const { return Math::Floor(v_, rtn); }
@@ -3508,8 +3382,8 @@ Math::Rint::Rint(Term::Any x, Type::Any rtn) noexcept
 uint32_t Math::Rint::id() const { return variant_id; };
 size_t Math::Rint::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Math::Rint Math::Rint::withX(const Term::Any &v_) const { return Math::Rint(v_, rtn); }
@@ -3530,8 +3404,8 @@ Math::Sqrt::Sqrt(Term::Any x, Type::Any rtn) noexcept
 uint32_t Math::Sqrt::id() const { return variant_id; };
 size_t Math::Sqrt::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Math::Sqrt Math::Sqrt::withX(const Term::Any &v_) const { return Math::Sqrt(v_, rtn); }
@@ -3552,8 +3426,8 @@ Math::Cbrt::Cbrt(Term::Any x, Type::Any rtn) noexcept
 uint32_t Math::Cbrt::id() const { return variant_id; };
 size_t Math::Cbrt::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Math::Cbrt Math::Cbrt::withX(const Term::Any &v_) const { return Math::Cbrt(v_, rtn); }
@@ -3574,8 +3448,8 @@ Math::Exp::Exp(Term::Any x, Type::Any rtn) noexcept
 uint32_t Math::Exp::id() const { return variant_id; };
 size_t Math::Exp::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Math::Exp Math::Exp::withX(const Term::Any &v_) const { return Math::Exp(v_, rtn); }
@@ -3596,8 +3470,8 @@ Math::Expm1::Expm1(Term::Any x, Type::Any rtn) noexcept
 uint32_t Math::Expm1::id() const { return variant_id; };
 size_t Math::Expm1::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Math::Expm1 Math::Expm1::withX(const Term::Any &v_) const { return Math::Expm1(v_, rtn); }
@@ -3618,8 +3492,8 @@ Math::Log::Log(Term::Any x, Type::Any rtn) noexcept
 uint32_t Math::Log::id() const { return variant_id; };
 size_t Math::Log::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Math::Log Math::Log::withX(const Term::Any &v_) const { return Math::Log(v_, rtn); }
@@ -3640,8 +3514,8 @@ Math::Log1p::Log1p(Term::Any x, Type::Any rtn) noexcept
 uint32_t Math::Log1p::id() const { return variant_id; };
 size_t Math::Log1p::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Math::Log1p Math::Log1p::withX(const Term::Any &v_) const { return Math::Log1p(v_, rtn); }
@@ -3662,8 +3536,8 @@ Math::Log10::Log10(Term::Any x, Type::Any rtn) noexcept
 uint32_t Math::Log10::id() const { return variant_id; };
 size_t Math::Log10::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Math::Log10 Math::Log10::withX(const Term::Any &v_) const { return Math::Log10(v_, rtn); }
@@ -3685,9 +3559,9 @@ Math::Pow::Pow(Term::Any x, Term::Any y, Type::Any rtn) noexcept
 uint32_t Math::Pow::id() const { return variant_id; };
 size_t Math::Pow::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Math::Pow Math::Pow::withX(const Term::Any &v_) const { return Math::Pow(v_, y, rtn); }
@@ -3712,9 +3586,9 @@ Math::Atan2::Atan2(Term::Any x, Term::Any y, Type::Any rtn) noexcept
 uint32_t Math::Atan2::id() const { return variant_id; };
 size_t Math::Atan2::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Math::Atan2 Math::Atan2::withX(const Term::Any &v_) const { return Math::Atan2(v_, y, rtn); }
@@ -3739,9 +3613,9 @@ Math::Hypot::Hypot(Term::Any x, Term::Any y, Type::Any rtn) noexcept
 uint32_t Math::Hypot::id() const { return variant_id; };
 size_t Math::Hypot::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Math::Hypot Math::Hypot::withX(const Term::Any &v_) const { return Math::Hypot(v_, y, rtn); }
@@ -3760,8 +3634,8 @@ Math::Any Math::Hypot::widen() const { return Any(*this); };
 ExceptionKind::ExceptionKind(Type::Any tpe, std::string sourceName) noexcept : tpe(std::move(tpe)), sourceName(std::move(sourceName)) {}
 size_t ExceptionKind::hash_code() const {
   size_t seed = 0;
-  seed ^= std::hash<decltype(tpe)>()(tpe) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(sourceName)>()(sourceName) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(tpe)>()(tpe) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(sourceName)>()(sourceName) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 ExceptionKind ExceptionKind::withTpe(const Type::Any &v_) const { return ExceptionKind(v_, sourceName); }
@@ -3775,9 +3649,9 @@ Handler::Handler(std::optional<ExceptionKind> caught, std::optional<Named> binde
     : caught(std::move(caught)), binder(std::move(binder)), body(std::move(body)) {}
 size_t Handler::hash_code() const {
   size_t seed = 0;
-  seed ^= std::hash<decltype(caught)>()(caught) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(binder)>()(binder) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(body)>()(body) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(caught)>()(caught) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(binder)>()(binder) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(body)>()(body) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Handler Handler::withCaught(const std::optional<ExceptionKind> &v_) const { return Handler(v_, binder, body); }
@@ -3797,13 +3671,13 @@ bool Stmt::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._
 bool Stmt::Any::operator<(const Any &rhs) const { return _v->operator<(*rhs._v); };
 
 Stmt::Var::Var(Named name, std::optional<Expr::Any> expr, bool isMutable) noexcept
-    : Stmt::Base(), name(std::move(name)), expr(std::move(expr)), isMutable(isMutable) {}
+    : name(std::move(name)), expr(std::move(expr)), isMutable(isMutable) {}
 uint32_t Stmt::Var::id() const { return variant_id; };
 size_t Stmt::Var::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(expr)>()(expr) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(isMutable)>()(isMutable) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(expr)>()(expr) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(isMutable)>()(isMutable) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Stmt::Var Stmt::Var::withName(const Named &v_) const { return Stmt::Var(v_, expr, isMutable); }
@@ -3822,12 +3696,12 @@ POLYREGION_EXPORT bool Stmt::Var::operator<(const Base &rhs_) const { return var
 Stmt::Var::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Var>(*this)); }
 Stmt::Any Stmt::Var::widen() const { return Any(*this); };
 
-Stmt::Mut::Mut(Term::Select name, Expr::Any expr) noexcept : Stmt::Base(), name(std::move(name)), expr(std::move(expr)) {}
+Stmt::Mut::Mut(Term::Select name, Expr::Any expr) noexcept : name(std::move(name)), expr(std::move(expr)) {}
 uint32_t Stmt::Mut::id() const { return variant_id; };
 size_t Stmt::Mut::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(expr)>()(expr) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(expr)>()(expr) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Stmt::Mut Stmt::Mut::withName(const Term::Select &v_) const { return Stmt::Mut(v_, expr); }
@@ -3843,13 +3717,13 @@ Stmt::Mut::operator Stmt::Any() const { return std::static_pointer_cast<Base>(st
 Stmt::Any Stmt::Mut::widen() const { return Any(*this); };
 
 Stmt::Update::Update(Term::Select lhs, Term::Any idx, Term::Any value) noexcept
-    : Stmt::Base(), lhs(std::move(lhs)), idx(std::move(idx)), value(std::move(value)) {}
+    : lhs(std::move(lhs)), idx(std::move(idx)), value(std::move(value)) {}
 uint32_t Stmt::Update::id() const { return variant_id; };
 size_t Stmt::Update::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(lhs)>()(lhs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(idx)>()(idx) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(lhs)>()(lhs) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(idx)>()(idx) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Stmt::Update Stmt::Update::withLhs(const Term::Select &v_) const { return Stmt::Update(v_, idx, value); }
@@ -3867,12 +3741,12 @@ POLYREGION_EXPORT bool Stmt::Update::operator<(const Base &rhs_) const { return 
 Stmt::Update::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Update>(*this)); }
 Stmt::Any Stmt::Update::widen() const { return Any(*this); };
 
-Stmt::While::While(Term::Any cond, std::vector<Stmt::Any> body) noexcept : Stmt::Base(), cond(std::move(cond)), body(std::move(body)) {}
+Stmt::While::While(Term::Any cond, std::vector<Stmt::Any> body) noexcept : cond(std::move(cond)), body(std::move(body)) {}
 uint32_t Stmt::While::id() const { return variant_id; };
 size_t Stmt::While::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(cond)>()(cond) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(body)>()(body) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(cond)>()(cond) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(body)>()(body) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Stmt::While Stmt::While::withCond(const Term::Any &v_) const { return Stmt::While(v_, body); }
@@ -3891,16 +3765,15 @@ Stmt::While::operator Stmt::Any() const { return std::static_pointer_cast<Base>(
 Stmt::Any Stmt::While::widen() const { return Any(*this); };
 
 Stmt::ForRange::ForRange(Named induction, Term::Any lbIncl, Term::Any ubExcl, Term::Any step, std::vector<Stmt::Any> body) noexcept
-    : Stmt::Base(), induction(std::move(induction)), lbIncl(std::move(lbIncl)), ubExcl(std::move(ubExcl)), step(std::move(step)),
-      body(std::move(body)) {}
+    : induction(std::move(induction)), lbIncl(std::move(lbIncl)), ubExcl(std::move(ubExcl)), step(std::move(step)), body(std::move(body)) {}
 uint32_t Stmt::ForRange::id() const { return variant_id; };
 size_t Stmt::ForRange::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(induction)>()(induction) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(lbIncl)>()(lbIncl) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(ubExcl)>()(ubExcl) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(step)>()(step) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(body)>()(body) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(induction)>()(induction) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(lbIncl)>()(lbIncl) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(ubExcl)>()(ubExcl) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(step)>()(step) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(body)>()(body) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Stmt::ForRange Stmt::ForRange::withInduction(const Named &v_) const { return Stmt::ForRange(v_, lbIncl, ubExcl, step, body); }
@@ -3923,12 +3796,9 @@ POLYREGION_EXPORT bool Stmt::ForRange::operator<(const Base &rhs_) const { retur
 Stmt::ForRange::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<ForRange>(*this)); }
 Stmt::Any Stmt::ForRange::widen() const { return Any(*this); };
 
-Stmt::Break::Break() noexcept : Stmt::Base() {}
+Stmt::Break::Break() = default;
 uint32_t Stmt::Break::id() const { return variant_id; };
-size_t Stmt::Break::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t Stmt::Break::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool Stmt::Break::operator==(const Stmt::Break &rhs) const { return true; }
 POLYREGION_EXPORT bool Stmt::Break::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -3939,12 +3809,9 @@ POLYREGION_EXPORT bool Stmt::Break::operator<(const Base &rhs_) const { return v
 Stmt::Break::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Break>(*this)); }
 Stmt::Any Stmt::Break::widen() const { return Any(*this); };
 
-Stmt::Cont::Cont() noexcept : Stmt::Base() {}
+Stmt::Cont::Cont() = default;
 uint32_t Stmt::Cont::id() const { return variant_id; };
-size_t Stmt::Cont::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t Stmt::Cont::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool Stmt::Cont::operator==(const Stmt::Cont &rhs) const { return true; }
 POLYREGION_EXPORT bool Stmt::Cont::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -3956,13 +3823,13 @@ Stmt::Cont::operator Stmt::Any() const { return std::static_pointer_cast<Base>(s
 Stmt::Any Stmt::Cont::widen() const { return Any(*this); };
 
 Stmt::Cond::Cond(Term::Any cond, std::vector<Stmt::Any> trueBr, std::vector<Stmt::Any> falseBr) noexcept
-    : Stmt::Base(), cond(std::move(cond)), trueBr(std::move(trueBr)), falseBr(std::move(falseBr)) {}
+    : cond(std::move(cond)), trueBr(std::move(trueBr)), falseBr(std::move(falseBr)) {}
 uint32_t Stmt::Cond::id() const { return variant_id; };
 size_t Stmt::Cond::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(cond)>()(cond) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(trueBr)>()(trueBr) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(falseBr)>()(falseBr) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(cond)>()(cond) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(trueBr)>()(trueBr) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(falseBr)>()(falseBr) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Stmt::Cond Stmt::Cond::withCond(const Term::Any &v_) const { return Stmt::Cond(v_, trueBr, falseBr); }
@@ -3984,13 +3851,14 @@ POLYREGION_EXPORT bool Stmt::Cond::operator<(const Base &rhs_) const { return va
 Stmt::Cond::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Cond>(*this)); }
 Stmt::Any Stmt::Cond::widen() const { return Any(*this); };
 
-Stmt::Return::Return(Expr::Any value) noexcept : Stmt::Base(), value(std::move(value)) {}
+Stmt::Return::Return(Expr::Any value) noexcept : value(std::move(value)) {}
 uint32_t Stmt::Return::id() const { return variant_id; };
 size_t Stmt::Return::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Stmt::Return Stmt::Return::withValue(const Expr::Any &v_) const { return Stmt::Return(v_); }
 POLYREGION_EXPORT bool Stmt::Return::operator==(const Stmt::Return &rhs) const { return (this->value == rhs.value); }
 POLYREGION_EXPORT bool Stmt::Return::operator==(const Base &rhs_) const {
@@ -4003,13 +3871,13 @@ Stmt::Return::operator Stmt::Any() const { return std::static_pointer_cast<Base>
 Stmt::Any Stmt::Return::widen() const { return Any(*this); };
 
 Stmt::Annotated::Annotated(Stmt::Any inner, std::optional<SourcePosition> pos, std::optional<std::string> comment) noexcept
-    : Stmt::Base(), inner(std::move(inner)), pos(std::move(pos)), comment(std::move(comment)) {}
+    : inner(std::move(inner)), pos(std::move(pos)), comment(std::move(comment)) {}
 uint32_t Stmt::Annotated::id() const { return variant_id; };
 size_t Stmt::Annotated::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(inner)>()(inner) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(pos)>()(pos) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(comment)>()(comment) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(inner)>()(inner) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(pos)>()(pos) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(comment)>()(comment) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Stmt::Annotated Stmt::Annotated::withInner(const Stmt::Any &v_) const { return Stmt::Annotated(v_, pos, comment); }
@@ -4028,13 +3896,13 @@ Stmt::Annotated::operator Stmt::Any() const { return std::static_pointer_cast<Ba
 Stmt::Any Stmt::Annotated::widen() const { return Any(*this); };
 
 Stmt::Try::Try(std::vector<Stmt::Any> body, std::vector<Handler> handlers, std::vector<Stmt::Any> fin) noexcept
-    : Stmt::Base(), body(std::move(body)), handlers(std::move(handlers)), fin(std::move(fin)) {}
+    : body(std::move(body)), handlers(std::move(handlers)), fin(std::move(fin)) {}
 uint32_t Stmt::Try::id() const { return variant_id; };
 size_t Stmt::Try::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(body)>()(body) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(handlers)>()(handlers) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(fin)>()(fin) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(body)>()(body) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(handlers)>()(handlers) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(fin)>()(fin) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Stmt::Try Stmt::Try::withBody(const std::vector<Stmt::Any> &v_) const { return Stmt::Try(v_, handlers, fin); }
@@ -4055,13 +3923,13 @@ Stmt::Try::operator Stmt::Any() const { return std::static_pointer_cast<Base>(st
 Stmt::Any Stmt::Try::widen() const { return Any(*this); };
 
 Stmt::Raise::Raise(Term::Any value, ExceptionKind exceptionKind, std::vector<Stmt::Any> cleanup) noexcept
-    : Stmt::Base(), value(std::move(value)), exceptionKind(std::move(exceptionKind)), cleanup(std::move(cleanup)) {}
+    : value(std::move(value)), exceptionKind(std::move(exceptionKind)), cleanup(std::move(cleanup)) {}
 uint32_t Stmt::Raise::id() const { return variant_id; };
 size_t Stmt::Raise::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(exceptionKind)>()(exceptionKind) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(cleanup)>()(cleanup) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(exceptionKind)>()(exceptionKind) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(cleanup)>()(cleanup) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Stmt::Raise Stmt::Raise::withValue(const Term::Any &v_) const { return Stmt::Raise(v_, exceptionKind, cleanup); }
@@ -4081,12 +3949,9 @@ POLYREGION_EXPORT bool Stmt::Raise::operator<(const Base &rhs_) const { return v
 Stmt::Raise::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Raise>(*this)); }
 Stmt::Any Stmt::Raise::widen() const { return Any(*this); };
 
-Stmt::Rethrow::Rethrow() noexcept : Stmt::Base() {}
+Stmt::Rethrow::Rethrow() = default;
 uint32_t Stmt::Rethrow::id() const { return variant_id; };
-size_t Stmt::Rethrow::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t Stmt::Rethrow::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool Stmt::Rethrow::operator==(const Stmt::Rethrow &rhs) const { return true; }
 POLYREGION_EXPORT bool Stmt::Rethrow::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -4103,13 +3968,13 @@ Signature::Signature(Sym name, std::vector<Type::Var> tpeVars, std::optional<Typ
       moduleCaptures(std::move(moduleCaptures)), termCaptures(std::move(termCaptures)), rtn(std::move(rtn)) {}
 size_t Signature::hash_code() const {
   size_t seed = 0;
-  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(tpeVars)>()(tpeVars) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(receiver)>()(receiver) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(args)>()(args) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(moduleCaptures)>()(moduleCaptures) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(termCaptures)>()(termCaptures) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(tpeVars)>()(tpeVars) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(receiver)>()(receiver) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(args)>()(args) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(moduleCaptures)>()(moduleCaptures) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(termCaptures)>()(termCaptures) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Signature Signature::withName(const Sym &v_) const { return Signature(v_, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn); }
@@ -4150,12 +4015,9 @@ bool FunctionVisibility::Any::operator==(const Any &rhs) const { return _v->oper
 bool FunctionVisibility::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v); }
 bool FunctionVisibility::Any::operator<(const Any &rhs) const { return _v->operator<(*rhs._v); };
 
-FunctionVisibility::Internal::Internal() noexcept : FunctionVisibility::Base() {}
+FunctionVisibility::Internal::Internal() = default;
 uint32_t FunctionVisibility::Internal::id() const { return variant_id; };
-size_t FunctionVisibility::Internal::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t FunctionVisibility::Internal::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool FunctionVisibility::Internal::operator==(const FunctionVisibility::Internal &rhs) const { return true; }
 POLYREGION_EXPORT bool FunctionVisibility::Internal::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -4168,12 +4030,9 @@ FunctionVisibility::Internal::operator FunctionVisibility::Any() const {
 }
 FunctionVisibility::Any FunctionVisibility::Internal::widen() const { return Any(*this); };
 
-FunctionVisibility::Exported::Exported() noexcept : FunctionVisibility::Base() {}
+FunctionVisibility::Exported::Exported() = default;
 uint32_t FunctionVisibility::Exported::id() const { return variant_id; };
-size_t FunctionVisibility::Exported::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t FunctionVisibility::Exported::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool FunctionVisibility::Exported::operator==(const FunctionVisibility::Exported &rhs) const { return true; }
 POLYREGION_EXPORT bool FunctionVisibility::Exported::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -4193,12 +4052,9 @@ bool FunctionFpMode::Any::operator==(const Any &rhs) const { return _v->operator
 bool FunctionFpMode::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v); }
 bool FunctionFpMode::Any::operator<(const Any &rhs) const { return _v->operator<(*rhs._v); };
 
-FunctionFpMode::Relaxed::Relaxed() noexcept : FunctionFpMode::Base() {}
+FunctionFpMode::Relaxed::Relaxed() = default;
 uint32_t FunctionFpMode::Relaxed::id() const { return variant_id; };
-size_t FunctionFpMode::Relaxed::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t FunctionFpMode::Relaxed::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool FunctionFpMode::Relaxed::operator==(const FunctionFpMode::Relaxed &rhs) const { return true; }
 POLYREGION_EXPORT bool FunctionFpMode::Relaxed::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -4209,12 +4065,9 @@ POLYREGION_EXPORT bool FunctionFpMode::Relaxed::operator<(const Base &rhs_) cons
 FunctionFpMode::Relaxed::operator FunctionFpMode::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Relaxed>(*this)); }
 FunctionFpMode::Any FunctionFpMode::Relaxed::widen() const { return Any(*this); };
 
-FunctionFpMode::Strict::Strict() noexcept : FunctionFpMode::Base() {}
+FunctionFpMode::Strict::Strict() = default;
 uint32_t FunctionFpMode::Strict::id() const { return variant_id; };
-size_t FunctionFpMode::Strict::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t FunctionFpMode::Strict::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool FunctionFpMode::Strict::operator==(const FunctionFpMode::Strict &rhs) const { return true; }
 POLYREGION_EXPORT bool FunctionFpMode::Strict::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -4232,12 +4085,9 @@ bool FunctionAffinity::Any::operator==(const Any &rhs) const { return _v->operat
 bool FunctionAffinity::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v); }
 bool FunctionAffinity::Any::operator<(const Any &rhs) const { return _v->operator<(*rhs._v); };
 
-FunctionAffinity::Offload::Offload() noexcept : FunctionAffinity::Base() {}
+FunctionAffinity::Offload::Offload() = default;
 uint32_t FunctionAffinity::Offload::id() const { return variant_id; };
-size_t FunctionAffinity::Offload::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t FunctionAffinity::Offload::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool FunctionAffinity::Offload::operator==(const FunctionAffinity::Offload &rhs) const { return true; }
 POLYREGION_EXPORT bool FunctionAffinity::Offload::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -4250,12 +4100,9 @@ FunctionAffinity::Offload::operator FunctionAffinity::Any() const {
 }
 FunctionAffinity::Any FunctionAffinity::Offload::widen() const { return Any(*this); };
 
-FunctionAffinity::Host::Host() noexcept : FunctionAffinity::Base() {}
+FunctionAffinity::Host::Host() = default;
 uint32_t FunctionAffinity::Host::id() const { return variant_id; };
-size_t FunctionAffinity::Host::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t FunctionAffinity::Host::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool FunctionAffinity::Host::operator==(const FunctionAffinity::Host &rhs) const { return true; }
 POLYREGION_EXPORT bool FunctionAffinity::Host::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -4273,12 +4120,9 @@ bool ArgAccess::Any::operator==(const Any &rhs) const { return _v->operator==(*r
 bool ArgAccess::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v); }
 bool ArgAccess::Any::operator<(const Any &rhs) const { return _v->operator<(*rhs._v); };
 
-ArgAccess::Read::Read() noexcept : ArgAccess::Base() {}
+ArgAccess::Read::Read() = default;
 uint32_t ArgAccess::Read::id() const { return variant_id; };
-size_t ArgAccess::Read::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t ArgAccess::Read::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool ArgAccess::Read::operator==(const ArgAccess::Read &rhs) const { return true; }
 POLYREGION_EXPORT bool ArgAccess::Read::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -4289,12 +4133,9 @@ POLYREGION_EXPORT bool ArgAccess::Read::operator<(const Base &rhs_) const { retu
 ArgAccess::Read::operator ArgAccess::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Read>(*this)); }
 ArgAccess::Any ArgAccess::Read::widen() const { return Any(*this); };
 
-ArgAccess::Write::Write() noexcept : ArgAccess::Base() {}
+ArgAccess::Write::Write() = default;
 uint32_t ArgAccess::Write::id() const { return variant_id; };
-size_t ArgAccess::Write::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t ArgAccess::Write::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool ArgAccess::Write::operator==(const ArgAccess::Write &rhs) const { return true; }
 POLYREGION_EXPORT bool ArgAccess::Write::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -4305,12 +4146,9 @@ POLYREGION_EXPORT bool ArgAccess::Write::operator<(const Base &rhs_) const { ret
 ArgAccess::Write::operator ArgAccess::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Write>(*this)); }
 ArgAccess::Any ArgAccess::Write::widen() const { return Any(*this); };
 
-ArgAccess::ReadWrite::ReadWrite() noexcept : ArgAccess::Base() {}
+ArgAccess::ReadWrite::ReadWrite() = default;
 uint32_t ArgAccess::ReadWrite::id() const { return variant_id; };
-size_t ArgAccess::ReadWrite::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t ArgAccess::ReadWrite::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool ArgAccess::ReadWrite::operator==(const ArgAccess::ReadWrite &rhs) const { return true; }
 POLYREGION_EXPORT bool ArgAccess::ReadWrite::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -4328,13 +4166,14 @@ bool ArgSizeExpr::Any::operator==(const Any &rhs) const { return _v->operator==(
 bool ArgSizeExpr::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v); }
 bool ArgSizeExpr::Any::operator<(const Any &rhs) const { return _v->operator<(*rhs._v); };
 
-ArgSizeExpr::Param::Param(int32_t index) noexcept : ArgSizeExpr::Base(), index(index) {}
+ArgSizeExpr::Param::Param(int32_t index) noexcept : index(index) {}
 uint32_t ArgSizeExpr::Param::id() const { return variant_id; };
 size_t ArgSizeExpr::Param::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(index)>()(index) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(index)>()(index) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 ArgSizeExpr::Param ArgSizeExpr::Param::withIndex(const int32_t &v_) const { return ArgSizeExpr::Param(v_); }
 POLYREGION_EXPORT bool ArgSizeExpr::Param::operator==(const ArgSizeExpr::Param &rhs) const { return (this->index == rhs.index); }
 POLYREGION_EXPORT bool ArgSizeExpr::Param::operator==(const Base &rhs_) const {
@@ -4346,13 +4185,14 @@ POLYREGION_EXPORT bool ArgSizeExpr::Param::operator<(const Base &rhs_) const { r
 ArgSizeExpr::Param::operator ArgSizeExpr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Param>(*this)); }
 ArgSizeExpr::Any ArgSizeExpr::Param::widen() const { return Any(*this); };
 
-ArgSizeExpr::Const::Const(int64_t value) noexcept : ArgSizeExpr::Base(), value(value) {}
+ArgSizeExpr::Const::Const(int64_t value) noexcept : value(value) {}
 uint32_t ArgSizeExpr::Const::id() const { return variant_id; };
 size_t ArgSizeExpr::Const::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 ArgSizeExpr::Const ArgSizeExpr::Const::withValue(const int64_t &v_) const { return ArgSizeExpr::Const(v_); }
 POLYREGION_EXPORT bool ArgSizeExpr::Const::operator==(const ArgSizeExpr::Const &rhs) const { return (this->value == rhs.value); }
 POLYREGION_EXPORT bool ArgSizeExpr::Const::operator==(const Base &rhs_) const {
@@ -4364,13 +4204,12 @@ POLYREGION_EXPORT bool ArgSizeExpr::Const::operator<(const Base &rhs_) const { r
 ArgSizeExpr::Const::operator ArgSizeExpr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Const>(*this)); }
 ArgSizeExpr::Any ArgSizeExpr::Const::widen() const { return Any(*this); };
 
-ArgSizeExpr::Add::Add(ArgSizeExpr::Any lhs, ArgSizeExpr::Any rhs) noexcept
-    : ArgSizeExpr::Base(), lhs(std::move(lhs)), rhs(std::move(rhs)) {}
+ArgSizeExpr::Add::Add(ArgSizeExpr::Any lhs, ArgSizeExpr::Any rhs) noexcept : lhs(std::move(lhs)), rhs(std::move(rhs)) {}
 uint32_t ArgSizeExpr::Add::id() const { return variant_id; };
 size_t ArgSizeExpr::Add::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(lhs)>()(lhs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rhs)>()(rhs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(lhs)>()(lhs) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rhs)>()(rhs) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 ArgSizeExpr::Add ArgSizeExpr::Add::withLhs(const ArgSizeExpr::Any &v_) const { return ArgSizeExpr::Add(v_, rhs); }
@@ -4387,13 +4226,12 @@ POLYREGION_EXPORT bool ArgSizeExpr::Add::operator<(const Base &rhs_) const { ret
 ArgSizeExpr::Add::operator ArgSizeExpr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Add>(*this)); }
 ArgSizeExpr::Any ArgSizeExpr::Add::widen() const { return Any(*this); };
 
-ArgSizeExpr::Mul::Mul(ArgSizeExpr::Any lhs, ArgSizeExpr::Any rhs) noexcept
-    : ArgSizeExpr::Base(), lhs(std::move(lhs)), rhs(std::move(rhs)) {}
+ArgSizeExpr::Mul::Mul(ArgSizeExpr::Any lhs, ArgSizeExpr::Any rhs) noexcept : lhs(std::move(lhs)), rhs(std::move(rhs)) {}
 uint32_t ArgSizeExpr::Mul::id() const { return variant_id; };
 size_t ArgSizeExpr::Mul::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(lhs)>()(lhs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rhs)>()(rhs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(lhs)>()(lhs) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rhs)>()(rhs) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 ArgSizeExpr::Mul ArgSizeExpr::Mul::withLhs(const ArgSizeExpr::Any &v_) const { return ArgSizeExpr::Mul(v_, rhs); }
@@ -4410,13 +4248,12 @@ POLYREGION_EXPORT bool ArgSizeExpr::Mul::operator<(const Base &rhs_) const { ret
 ArgSizeExpr::Mul::operator ArgSizeExpr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Mul>(*this)); }
 ArgSizeExpr::Any ArgSizeExpr::Mul::widen() const { return Any(*this); };
 
-ArgSizeExpr::Min::Min(ArgSizeExpr::Any lhs, ArgSizeExpr::Any rhs) noexcept
-    : ArgSizeExpr::Base(), lhs(std::move(lhs)), rhs(std::move(rhs)) {}
+ArgSizeExpr::Min::Min(ArgSizeExpr::Any lhs, ArgSizeExpr::Any rhs) noexcept : lhs(std::move(lhs)), rhs(std::move(rhs)) {}
 uint32_t ArgSizeExpr::Min::id() const { return variant_id; };
 size_t ArgSizeExpr::Min::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(lhs)>()(lhs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rhs)>()(rhs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(lhs)>()(lhs) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rhs)>()(rhs) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 ArgSizeExpr::Min ArgSizeExpr::Min::withLhs(const ArgSizeExpr::Any &v_) const { return ArgSizeExpr::Min(v_, rhs); }
@@ -4433,13 +4270,14 @@ POLYREGION_EXPORT bool ArgSizeExpr::Min::operator<(const Base &rhs_) const { ret
 ArgSizeExpr::Min::operator ArgSizeExpr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Min>(*this)); }
 ArgSizeExpr::Any ArgSizeExpr::Min::widen() const { return Any(*this); };
 
-ArgSizeExpr::Result::Result(ArgSizeExpr::Any bound) noexcept : ArgSizeExpr::Base(), bound(std::move(bound)) {}
+ArgSizeExpr::Result::Result(ArgSizeExpr::Any bound) noexcept : bound(std::move(bound)) {}
 uint32_t ArgSizeExpr::Result::id() const { return variant_id; };
 size_t ArgSizeExpr::Result::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(bound)>()(bound) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(bound)>()(bound) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 ArgSizeExpr::Result ArgSizeExpr::Result::withBound(const ArgSizeExpr::Any &v_) const { return ArgSizeExpr::Result(v_); }
 POLYREGION_EXPORT bool ArgSizeExpr::Result::operator==(const ArgSizeExpr::Result &rhs) const { return (this->bound == rhs.bound); }
 POLYREGION_EXPORT bool ArgSizeExpr::Result::operator==(const Base &rhs_) const {
@@ -4458,13 +4296,14 @@ bool ArgExtent::Any::operator==(const Any &rhs) const { return _v->operator==(*r
 bool ArgExtent::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v); }
 bool ArgExtent::Any::operator<(const Any &rhs) const { return _v->operator<(*rhs._v); };
 
-ArgExtent::Elements::Elements(ArgSizeExpr::Any size) noexcept : ArgExtent::Base(), size(std::move(size)) {}
+ArgExtent::Elements::Elements(ArgSizeExpr::Any size) noexcept : size(std::move(size)) {}
 uint32_t ArgExtent::Elements::id() const { return variant_id; };
 size_t ArgExtent::Elements::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(size)>()(size) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(size)>()(size) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 ArgExtent::Elements ArgExtent::Elements::withSize(const ArgSizeExpr::Any &v_) const { return ArgExtent::Elements(v_); }
 POLYREGION_EXPORT bool ArgExtent::Elements::operator==(const ArgExtent::Elements &rhs) const { return (this->size == rhs.size); }
 POLYREGION_EXPORT bool ArgExtent::Elements::operator==(const Base &rhs_) const {
@@ -4476,13 +4315,14 @@ POLYREGION_EXPORT bool ArgExtent::Elements::operator<(const Base &rhs_) const { 
 ArgExtent::Elements::operator ArgExtent::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Elements>(*this)); }
 ArgExtent::Any ArgExtent::Elements::widen() const { return Any(*this); };
 
-ArgExtent::Bytes::Bytes(ArgSizeExpr::Any size) noexcept : ArgExtent::Base(), size(std::move(size)) {}
+ArgExtent::Bytes::Bytes(ArgSizeExpr::Any size) noexcept : size(std::move(size)) {}
 uint32_t ArgExtent::Bytes::id() const { return variant_id; };
 size_t ArgExtent::Bytes::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(size)>()(size) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(size)>()(size) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 ArgExtent::Bytes ArgExtent::Bytes::withSize(const ArgSizeExpr::Any &v_) const { return ArgExtent::Bytes(v_); }
 POLYREGION_EXPORT bool ArgExtent::Bytes::operator==(const ArgExtent::Bytes &rhs) const { return (this->size == rhs.size); }
 POLYREGION_EXPORT bool ArgExtent::Bytes::operator==(const Base &rhs_) const {
@@ -4497,8 +4337,8 @@ ArgExtent::Any ArgExtent::Bytes::widen() const { return Any(*this); };
 ArgBoundary::ArgBoundary(ArgAccess::Any access, ArgExtent::Any extent) noexcept : access(std::move(access)), extent(std::move(extent)) {}
 size_t ArgBoundary::hash_code() const {
   size_t seed = 0;
-  seed ^= std::hash<decltype(access)>()(access) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(extent)>()(extent) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(access)>()(access) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(extent)>()(extent) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 ArgBoundary ArgBoundary::withAccess(const ArgAccess::Any &v_) const { return ArgBoundary(v_, extent); }
@@ -4510,9 +4350,9 @@ Arg::Arg(Named named, std::optional<SourcePosition> pos, std::optional<ArgBounda
     : named(std::move(named)), pos(std::move(pos)), boundary(std::move(boundary)) {}
 size_t Arg::hash_code() const {
   size_t seed = 0;
-  seed ^= std::hash<decltype(named)>()(named) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(pos)>()(pos) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(boundary)>()(boundary) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(named)>()(named) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(pos)>()(pos) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(boundary)>()(boundary) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Arg Arg::withNamed(const Named &v_) const { return Arg(v_, pos, boundary); }
@@ -4531,14 +4371,14 @@ FunctionDecl::FunctionDecl(Sym name, std::vector<Type::Var> tpeVars, std::option
 }
 size_t FunctionDecl::hash_code() const {
   size_t seed = 0;
-  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(tpeVars)>()(tpeVars) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(receiver)>()(receiver) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(args)>()(args) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(moduleCaptures)>()(moduleCaptures) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(termCaptures)>()(termCaptures) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(affinity)>()(affinity) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(tpeVars)>()(tpeVars) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(receiver)>()(receiver) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(args)>()(args) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(moduleCaptures)>()(moduleCaptures) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(termCaptures)>()(termCaptures) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(affinity)>()(affinity) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 FunctionDecl FunctionDecl::withName(const Sym &v_) const {
@@ -4578,12 +4418,9 @@ bool CallConvention::Any::operator==(const Any &rhs) const { return _v->operator
 bool CallConvention::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v); }
 bool CallConvention::Any::operator<(const Any &rhs) const { return _v->operator<(*rhs._v); };
 
-CallConvention::RegularCall::RegularCall() noexcept : CallConvention::Base() {}
+CallConvention::RegularCall::RegularCall() = default;
 uint32_t CallConvention::RegularCall::id() const { return variant_id; };
-size_t CallConvention::RegularCall::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t CallConvention::RegularCall::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool CallConvention::RegularCall::operator==(const CallConvention::RegularCall &rhs) const { return true; }
 POLYREGION_EXPORT bool CallConvention::RegularCall::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -4596,12 +4433,9 @@ CallConvention::RegularCall::operator CallConvention::Any() const {
 }
 CallConvention::Any CallConvention::RegularCall::widen() const { return Any(*this); };
 
-CallConvention::OffloadEntry::OffloadEntry() noexcept : CallConvention::Base() {}
+CallConvention::OffloadEntry::OffloadEntry() = default;
 uint32_t CallConvention::OffloadEntry::id() const { return variant_id; };
-size_t CallConvention::OffloadEntry::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t CallConvention::OffloadEntry::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool CallConvention::OffloadEntry::operator==(const CallConvention::OffloadEntry &rhs) const { return true; }
 POLYREGION_EXPORT bool CallConvention::OffloadEntry::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -4620,13 +4454,13 @@ Function::Function(FunctionDecl decl, std::vector<Stmt::Any> body, FunctionVisib
       convention(std::move(convention)), implements(std::move(implements)), requiredCapabilities(std::move(requiredCapabilities)) {}
 size_t Function::hash_code() const {
   size_t seed = 0;
-  seed ^= std::hash<decltype(decl)>()(decl) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(body)>()(body) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(visibility)>()(visibility) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(fpMode)>()(fpMode) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(convention)>()(convention) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(implements)>()(implements) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(requiredCapabilities)>()(requiredCapabilities) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(decl)>()(decl) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(body)>()(body) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(visibility)>()(visibility) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(fpMode)>()(fpMode) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(convention)>()(convention) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(implements)>()(implements) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(requiredCapabilities)>()(requiredCapabilities) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Function Function::withDecl(const FunctionDecl &v_) const {
@@ -4663,11 +4497,11 @@ StructDef::StructDef(Sym name, std::vector<Type::Var> tpeVars, std::vector<Named
     : name(std::move(name)), tpeVars(std::move(tpeVars)), members(std::move(members)), parents(std::move(parents)), isUnion(isUnion) {}
 size_t StructDef::hash_code() const {
   size_t seed = 0;
-  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(tpeVars)>()(tpeVars) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(members)>()(members) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(parents)>()(parents) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(isUnion)>()(isUnion) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(tpeVars)>()(tpeVars) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(members)>()(members) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(parents)>()(parents) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(isUnion)>()(isUnion) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 StructDef StructDef::withName(const Sym &v_) const { return StructDef(v_, tpeVars, members, parents, isUnion); }
@@ -4686,11 +4520,11 @@ Mirror::Mirror(Sym source, std::vector<Sym> sourceParents, StructDef structDef, 
       dependencies(std::move(dependencies)) {}
 size_t Mirror::hash_code() const {
   size_t seed = 0;
-  seed ^= std::hash<decltype(source)>()(source) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(sourceParents)>()(sourceParents) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(structDef)>()(structDef) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(functions)>()(functions) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(dependencies)>()(dependencies) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(source)>()(source) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(sourceParents)>()(sourceParents) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(structDef)>()(structDef) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(functions)>()(functions) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(dependencies)>()(dependencies) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Mirror Mirror::withSource(const Sym &v_) const { return Mirror(v_, sourceParents, structDef, functions, dependencies); }
@@ -4711,12 +4545,9 @@ bool PassPhase::Any::operator==(const Any &rhs) const { return _v->operator==(*r
 bool PassPhase::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v); }
 bool PassPhase::Any::operator<(const Any &rhs) const { return _v->operator<(*rhs._v); };
 
-PassPhase::Initial::Initial() noexcept : PassPhase::Base() {}
+PassPhase::Initial::Initial() = default;
 uint32_t PassPhase::Initial::id() const { return variant_id; };
-size_t PassPhase::Initial::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t PassPhase::Initial::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool PassPhase::Initial::operator==(const PassPhase::Initial &rhs) const { return true; }
 POLYREGION_EXPORT bool PassPhase::Initial::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -4727,12 +4558,9 @@ POLYREGION_EXPORT bool PassPhase::Initial::operator<(const Base &rhs_) const { r
 PassPhase::Initial::operator PassPhase::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Initial>(*this)); }
 PassPhase::Any PassPhase::Initial::widen() const { return Any(*this); };
 
-PassPhase::PostMono::PostMono() noexcept : PassPhase::Base() {}
+PassPhase::PostMono::PostMono() = default;
 uint32_t PassPhase::PostMono::id() const { return variant_id; };
-size_t PassPhase::PostMono::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
+size_t PassPhase::PostMono::hash_code() const { return variant_id; }
 POLYREGION_EXPORT bool PassPhase::PostMono::operator==(const PassPhase::PostMono &rhs) const { return true; }
 POLYREGION_EXPORT bool PassPhase::PostMono::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -4746,8 +4574,8 @@ PassPhase::Any PassPhase::PostMono::widen() const { return Any(*this); };
 MetaEntry::MetaEntry(std::string key, std::string value) noexcept : key(std::move(key)), value(std::move(value)) {}
 size_t MetaEntry::hash_code() const {
   size_t seed = 0;
-  seed ^= std::hash<decltype(key)>()(key) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(key)>()(key) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 MetaEntry MetaEntry::withKey(const std::string &v_) const { return MetaEntry(v_, value); }
@@ -4761,11 +4589,11 @@ Program::Program(std::optional<Function> entry, std::vector<Function> functions,
       metadata(std::move(metadata)) {}
 size_t Program::hash_code() const {
   size_t seed = 0;
-  seed ^= std::hash<decltype(entry)>()(entry) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(functions)>()(functions) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(defs)>()(defs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(phase)>()(phase) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(metadata)>()(metadata) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(entry)>()(entry) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(functions)>()(functions) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(defs)>()(defs) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(phase)>()(phase) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(metadata)>()(metadata) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Program Program::withEntry(const std::optional<Function> &v_) const { return Program(v_, functions, defs, phase, metadata); }
@@ -4782,9 +4610,9 @@ StructLayoutMember::StructLayoutMember(Named name, int64_t offsetInBytes, int64_
     : name(std::move(name)), offsetInBytes(offsetInBytes), sizeInBytes(sizeInBytes) {}
 size_t StructLayoutMember::hash_code() const {
   size_t seed = 0;
-  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(offsetInBytes)>()(offsetInBytes) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(sizeInBytes)>()(sizeInBytes) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(offsetInBytes)>()(offsetInBytes) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(sizeInBytes)>()(sizeInBytes) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 StructLayoutMember StructLayoutMember::withName(const Named &v_) const { return StructLayoutMember(v_, offsetInBytes, sizeInBytes); }
@@ -4799,10 +4627,10 @@ StructLayout::StructLayout(std::string name, int64_t sizeInBytes, int64_t alignm
     : name(std::move(name)), sizeInBytes(sizeInBytes), alignment(alignment), members(std::move(members)) {}
 size_t StructLayout::hash_code() const {
   size_t seed = 0;
-  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(sizeInBytes)>()(sizeInBytes) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(alignment)>()(alignment) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(members)>()(members) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(sizeInBytes)>()(sizeInBytes) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(alignment)>()(alignment) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(members)>()(members) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 StructLayout StructLayout::withName(const std::string &v_) const { return StructLayout(v_, sizeInBytes, alignment, members); }
@@ -4821,11 +4649,11 @@ CompileEvent::CompileEvent(int64_t epochMillis, int64_t elapsedNanos, std::strin
     : epochMillis(epochMillis), elapsedNanos(elapsedNanos), name(std::move(name)), data(std::move(data)), items(std::move(items)) {}
 size_t CompileEvent::hash_code() const {
   size_t seed = 0;
-  seed ^= std::hash<decltype(epochMillis)>()(epochMillis) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(elapsedNanos)>()(elapsedNanos) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(data)>()(data) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(items)>()(items) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(epochMillis)>()(epochMillis) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(elapsedNanos)>()(elapsedNanos) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(data)>()(data) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(items)>()(items) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 CompileEvent CompileEvent::withEpochMillis(const int64_t &v_) const { return CompileEvent(v_, elapsedNanos, name, data, items); }
@@ -4844,8 +4672,8 @@ POLYREGION_EXPORT bool CompileEvent::operator==(const CompileEvent &rhs) const {
 PassArg::PassArg(std::string name, std::string value) noexcept : name(std::move(name)), value(std::move(value)) {}
 size_t PassArg::hash_code() const {
   size_t seed = 0;
-  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 PassArg PassArg::withName(const std::string &v_) const { return PassArg(v_, value); }
@@ -4856,8 +4684,8 @@ POLYREGION_EXPORT bool PassArg::operator==(const PassArg &rhs) const { return (n
 PassSpec::PassSpec(std::string name, std::vector<PassArg> args) noexcept : name(std::move(name)), args(std::move(args)) {}
 size_t PassSpec::hash_code() const {
   size_t seed = 0;
-  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(args)>()(args) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(args)>()(args) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 PassSpec PassSpec::withName(const std::string &v_) const { return PassSpec(v_, args); }
@@ -4868,9 +4696,10 @@ POLYREGION_EXPORT bool PassSpec::operator==(const PassSpec &rhs) const { return 
 PassPipeline::PassPipeline(std::vector<PassSpec> steps) noexcept : steps(std::move(steps)) {}
 size_t PassPipeline::hash_code() const {
   size_t seed = 0;
-  seed ^= std::hash<decltype(steps)>()(steps) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(steps)>()(steps) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 PassPipeline PassPipeline::withSteps(const std::vector<PassSpec> &v_) const { return PassPipeline(v_); }
 POLYREGION_EXPORT bool PassPipeline::operator!=(const PassPipeline &rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool PassPipeline::operator==(const PassPipeline &rhs) const { return (steps == rhs.steps); }
@@ -4878,8 +4707,8 @@ POLYREGION_EXPORT bool PassPipeline::operator==(const PassPipeline &rhs) const {
 PassRunResult::PassRunResult(Program program, CompileEvent event) noexcept : program(std::move(program)), event(std::move(event)) {}
 size_t PassRunResult::hash_code() const {
   size_t seed = 0;
-  seed ^= std::hash<decltype(program)>()(program) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(event)>()(event) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(program)>()(program) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(event)>()(event) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 PassRunResult PassRunResult::withProgram(const Program &v_) const { return PassRunResult(v_, event); }
@@ -4895,12 +4724,12 @@ CompileResult::CompileResult(std::optional<std::vector<int8_t>> binary, std::vec
       messages(std::move(messages)), entryArgs(std::move(entryArgs)) {}
 size_t CompileResult::hash_code() const {
   size_t seed = 0;
-  seed ^= std::hash<decltype(binary)>()(binary) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(features)>()(features) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(events)>()(events) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(layouts)>()(layouts) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(messages)>()(messages) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(entryArgs)>()(entryArgs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(binary)>()(binary) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(features)>()(features) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(events)>()(events) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(layouts)>()(layouts) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(messages)>()(messages) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(entryArgs)>()(entryArgs) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 CompileResult CompileResult::withBinary(const std::optional<std::vector<int8_t>> &v_) const {
@@ -4931,9 +4760,9 @@ Interface::Interface(Sym name, std::vector<FunctionDecl> declarations, std::vect
     : name(std::move(name)), declarations(std::move(declarations)), metadata(std::move(metadata)) {}
 size_t Interface::hash_code() const {
   size_t seed = 0;
-  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(declarations)>()(declarations) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(metadata)>()(metadata) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(declarations)>()(declarations) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(metadata)>()(metadata) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Interface Interface::withName(const Sym &v_) const { return Interface(v_, declarations, metadata); }
@@ -4947,8 +4776,8 @@ POLYREGION_EXPORT bool Interface::operator==(const Interface &rhs) const {
 Package::Package(Interface interface, Program program) noexcept : interface(std::move(interface)), program(std::move(program)) {}
 size_t Package::hash_code() const {
   size_t seed = 0;
-  seed ^= std::hash<decltype(interface)>()(interface) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(program)>()(program) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(interface)>()(interface) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(program)>()(program) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 Package Package::withInterface(const Interface &v_) const { return Package(v_, program); }
@@ -4959,8 +4788,8 @@ POLYREGION_EXPORT bool Package::operator==(const Package &rhs) const { return (i
 ProgramTypeSize::ProgramTypeSize(Type::Any tpe, int32_t sizeInBytes) noexcept : tpe(std::move(tpe)), sizeInBytes(sizeInBytes) {}
 size_t ProgramTypeSize::hash_code() const {
   size_t seed = 0;
-  seed ^= std::hash<decltype(tpe)>()(tpe) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(sizeInBytes)>()(sizeInBytes) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(tpe)>()(tpe) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(sizeInBytes)>()(sizeInBytes) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 ProgramTypeSize ProgramTypeSize::withTpe(const Type::Any &v_) const { return ProgramTypeSize(v_, sizeInBytes); }
@@ -4974,15 +4803,15 @@ ProgramLinkRequest::ProgramLinkRequest(std::vector<Package> packages, Program co
                                        std::vector<ProgramTypeSize> typeSizes, std::optional<int32_t> stackDepth,
                                        bool logicalAddressing) noexcept
     : packages(std::move(packages)), consumer(std::move(consumer)), capabilities(std::move(capabilities)), typeSizes(std::move(typeSizes)),
-      stackDepth(std::move(stackDepth)), logicalAddressing(logicalAddressing) {}
+      stackDepth(stackDepth), logicalAddressing(logicalAddressing) {}
 size_t ProgramLinkRequest::hash_code() const {
   size_t seed = 0;
-  seed ^= std::hash<decltype(packages)>()(packages) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(consumer)>()(consumer) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(capabilities)>()(capabilities) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(typeSizes)>()(typeSizes) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(stackDepth)>()(stackDepth) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(logicalAddressing)>()(logicalAddressing) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(packages)>()(packages) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(consumer)>()(consumer) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(capabilities)>()(capabilities) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(typeSizes)>()(typeSizes) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(stackDepth)>()(stackDepth) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(logicalAddressing)>()(logicalAddressing) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 ProgramLinkRequest ProgramLinkRequest::withPackages(const std::vector<Package> &v_) const {
@@ -5013,8 +4842,8 @@ PackageFragment::PackageFragment(std::string identity, Program program) noexcept
     : identity(std::move(identity)), program(std::move(program)) {}
 size_t PackageFragment::hash_code() const {
   size_t seed = 0;
-  seed ^= std::hash<decltype(identity)>()(identity) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(program)>()(program) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(identity)>()(identity) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(program)>()(program) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 PackageFragment PackageFragment::withIdentity(const std::string &v_) const { return PackageFragment(v_, program); }
@@ -5030,10 +4859,10 @@ PackageLinkRequest::PackageLinkRequest(Interface interface, std::vector<PackageF
       pruneUnimplementedDeclarations(pruneUnimplementedDeclarations) {}
 size_t PackageLinkRequest::hash_code() const {
   size_t seed = 0;
-  seed ^= std::hash<decltype(interface)>()(interface) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(fragments)>()(fragments) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(capabilities)>()(capabilities) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(pruneUnimplementedDeclarations)>()(pruneUnimplementedDeclarations) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(interface)>()(interface) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(fragments)>()(fragments) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(capabilities)>()(capabilities) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(pruneUnimplementedDeclarations)>()(pruneUnimplementedDeclarations) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 PackageLinkRequest PackageLinkRequest::withInterface(const Interface &v_) const {
@@ -5059,11 +4888,11 @@ CompileModule::CompileModule(std::string moduleName, int32_t format, int32_t kin
     : moduleName(std::move(moduleName)), format(format), kind(kind), features(std::move(features)), image(std::move(image)) {}
 size_t CompileModule::hash_code() const {
   size_t seed = 0;
-  seed ^= std::hash<decltype(moduleName)>()(moduleName) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(format)>()(format) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(kind)>()(kind) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(features)>()(features) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(image)>()(image) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(moduleName)>()(moduleName) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(format)>()(format) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(kind)>()(kind) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(features)>()(features) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(image)>()(image) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 CompileModule CompileModule::withModuleName(const std::string &v_) const { return CompileModule(v_, format, kind, features, image); }
@@ -5086,10 +4915,10 @@ CompileRoot::CompileRoot(std::string name, std::vector<std::string> modules, std
     : name(std::move(name)), modules(std::move(modules)), implementations(std::move(implementations)), unfit(std::move(unfit)) {}
 size_t CompileRoot::hash_code() const {
   size_t seed = 0;
-  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(modules)>()(modules) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(implementations)>()(implementations) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(unfit)>()(unfit) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(modules)>()(modules) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(implementations)>()(implementations) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(unfit)>()(unfit) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 CompileRoot CompileRoot::withName(const std::string &v_) const { return CompileRoot(v_, modules, implementations, unfit); }
@@ -5108,11 +4937,11 @@ CompileBundle::CompileBundle(std::vector<int8_t> hostObject, std::vector<Compile
       unfit(std::move(unfit)), roots(std::move(roots)) {}
 size_t CompileBundle::hash_code() const {
   size_t seed = 0;
-  seed ^= std::hash<decltype(hostObject)>()(hostObject) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(remoteModules)>()(remoteModules) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(implementations)>()(implementations) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(unfit)>()(unfit) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(roots)>()(roots) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(hostObject)>()(hostObject) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(remoteModules)>()(remoteModules) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(implementations)>()(implementations) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(unfit)>()(unfit) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(roots)>()(roots) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
 CompileBundle CompileBundle::withHostObject(const std::vector<int8_t> &v_) const {

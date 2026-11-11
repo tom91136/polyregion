@@ -1,9 +1,22 @@
 #include "llvmc.h"
 
 #include <array>
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <functional>
+#include <memory>
 #include <mutex>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "llvm/Analysis/LoopAnalysisManager.h"
@@ -92,8 +105,9 @@ const llvmc::CpuInfo &llvmc::hostCpuInfo() {
   static std::optional<llvmc::CpuInfo> hostCpuInfo = {};
   static std::once_flag once;
   std::call_once(once, [] {
+    // NOLINTNEXTLINE(misc-const-correctness)
     auto hostFeatures = llvm::sys::getHostCPUFeatures();
-#if defined(__riscv)
+#ifdef __riscv
     // QEMU's riscv_hwprobe emulation can omit floating-point extensions even
     // though the running process ABI requires them. The binary could not
     // execute correctly without these ABI-mandated features, so restore them
@@ -106,9 +120,9 @@ const llvmc::CpuInfo &llvmc::hostCpuInfo() {
   #endif
 #endif
     // XXX QEMU riscv_hwprobe emulation can report 'v' without the zve* bits it implies
-    bool hasV = hostFeatures.lookup("v");
+    const bool hasV = hostFeatures.lookup("v");
     llvm::SubtargetFeatures Features;
-    for (auto &F : hostFeatures) {
+    for (const auto &F : hostFeatures) {
       if (hasV && !F.second && F.first().starts_with("zve")) continue;
       Features.AddFeature(F.first(), F.second);
     }
@@ -121,7 +135,7 @@ const llvmc::CpuInfo &llvmc::hostCpuInfo() {
 const llvm::Target *llvmc::targetFromTriple(const llvm::Triple &triple) {
   llvm::Triple triple0 = triple; // XXX lookup might modify triple (!?)
   std::string targetError;
-  auto TheTarget = llvm::TargetRegistry::lookupTarget("", triple0, targetError);
+  const auto *TheTarget = llvm::TargetRegistry::lookupTarget("", triple0, targetError);
   if (!targetError.empty() || !TheTarget) {
     throw std::logic_error("Target lookup failed: " + targetError);
   }
@@ -174,7 +188,7 @@ void llvmc::initialise() {
 /// line flags.
 static void setFunctionAttributes(llvm::StringRef CPU, llvm::StringRef Features, llvm::Function &F, bool useUnsafeMath) {
   auto &Ctx = F.getContext();
-  llvm::AttributeList Attrs = F.getAttributes();
+  const llvm::AttributeList Attrs = F.getAttributes();
   llvm::AttrBuilder NewAttrs(Ctx);
 
   // XXX overwrite, not merge: vendor bitcode pins gfx9/sm_<N> attrs that conflict with the
@@ -188,7 +202,7 @@ static void setFunctionAttributes(llvm::StringRef CPU, llvm::StringRef Features,
     NewAttrs.addAttribute("target-features", Features);
   }
 
-  llvm::DenormalMode::DenormalModeKind DenormKind = llvm::DenormalMode::DenormalModeKind::IEEE;
+  const llvm::DenormalMode::DenormalModeKind DenormKind = llvm::DenormalMode::DenormalModeKind::IEEE;
   NewAttrs.addAttribute("denormal-fp-math", llvm::DenormalMode(DenormKind, DenormKind).str());
   NewAttrs.addAttribute("denormal-fp-math-f32", llvm::DenormalMode(DenormKind, DenormKind).str());
 
@@ -207,7 +221,7 @@ static void setFunctionAttributes(llvm::StringRef CPU, llvm::StringRef Features,
   F.setAttributes(Attrs.addFnAttributes(Ctx, NewAttrs));
 }
 
-Pair<Opt<std::string>, std::string> llvmc::verifyModule(llvm::Module &mod) {
+Pair<Opt<std::string>, std::string> llvmc::verifyModule(const llvm::Module &mod) {
   std::string err;
   llvm::raw_string_ostream errOut(err);
   if (llvm::verifyModule(mod, &errOut)) {
@@ -224,17 +238,17 @@ Pair<Opt<std::string>, std::string> llvmc::verifyModule(llvm::Module &mod) {
 // every integer width; pointer/null OpConstantNull entries are left alone.
 static std::string patchSpirvConstantNull(std::string spv) {
   if (spv.size() < 5 * sizeof(uint32_t)) return spv;
-  auto *src = reinterpret_cast<const uint32_t *>(spv.data());
+  const auto *src = reinterpret_cast<const uint32_t *>(spv.data());
   const size_t nWords = spv.size() / sizeof(uint32_t);
-  auto opcode = [](uint32_t inst) { return static_cast<uint16_t>(inst & 0xFFFF); };
-  auto wcount = [](uint32_t inst) { return static_cast<uint16_t>(inst >> 16); };
+  const auto opcode = [](uint32_t inst) { return static_cast<uint16_t>(inst & 0xFFFF); };
+  const auto wcount = [](uint32_t inst) { return static_cast<uint16_t>(inst >> 16); };
   std::unordered_map<uint32_t, uint32_t> intTypeWidth;
   bool needsRewrite = false;
   for (size_t i = 5; i < nWords;) {
     const uint16_t wc = wcount(src[i]);
     if (wc == 0 || i + wc > nWords) return spv;
     if (opcode(src[i]) == spv::OpTypeInt && wc == 4) intTypeWidth[src[i + 1]] = src[i + 2];
-    else if (opcode(src[i]) == spv::OpConstantNull && wc == 3 && intTypeWidth.count(src[i + 1])) needsRewrite = true;
+    else if (opcode(src[i]) == spv::OpConstantNull && wc == 3 && intTypeWidth.contains(src[i + 1])) needsRewrite = true;
     i += wc;
   }
   if (!needsRewrite) return spv;
@@ -244,12 +258,12 @@ static std::string patchSpirvConstantNull(std::string spv) {
     const uint16_t wc = wcount(src[i]);
     const auto it = (opcode(src[i]) == spv::OpConstantNull && wc == 3) ? intTypeWidth.find(src[i + 1]) : intTypeWidth.end();
     if (it != intTypeWidth.end()) {
-      const uint32_t literalWords = (it->second + 31u) / 32u;
-      out.push_back(((3u + literalWords) << 16) | spv::OpConstant);
+      const uint32_t literalWords = (it->second + 31U) / 32U;
+      out.push_back(((3U + literalWords) << 16) | spv::OpConstant);
       out.push_back(src[i + 1]);
       out.push_back(src[i + 2]);
       for (uint32_t w = 0; w < literalWords; ++w)
-        out.push_back(0u);
+        out.push_back(0U);
     } else out.insert(out.end(), src + i, src + i + wc);
     i += wc;
   }
@@ -265,12 +279,12 @@ static std::string patchSpirvConstantNull(std::string spv) {
 // definitions untouched: the required extension signedness cannot be inferred here.
 std::string llvmc::normaliseSpirvNarrowIntegerOperands(std::string spv) {
   if (spv.size() < 5 * sizeof(uint32_t) || spv.size() % sizeof(uint32_t) != 0) return spv;
-  auto *src = reinterpret_cast<const uint32_t *>(spv.data());
+  const auto *src = reinterpret_cast<const uint32_t *>(spv.data());
   const size_t nWords = spv.size() / sizeof(uint32_t);
-  auto opcode = [](uint32_t inst) { return static_cast<uint16_t>(inst & 0xFFFF); };
-  auto wcount = [](uint32_t inst) { return static_cast<uint16_t>(inst >> 16); };
+  const auto opcode = [](uint32_t inst) { return static_cast<uint16_t>(inst & 0xFFFF); };
+  const auto wcount = [](uint32_t inst) { return static_cast<uint16_t>(inst >> 16); };
   // Pair of {instruction value operands, operands constrained to the result type}.
-  auto operandShape = [](const uint16_t op) -> std::pair<uint32_t, uint32_t> {
+  const auto operandShape = [](const uint16_t op) -> std::pair<uint32_t, uint32_t> {
     switch (op) {
       case spv::OpIAdd:
       case spv::OpISub:
@@ -300,14 +314,14 @@ std::string llvmc::normaliseSpirvNarrowIntegerOperands(std::string spv) {
   for (size_t i = 5; i < nWords;) {
     const uint16_t wc = wcount(src[i]);
     if (wc == 0 || i + wc > nWords) return spv;
-    if (opcode(src[i]) == spv::OpTypeInt && wc == 4) intShapes.emplace(src[i + 1], IntShape{src[i + 2], 1});
+    if (opcode(src[i]) == spv::OpTypeInt && wc == 4) intShapes.emplace(src[i + 1], IntShape{.width = src[i + 2], .lanes = 1});
     i += wc;
   }
   for (size_t i = 5; i < nWords;) {
     const uint16_t wc = wcount(src[i]);
     if (opcode(src[i]) == spv::OpTypeVector && wc == 4)
       if (const auto component = intShapes.find(src[i + 2]); component != intShapes.end())
-        intShapes.emplace(src[i + 1], IntShape{component->second.width, src[i + 3]});
+        intShapes.emplace(src[i + 1], IntShape{.width = component->second.width, .lanes = src[i + 3]});
     i += wc;
   }
 
@@ -316,7 +330,7 @@ std::string llvmc::normaliseSpirvNarrowIntegerOperands(std::string spv) {
     const uint16_t wc = wcount(src[i]);
     bool hasResult = false, hasResultType = false;
     spv::HasResultAndType(static_cast<spv::Op>(opcode(src[i])), &hasResult, &hasResultType);
-    if (hasResult && hasResultType && wc >= 3 && intShapes.count(src[i + 1])) valueTypes[src[i + 2]] = src[i + 1];
+    if (hasResult && hasResultType && wc >= 3 && intShapes.contains(src[i + 1])) valueTypes[src[i + 2]] = src[i + 1];
     i += wc;
   }
 
@@ -327,7 +341,7 @@ std::string llvmc::normaliseSpirvNarrowIntegerOperands(std::string spv) {
   for (size_t i = 5; i < nWords;) {
     const uint16_t wc = wcount(src[i]), op = opcode(src[i]);
     const auto [operandCount, constrainedCount] = operandShape(op);
-    if (operandCount != 0 && wc == 3 + operandCount && intShapes.count(src[i + 1])) {
+    if (operandCount != 0 && wc == 3 + operandCount && intShapes.contains(src[i + 1])) {
       uint32_t operands[2] = {src[i + 3], operandCount == 2 ? src[i + 4] : 0};
       for (uint32_t operandIndex = 0; operandIndex < constrainedCount; ++operandIndex) {
         uint32_t &operand = operands[operandIndex];
@@ -337,7 +351,7 @@ std::string llvmc::normaliseSpirvNarrowIntegerOperands(std::string spv) {
         const auto &result = intShapes.at(src[i + 1]);
         if (source.lanes != result.lanes || source.width <= result.width) continue;
         const uint32_t converted = nextId++;
-        out.push_back((4u << 16) | spv::OpUConvert);
+        out.push_back((4U << 16) | spv::OpUConvert);
         out.push_back(src[i + 1]);
         out.push_back(converted);
         out.push_back(operand);
@@ -360,10 +374,10 @@ std::string llvmc::normaliseSpirvNarrowIntegerOperands(std::string spv) {
 static std::string lowerSpirvControlBarrierCalls(std::string spv) {
   constexpr std::string_view stubName = "_Z22__spirv_ControlBarrierjjj";
   if (spv.size() < 5 * sizeof(uint32_t)) return spv;
-  auto *src = reinterpret_cast<const uint32_t *>(spv.data());
+  const auto *src = reinterpret_cast<const uint32_t *>(spv.data());
   const size_t nWords = spv.size() / sizeof(uint32_t);
-  auto opcode = [](uint32_t inst) { return static_cast<uint16_t>(inst & 0xFFFF); };
-  auto wcount = [](uint32_t inst) { return static_cast<uint16_t>(inst >> 16); };
+  const auto opcode = [](uint32_t inst) { return static_cast<uint16_t>(inst & 0xFFFF); };
+  const auto wcount = [](uint32_t inst) { return static_cast<uint16_t>(inst >> 16); };
   uint32_t stub = 0;
   size_t linkages = 0;
   for (size_t i = 5; i < nWords;) {
@@ -385,7 +399,7 @@ static std::string lowerSpirvControlBarrierCalls(std::string spv) {
     const bool drop = inStub || (op == spv::OpName && src[i + 1] == stub) || (op == spv::OpDecorate && src[i + 1] == stub)
                       || (linkages == 1 && op == spv::OpCapability && src[i + 1] == spv::CapabilityLinkage);
     if (op == spv::OpFunctionCall && wc == 7 && src[i + 3] == stub) {
-      out.push_back((4u << 16) | spv::OpControlBarrier);
+      out.push_back((4U << 16) | spv::OpControlBarrier);
       out.insert(out.end(), src + i + 4, src + i + 7);
     } else if (!drop) out.insert(out.end(), src + i, src + i + wc);
     if (op == spv::OpFunctionEnd) inStub = false;
@@ -396,10 +410,10 @@ static std::string lowerSpirvControlBarrierCalls(std::string spv) {
 
 static std::string declareSpirvNarrowAccess(std::string spv) {
   if (spv.size() < 5 * sizeof(uint32_t)) return spv;
-  auto *src = reinterpret_cast<const uint32_t *>(spv.data());
+  const auto *src = reinterpret_cast<const uint32_t *>(spv.data());
   const size_t nWords = spv.size() / sizeof(uint32_t);
-  auto opcode = [](uint32_t inst) { return static_cast<uint16_t>(inst & 0xFFFF); };
-  auto wcount = [](uint32_t inst) { return static_cast<uint16_t>(inst >> 16); };
+  const auto opcode = [](uint32_t inst) { return static_cast<uint16_t>(inst & 0xFFFF); };
+  const auto wcount = [](uint32_t inst) { return static_cast<uint16_t>(inst >> 16); };
   constexpr uint32_t narrow8 = 1, narrow16 = 2;
   std::unordered_map<uint32_t, uint32_t> scalarBits;
   std::unordered_map<uint32_t, std::vector<uint32_t>> children;
@@ -418,7 +432,13 @@ static std::string declareSpirvNarrowAccess(std::string spv) {
         break;
       case spv::OpExtension: extensions.insert(reinterpret_cast<const char *>(&src[i + 1])); break;
       case spv::OpTypeInt:
-      case spv::OpTypeFloat: scalarBits[src[i + 1]] = src[i + 2] == 8 ? narrow8 : src[i + 2] == 16 ? narrow16 : 0; break;
+      case spv::OpTypeFloat:
+        scalarBits[src[i + 1]] = [&]() -> uint32_t {
+          if (src[i + 2] == 8) return narrow8;
+          if (src[i + 2] == 16) return narrow16;
+          return 0;
+        }();
+        break;
       case spv::OpTypeVector:
       case spv::OpTypeArray:
       case spv::OpTypeRuntimeArray: children[src[i + 1]] = {src[i + 2]}; break;
@@ -446,7 +466,7 @@ static std::string declareSpirvNarrowAccess(std::string spv) {
   std::vector<std::string_view> addExtensions;
   const auto require = [&](uint32_t capability, std::string_view extension) {
     if (declared.insert(capability).second) add.push_back(capability);
-    if (!extensions.count(extension) && !(addExtensions ^ contains(extension))) addExtensions.push_back(extension);
+    if (!(extensions ^ contains(extension)) && !(addExtensions ^ contains(extension))) addExtensions.push_back(extension);
   };
   for (const auto &[pointerType, storageClass] : blocks) {
     const auto target = pointee.find(pointerType);
@@ -462,11 +482,11 @@ static std::string declareSpirvNarrowAccess(std::string spv) {
   if (add.empty()) return spv;
   std::vector<uint32_t> out(src, src + capabilitiesEnd);
   for (const uint32_t capability : add) {
-    out.push_back((2u << 16) | spv::OpCapability);
+    out.push_back((2U << 16) | spv::OpCapability);
     out.push_back(capability);
   }
   for (const auto extension : addExtensions) {
-    const size_t words = extension.size() / sizeof(uint32_t) + 1;
+    const size_t words = (extension.size() / sizeof(uint32_t)) + 1;
     out.push_back(static_cast<uint32_t>((1 + words) << 16) | spv::OpExtension);
     const size_t at = out.size();
     out.resize(at + words, 0);
@@ -497,10 +517,10 @@ static std::vector<std::string> spirvNarrowAccessFeatures(const std::string &spv
 // decorate every StorageBuffer Aliased; it can only forbid an optimisation, so it is conservatively correct
 static std::string patchSpirvAliased(std::string spv) {
   if (spv.size() < 5 * sizeof(uint32_t)) return spv;
-  auto *src = reinterpret_cast<const uint32_t *>(spv.data());
+  const auto *src = reinterpret_cast<const uint32_t *>(spv.data());
   const size_t nWords = spv.size() / sizeof(uint32_t);
-  auto opcode = [](uint32_t inst) { return static_cast<uint16_t>(inst & 0xFFFF); };
-  auto wcount = [](uint32_t inst) { return static_cast<uint16_t>(inst >> 16); };
+  const auto opcode = [](uint32_t inst) { return static_cast<uint16_t>(inst & 0xFFFF); };
+  const auto wcount = [](uint32_t inst) { return static_cast<uint16_t>(inst >> 16); };
   std::vector<uint32_t> ssboVars;
   std::unordered_set<uint32_t> aliased;
   size_t lastDecorEnd = 0; // word index just past the last annotation instruction (decorations go here)
@@ -517,7 +537,7 @@ static std::string patchSpirvAliased(std::string spv) {
   std::vector<uint32_t> add;
   for (const uint32_t id : ssboVars)
     if (aliased.insert(id).second) {
-      add.push_back((3u << 16) | spv::OpDecorate);
+      add.push_back((3U << 16) | spv::OpDecorate);
       add.push_back(id);
       add.push_back(spv::DecorationAliased);
     }
@@ -535,11 +555,11 @@ static std::string patchSpirvAliased(std::string spv) {
 // runtime already supplies spec constants 0/1/2, so the host sets the group size at pipeline creation
 std::string llvmc::patchSpirvWorkgroupSpecConstant(std::string spv) {
   if (spv.size() < 5 * sizeof(uint32_t)) return spv;
-  auto *src = reinterpret_cast<const uint32_t *>(spv.data());
+  const auto *src = reinterpret_cast<const uint32_t *>(spv.data());
   const size_t nWords = spv.size() / sizeof(uint32_t);
-  auto opcode = [](uint32_t x) { return static_cast<uint16_t>(x & 0xFFFF); };
-  auto wcount = [](uint32_t x) { return static_cast<uint16_t>(x >> 16); };
-  auto declaration = [](uint16_t op) {
+  const auto opcode = [](uint32_t x) { return static_cast<uint16_t>(x & 0xFFFF); };
+  const auto wcount = [](uint32_t x) { return static_cast<uint16_t>(x >> 16); };
+  const auto declaration = [](uint16_t op) {
     return (op >= spv::OpTypeVoid && op <= spv::OpTypeForwardPointer) || (op >= spv::OpConstantTrue && op <= spv::OpSpecConstantOp)
            || op == spv::OpVariable || op == spv::OpUndef;
   };
@@ -572,22 +592,22 @@ std::string llvmc::patchSpirvWorkgroupSpecConstant(std::string spv) {
   out.insert(out.end(), src, src + 5);
   out[3] = next + 4;
   const auto decorations =
-      iota(0u, 3u) //
+      iota(0U, 3U) //
       | flat_map(
-          [&](const uint32_t d) { return std::vector<uint32_t>{(4u << 16) | spv::OpDecorate, sc0 + d, spv::DecorationSpecId, d}; }) //
-      | concat(std::vector<uint32_t>{(4u << 16) | spv::OpDecorate, comp, spv::DecorationBuiltIn, spv::BuiltInWorkgroupSize})        //
+          [&](const uint32_t d) { return std::vector<uint32_t>{(4U << 16) | spv::OpDecorate, sc0 + d, spv::DecorationSpecId, d}; }) //
+      | concat(std::vector<uint32_t>{(4U << 16) | spv::OpDecorate, comp, spv::DecorationBuiltIn, spv::BuiltInWorkgroupSize})        //
       | to_vector();
   const auto specConstants =
-      iota(0u, 3u)                                                                                                                        //
-      | flat_map([&](const uint32_t d) { return std::vector<uint32_t>{(4u << 16) | spv::OpSpecConstant, uintTy, sc0 + d, defaults[d]}; }) //
-      | concat(std::vector<uint32_t>{(6u << 16) | spv::OpSpecConstantComposite, v3uintTy, comp, sc0, sc1, sc2})                           //
+      iota(0U, 3U)                                                                                                                        //
+      | flat_map([&](const uint32_t d) { return std::vector<uint32_t>{(4U << 16) | spv::OpSpecConstant, uintTy, sc0 + d, defaults[d]}; }) //
+      | concat(std::vector<uint32_t>{(6U << 16) | spv::OpSpecConstantComposite, v3uintTy, comp, sc0, sc1, sc2})                           //
       | to_vector();
   for (size_t i = 5; i < nWords;) {
     const uint16_t wc = wcount(src[i]), op = opcode(src[i]);
     if (!lastDecorEnd && i == (firstDeclaration ? firstDeclaration : funcStart)) out ^= concat(decorations);
     if (i == funcStart) { // emit the spec constants + composite just before the first function
-      if (declareUint) out.insert(out.end(), {(4u << 16) | spv::OpTypeInt, uintTy, 32u, 0u});
-      if (declareV3uint) out.insert(out.end(), {(4u << 16) | spv::OpTypeVector, v3uintTy, uintTy, 3u});
+      if (declareUint) out.insert(out.end(), {(4U << 16) | spv::OpTypeInt, uintTy, 32U, 0U});
+      if (declareV3uint) out.insert(out.end(), {(4U << 16) | spv::OpTypeVector, v3uintTy, uintTy, 3U});
       out ^= concat(specConstants);
     }
     if (i == execModeIdx) { /* drop the literal LocalSize execution mode */
@@ -595,7 +615,7 @@ std::string llvmc::patchSpirvWorkgroupSpecConstant(std::string spv) {
                && src[i + 1] == wgVar) {                                           /* drop the var's name/decoration */
     } else if (wgVar && op == spv::OpVariable && wc >= 3 && src[i + 2] == wgVar) { /* drop the WorkgroupSize Input variable */
     } else if (wgVar && op == spv::OpLoad && wc == 4 && src[i + 3] == wgVar) {     // OpLoad %ty %res %wgVar -> OpCopyObject %ty %res %comp
-      out.push_back((4u << 16) | spv::OpCopyObject);
+      out.push_back((4U << 16) | spv::OpCopyObject);
       out.push_back(src[i + 1]);
       out.push_back(src[i + 2]);
       out.push_back(comp);
@@ -603,7 +623,7 @@ std::string llvmc::patchSpirvWorkgroupSpecConstant(std::string spv) {
       size_t w = i + 3;                            // skip ExecutionModel + entry id, then the name string
       while (w < i + wc) {
         const uint32_t word = src[w++];
-        if (!(word & 0xFFu) || !(word & 0xFF00u) || !(word & 0xFF0000u) || !(word & 0xFF000000u)) break;
+        if (!(word & 0xFFU) || !(word & 0xFF00U) || !(word & 0xFF0000U) || !(word & 0xFF000000U)) break;
       }
       std::vector<uint32_t> ep(src + i, src + i + wc);
       for (size_t k = w - i; k < ep.size();)
@@ -630,7 +650,7 @@ std::string llvmc::appendSpirvModuleProcessed(std::string spv, std::string_view 
   size_t at = words.size(), lastDebugEnd = 0;
   for (size_t i = 5; i < words.size();) {
     const uint32_t count = words[i] >> 16;
-    const auto op = static_cast<spv::Op>(words[i] & 0xFFFFu);
+    const auto op = static_cast<spv::Op>(words[i] & 0xFFFFU);
     if (count == 0 || i + count > words.size()) return spv;
     if (debugOps ^ contains(op)) lastDebugEnd = i + count;
     else if ((annotationOps ^ contains(op)) || (op >= spv::OpTypeVoid && op <= spv::OpTypeForwardPointer)) {
@@ -639,7 +659,7 @@ std::string llvmc::appendSpirvModuleProcessed(std::string spv, std::string_view 
     }
     i += count;
   }
-  std::vector<uint32_t> literal(text.size() / sizeof(uint32_t) + 1, 0);
+  std::vector<uint32_t> literal((text.size() / sizeof(uint32_t)) + 1, 0);
   std::memcpy(literal.data(), text.data(), text.size());
   const auto instruction =
       std::vector<uint32_t>{static_cast<uint32_t>((literal.size() + 1) << 16 | spv::OpModuleProcessed)} ^ concat(literal);
@@ -665,7 +685,7 @@ bool llvmc::captureModuleIr() {
 std::string llvmc::findInDirs(llvm::StringRef name, llvm::ArrayRef<llvm::StringRef> dirs) {
   namespace fs = llvm::sys::fs;
   namespace path = llvm::sys::path;
-  for (auto dir : dirs) {
+  for (const auto dir : dirs) {
     if (dir.empty()) continue;
     llvm::SmallString<256> p(dir);
     path::append(p, name);
@@ -688,7 +708,7 @@ std::string llvmc::findVendorBitcode(llvm::StringRef name) {
     path::append(lib, "../lib");
     owned.emplace_back(lib.str().str());
   }
-  if (std::string_view dev = POLYREGION_BITCODE_DEV_DIR; !dev.empty()) owned.emplace_back(dev);
+  if (const std::string_view dev = POLYREGION_BITCODE_DEV_DIR; !dev.empty()) owned.emplace_back(dev);
   const auto refs = owned ^ map([](const auto &s) { return llvm::StringRef(s); });
   return findInDirs(name, refs);
 }
@@ -718,17 +738,19 @@ bool llvmc::linkVendorBitcodeFile(llvm::Module &M, llvm::StringRef path) {
 
 // Newest-first; older variants fall through for arches the newer libdevice has dropped.
 // Generated by polyc/CMakeLists.txt from POLYREGION_CUDA_LIBDEVICE.
+namespace {
 struct CudaLibDeviceVariant {
   const char *file;
   unsigned minArch;
 };
+} // namespace
 static constexpr CudaLibDeviceVariant LibDevices[] = {
 #include "vendor_libdevice.inc"
 };
 
 static void linkVendorDeviceLibs(llvm::Module &M, const llvm::Triple &triple, llvm::StringRef cpu) {
-  auto link = [&](const llvm::Twine &name) {
-    if (auto p = llvmc::findVendorBitcode(name.str()); !p.empty()) llvmc::linkVendorBitcodeFile(M, p);
+  const auto link = [&](const llvm::Twine &name) {
+    if (const auto p = llvmc::findVendorBitcode(name.str()); !p.empty()) llvmc::linkVendorBitcodeFile(M, p);
   };
   if (triple.isNVPTX()) {
     unsigned arch = 0;
@@ -741,13 +763,13 @@ static void linkVendorDeviceLibs(llvm::Module &M, const llvm::Triple &triple, ll
     for (const auto &v : LibDevices) {
       if (arch < v.minArch) continue;
       tried.emplace_back(v.file);
-      if (auto p = llvmc::findVendorBitcode(v.file); !p.empty()) {
+      if (const auto p = llvmc::findVendorBitcode(v.file); !p.empty()) {
         llvmc::linkVendorBitcodeFile(M, p);
         return;
       }
     }
     std::string msg = "no staged libdevice for " + cpu.str() + "; expected one of";
-    for (auto t : tried) {
+    for (const auto t : tried) {
       msg += ' ';
       msg += t.str();
     }
@@ -757,7 +779,7 @@ static void linkVendorDeviceLibs(llvm::Module &M, const llvm::Triple &triple, ll
   if (triple.isAMDGPU()) {
     link("ocml.bc");
     link("ockl.bc");
-    llvm::StringRef suffix = cpu.starts_with("gfx") ? cpu.drop_front(3) : llvm::StringRef{};
+    const llvm::StringRef suffix = cpu.starts_with("gfx") ? cpu.drop_front(3) : llvm::StringRef{};
     unsigned gen = 0;
     suffix.getAsInteger(10, gen);
     if (!suffix.empty()) link("oclc_isa_version_" + suffix + ".bc");
@@ -794,7 +816,7 @@ static void verifyKernelSymbols(const llvm::Module &M, const llvm::Triple &tripl
       | for_each([&](const auto &G) { missing.emplace_back(G.getName().str()); });
   if (missing.empty()) return;
   std::string msg = "unresolved kernel-side symbols for " + triple.str() + " (stage vendor bitcode via POLYREGION_BITCODE_DIR):";
-  for (auto &s : missing) {
+  for (const auto &s : missing) {
     msg += ' ';
     msg += s;
   }
@@ -882,8 +904,8 @@ static void normaliseUnitSignSelects(llvm::Function &F) {
   llvm::SmallVector<llvm::SelectInst *> targets;
   for (llvm::Instruction &I : llvm::instructions(F)) {
     auto *select = llvm::dyn_cast<llvm::SelectInst>(&I);
-    auto *negative = select ? llvm::dyn_cast<llvm::ConstantFP>(select->getTrueValue()) : nullptr;
-    auto *positive = select ? llvm::dyn_cast<llvm::ConstantFP>(select->getFalseValue()) : nullptr;
+    const auto *negative = select ? llvm::dyn_cast<llvm::ConstantFP>(select->getTrueValue()) : nullptr;
+    const auto *positive = select ? llvm::dyn_cast<llvm::ConstantFP>(select->getFalseValue()) : nullptr;
     if (select && select->hasOneUse() && negative && negative->isExactlyValue(-1.0) && positive && positive->isExactlyValue(1.0)
         && llvm::isa<llvm::BinaryOperator>(*select->user_begin()))
       targets.push_back(select);
@@ -914,16 +936,16 @@ static void foldConstantBranches(llvm::Function &F) {
 static void specialisePointersByBooleanPhi(llvm::Function &F) {
   llvm::DominatorTree DT(F);
   for (llvm::BasicBlock &BB : F) {
-    auto *branch = llvm::dyn_cast<llvm::BranchInst>(BB.getTerminator());
+    const auto *branch = llvm::dyn_cast<llvm::BranchInst>(BB.getTerminator());
     auto *guard = branch && branch->isConditional() ? llvm::dyn_cast<llvm::PHINode>(branch->getCondition()) : nullptr;
     if (!guard || guard->getParent() != &BB) continue;
     if (branch->getSuccessor(0) == branch->getSuccessor(1)) continue;
     if (!(guard->incoming_values() ^ forall([](const auto &value) { return llvm::isa<llvm::ConstantInt>(value); }))) continue;
 
-    auto commonIncoming = [&](llvm::PHINode &phi, const bool wanted) -> llvm::Value * {
+    const auto commonIncoming = [&](llvm::PHINode &phi, const bool wanted) -> llvm::Value * {
       llvm::Value *common = nullptr;
       for (unsigned i = 0; i < guard->getNumIncomingValues(); ++i) {
-        auto *constant = llvm::dyn_cast<llvm::ConstantInt>(guard->getIncomingValue(i));
+        const auto *constant = llvm::dyn_cast<llvm::ConstantInt>(guard->getIncomingValue(i));
         if (!constant || constant->isOne() != wanted) continue;
         auto *value = phi.getIncomingValueForBlock(guard->getIncomingBlock(i));
         if (!value || (common && common != value)) return nullptr;
@@ -931,9 +953,9 @@ static void specialisePointersByBooleanPhi(llvm::Function &F) {
       }
       return common;
     };
-    auto dominates = [&](llvm::Value *value, llvm::Instruction *use) {
+    const auto dominates = [&](llvm::Value *value, llvm::Instruction *use) {
       if (llvm::isa<llvm::Constant>(value) || llvm::isa<llvm::Argument>(value)) return true;
-      if (auto *definition = llvm::dyn_cast<llvm::Instruction>(value)) return DT.dominates(definition, use);
+      if (const auto *definition = llvm::dyn_cast<llvm::Instruction>(value)) return DT.dominates(definition, use);
       return false;
     };
 
@@ -968,16 +990,16 @@ static void indexPointerArithmetic(llvm::Function &F) {
 
   const auto arrayRoot = [](llvm::Value *v) -> std::optional<Origin> {
     llvm::Type *ty = nullptr;
-    if (auto *g = llvm::dyn_cast<llvm::GlobalVariable>(v)) ty = g->getValueType();
-    else if (auto *a = llvm::dyn_cast<llvm::AllocaInst>(v)) ty = a->getAllocatedType();
-    if (auto *arr = llvm::dyn_cast_or_null<llvm::ArrayType>(ty)) return Origin{v, arr, arr->getElementType()};
+    if (const auto *g = llvm::dyn_cast<llvm::GlobalVariable>(v)) ty = g->getValueType();
+    else if (const auto *a = llvm::dyn_cast<llvm::AllocaInst>(v)) ty = a->getAllocatedType();
+    if (auto *arr = llvm::dyn_cast_or_null<llvm::ArrayType>(ty)) return Origin{.base = v, .arrayTy = arr, .elemTy = arr->getElementType()};
     return std::nullopt;
   };
   // gep [N x T], array, 0, i: the access chain every rebuilt pointer takes
   const auto elementOf = [&](llvm::Value *v) -> std::optional<std::pair<Origin, llvm::Value *>> {
     auto *gep = llvm::dyn_cast<llvm::GEPOperator>(v);
     if (!gep || gep->getNumIndices() != 2) return std::nullopt;
-    auto *first = llvm::dyn_cast<llvm::ConstantInt>(gep->getOperand(1));
+    const auto *first = llvm::dyn_cast<llvm::ConstantInt>(gep->getOperand(1));
     const auto root = arrayRoot(gep->getPointerOperand());
     if (!first || !first->isZero() || !root || gep->getSourceElementType() != root->arrayTy) return std::nullopt;
     return std::pair{*root, gep->getOperand(2)};
@@ -990,8 +1012,8 @@ static void indexPointerArithmetic(llvm::Function &F) {
   llvm::DenseMap<llvm::Value *, std::pair<State, std::optional<Origin>>> states;
   const auto stateOf = [&](llvm::Value *v) -> std::pair<State, std::optional<Origin>> {
     if (auto element = elementOf(v)) return {State::Known, element->first};
-    if (auto root = arrayRoot(v)) return {State::Known, root};
-    if (auto it = states.find(v); it != states.end()) return it->second;
+    if (const auto root = arrayRoot(v)) return {State::Known, root};
+    if (const auto it = states.find(v); it != states.end()) return it->second;
     return {State::Bottom, std::nullopt};
   };
   const auto meet = [](std::pair<State, std::optional<Origin>> lhs, std::pair<State, std::optional<Origin>> rhs) {
@@ -1033,9 +1055,9 @@ static void indexPointerArithmetic(llvm::Function &F) {
 
   llvm::DenseMap<llvm::Value *, llvm::Value *> indices;
   std::function<llvm::Value *(llvm::Value *)> indexOf = [&](llvm::Value *v) -> llvm::Value * {
-    if (auto it = indices.find(v); it != indices.end()) return it->second;
+    if (const auto it = indices.find(v); it != indices.end()) return it->second;
     if (auto element = elementOf(v)) {
-      if (auto *constant = llvm::dyn_cast<llvm::ConstantInt>(element->second))
+      if (const auto *constant = llvm::dyn_cast<llvm::ConstantInt>(element->second))
         return indices[v] = llvm::ConstantInt::get(i64, constant->getSExtValue());
       auto *gep = llvm::cast<llvm::GetElementPtrInst>(v);
       return indices[v] = llvm::CastInst::CreateIntegerCast(element->second, i64, true, "", gep->getIterator());
@@ -1102,12 +1124,12 @@ static void indexPointerArithmetic(llvm::Function &F) {
 // indices) into its base, leaving a GEP whose source type is that subobject applied to the enclosing aggregate's
 // pointer. Restore the access chain down to the subobject so the translator indexes the right type.
 // the all-zero GEP path from an aggregate down its leading members to `target`, empty when `target` is not one of them
-static llvm::SmallVector<llvm::Value *> zeroPathTo(llvm::Type *enclosing, llvm::Type *target) {
+static llvm::SmallVector<llvm::Value *> zeroPathTo(const llvm::Type *enclosing, const llvm::Type *target) {
   auto *zero = llvm::ConstantInt::get(llvm::Type::getInt32Ty(target->getContext()), 0);
   llvm::SmallVector<llvm::Value *> path{zero};
-  for (auto *current = enclosing; current != target; path.push_back(zero)) {
-    if (auto *st = llvm::dyn_cast<llvm::StructType>(current); st && st->getNumElements() > 0) current = st->getElementType(0);
-    else if (auto *arr = llvm::dyn_cast<llvm::ArrayType>(current)) current = arr->getElementType();
+  for (const auto *current = enclosing; current != target; path.push_back(zero)) {
+    if (const auto *st = llvm::dyn_cast<llvm::StructType>(current); st && st->getNumElements() > 0) current = st->getElementType(0);
+    else if (const auto *arr = llvm::dyn_cast<llvm::ArrayType>(current)) current = arr->getElementType();
     else return {};
   }
   return path.size() < 2 ? llvm::SmallVector<llvm::Value *>{} : path;
@@ -1115,19 +1137,19 @@ static llvm::SmallVector<llvm::Value *> zeroPathTo(llvm::Type *enclosing, llvm::
 
 static void restoreSubobjectGeps(llvm::Function &F) {
   const auto pointeeOf = [](llvm::Value *v) -> llvm::Type * {
-    if (auto *gep = llvm::dyn_cast<llvm::GEPOperator>(v)) return gep->getResultElementType();
-    if (auto *alloca = llvm::dyn_cast<llvm::AllocaInst>(v)) return alloca->getAllocatedType();
-    if (auto *global = llvm::dyn_cast<llvm::GlobalVariable>(v)) return global->getValueType();
-    if (auto *call = llvm::dyn_cast<llvm::CallInst>(v); call && call->getIntrinsicID() == llvm::Intrinsic::spv_resource_getpointer)
-      if (auto *handle = llvm::dyn_cast<llvm::TargetExtType>(call->getArgOperand(0)->getType());
+    if (const auto *gep = llvm::dyn_cast<llvm::GEPOperator>(v)) return gep->getResultElementType();
+    if (const auto *alloca = llvm::dyn_cast<llvm::AllocaInst>(v)) return alloca->getAllocatedType();
+    if (const auto *global = llvm::dyn_cast<llvm::GlobalVariable>(v)) return global->getValueType();
+    if (const auto *call = llvm::dyn_cast<llvm::CallInst>(v); call && call->getIntrinsicID() == llvm::Intrinsic::spv_resource_getpointer)
+      if (const auto *handle = llvm::dyn_cast<llvm::TargetExtType>(call->getArgOperand(0)->getType());
           handle && handle->getNumTypeParameters() > 0)
-        if (auto *runtime = llvm::dyn_cast<llvm::ArrayType>(handle->getTypeParameter(0))) return runtime->getElementType();
+        if (const auto *runtime = llvm::dyn_cast<llvm::ArrayType>(handle->getTypeParameter(0))) return runtime->getElementType();
     return nullptr;
   };
   for (llvm::Instruction &I : llvm::make_early_inc_range(llvm::instructions(F))) {
     auto *gep = llvm::dyn_cast<llvm::GetElementPtrInst>(&I);
     if (!gep) continue;
-    auto *target = gep->getSourceElementType();
+    const llvm::Type *target = gep->getSourceElementType();
     auto *enclosing = pointeeOf(gep->getPointerOperand());
     if (!enclosing || enclosing == target || !target->isAggregateType()) continue;
     const auto path = zeroPathTo(enclosing, target);
@@ -1137,12 +1159,12 @@ static void restoreSubobjectGeps(llvm::Function &F) {
 }
 
 static bool isByteGep(const llvm::Value *v) {
-  auto *gep = llvm::dyn_cast<llvm::GetElementPtrInst>(v);
+  const auto *gep = llvm::dyn_cast<llvm::GetElementPtrInst>(v);
   return gep && gep->getSourceElementType()->isIntegerTy(8) && gep->getNumIndices() == 1;
 }
 
 static bool foldResourceByteOffsets(llvm::Function &F) {
-  auto *i8 = llvm::Type::getInt8Ty(F.getContext());
+  const auto *i8 = llvm::Type::getInt8Ty(F.getContext());
   auto *i32 = llvm::Type::getInt32Ty(F.getContext());
   auto *i64 = llvm::Type::getInt64Ty(F.getContext());
   const auto byteGeps = llvm::instructions(F) ^ collect([](llvm::Instruction &I) -> std::optional<llvm::GetElementPtrInst *> {
@@ -1155,18 +1177,18 @@ static bool foldResourceByteOffsets(llvm::Function &F) {
     llvm::SmallVector<llvm::Value *> offsets{gep->getOperand(1)};
     auto *base = gep->getPointerOperand();
     while (true) {
-      if (auto *cast = llvm::dyn_cast<llvm::AddrSpaceCastInst>(base)) base = cast->getOperand(0);
+      if (const auto *cast = llvm::dyn_cast<llvm::AddrSpaceCastInst>(base)) base = cast->getOperand(0);
       else if (isByteGep(base)) {
         auto *inner = llvm::cast<llvm::GetElementPtrInst>(base);
         offsets.push_back(inner->getOperand(1));
         base = inner->getPointerOperand();
       } else break;
     }
-    auto *resource = llvm::dyn_cast<llvm::CallInst>(base);
+    const auto *resource = llvm::dyn_cast<llvm::CallInst>(base);
     if (!resource || resource->getIntrinsicID() != llvm::Intrinsic::spv_resource_getpointer) continue;
-    auto *handle = llvm::dyn_cast<llvm::TargetExtType>(resource->getArgOperand(0)->getType());
+    const auto *handle = llvm::dyn_cast<llvm::TargetExtType>(resource->getArgOperand(0)->getType());
     if (!handle || handle->getNumTypeParameters() == 0) continue;
-    auto *elements = llvm::dyn_cast<llvm::ArrayType>(handle->getTypeParameter(0));
+    const auto *elements = llvm::dyn_cast<llvm::ArrayType>(handle->getTypeParameter(0));
     if (!elements || elements->getElementType() != i8) continue;
 
     llvm::IRBuilder<> B(gep);
@@ -1203,11 +1225,11 @@ static void foldNonNullPointerChecks(llvm::Function &F) {
   const auto nonNull = [](llvm::Value *v) {
     auto *root = v->stripInBoundsOffsets();
     if (llvm::isa<llvm::AllocaInst, llvm::GlobalVariable>(root)) return true;
-    auto *call = llvm::dyn_cast<llvm::CallInst>(root);
+    const auto *call = llvm::dyn_cast<llvm::CallInst>(root);
     return call && call->getIntrinsicID() == llvm::Intrinsic::spv_resource_getpointer;
   };
   const auto isNull = [](llvm::Value *v) {
-    auto *constant = llvm::dyn_cast<llvm::Constant>(v->stripPointerCasts());
+    const auto *constant = llvm::dyn_cast<llvm::Constant>(v->stripPointerCasts());
     return constant && constant->isNullValue();
   };
   for (llvm::Instruction &I : llvm::make_early_inc_range(llvm::instructions(F))) {
@@ -1354,9 +1376,9 @@ static void optimise(llvm::TargetMachine &TM, llvm::Module &M, const llvm::Optim
 
 polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compiletime::OptLevel &opt, bool emitDisassembly, llvm::Module &M,
                                             bool emitBitcode) {
-  auto start = compiler::nowMono();
+  const auto start = compiler::nowMono();
 
-  auto useUnsafeMath = opt == compiletime::OptLevel::Ofast;
+  const auto useUnsafeMath = opt == compiletime::OptLevel::Ofast;
   llvm::TargetOptions options;
   options.AllowFPOpFusion = useUnsafeMath ? llvm::FPOpFusion::Fast : llvm::FPOpFusion::Standard;
   // LLVM 22 removed `TargetOptions::UnsafeFPMath` (was a meta-flag combining the granular ones
@@ -1391,7 +1413,7 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
 
   using TargetMachine = llvm::TargetMachine;
 
-  auto mkLLVMTargetMachine = [](const TargetInfo &info, const llvm::TargetOptions &options, const llvm::CodeGenOptLevel &level) {
+  const auto mkLLVMTargetMachine = [](const TargetInfo &info, const llvm::TargetOptions &options, const llvm::CodeGenOptLevel &level) {
     // XXX RuntimeDyld objects can land anywhere in the address space:
     // - x86_64: Large emits `.ltext` which SectionMemoryManager leaves non-executable, so use Medium.
     // - AArch64 COFF: Large emits ADRP+ADD+BLR; RuntimeDyldCOFFAArch64 only synthesises stubs
@@ -1400,35 +1422,36 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
     //   RTDyld inserts its 20-byte MOVZ/MOVK/BR stub when the target is out of +-128MB range.
     // - AArch64 Mach-O: Large emits MOVZ/MOVK via Mach-O-specific absolute relocations; keep it.
     const auto isSpirv = info.triple.isSPIRV();
-    const auto codeModel = info.triple.getArch() == llvm::Triple::aarch64
-                               ? (info.triple.isOSBinFormatCOFF() ? llvm::CodeModel::Small : llvm::CodeModel::Large)
-                               : llvm::CodeModel::Medium;
-    auto tm = static_cast<TargetMachine *>(info.target->createTargetMachine( //
-        info.triple,                                                         //
-        isSpirv ? "" : info.cpu.uArch,                                       //
-        isSpirv ? "" : info.cpu.features,                                    //
+    const auto codeModel = [&] {
+      if (info.triple.getArch() != llvm::Triple::aarch64) return llvm::CodeModel::Medium;
+      return info.triple.isOSBinFormatCOFF() ? llvm::CodeModel::Small : llvm::CodeModel::Large;
+    }();
+    auto *tm = static_cast<TargetMachine *>(info.target->createTargetMachine( //
+        info.triple,                                                          //
+        isSpirv ? "" : info.cpu.uArch,                                        //
+        isSpirv ? "" : info.cpu.features,                                     //
         options, llvm::Reloc::Model::PIC_, codeModel, level));
     return std::unique_ptr<TargetMachine>(tm);
   };
 
-  auto bindLLVMTargetMachineDataLayout = [&](TargetMachine &TM, llvm::Module &M) {
+  const auto bindLLVMTargetMachineDataLayout = [&](TargetMachine &TM, llvm::Module &M) {
     if (M.getDataLayout().isDefault()) {
       M.setDataLayout(TM.createDataLayout());
     }
     M.setTargetTriple(TM.getTargetTriple());
   };
 
-  auto mkLLVMTargetMachineArtefact = [optLevel, genOpt, useUnsafeMath](TargetMachine &TM,                               //
-                                                                       const std::optional<llvm::CodeGenFileType> &tpe, //
-                                                                       const llvm::Module &m0,                          //
-                                                                       std::vector<polyast::CompileEvent> &events,
-                                                                       const bool emplaceEvent) {
+  const auto mkLLVMTargetMachineArtefact = [optLevel, genOpt, useUnsafeMath](TargetMachine &TM,                               //
+                                                                             const std::optional<llvm::CodeGenFileType> &tpe, //
+                                                                             const llvm::Module &m0,                          //
+                                                                             std::vector<polyast::CompileEvent> &events,
+                                                                             const bool emplaceEvent) {
     auto m = llvm::CloneModule(m0);
-    auto iselPassStart = compiler::nowMono();
+    const auto iselPassStart = compiler::nowMono();
     llvm::SmallVector<char, 0> objBuffer;
     llvm::raw_svector_ostream objStream(objBuffer);
     {
-      auto optPassStart = compiler::nowMono();
+      const auto optPassStart = compiler::nowMono();
 
       // SPIRV: skip the host-side opt pipeline; FunctionAttrs would infer memory(none) -> Pure ->
       // OpUnreachable. The driver / SPIRV-Tools run their own passes on the blob. We do still
@@ -1512,18 +1535,18 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
     return std::make_tuple(std::move(m), objBuffer, compiler::nowMs(), compiler::elapsedNs(iselPassStart));
   };
 
-  auto objectSize = [](const llvm::SmallVector<char, 0> &xs) {
+  const auto objectSize = [](const llvm::SmallVector<char, 0> &xs) {
     return std::to_string(static_cast<float>(xs.size_in_bytes()) / 1024) + "KiB";
   };
 
-  auto collectPrecisionFeatures = [](const llvm::Module &M) {
+  const auto collectPrecisionFeatures = [](const llvm::Module &M) {
     bool usesFp64 = false, usesFp16 = false, usesInt64 = false;
-    auto inspect = [&](const llvm::Type *t, const auto &self) -> void {
+    const auto inspect = [&](const llvm::Type *t, const auto &self) -> void {
       if (!t) return;
       if (t->isDoubleTy()) usesFp64 = true;
       else if (t->isHalfTy()) usesFp16 = true;
       else if (t->isIntegerTy(64)) usesInt64 = true;
-      for (auto *sub : t->subtypes())
+      for (const llvm::Type *sub : t->subtypes())
         self(sub, self);
     };
     for (const auto &F : M)
@@ -1560,12 +1583,12 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
         events.emplace_back(assemblyStart, assemblyElapsed, "llvm_to_asm", std::string(assembly.begin(), assembly.end()),
                             std::vector<polyast::CompileEvent>{});
       }
-      llvm::StringRef objectString(object.begin(), object.size());
-      llvm::MemoryBufferRef kernelObject(objectString, "kernel.hsaco");
+      const llvm::StringRef objectString(object.begin(), object.size());
+      const llvm::MemoryBufferRef kernelObject(objectString, "kernel.hsaco");
       // XXX Don't strip AMDGCN ELFs as hipModuleLoad will report "Invalid ptx". GC and optimisation is fine.
-      auto linkerStart = compiler::nowMono();
+      const auto linkerStart = compiler::nowMono();
       auto [err, result] = backend::lld_lite::linkElf({"-shared", "--gc-sections", "-O3", "--no-undefined"}, {kernelObject});
-      auto linkerElapsed = compiler::elapsedNs(linkerStart);
+      const auto linkerElapsed = compiler::elapsedNs(linkerStart);
       events.emplace_back(compiler::nowMs(), linkerElapsed, "lld_link_amdgpu", "", std::vector<polyast::CompileEvent>{});
       if (!result) { // linker failed
         return {{}, {info.cpu.uArch}, events, {}, "Linker did not complete normally: " + err.value_or("(no message reported)"), {}};

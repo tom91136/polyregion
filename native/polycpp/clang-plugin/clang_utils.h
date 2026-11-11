@@ -32,7 +32,7 @@ struct Location {
   size_t line, col;
 };
 
-Location getLocation(const clang::SourceLocation &e, clang::ASTContext &c);
+Location getLocation(const clang::SourceLocation &l, clang::ASTContext &c);
 Location getLocation(const clang::Expr &e, clang::ASTContext &c);
 
 bool hasAnnotation(const clang::Decl *decl, llvm::StringRef annotation);
@@ -52,7 +52,7 @@ clang::FunctionDecl *mkExternCFn(clang::ASTContext &C, const std::string &name, 
                                  const std::vector<clang::QualType> &paramTys);
 clang::FunctionDecl *mkExternCppFn(clang::ASTContext &C, const std::string &name, clang::QualType retTy,
                                    const std::vector<clang::QualType> &paramTys);
-clang::CallExpr *mkCall(clang::ASTContext &C, clang::FunctionDecl *fn, const std::vector<clang::Expr *> &args);
-clang::Expr *mkLoad(clang::ASTContext &C, clang::VarDecl *var);
+clang::CallExpr *mkCall(const clang::ASTContext &C, clang::FunctionDecl *fn, const std::vector<clang::Expr *> &args);
+clang::Expr *mkLoad(const clang::ASTContext &C, clang::VarDecl *var);
 
 } // namespace polyregion::polystl

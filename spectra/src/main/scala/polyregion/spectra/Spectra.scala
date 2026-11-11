@@ -54,6 +54,32 @@ object Spectra {
       p.Function.Affinity.Host
     )
 
+  private def mergeArgs: List[p.Arg] =
+    List(
+      read("a", size = param(1)),
+      count("na"),
+      read("b", size = param(3)),
+      count("nb"),
+      write("out", size = sum(1, 3)),
+      callable("op", List(t, t), p.Type.Bool1)
+    )
+
+  private def filterCopyArgs: List[p.Arg] =
+    List(
+      read("in", size = param(1)),
+      count("n"),
+      write("out", size = result(param(1))),
+      callable("op", List(t), p.Type.Bool1)
+    )
+
+  private def pairwiseArgs: List[p.Arg] =
+    List(
+      read("a", size = param(2)),
+      read("b", size = param(2)),
+      count("n"),
+      callable("op", List(t, t), p.Type.Bool1)
+    )
+
   private val T: List[p.Type.Var]   = List(p.Type.Var("T"))
   private val TU: List[p.Type.Var]  = List(p.Type.Var("T"), p.Type.Var("U"))
   private val TUV: List[p.Type.Var] = List(p.Type.Var("T"), p.Type.Var("U"), p.Type.Var("V"))
@@ -129,14 +155,7 @@ object Spectra {
     declaration(
       "merge",
       T,
-      List(
-        read("a", size = param(1)),
-        count("na"),
-        read("b", size = param(3)),
-        count("nb"),
-        write("out", size = sum(1, 3)),
-        callable("op", List(t, t), p.Type.Bool1)
-      ),
+      mergeArgs,
       p.Type.Unit0
     ),
     declaration(
@@ -193,23 +212,13 @@ object Spectra {
     declaration(
       "copy_if",
       T,
-      List(
-        read("in", size = param(1)),
-        count("n"),
-        write("out", size = result(param(1))),
-        callable("op", List(t), p.Type.Bool1)
-      ),
+      filterCopyArgs,
       p.Type.IntS32
     ),
     declaration(
       "remove_copy_if",
       T,
-      List(
-        read("in", size = param(1)),
-        count("n"),
-        write("out", size = result(param(1))),
-        callable("op", List(t), p.Type.Bool1)
-      ),
+      filterCopyArgs,
       p.Type.IntS32
     ),
     declaration(
@@ -385,23 +394,13 @@ object Spectra {
     declaration(
       "equal",
       T,
-      List(
-        read("a", size = param(2)),
-        read("b", size = param(2)),
-        count("n"),
-        callable("op", List(t, t), p.Type.Bool1)
-      ),
+      pairwiseArgs,
       p.Type.Bool1
     ),
     declaration(
       "mismatch",
       T,
-      List(
-        read("a", size = param(2)),
-        read("b", size = param(2)),
-        count("n"),
-        callable("op", List(t, t), p.Type.Bool1)
-      ),
+      pairwiseArgs,
       p.Type.IntS32
     ),
     declaration(

@@ -44,6 +44,11 @@ object Retyper {
 
   def isModuleClass(using q: Quoted)(s: q.Symbol) = !s.isPackageDef && s.flags.is(q.Flags.Module)
 
+  def ownersList(using q: Quoted)(sym: q.Symbol): LazyList[q.Symbol] =
+    LazyList.unfold(sym.maybeOwner)(s => if (s.isNoSymbol) None else Some(s, s.maybeOwner))
+
+  def owningClassSymbol(using q: Quoted)(sym: q.Symbol): Option[q.Symbol] = ownersList(sym).find(_.isClassDef)
+
   def structName0(using q: Quoted)(clsSym: q.Symbol): p.Sym = p.Sym(clsSym.fullName)
 
   private def deriveParents(using q: Quoted)(clsSym: q.Symbol): List[p.Type.Struct] = {
@@ -216,7 +221,7 @@ object Retyper {
           (receiverCtorTpes, wit2) <- repr match {
             case tr @ q.TermRef(_: q.NoPrefix, _) => // this is local function so no prefix
               for {
-                classSymbol <- Remapper.owningClassSymbol(tr.termSymbol).failIfEmpty(s"No class for type ref ${tr}")
+                classSymbol <- owningClassSymbol(tr.termSymbol).failIfEmpty(s"No class for type ref ${tr}")
                 tpe         <- clsSymTyper0(classSymbol)
               } yield (tpe :: Nil) -> Map.empty
             case q.TermRef(receiverTpe, _) => // we have something concrete

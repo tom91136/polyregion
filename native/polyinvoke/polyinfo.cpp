@@ -1,6 +1,9 @@
 #include <cstdio>
+#include <cstdlib>
+#include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include "aspartame/all.hpp"
 #include "fmt/format.h"
@@ -43,7 +46,7 @@ std::string quote(const std::string_view s) {
 
 } // namespace
 
-int fired_main( //
+static int fired_main( //
     bool list = fire::arg({"-l", "--list", "List backends and their devices by name only, like `clinfo -l`"}),
     bool json = fire::arg({"--json", "Print one JSON object per backend, devices with their features, one per line"}),
     fire::optional<std::string> select = fire::arg({"--select", "Only enumerate the backend a POLYRT_PLATFORM selector names"})) {
@@ -66,7 +69,7 @@ int fired_main( //
       }
       auto platform = std::move(std::get<std::unique_ptr<Platform>>(r));
       const auto devices = platform->enumerate() ^ mk_string(",", [](const auto &d) {
-                             return fmt::format("{{\"name\":{},\"format\":{},\"features\":[{}]}}", quote(d->name()),
+                             return fmt::format(R"({{"name":{},"format":{},"features":[{}]}})", quote(d->name()),
                                                 quote(magic_enum::enum_name(d->moduleFormat())),
                                                 d->features() ^ mk_string(",", [](const auto &f) { return quote(f); }));
                            });
@@ -97,5 +100,6 @@ int fired_main( //
   return EXIT_SUCCESS;
 }
 
+// NOLINTNEXTLINE(misc-const-correctness)
 FIRE(fired_main, "polyinfo: enumerate polyregion backends, devices, features and properties (the device-selection surface). Use -l for a "
                  "clinfo-style listing.")

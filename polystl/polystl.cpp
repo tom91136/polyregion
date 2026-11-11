@@ -13,7 +13,7 @@
 
 // XXX polystl-static bundles polyinvoke + LLVM Support; consumers link via polycpp at runtime
 // without CMake propagation, so pull in the Windows system imports from this object.
-#if defined(_MSC_VER)
+#ifdef _MSC_VER
   #pragma comment(lib, "Version.lib")
   #pragma comment(lib, "psapi.lib")
   #pragma comment(lib, "ntdll.lib")
@@ -43,7 +43,7 @@ POLYREGION_RT_PROTECT static polyrt::SynchronisedMemAllocation allocations(
             .sizeInBytes = meta.size, .offsetInBytes = meta.offset, .hostReadOnly = meta.type == rt_reflect::Type::StaticRodata};
       }
       log(DebugLevel::Debug, "Local: Failed to query %p", ptr);
-      return polyrt::PtrQuery{0, 0};
+      return polyrt::PtrQuery{.sizeInBytes = 0, .offsetInBytes = 0};
     },
     polyrt::sma::stdRemoteAlloc(),   //
     polyrt::sma::stdRemoteRead(),    //
@@ -68,7 +68,9 @@ POLYREGION_DEFINE_SMA_MIRROR_ABI(allocations);
 namespace {
 polyrt::AssertSink g_assert;
 
-polystl::details::AssertRecord toRecord(const polyrt::AssertReason &r) { return {r.raised, r.code, r.message, r.truncated}; }
+polystl::details::AssertRecord toRecord(const polyrt::AssertReason &r) {
+  return {.raised = r.raised, .code = r.code, .message = r.message, .truncated = r.truncated};
+}
 } // namespace
 
 POLYREGION_EXPORT extern "C" void __polyregion_builtin_assert(uint32_t code, const char *message) { g_assert.record(code, message); }
@@ -90,7 +92,7 @@ POLYREGION_EXPORT void polystl::details::dispatchHostThreaded(const size_t globa
   polyrt::bindAssertError(buffer, asserts, errDev);
   buffer.append(Type::Ptr, &functorData);
   polyrt::appendArgTerminator(buffer);
-  polyrt::currentQueue->enqueueInvokeAsync(moduleId, conventions::EntryName, buffer, Policy{Dim3{global, 1, 1}}, {});
+  polyrt::currentQueue->enqueueInvokeAsync(moduleId, conventions::EntryName, buffer, Policy{.global = Dim3{global, 1, 1}}, {});
   polyrt::currentQueue->enqueueWaitBlocking();
   if (asserts) polyrt::reportAssert(polyrt::decodeAssertBuffer(errorBuf.data()), g_assert, __func__, moduleId);
   log(DebugLevel::Debug, "<%s:%s:%zu> Done", __func__, moduleId, global);
@@ -115,7 +117,9 @@ POLYREGION_EXPORT void polystl::details::dispatchManaged(const size_t global, co
     polyrt::appendArgTerminator(buffer);
     polyrt::currentQueue->enqueueInvokeAsync(
         moduleId, conventions::EntryName, buffer, //
-        Policy{Dim3{global, 1, 1}, local > 0 ? std::optional{std::pair{Dim3{local, 1, 1}, localMemBytes}} : std::nullopt}, {});
+        Policy{.global = Dim3{global, 1, 1},
+               .local = local > 0 ? std::optional{std::pair{Dim3{local, 1, 1}, localMemBytes}} : std::nullopt},
+        {});
     log(DebugLevel::Debug, "<%s:%s:%zu> Submitted", __func__, moduleId, global);
     polyrt::currentQueue->enqueueWaitBlocking();
     if (asserts) polyrt::reportAssert(polyrt::readAssertBuffer(*polyrt::currentContext(), errDev), g_assert, __func__, moduleId);
@@ -151,8 +155,8 @@ POLYREGION_EXPORT void polystl::details::dispatchManaged(const size_t global, co
   const uintptr_t preludeResult = useGenerated ? prelude(functorData, layout->sizeInBytes) : 0;
   polyrt::sma::dumpAllocationTable(allocations);
 
-  auto functorDevicePtr = useGenerated ? reinterpret_cast<void *>(preludeResult)
-                                       : reinterpret_cast<void *>(allocations.syncLocalToRemote(functorData, *layout));
+  auto *functorDevicePtr = useGenerated ? reinterpret_cast<void *>(preludeResult)
+                                        : reinterpret_cast<void *>(allocations.syncLocalToRemote(functorData, *layout));
   auto buffer = newBuffer();
   bindError(buffer);
   if (localMemBytes > 0) buffer.append(Type::Scratch, nullptr);

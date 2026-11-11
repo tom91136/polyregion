@@ -59,7 +59,7 @@ class AddressRefinementSuite extends munit.FunSuite {
           pointer,
           Some(p.Expr.RefTo(selectT(value), None, p.Type.IntS32, p.Type.Space.Global, p.Region.Opaque))
         ),
-        p.Stmt.Var(out, Some(p.Expr.Index(selectT(pointer), p.Term.IntS64Const(0), p.Type.IntS32)), false)
+        p.Stmt.Var(out, Some(p.Expr.Index(selectT(pointer), p.Term.IntS64Const(0), p.Type.IntS32)))
       ),
       Nil
     )
@@ -74,7 +74,7 @@ class AddressRefinementSuite extends munit.FunSuite {
     val analysis = analyse(
       List(
         p.Stmt.Var(storage, None, isMutable = true),
-        p.Stmt.Var(pointer, Some(p.Expr.Cast(selectT(storage), pointer.tpe)), isMutable = false)
+        p.Stmt.Var(pointer, Some(p.Expr.Cast(selectT(storage), pointer.tpe)))
       ),
       Nil
     )
@@ -89,11 +89,7 @@ class AddressRefinementSuite extends munit.FunSuite {
     val e = entry(
       args = List(p.Arg(cap)),
       body = List(
-        p.Stmt.Var(
-          pointer,
-          Some(p.Expr.RefTo(selectT(cap), None, capTpe, p.Type.Space.Global, p.Region.Opaque)),
-          false
-        ),
+        p.Stmt.Var(pointer, Some(p.Expr.RefTo(selectT(cap), None, capTpe, p.Type.Space.Global, p.Region.Opaque))),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       )
     )
@@ -116,11 +112,10 @@ class AddressRefinementSuite extends munit.FunSuite {
       List(
         p.Stmt.Var(
           a,
-          Some(p.Expr.Alias(p.Term.Select(cap, List(p.PathStep.Field("data")), ptrTpe))),
-          isMutable = false
+          Some(p.Expr.Alias(p.Term.Select(cap, List(p.PathStep.Field("data")), ptrTpe)))
         ),
-        p.Stmt.Var(b, Some(p.Expr.Alias(selectT(a))), isMutable = false),
-        p.Stmt.Var(out, Some(p.Expr.Index(selectT(b), p.Term.IntS64Const(0), p.Type.IntS32)), false)
+        p.Stmt.Var(b, Some(p.Expr.Alias(selectT(a)))),
+        p.Stmt.Var(out, Some(p.Expr.Index(selectT(b), p.Term.IntS64Const(0), p.Type.IntS32)))
       ),
       List(p.Arg(cap))
     )
@@ -184,25 +179,13 @@ class AddressRefinementSuite extends munit.FunSuite {
     val e = entry(
       args = views.map(p.Arg(_)),
       body = List(
-        p.Stmt.Var(
-          loaded,
-          Some(p.Expr.Index(selectT(addressView), p.Term.IntS64Const(0), p.Type.IntS64)),
-          false
-        ),
+        p.Stmt.Var(loaded, Some(p.Expr.Index(selectT(addressView), p.Term.IntS64Const(0), p.Type.IntS64))),
         p.Stmt.Var(carrier, Some(p.Expr.Alias(p.Term.IntS64Const(0))), true),
         p.Stmt.Mut(selectT(carrier), p.Expr.Alias(selectT(loaded))),
-        p.Stmt.Var(offset, Some(p.Expr.OffsetOf(derivedTpe, "#base_Base")), false),
-        p.Stmt.Var(
-          address,
-          Some(p.Expr.IntrOp(p.Intr.Add(selectT(carrier), selectT(offset), p.Type.IntS64))),
-          false
-        ),
-        p.Stmt.Var(pointer, Some(p.Expr.Cast(selectT(address), pointer.tpe)), false),
-        p.Stmt.Var(
-          value,
-          Some(p.Expr.Alias(p.Term.Select(pointer, List(p.PathStep.Field("value")), p.Type.IntS32))),
-          false
-        ),
+        p.Stmt.Var(offset, Some(p.Expr.OffsetOf(derivedTpe, "#base_Base"))),
+        p.Stmt.Var(address, Some(p.Expr.IntrOp(p.Intr.Add(selectT(carrier), selectT(offset), p.Type.IntS64)))),
+        p.Stmt.Var(pointer, Some(p.Expr.Cast(selectT(address), pointer.tpe))),
+        p.Stmt.Var(value, Some(p.Expr.Alias(p.Term.Select(pointer, List(p.PathStep.Field("value")), p.Type.IntS32)))),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       )
     )
@@ -238,10 +221,9 @@ class AddressRefinementSuite extends munit.FunSuite {
               p.Type.Space.Private,
               p.Region.Opaque
             )
-          ),
-          false
+          )
         ),
-        p.Stmt.Var(value, Some(p.Expr.Index(selectT(pointer), p.Term.IntS64Const(0), p.Type.IntS32)), false)
+        p.Stmt.Var(value, Some(p.Expr.Index(selectT(pointer), p.Term.IntS64Const(0), p.Type.IntS32)))
       ),
       List(p.Arg(cap))
     )
@@ -264,11 +246,7 @@ class AddressRefinementSuite extends munit.FunSuite {
     val e = entry(
       args = List(p.Arg(cap)),
       body = List(
-        p.Stmt.Var(
-          derived,
-          Some(p.Expr.Alias(p.Term.Select(cap, List(p.PathStep.Field("derived")), derivedPtr))),
-          false
-        ),
+        p.Stmt.Var(derived, Some(p.Expr.Alias(p.Term.Select(cap, List(p.PathStep.Field("derived")), derivedPtr)))),
         p.Stmt.Var(
           adjusted,
           Some(
@@ -279,14 +257,9 @@ class AddressRefinementSuite extends munit.FunSuite {
               p.Type.Space.Global,
               p.Region.Opaque
             )
-          ),
-          false
+          )
         ),
-        p.Stmt.Var(
-          value,
-          Some(p.Expr.Alias(p.Term.Select(adjusted, List(p.PathStep.Field("value")), p.Type.IntS32))),
-          false
-        ),
+        p.Stmt.Var(value, Some(p.Expr.Alias(p.Term.Select(adjusted, List(p.PathStep.Field("value")), p.Type.IntS32)))),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       )
     )
@@ -347,11 +320,7 @@ class AddressRefinementSuite extends munit.FunSuite {
     val adjusted   = named("adjusted", basePtr)
     val e = entry(
       body = List(
-        p.Stmt.Var(
-          pointer,
-          Some(p.Expr.Alias(p.Term.NullPtrConst(derivedTpe, p.Type.Space.Global, p.Region.Opaque))),
-          false
-        ),
+        p.Stmt.Var(pointer, Some(p.Expr.Alias(p.Term.NullPtrConst(derivedTpe, p.Type.Space.Global, p.Region.Opaque)))),
         p.Stmt.Var(
           adjusted,
           Some(
@@ -362,8 +331,7 @@ class AddressRefinementSuite extends munit.FunSuite {
               p.Type.Space.Global,
               p.Region.Opaque
             )
-          ),
-          false
+          )
         ),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       )
@@ -405,7 +373,7 @@ class AddressRefinementSuite extends munit.FunSuite {
             )
           )
         ),
-        p.Stmt.Var(out, Some(p.Expr.Index(selectT(pointer), p.Term.IntS64Const(0), p.Type.IntS32)), false)
+        p.Stmt.Var(out, Some(p.Expr.Index(selectT(pointer), p.Term.IntS64Const(0), p.Type.IntS32)))
       ),
       List(p.Arg(cap), p.Arg(condition))
     )
@@ -432,7 +400,7 @@ class AddressRefinementSuite extends munit.FunSuite {
           ),
           Nil
         ),
-        p.Stmt.Var(out, Some(p.Expr.Index(selectT(pointer), p.Term.IntS64Const(0), p.Type.IntS32)), false)
+        p.Stmt.Var(out, Some(p.Expr.Index(selectT(pointer), p.Term.IntS64Const(0), p.Type.IntS32)))
       ),
       List(p.Arg(cap), p.Arg(condition))
     )
@@ -457,7 +425,7 @@ class AddressRefinementSuite extends munit.FunSuite {
             )
           )
         ),
-        p.Stmt.Var(out, Some(p.Expr.Index(selectT(pointer), p.Term.IntS64Const(0), p.Type.IntS32)), false)
+        p.Stmt.Var(out, Some(p.Expr.Index(selectT(pointer), p.Term.IntS64Const(0), p.Type.IntS32)))
       ),
       List(p.Arg(cap), p.Arg(condition))
     )
@@ -555,8 +523,7 @@ class AddressRefinementSuite extends munit.FunSuite {
               p.Type.Space.Global,
               p.Region.Opaque
             )
-          ),
-          false
+          )
         ),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       )
@@ -599,7 +566,7 @@ class AddressRefinementSuite extends munit.FunSuite {
           field(writeAt),
           p.Expr.Alias(p.Term.Select(cap, List(p.PathStep.Field("data")), ptrTpe))
         ),
-        p.Stmt.Var(pointer, Some(p.Expr.Alias(field(readAt))), false),
+        p.Stmt.Var(pointer, Some(p.Expr.Alias(field(readAt)))),
         p.Stmt.Update(selectT(pointer), p.Term.IntS64Const(0), p.Term.IntS32Const(1)),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       )
@@ -644,8 +611,7 @@ class AddressRefinementSuite extends munit.FunSuite {
               p.Type.Space.Private,
               p.Region.Opaque
             )
-          ),
-          false
+          )
         ),
         p.Stmt.Mut(
           p.Term.Select(owner, List(p.PathStep.Field("counter")), ptrTpe),
@@ -662,8 +628,7 @@ class AddressRefinementSuite extends munit.FunSuite {
                 ptrTpe
               )
             )
-          ),
-          false
+          )
         ),
         p.Stmt.Update(selectT(pointer), p.Term.IntS64Const(0), p.Term.IntS32Const(1)),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
@@ -708,8 +673,7 @@ class AddressRefinementSuite extends munit.FunSuite {
                     p.Term.IntS64Const(0),
                     ptrTpe
                   )
-                ),
-                false
+                )
               ),
               p.Stmt.Update(selectT(loaded), p.Term.IntS64Const(0), p.Term.IntS32Const(1)),
               p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
@@ -747,15 +711,13 @@ class AddressRefinementSuite extends munit.FunSuite {
       List(
         p.Stmt.Var(
           pointer,
-          Some(p.Expr.Alias(p.Term.Select(cap, List(p.PathStep.Field("data")), ptrTpe))),
-          false
+          Some(p.Expr.Alias(p.Term.Select(cap, List(p.PathStep.Field("data")), ptrTpe)))
         ),
         p.Stmt.Var(
           ref,
-          Some(p.Expr.RefTo(selectT(pointer), None, ptrTpe, p.Type.Space.Private, p.Region.Rooted(pointer))),
-          false
+          Some(p.Expr.RefTo(selectT(pointer), None, ptrTpe, p.Type.Space.Private, p.Region.Rooted(pointer)))
         ),
-        p.Stmt.Var(loaded, Some(p.Expr.Index(selectT(ref), p.Term.IntS64Const(0), ptrTpe)), false)
+        p.Stmt.Var(loaded, Some(p.Expr.Index(selectT(ref), p.Term.IntS64Const(0), ptrTpe)))
       ),
       List(p.Arg(cap))
     )
@@ -786,8 +748,8 @@ class AddressRefinementSuite extends munit.FunSuite {
     val out     = named("out", p.Type.IntS32)
     val analysis = analyse(
       List(
-        p.Stmt.Var(pointer, Some(p.Expr.ForeignCall("unknown_pointer", Nil, ptrTpe)), false),
-        p.Stmt.Var(out, Some(p.Expr.Index(selectT(pointer), p.Term.IntS64Const(0), p.Type.IntS32)), false)
+        p.Stmt.Var(pointer, Some(p.Expr.ForeignCall("unknown_pointer", Nil, ptrTpe))),
+        p.Stmt.Var(out, Some(p.Expr.Index(selectT(pointer), p.Term.IntS64Const(0), p.Type.IntS32)))
       ),
       List(p.Arg(cap))
     )
@@ -822,10 +784,9 @@ class AddressRefinementSuite extends munit.FunSuite {
               List(p.Term.Select(cap, List(p.PathStep.Field("data")), ptrTpe)),
               ptrTpe
             )
-          ),
-          false
+          )
         ),
-        p.Stmt.Var(out, Some(p.Expr.Index(selectT(returned), p.Term.IntS64Const(0), p.Type.IntS32)), false),
+        p.Stmt.Var(out, Some(p.Expr.Index(selectT(returned), p.Term.IntS64Const(0), p.Type.IntS32))),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       )
     )
@@ -858,18 +819,10 @@ class AddressRefinementSuite extends munit.FunSuite {
     val e = entry(
       args = List(p.Arg(cap), p.Arg(external)),
       body = List(
-        p.Stmt.Var(
-          arenaResult,
-          Some(invoke(p.Term.Select(cap, List(p.PathStep.Field("data")), ptrTpe))),
-          false
-        ),
-        p.Stmt.Var(nativeResult, Some(invoke(selectT(external))), false),
-        p.Stmt.Var(arenaValue, Some(p.Expr.Index(selectT(arenaResult), p.Term.IntS64Const(0), p.Type.IntS32)), false),
-        p.Stmt.Var(
-          nativeValue,
-          Some(p.Expr.Index(selectT(nativeResult), p.Term.IntS64Const(0), p.Type.IntS32)),
-          false
-        ),
+        p.Stmt.Var(arenaResult, Some(invoke(p.Term.Select(cap, List(p.PathStep.Field("data")), ptrTpe)))),
+        p.Stmt.Var(nativeResult, Some(invoke(selectT(external)))),
+        p.Stmt.Var(arenaValue, Some(p.Expr.Index(selectT(arenaResult), p.Term.IntS64Const(0), p.Type.IntS32))),
+        p.Stmt.Var(nativeValue, Some(p.Expr.Index(selectT(nativeResult), p.Term.IntS64Const(0), p.Type.IntS32))),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       )
     )
@@ -920,10 +873,9 @@ class AddressRefinementSuite extends munit.FunSuite {
               List(p.Term.Select(cap, List(p.PathStep.Field("data")), ptrTpe)),
               ptrTpe
             )
-          ),
-          false
+          )
         ),
-        p.Stmt.Var(out, Some(p.Expr.Index(selectT(returned), p.Term.IntS64Const(0), p.Type.IntS32)), false),
+        p.Stmt.Var(out, Some(p.Expr.Index(selectT(returned), p.Term.IntS64Const(0), p.Type.IntS32))),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       )
     )
@@ -970,18 +922,10 @@ class AddressRefinementSuite extends munit.FunSuite {
     val e = entry(
       args = List(p.Arg(cap), p.Arg(external)),
       body = List(
-        p.Stmt.Var(
-          arenaResult,
-          Some(invoke(p.Term.Select(cap, List(p.PathStep.Field("data")), ptrTpe))),
-          false
-        ),
-        p.Stmt.Var(nativeResult, Some(invoke(selectT(external))), false),
-        p.Stmt.Var(arenaValue, Some(p.Expr.Index(selectT(arenaResult), p.Term.IntS64Const(0), p.Type.IntS32)), false),
-        p.Stmt.Var(
-          nativeValue,
-          Some(p.Expr.Index(selectT(nativeResult), p.Term.IntS64Const(0), p.Type.IntS32)),
-          false
-        ),
+        p.Stmt.Var(arenaResult, Some(invoke(p.Term.Select(cap, List(p.PathStep.Field("data")), ptrTpe)))),
+        p.Stmt.Var(nativeResult, Some(invoke(selectT(external)))),
+        p.Stmt.Var(arenaValue, Some(p.Expr.Index(selectT(arenaResult), p.Term.IntS64Const(0), p.Type.IntS32))),
+        p.Stmt.Var(nativeValue, Some(p.Expr.Index(selectT(nativeResult), p.Term.IntS64Const(0), p.Type.IntS32))),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       )
     )
@@ -1003,7 +947,7 @@ class AddressRefinementSuite extends munit.FunSuite {
     val pointer = named("pointer", ptrTpe)
     val e = entry(
       body = List(
-        p.Stmt.Var(pointer, Some(p.Expr.ForeignCall("unknown_pointer", Nil, ptrTpe)), false),
+        p.Stmt.Var(pointer, Some(p.Expr.ForeignCall("unknown_pointer", Nil, ptrTpe))),
         p.Stmt.Return(p.Expr.Alias(selectT(pointer)))
       )
     ).modifyDecl(_.copy(rtn = ptrTpe))
@@ -1028,7 +972,7 @@ class AddressRefinementSuite extends munit.FunSuite {
           List(p.Stmt.Mut(selectT(pointer), p.Expr.Cast(selectT(local), ptrTpe))),
           List(p.Stmt.Mut(selectT(pointer), p.Expr.Alias(selectT(global))))
         ),
-        p.Stmt.Var(out, Some(p.Expr.Index(selectT(pointer), p.Term.IntS64Const(0), p.Type.IntS32)), false),
+        p.Stmt.Var(out, Some(p.Expr.Index(selectT(pointer), p.Term.IntS64Const(0), p.Type.IntS32))),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       )
     )
@@ -1063,8 +1007,7 @@ class AddressRefinementSuite extends munit.FunSuite {
                 p.Type.IntS32
               )
             )
-          ),
-          false
+          )
         ),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       )

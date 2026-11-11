@@ -88,13 +88,15 @@ object Pickler {
     case class Member[A](tpe: p.Type, sizeInBytes: Long, offsetInBytes: Long, select: A => A)
   }
 
-  private def mkStructMapping(using q: Quoted)( //
+  @SuppressWarnings(Array("bonsai:complexity"))
+  private def mkStructMapping(using
+      q: Quoted
+  )( //
       sdef: p.StructDef,
       layouts: Map[p.StructDef, (ct.Layout, Option[polyregion.prism.Prism])]
   ): StructMapping[q.Term] = {
-    val (layout, maybePrism) = layouts
-      .get(sdef)
-      .getOrElse(q.report.errorAndAbort(s"Unseen sdef ${sdef.repr}, known reprs: ${layouts}"))
+    val (layout, maybePrism) =
+      layouts.getOrElse(sdef, q.report.errorAndAbort(s"Unseen sdef ${sdef.repr}, known reprs: ${layouts}"))
     val layoutTable = layout.members.map(m => m.name -> m).toMap
     val members = sdef.members.map { named =>
       val fieldName = named.symbol
@@ -135,7 +137,9 @@ object Pickler {
     StructMapping(sdef, layout.sizeInBytes, write, read, members)
   }
 
-  def deriveAllRepr(using q: Quoted)( //
+  def deriveAllRepr(using
+      q: Quoted
+  )( //
       lut: Map[p.Sym, (p.StructDef, Option[polyregion.prism.Prism])],
       sdef: p.StructDef,
       repr: q.TypeRepr
@@ -203,7 +207,9 @@ object Pickler {
     }
   )
 
-  def generateAll(using q: Quoted)(
+  def generateAll(using
+      q: Quoted
+  )(
       lut: Map[p.Sym, p.StructDef],
       layouts: Map[p.StructDef, (ct.Layout, Option[polyregion.prism.Prism])],
       reprs: Map[p.StructDef, q.TypeRepr],
@@ -225,46 +231,34 @@ object Pickler {
     // to the kernel anyway) lets all instantiations call the same method safely.
     def methodParamRepr(sdef: p.StructDef, repr: q.TypeRepr): q.TypeRepr =
       if (sdef.members.isEmpty) q.TypeRepr.of[Any] else repr
+    def methodSyms(prefix: String, rtn: (p.StructDef, q.TypeRepr) => q.TypeRepr)(
+        extra: => Seq[(String, q.TypeRepr)]
+    ): Map[p.Sym, q.Symbol] =
+      reprs.toList
+        .map((sdef, repr) =>
+          sdef.name -> mkMethodSym(
+            s"${prefix}_${sdef.name.fqcn}",
+            rtn(sdef, repr),
+            (("root" -> methodParamRepr(sdef, repr)) +: extra)*
+          )
+        )
+        .toMap
     // Index by struct name (p.Sym) rather than StructDef instance: callers' `lut(name)` can return
     // a StructDef whose `parents` (or other derived fields) differ from the one stored in `reprs`,
     // even when they refer to the same logical type — using the name as the key avoids that
     // identity mismatch.
-    val writeSymbols: Map[p.Sym, q.Symbol] = reprs.toList
-      .map((sdef, repr) =>
-        sdef.name -> mkMethodSym(
-          s"write_${sdef.name.fqcn}",
-          q.TypeRepr.of[Long],
-          "root"   -> methodParamRepr(sdef, repr),
-          "ptrMap" -> q.TypeRepr.of[PtrMapTpe]
-        )
-      )
-      .toMap
+    val writeSymbols: Map[p.Sym, q.Symbol] = methodSyms("write", (_, _) => q.TypeRepr.of[Long])(
+      Seq("ptrMap" -> q.TypeRepr.of[PtrMapTpe])
+    )
 
-    val readSymbols: Map[p.Sym, q.Symbol] = reprs.toList
-      .map((sdef, repr) =>
-        sdef.name -> mkMethodSym(
-          s"read_${sdef.name.fqcn}",
-          methodParamRepr(sdef, repr),
-          "root"   -> methodParamRepr(sdef, repr),
-          "ptr"    -> q.TypeRepr.of[Long],
-          "ptrMap" -> q.TypeRepr.of[PtrMapTpe],
-          "objMap" -> q.TypeRepr.of[ObjMapTpe]
-        )
-      )
-      .toMap
+    def ptrArgs: Seq[(String, q.TypeRepr)] = Seq(
+      "ptr"    -> q.TypeRepr.of[Long],
+      "ptrMap" -> q.TypeRepr.of[PtrMapTpe],
+      "objMap" -> q.TypeRepr.of[ObjMapTpe]
+    )
 
-    val updateSymbols: Map[p.Sym, q.Symbol] = reprs.toList
-      .map((sdef, repr) =>
-        sdef.name -> mkMethodSym(
-          s"update_${sdef.name.fqcn}",
-          q.TypeRepr.of[Unit],
-          "root"   -> methodParamRepr(sdef, repr),
-          "ptr"    -> q.TypeRepr.of[Long],
-          "ptrMap" -> q.TypeRepr.of[PtrMapTpe],
-          "objMap" -> q.TypeRepr.of[ObjMapTpe]
-        )
-      )
-      .toMap
+    val readSymbols: Map[p.Sym, q.Symbol]   = methodSyms("read", methodParamRepr)(ptrArgs)
+    val updateSymbols: Map[p.Sym, q.Symbol] = methodSyms("update", (_, _) => q.TypeRepr.of[Unit])(ptrArgs)
 
     def allocateBuffer(size: Expr[Int]) = '{ ByteBuffer.allocateDirect($size).order(ByteOrder.nativeOrder()) }
 
@@ -278,9 +272,27 @@ object Pickler {
       q.Apply(q.Ref(updateSymbols(name)), List(root.asTerm, ptr.asTerm, ptrMap.asTerm, objMap.asTerm))
         .asExprOf[Unit]
 
+    def copyStructInto(target: Expr[ByteBuffer], byteOffset: Expr[Int], ptr: Expr[Long], size: Int): Expr[Unit] = '{
+      val srcBuf = $bufferOfPointer($ptr, ${ Expr(size) }.toLong)
+      val tmp    = new Array[Byte](${ Expr(size) })
+      srcBuf.duplicate().get(tmp)
+      val dst = $target.duplicate()
+      dst.position($byteOffset)
+      dst.put(tmp)
+      ()
+    }
+
     // Moved up so writeArray/readArray can access struct mappings (for inline-struct array ABI).
     val mappings: Map[p.Sym, StructMapping[q.Term]] =
       reprs.keys.map(mkStructMapping(_, layouts)).map(m => m.source.name -> m).toMap
+
+    def dumpTarget(marker: String, buffer: Expr[ByteBuffer]) = '{
+      if (sys.env.contains(Env.PolyregionDebug)) {
+        val array = new Array[Byte]($buffer.remaining())
+        $buffer.duplicate().get(array)
+        println(s"${${ Expr(marker) }} target => 0x${array.map(byte => f"$byte%02x").mkString(" ")}")
+      }
+    }
 
     def writeArray[t: Type](expr: Expr[StdLib.MutableSeq[t]], comp: p.Type, ptrMap: Expr[PtrMapTpe]): Expr[Long] = {
       // Kernel ABI for arrays of structs: elements are stored INLINE (struct bytes packed into the
@@ -318,15 +330,10 @@ object Pickler {
                   // BaseSuite.offload1) we leave the slot zeroed since the kernel will overwrite it.
                   '{
                     val elem = $expr(i)
-                    if (elem != null) {
-                      val structPtr = ${ callWrite(name, 'elem, ptrMap) }
-                      val srcBuf    = $bufferOfPointer(structPtr, ${ Expr(elementSizeInBytes) }.toLong)
-                      val tmp       = new Array[Byte](${ Expr(elementSizeInBytes) })
-                      srcBuf.duplicate().get(tmp)
-                      val dst = arrBuffer.duplicate()
-                      dst.position($elementOffset)
-                      dst.put(tmp)
-                    }
+                    if (elem != null)
+                      ${
+                        copyStructInto('arrBuffer, elementOffset, callWrite(name, 'elem, ptrMap), elementSizeInBytes)
+                      }
                     ()
                   }
                 case t =>
@@ -368,16 +375,12 @@ object Pickler {
               // (matches the kernel's `functionBoundary=false` member layout). callWrite
               // produces a struct-sized buffer; memcpy its bytes into the parent slot.
               val nestedSize = layouts(lut(name))._1.sizeInBytes.toInt
-              '{
-                val nestedPtr = ${ callWrite(name, m.select(rootAfterPrism.asTerm).asExpr, ptrMap) }
-                val srcBuf    = $bufferOfPointer(nestedPtr, ${ Expr(nestedSize) }.toLong)
-                val tmp       = new Array[Byte](${ Expr(nestedSize) })
-                srcBuf.duplicate().get(tmp)
-                val dst = buffer.duplicate()
-                dst.position($memberOffset)
-                dst.put(tmp)
-                ()
-              }
+              copyStructInto(
+                'buffer,
+                memberOffset,
+                callWrite(name, m.select(rootAfterPrism.asTerm).asExpr, ptrMap),
+                nestedSize
+              )
             case (_, p.Type.Struct(_, _)) =>
               // Opaque struct member (e.g. scala.Option) — kernel doesn't access this field;
               // skip (the inline layout has no slot for it anyway).
@@ -392,14 +395,7 @@ object Pickler {
         })
       }
 
-      def toByteArray(buffer: ByteBuffer): Array[Byte] = {
-        val array = new Array[Byte](buffer.remaining())
-        buffer.duplicate().get(array)
-        array
-      }
-
-      if (sys.env.contains(Env.PolyregionDebug))
-        println(s"??? target => 0x${toByteArray(buffer).map(byte => f"$byte%02x").mkString(" ")}")
+      ${ dumpTarget("???", 'buffer) }
       $ptrMap += ($root -> ptr)
       ptr
     }
@@ -475,14 +471,7 @@ object Pickler {
       if (sys.env.contains(Env.PolyregionDebug))
         println(s"[marshal]: update object  ${$root} <- $buffer(0x${$ptr.toHexString})")
 
-      def toByteArray(buffer: ByteBuffer): Array[Byte] = {
-        val array = new Array[Byte](buffer.remaining())
-        buffer.duplicate().get(array)
-        array
-      }
-
-      if (sys.env.contains(Env.PolyregionDebug))
-        println(s">>> target => 0x${toByteArray(buffer).map(byte => f"$byte%02x").mkString(" ")}")
+      ${ dumpTarget(">>>", 'buffer) }
 
       ${
         Varargs(
@@ -652,6 +641,22 @@ object Pickler {
       case List(root: q.Term, ptr: q.Term, ptrMap: q.Term, objMap: q.Term) =>
         ((root.asExpr, ptr.asExpr, ptrMap.asExpr, objMap.asExpr): @unchecked) match {
           case ('{ $rootExpr: t }, '{ $ptrExpr: Long }, '{ $ptrMap: PtrMapTpe }, '{ $objMap: ObjMapTpe }) =>
+            def readThroughPrism(readPtr: Expr[Long], write: q.Term => q.Term, read: q.Term => q.Term): Expr[Any] =
+              // XXX To derive the type of the prism's mirror, we need to  reconstruct it from the mirror's symbol.
+              // However, synthesising the TypeRepr for non-trivial types (e.g Seq[A], or (A,B)) is hard to get right.
+              // In theory, something like  `q.TypeIdent(q.Symbol.requiredClass(mirror.struct.name.fqcn))` should work
+              // but most often then not we get a symbol that exists but does not have a tree.
+
+              // As a workaround to all this, we simply instantiate the write prism with a dummy term of the correct type
+              // and then extract the return type that way. The instantiated tree will never spliced anywhere so it safe to do so.
+
+              write(rootExpr.asTerm).tpe.widenTermRefByName.asType match {
+                case '[t] =>
+                  '{
+                    val restored = ${ readMapping[t](readPtr, ptrMap, objMap, mapping) }
+                    ${ read('restored.asTerm).asExpr }
+                  }
+              }
             '{
               val root: t = $rootExpr
               ($ptrMap.get(root), $ptrExpr) match {
@@ -660,22 +665,7 @@ object Pickler {
                   ${
                     // If we have a prism, then a full read is required as we need a concrete instance.
                     (mapping.write, mapping.read) match {
-                      case (Some((_, write)), Some((mirror, read))) =>
-                        // XXX To derive the type of the prism's mirror, we need to  reconstruct it from the mirror's symbol.
-                        // However, synthesising the TypeRepr for non-trivial types (e.g Seq[A], or (A,B)) is hard to get right.
-                        // In theory, something like  `q.TypeIdent(q.Symbol.requiredClass(mirror.struct.name.fqcn))` should work
-                        // but most often then not we get a symbol that exists but does not have a tree.
-
-                        // As a workaround to all this, we simply instantiate the write prism with a dummy term of the correct type
-                        // and then extract the return type that way. The instantiated tree will never spliced anywhere so it safe to do so.
-
-                        write(rootExpr.asTerm).tpe.widenTermRefByName.asType match {
-                          case '[t] =>
-                            '{
-                              val restored = ${ readMapping[t]('readPtr, ptrMap, objMap, mapping) }
-                              ${ read('restored.asTerm).asExpr }
-                            }
-                        }
+                      case (Some((_, write)), Some((mirror, read))) => readThroughPrism('readPtr, write, read)
                       case (_, None) => '{ ${ updateMapping('root, 'readPtr, ptrMap, objMap, mapping) }; root }
                       case _         => ???
                     }
@@ -693,23 +683,9 @@ object Pickler {
                       ${
                         (mapping.write, mapping.read) match {
                           case (Some((_, write)), Some((mirror, read))) =>
-                            // XXX To derive the type of the prism's mirror, we need to reconstruct it from the mirror's symbol.
-                            // However, synthesising the TypeRepr for non-trivial types (e.g Seq[A], or (A,B)) is hard to get right.
-                            // In theory, something like  `q.TypeIdent(q.Symbol.requiredClass(mirror.struct.name.fqcn))` should work
-                            // but most often then not we get a symbol that exists but does not have a tree.
-
-                            // As a workaround to all this, we simply instantiate the write prism with a dummy term of the correct type
-                            // and then extract the return type that way. The instantiated tree will never spliced anywhere so it safe to do so.
-
                             debug(s"sss = ${rootExpr.asTerm.tpe.widenTermRefByName.show}")
                             debug(s"sss = ${write(rootExpr.asTerm).tpe.widenTermRefByName.show}")
-                            write(rootExpr.asTerm).tpe.widenTermRefByName.asType match {
-                              case '[t] =>
-                                '{
-                                  val restored = ${ readMapping[t]('readPtr, ptrMap, objMap, mapping) }
-                                  ${ read('restored.asTerm).asExpr }
-                                }
-                            }
+                            readThroughPrism('readPtr, write, read)
                           case (_, None) => readMapping[t]('readPtr, ptrMap, objMap, mapping)
                           case _         => ???
                         }

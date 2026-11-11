@@ -68,7 +68,7 @@ final case class RecursionLower(maxDepth: Int = 1024) extends ProgramPass derive
     else {
       val loweredByName = byName ++ recComps.flatten.distinct.flatMap { name =>
         val f = byName(name)
-        Option.when(f.collectFirst_[p.Stmt] { case _: p.Stmt.Try => () }.isDefined)(
+        Option.when(f.collectFirst_[p.Stmt] { case p.Stmt.Try(_, _, _) => () }.isDefined)(
           name -> StructuredExit.lowerHandledFunction(f, program.defs, log)
         )
       }
@@ -150,7 +150,7 @@ final case class RecursionLower(maxDepth: Int = 1024) extends ProgramPass derive
     def mergedArgs(j: Int, callArgs: List[p.Term]): List[p.Term] = i32c(j) :: callArgs
 
     def memberBody(m: p.Function, i: Int): List[p.Stmt] = {
-      val paramRename             = m.args.zipWithIndex.map((a, j) => a.named.symbol -> sharedParams(j)).toMap
+      val paramRename             = m.args.map(_.named.symbol).zip(sharedParams).toMap
       val prefix                  = s"_m${i}_"
       def rn(n: p.Named): p.Named = paramRename.getOrElse(n.symbol, p.Named(prefix + n.symbol, n.tpe))
       m.body
@@ -167,8 +167,9 @@ final case class RecursionLower(maxDepth: Int = 1024) extends ProgramPass derive
         }
     }
 
+    val lastIndex = members.size - 1
     val body = members.zipWithIndex.foldRight(List.empty[p.Stmt]) { case ((m, i), elseBr) =>
-      if (i == members.size - 1) memberBody(m, i)
+      if (i == lastIndex) memberBody(m, i)
       else {
         val isName = p.Named(fresh("_scc_is"), bool)
         List(
@@ -208,14 +209,14 @@ final case class RecursionLower(maxDepth: Int = 1024) extends ProgramPass derive
   }
 
   private def returnInLoop(stmts: List[p.Stmt]): Boolean = stmts.exists {
-    case p.Stmt.While(_, b)             => hasReturn(b)
-    case p.Stmt.ForRange(_, _, _, _, b) => hasReturn(b)
-    case p.Stmt.Cond(_, t, e)           => returnInLoop(t) || returnInLoop(e)
-    case p.Stmt.Annotated(i, _, _)      => returnInLoop(List(i))
-    case _                              => false
+    case p.Stmt.While(_, b)        => hasReturn(b)
+    case p.Stmt.ForRange(body = b) => hasReturn(b)
+    case p.Stmt.Cond(_, t, e)      => returnInLoop(t) || returnInLoop(e)
+    case p.Stmt.Annotated(i, _, _) => returnInLoop(List(i))
+    case _                         => false
   }
   private def hasReturn(stmts: List[p.Stmt]): Boolean =
-    stmts.collectWhere[p.Stmt] { case _: p.Stmt.Return => () }.nonEmpty
+    stmts.collectWhere[p.Stmt] { case p.Stmt.Return(_) => () }.nonEmpty
 
   private def transform(f: p.Function): (p.Function, Option[p.StructDef]) =
     if (isTailRecursive(f)) (transformTail(f), None)
@@ -244,10 +245,10 @@ final case class RecursionLower(maxDepth: Int = 1024) extends ProgramPass derive
       case p.Stmt.Return(i: p.Expr.Invoke) if i.calleeName == f.name =>
         require(i.args.sizeIs == locals.size, s"RecursionLower: tail arity mismatch in ${f.name.repr}")
         val temps = i.args.map(a => p.Named(fresh("#tco_arg"), a.tpe))
-        temps.zip(i.args).map((t, a) => p.Stmt.Var(t, Some(alias(a)), isMutable = false)) ++
+        temps.zip(i.args).map((t, a) => p.Stmt.Var(t, Some(alias(a)))) ++
           locals.zip(temps).map((l, t) => p.Stmt.Mut(sel(l), alias(sel(t))))
       case p.Stmt.Return(e) =>
-        List(p.Stmt.Mut(sel(resultN), e), p.Stmt.Mut(sel(contN), alias(p.Term.Bool1Const(false))))
+        List(setVar(resultN, e), setVar(contN, alias(p.Term.Bool1Const(false))))
       case p.Stmt.Cond(c, t, e)       => List(p.Stmt.Cond(c, t.flatMap(repl), e.flatMap(repl)))
       case p.Stmt.Annotated(i, p0, c) => repl(i).map(p.Stmt.Annotated(_, p0, c))
       case other                      => List(other)
@@ -289,7 +290,7 @@ final case class RecursionLower(maxDepth: Int = 1024) extends ProgramPass derive
           emit(curId, Block(acc.reverse, Terminator.Call(ivk.args, resume)))
         case p.Stmt.Return(ivk: p.Expr.Invoke) :: _ if isSelf(ivk) =>
           val t = p.Named(fresh("#rec_tail"), f.rtn)
-          go(p.Stmt.Var(t, Some(ivk), isMutable = false) :: p.Stmt.Return(alias(sel(t))) :: Nil, acc, curId)
+          go(p.Stmt.Var(t, Some(ivk)) :: p.Stmt.Return(alias(sel(t))) :: Nil, acc, curId)
         case p.Stmt.Return(e) :: _ => emit(curId, Block(acc.reverse, Terminator.Ret(e)))
         case p.Stmt.Cond(c, tBr, fBr) :: rest =>
           val contId = if (rest.isEmpty) next else lower(rest, next)
@@ -311,15 +312,15 @@ final case class RecursionLower(maxDepth: Int = 1024) extends ProgramPass derive
           val cmp  = p.Named(fresh("#rec_for"), bool)
           val cmpE = p.Expr.IntrOp(p.Intr.LogicLt(sel(ind), sel(ubV)))
           val desugared = List(
-            p.Stmt.Var(ubV, Some(alias(ub)), isMutable = false),
-            p.Stmt.Var(stV, Some(alias(step)), isMutable = false),
+            p.Stmt.Var(ubV, Some(alias(ub))),
+            p.Stmt.Var(stV, Some(alias(step))),
             p.Stmt.Var(ind, Some(alias(lb)), isMutable = true),
-            p.Stmt.Var(cmp, Some(cmpE), isMutable = true),
+            assignVar(cmp, cmpE),
             p.Stmt.While(
               sel(cmp),
               body ++ List(
                 p.Stmt.Mut(sel(ind), p.Expr.IntrOp(p.Intr.Add(sel(ind), sel(stV), ind.tpe))),
-                p.Stmt.Mut(sel(cmp), cmpE)
+                setVar(cmp, cmpE)
               )
             )
           )

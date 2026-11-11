@@ -151,7 +151,8 @@ object Main {
       selected.foreach { w =>
         println(s"==> ${w.name}")
         try {
-          val groupResults = w.groups.map { g =>
+          val groupResults = Vector.newBuilder[Generator.GroupResult]
+          w.groups.foreach { g =>
             val archive      = Download.fetch(cache, g.source.url)
             val groupWorkDir = work.resolve(w.name).resolve(g.name)
             Download.extract(archive, groupWorkDir, g.source.stripComponents)
@@ -160,9 +161,9 @@ object Main {
             println(
               s"  [probed] ${g.name}: ${probe.functions.size} fns, ${probe.typeSlices.size} types, ${probe.macros.size} macros"
             )
-            Generator.GroupResult(g, probe)
+            groupResults += Generator.GroupResult(g, probe)
           }
-          val output  = Generator.emit(w, groupResults)
+          val output  = Generator.emit(w, groupResults.result())
           val outRoot = out.resolve(w.name)
           val incDir  = outRoot.resolve("include")
           val srcDir  = outRoot.resolve("src")

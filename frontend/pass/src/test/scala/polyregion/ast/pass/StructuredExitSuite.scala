@@ -90,7 +90,7 @@ class StructuredExitSuite extends munit.FunSuite {
     val in  = program(entry(body = List(ret)), functions = List(helper))
     val out = StructuredExit(in, NoopLog)
     assertEquals(out.functions.size, 1)
-    assertEquals(out.functions.head.collectWhere[p.Stmt] { case _: p.Stmt.Try => () }, Nil)
+    assertEquals(out.functions.head.collectWhere[p.Stmt] { case p.Stmt.Try(_, _, _) => () }, Nil)
     assertEquals(out.functions.head.args, helper.args)
   }
 
@@ -236,7 +236,7 @@ class StructuredExitSuite extends munit.FunSuite {
     )
     val out = lower(List(p.Arg(msg)), List(assertion, ret))
 
-    assert(out.entry.collectWhere[p.Stmt] { case _: p.Stmt.While => () }.nonEmpty)
+    assert(out.entry.collectWhere[p.Stmt] { case p.Stmt.While(_, _) => () }.nonEmpty)
     assertEquals(
       out.entry.collectWhere[p.Stmt] { case p.Stmt.Break => () },
       Nil,
@@ -277,7 +277,7 @@ class StructuredExitSuite extends munit.FunSuite {
 
     assertEquals(out.functions, Nil)
     assertEquals(out.entry.args.headOption.map(_.named.symbol), Some(p.Conventions.ErrorArg))
-    assertEquals(out.entry.collectWhere[p.Expr] { case p.Expr.SpecOp(_: p.Spec.Assert) => () }, Nil)
+    assertEquals(out.entry.collectWhere[p.Expr] { case p.Expr.SpecOp(p.Spec.Assert(_, _)) => () }, Nil)
 
     val vm  = Interpreter.Vm(out)
     val err = vm.alloc(4L + limit)
@@ -884,7 +884,7 @@ class StructuredExitSuite extends munit.FunSuite {
 
   test("an asserting lane and a non-asserting lane execute the same collective barriers") {
     val flag    = named("flag", p.Type.Bool1)
-    val barrier = p.Stmt.Var(named("_b", p.Type.Unit0), Some(p.Expr.SpecOp(p.Spec.GpuBarrierLocal)), isMutable = false)
+    val barrier = p.Stmt.Var(named("_b", p.Type.Unit0), Some(p.Expr.SpecOp(p.Spec.GpuBarrierLocal)))
     val out     = lower(List(p.Arg(flag)), List(p.Stmt.Cond(selectT(flag), List(assertStmt()), Nil), barrier, ret))
     def barriersWhen(asserts: Boolean): Long = {
       val vm  = Interpreter.Vm(out)
@@ -907,7 +907,7 @@ class StructuredExitSuite extends munit.FunSuite {
       p.Stmt.Var(c, Some(p.Expr.IntrOp(p.Intr.LogicEq(selectT(i), selectT(assertAt))))),
       p.Stmt.Cond(selectT(c), List(assertStmt()), Nil)
     )
-    val barrier = p.Stmt.Var(named("_b", p.Type.Unit0), Some(p.Expr.SpecOp(p.Spec.GpuBarrierLocal)), isMutable = false)
+    val barrier = p.Stmt.Var(named("_b", p.Type.Unit0), Some(p.Expr.SpecOp(p.Spec.GpuBarrierLocal)))
     val out = lower(
       List(p.Arg(arr), p.Arg(assertAt)),
       List(
@@ -931,7 +931,7 @@ class StructuredExitSuite extends munit.FunSuite {
     val flag    = named("flag", p.Type.Bool1)
     val base    = named("base", i32)
     val j       = named("j", i32)
-    val barrier = p.Stmt.Var(named("_b", p.Type.Unit0), Some(p.Expr.SpecOp(p.Spec.GpuBarrierLocal)), isMutable = false)
+    val barrier = p.Stmt.Var(named("_b", p.Type.Unit0), Some(p.Expr.SpecOp(p.Spec.GpuBarrierLocal)))
     val prog = lower(
       List(p.Arg(out), p.Arg(flag)),
       List(
@@ -957,7 +957,7 @@ class StructuredExitSuite extends munit.FunSuite {
 
   test("an assert inside a barrier-bearing loop is rejected") {
     val i       = named("i", i32)
-    val barrier = p.Stmt.Var(named("_b", p.Type.Unit0), Some(p.Expr.SpecOp(p.Spec.GpuBarrierLocal)), isMutable = false)
+    val barrier = p.Stmt.Var(named("_b", p.Type.Unit0), Some(p.Expr.SpecOp(p.Spec.GpuBarrierLocal)))
     val loop = p.Stmt.ForRange(
       i,
       p.Term.IntS32Const(0),
@@ -969,7 +969,7 @@ class StructuredExitSuite extends munit.FunSuite {
   }
 
   private def barrierStmt: p.Stmt =
-    p.Stmt.Var(named("_b", p.Type.Unit0), Some(p.Expr.SpecOp(p.Spec.GpuBarrierLocal)), isMutable = false)
+    p.Stmt.Var(named("_b", p.Type.Unit0), Some(p.Expr.SpecOp(p.Spec.GpuBarrierLocal)))
 
   private def elementLoop(count: Int, element: p.Named => List[p.Stmt]): p.Stmt = {
     val i = named("i", i32)
@@ -982,10 +982,11 @@ class StructuredExitSuite extends munit.FunSuite {
     val vm      = Interpreter.Vm(lowered)
     val a       = vm.alloc(4L * count)
     val err     = vm.alloc(4L + limit)
+    val arrTpe  = p.Type.Ptr(i32, g)
     val args = lowered.entry.args.map { arg =>
       arg.named.symbol match {
-        case p.Conventions.ErrorArg => errT               -> V.I(err)
-        case _                      => p.Type.Ptr(i32, g) -> V.I(a)
+        case p.Conventions.ErrorArg => errT   -> V.I(err)
+        case _                      => arrTpe -> V.I(a)
       }
     }
     vm.call(p.Conventions.EntryName, args)

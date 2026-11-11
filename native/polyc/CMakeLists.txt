@@ -274,7 +274,7 @@ foreach(_i RANGE ${_last_libdev} 0 -1)
   list(GET POLYREGION_CUDA_LIBDEVICE ${_i} _entry)
   string(REGEX MATCH "^([0-9]+)\\.([0-9]+)\\.[0-9]+:([0-9]+)$" _ "${_entry}")
   string(APPEND POLYREGION_LIBDEVICE_ENTRIES
-    "    {\"libdevice.10.cuda${CMAKE_MATCH_1}-${CMAKE_MATCH_2}.bc\", ${CMAKE_MATCH_3}u},\n")
+    "    {.file = \"libdevice.10.cuda${CMAKE_MATCH_1}-${CMAKE_MATCH_2}.bc\", .minArch = ${CMAKE_MATCH_3}u},\n")
 endforeach()
 configure_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/backend/vendor_libdevice.inc.in"

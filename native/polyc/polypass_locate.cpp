@@ -1,6 +1,11 @@
 #include "polypass_locate.h"
 
+#include <array>
 #include <cstdlib>
+#include <initializer_list>
+#include <optional>
+#include <string>
+#include <string_view>
 
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
@@ -17,7 +22,7 @@ namespace {
 
 const char locateAnchor = 0;
 
-#if defined(_WIN32)
+#ifdef _WIN32
 constexpr char PathSep = ';';
 constexpr auto DsoSuffix = ".dll";
 constexpr auto DsoBasename = "libpolypass.dll";
@@ -41,7 +46,7 @@ String resolveSymlink(String candidate) {
 
 String joinPath(llvm::StringRef dir, std::initializer_list<llvm::StringRef> parts) {
   llvm::SmallString<256> c(dir);
-  for (auto p : parts)
+  for (const auto p : parts)
     llvm::sys::path::append(c, p);
   return c.str().str();
 }
@@ -120,7 +125,7 @@ Vector<PluginRef> resolvePlugins(String &error) {
     error = "bundled plugin has unrecognised extension: " + bundled;
     return {};
   }
-  return {{bundled, *kind}};
+  return {{.path = bundled, .kind = *kind}};
 }
 
 } // namespace polyregion::polypass

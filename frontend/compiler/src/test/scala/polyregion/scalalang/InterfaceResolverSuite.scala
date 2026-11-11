@@ -68,7 +68,7 @@ class InterfaceResolverSuite extends munit.FunSuite {
       publicName,
       Nil,
       None,
-      List(p.Arg(p.Named("x", i32), None)),
+      List(p.Arg(p.Named("x", i32))),
       Nil,
       Nil,
       i32,
@@ -135,7 +135,7 @@ class InterfaceResolverSuite extends munit.FunSuite {
       p.Sym("bar.apply"),
       List(p.Type.Var("T")),
       None,
-      List(p.Arg(p.Named("x", p.Type.Var("T")), None), p.Arg(p.Named("op", operation), None)),
+      List(p.Arg(p.Named("x", p.Type.Var("T"))), p.Arg(p.Named("op", operation))),
       Nil,
       Nil,
       p.Type.Var("T"),
@@ -145,7 +145,7 @@ class InterfaceResolverSuite extends munit.FunSuite {
       p.Sym("bar.implementation.apply"),
       List(p.Type.Var("Element"), p.Type.Var("Op")),
       None,
-      List(p.Arg(p.Named("x", element), None), p.Arg(p.Named("op", p.Type.Var("Op")), None)),
+      List(p.Arg(p.Named("x", element)), p.Arg(p.Named("op", p.Type.Var("Op")))),
       Nil,
       Nil,
       element,
@@ -164,7 +164,7 @@ class InterfaceResolverSuite extends munit.FunSuite {
       callableName,
       Nil,
       None,
-      List(p.Arg(p.Named("x", i32), None)),
+      List(p.Arg(p.Named("x", i32))),
       Nil,
       Nil,
       i32,
@@ -201,7 +201,7 @@ class InterfaceResolverSuite extends munit.FunSuite {
       publicName,
       List(p.Type.Var("T")),
       None,
-      List(p.Arg(p.Named("in", p.Type.Ptr(p.Type.Var("T"), p.Type.Space.Global)), None)),
+      List(p.Arg(p.Named("in", p.Type.Ptr(p.Type.Var("T"), p.Type.Space.Global)))),
       Nil,
       Nil,
       p.Type.Unit0,
@@ -210,7 +210,7 @@ class InterfaceResolverSuite extends munit.FunSuite {
     val implementationDecl = publicDecl.copy(
       name = p.Sym("bar.implementation.copy_w4"),
       tpeVars = List(p.Type.Var("Element", Some(4))),
-      args = List(p.Arg(p.Named("in", p.Type.Ptr(element, p.Type.Space.Global)), None))
+      args = List(p.Arg(p.Named("in", p.Type.Ptr(element, p.Type.Space.Global))))
     )
     val implementation = p.Function(
       implementationDecl,
@@ -248,7 +248,7 @@ class InterfaceResolverSuite extends munit.FunSuite {
         publicName,
         List(p.Type.Var("T")),
         None,
-        List(p.Arg(p.Named("value", publicArg), None)),
+        List(p.Arg(p.Named("value", publicArg))),
         Nil,
         Nil,
         p.Type.Unit0,
@@ -257,7 +257,7 @@ class InterfaceResolverSuite extends munit.FunSuite {
       val implementationDecl = publicDecl.copy(
         name = p.Sym(s"bar.implementation.$name"),
         tpeVars = List(p.Type.Var("Element", Some(pointerWidth))),
-        args = List(p.Arg(p.Named("value", implementationArg), None))
+        args = List(p.Arg(p.Named("value", implementationArg)))
       )
       val implementation = p.Function(
         implementationDecl,
@@ -300,7 +300,7 @@ class InterfaceResolverSuite extends munit.FunSuite {
       p.Sym("bar.identity"),
       List(p.Type.Var("T")),
       None,
-      List(p.Arg(p.Named("x", tpe), None)),
+      List(p.Arg(p.Named("x", tpe))),
       Nil,
       Nil,
       tpe,

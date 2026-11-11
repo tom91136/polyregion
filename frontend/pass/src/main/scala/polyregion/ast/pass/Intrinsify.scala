@@ -65,13 +65,13 @@ object Intrinsify extends ProgramPass {
     case _                                => p.Type.IntS32
   }
 
-  private def binaryPromoteIntr[A](x: p.Term, y: p.Term, upper: p.Type, idx: Int)(f: (p.Term, p.Term) => A) = {
+  private def binaryPromoteIntr(x: p.Term, y: p.Term, upper: p.Type, idx: Int)(f: (p.Term, p.Term) => p.Intr) = {
     val (xVal, xStmts) = castOrId(x, upper, s"intr_l${idx}")
     val (yVal, yStmts) = castOrId(y, upper, s"intr_r${idx}")
     (f(xVal, yVal), xStmts ++ yStmts)
   }
 
-  private def unaryPromoteIntr[A](x: p.Term, upper: p.Type, idx: Int)(f: p.Term => A) = {
+  private def unaryPromoteIntr(x: p.Term, upper: p.Type, idx: Int)(f: p.Term => p.Intr) = {
     val (xVal, xStmts) = castOrId(x, upper, s"intr_${idx}")
     (f(xVal), xStmts)
   }
@@ -198,8 +198,17 @@ object Intrinsify extends ProgramPass {
     intrinsifyNested(s, intrinsifyInstanceApply(_, counter))
       .getOrElse(intrinsifyInstanceApply0(s, counter.getAndIncrement()))
 
-  private def intrinsifyInstanceApply0(s: p.Stmt, idx: Int): (List[p.Stmt], List[p.Expr.Invoke]) = {
-    val (stmt, cs) = s.modifyCollect[p.Expr, (List[p.Stmt], List[p.Expr.Invoke])] {
+  private def intrinsifyStmt(s: p.Stmt)(
+      rewrite: p.Expr => (p.Expr, (List[p.Stmt], List[p.Expr.Invoke]))
+  ): (List[p.Stmt], List[p.Expr.Invoke]) = {
+    val (stmt, cs)    = s.modifyCollect[p.Expr, (List[p.Stmt], List[p.Expr.Invoke])](rewrite)
+    val (stmts, ivks) = cs.combineAll
+    (stmts :+ stmt, ivks)
+  }
+
+  @SuppressWarnings(Array("bonsai:duplicate-code"))
+  private def intrinsifyInstanceApply0(s: p.Stmt, idx: Int): (List[p.Stmt], List[p.Expr.Invoke]) =
+    intrinsifyStmt(s) {
       case inv @ p.Expr.Invoke(p.Type.FnRef(sym), tpeArgs, Some(recv), args, rtn) =>
         (sym.fqn, recv, args) match {
           case (
@@ -329,9 +338,6 @@ object Intrinsify extends ProgramPass {
         }
       case x => (x, (Nil, Nil))
     }
-    val (stmts, ivks) = cs.combineAll
-    (stmts :+ stmt, ivks)
-  }
 
   private def intrinsifyModuleApply(
       s: p.Stmt,
@@ -340,8 +346,8 @@ object Intrinsify extends ProgramPass {
     intrinsifyNested(s, intrinsifyModuleApply(_, counter))
       .getOrElse(intrinsifyModuleApply0(s, counter.getAndIncrement()))
 
-  private def intrinsifyModuleApply0(s: p.Stmt, idx: Int): (List[p.Stmt], List[p.Expr.Invoke]) = {
-    val (stmt, cs) = s.modifyCollect[p.Expr, (List[p.Stmt], List[p.Expr.Invoke])] {
+  private def intrinsifyModuleApply0(s: p.Stmt, idx: Int): (List[p.Stmt], List[p.Expr.Invoke]) =
+    intrinsifyStmt(s) {
       case inv @ p.Expr.Invoke(p.Type.FnRef(sym), tpeArgs, Some(_), args, rtn) =>
         (sym.fqn, args) match {
 
@@ -371,8 +377,5 @@ object Intrinsify extends ProgramPass {
         }
       case x => (x, (Nil, Nil))
     }
-    val (stmts, ivks) = cs.combineAll
-    (stmts :+ stmt, ivks)
-  }
 
 }

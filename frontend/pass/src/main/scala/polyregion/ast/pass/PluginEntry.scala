@@ -61,7 +61,7 @@ object PluginEntry {
     val epoch = clock.epochMillis()
     val start = clock.nanoTime()
     val out   = f
-    out -> p.Compile.Event(epoch, math.max(0L, clock.nanoTime() - start), name, data, Nil)
+    out -> p.Compile.Event(epoch, math.max(0L, clock.nanoTime() - start), name, data)
   }
 }
 

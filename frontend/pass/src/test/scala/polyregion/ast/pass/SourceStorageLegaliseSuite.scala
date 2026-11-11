@@ -119,7 +119,7 @@ class SourceStorageLegaliseSuite extends munit.FunSuite {
 
     val out = SourceStorageLegalise()(program(kernel, Nil, List(holderDef)), NoopLog)
     assert(out.entry.required.body.exists {
-      case p.Stmt.Var(`element`, Some(p.Expr.RefTo(_, _, _, space, region)), _) =>
+      case p.Stmt.Var(`element`, Some(p.Expr.RefTo(space = space, region = region)), _) =>
         space == p.Type.Space.Local && region == p.Region.Opaque
       case _ => false
     })
@@ -152,8 +152,8 @@ class SourceStorageLegaliseSuite extends munit.FunSuite {
 
     val out = SourceStorageLegalise()(program(kernel, Nil, List(holderDef)), NoopLog)
     assert(out.entry.required.body.exists {
-      case p.Stmt.Var(`field`, Some(p.Expr.RefTo(_, _, _, _, region)), _) => region == p.Region.Rooted(self)
-      case _                                                              => false
+      case p.Stmt.Var(`field`, Some(p.Expr.RefTo(region = region)), _) => region == p.Region.Rooted(self)
+      case _                                                           => false
     })
   }
 
@@ -185,7 +185,7 @@ class SourceStorageLegaliseSuite extends munit.FunSuite {
 
     val out = SourceStorageLegalise()(program(kernel, Nil, List(holderDef)), NoopLog)
     assert(out.entry.required.body.exists {
-      case p.Stmt.Var(`element`, Some(p.Expr.RefTo(_, _, _, space, region)), _) =>
+      case p.Stmt.Var(`element`, Some(p.Expr.RefTo(space = space, region = region)), _) =>
         space == p.Type.Space.Private && region == p.Region.Rooted(local)
       case _ => false
     })

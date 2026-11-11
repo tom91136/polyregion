@@ -22,10 +22,15 @@ static void unregisterMethods(JNIEnv *env) {
 static void registerMethods(JNIEnv *env) {
   if (clazz) return;
   clazz = reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("polyregion/jvm/Natives")));
-  const static JNINativeMethod methods[3] = {
-      {(char *)"dynamicLibraryLoad0", (char *)"(Ljava/lang/String;)J", (void *)&dynamicLibraryLoad0},
-      {(char *)"dynamicLibraryRelease0", (char *)"(J)V", (void *)&dynamicLibraryRelease0},
-      {(char *)"registerFilesToDropOnUnload0", (char *)"(Ljava/io/File;)V", (void *)&registerFilesToDropOnUnload0}};
+  const static JNINativeMethod methods[3] = {{.name = const_cast<char *>("dynamicLibraryLoad0"),
+                                              .signature = const_cast<char *>("(Ljava/lang/String;)J"),
+                                              .fnPtr = reinterpret_cast<void *>(&dynamicLibraryLoad0)},
+                                             {.name = const_cast<char *>("dynamicLibraryRelease0"),
+                                              .signature = const_cast<char *>("(J)V"),
+                                              .fnPtr = reinterpret_cast<void *>(&dynamicLibraryRelease0)},
+                                             {.name = const_cast<char *>("registerFilesToDropOnUnload0"),
+                                              .signature = const_cast<char *>("(Ljava/io/File;)V"),
+                                              .fnPtr = reinterpret_cast<void *>(&registerFilesToDropOnUnload0)}};
   if (env->RegisterNatives(clazz, methods, 3) != 0) {
     throw std::logic_error("RegisterNatives returned non-zero for polyregion/jvm/Natives");
   }

@@ -1,15 +1,27 @@
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
+#include <cstddef>
+#include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <exception>
+#include <functional>
 #include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 #include <system_error>
 #include <thread>
 #include <utility>
+#include <variant>
+#include <vector>
 
 #include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
@@ -93,12 +105,15 @@ struct HostGroup {
   }
   void arrive() {
     std::unique_lock lock(mutex);
-    if (++arrived == expected) return release();
+    if (++arrived == expected) {
+      release();
+      return;
+    }
     const auto seen = generation;
     released.wait(lock, [&] { return generation != seen; });
   }
   void retire() {
-    const std::lock_guard lock(mutex);
+    const std::scoped_lock lock(mutex);
     --expected;
     if (expected > 0 && arrived == expected) release();
   }
@@ -133,7 +148,7 @@ constexpr size_t HostLaneStackBytes = 2 * 1024 * 1024;
 #endif
 
 uint64_t hostStackReserveBytes() {
-#if defined(POLYINVOKE_EXPLICIT_LANE_STACK)
+#ifdef POLYINVOKE_EXPLICIT_LANE_STACK
   return HostLaneStackBytes;
 #elif defined(_WIN32)
   const auto *dos = reinterpret_cast<const IMAGE_DOS_HEADER *>(GetModuleHandleW(nullptr));
@@ -237,17 +252,17 @@ static void groupedLaunch(const size_t groups, const size_t lanes, const MaybeCa
     return;
   }
   const size_t slots = std::clamp<size_t>(hostConcurrency() / lanes, 1, groups);
-  auto pending = std::make_shared<std::atomic_size_t>(slots);
-  auto run = std::make_shared<std::function<void(size_t)>>(std::move(task));
+  const auto pending = std::make_shared<std::atomic_size_t>(slots);
+  const auto run = std::make_shared<std::function<void(size_t)>>(std::move(task));
   for (size_t slot = 0; slot < slots; ++slot) {
-    std::thread([=]() {
+    std::thread([=] {
       for (size_t group = slot; group < groups; group += slots) {
         HostGroup state(lanes);
         std::vector<LaneThread> workers;
         workers.reserve(lanes);
         for (size_t lane = 0; lane < lanes; ++lane)
-          workers.emplace_back([&state, run, lanes, tid = group * lanes + lane]() {
-            struct Retire {
+          workers.emplace_back([&state, run, lanes, tid = (group * lanes) + lane] {
+            const struct Retire {
               HostGroup &group;
               ~Retire() { group.retire(); }
             } retire{state};
@@ -273,10 +288,10 @@ static void groupAbiLaunch(const size_t groups, const size_t lanes, const size_t
     return;
   }
   const size_t workers = std::min(hostConcurrency(), groups);
-  auto pending = std::make_shared<std::atomic_size_t>(workers);
-  auto run = std::make_shared<std::function<void(size_t)>>(std::move(task));
+  const auto pending = std::make_shared<std::atomic_size_t>(workers);
+  const auto run = std::make_shared<std::function<void(size_t)>>(std::move(task));
   for (size_t worker = 0; worker < workers; ++worker) {
-    std::thread([=]() {
+    std::thread([=] {
       hostLocalSize = lanes;
       for (size_t group = worker; group < groups; group += workers) {
         if (localBytes > 0) std::memset(hostTaskLocalBlock(), 0, localBytes);
@@ -326,7 +341,8 @@ static void ffiInvoke(const char *prefix, uint64_t symbolAddress, const std::vec
   ffi_type *returnFfiTpe = toFFITpe(types.back());
   uint64_t retSlot{};
   ffi_cif cif{};
-  ffi_status status = ffi_prep_cif(&cif, FFI_DEFAULT_ABI, static_cast<unsigned>(ffiParamTypes.size()), returnFfiTpe, ffiParamTypes.data());
+  const ffi_status status =
+      ffi_prep_cif(&cif, FFI_DEFAULT_ABI, static_cast<unsigned>(ffiParamTypes.size()), returnFfiTpe, ffiParamTypes.data());
   switch (status) {
     case FFI_OK:
       ffi_call(&cif, FFI_FN(symbolAddress), &retSlot, ffiParamArgs.data());
@@ -401,7 +417,7 @@ uintptr_t ObjectDevice::mallocDevice(size_t size, Access) {
 void ObjectDevice::freeDevice(uintptr_t ptr) {
   POLYINVOKE_TRACE();
   {
-    const std::lock_guard lock(reservationsMutex);
+    const std::scoped_lock lock(reservationsMutex);
     if (const auto it = reservations.find(ptr); it != reservations.end()) {
 #ifdef _WIN32
       VirtualFree(reinterpret_cast<void *>(ptr), 0, MEM_RELEASE);
@@ -425,17 +441,17 @@ uintptr_t ObjectDevice::reserveDevice(size_t maxBytes, size_t committedBytes) {
     throw std::bad_alloc();
   }
 #else
-  void *base = mmap(nullptr, maxBytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+  const void *base = mmap(nullptr, maxBytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
   if (base == MAP_FAILED) throw std::bad_alloc();
 #endif
   const auto handle = reinterpret_cast<uintptr_t>(base);
-  const std::lock_guard lock(reservationsMutex);
-  reservations.emplace(handle, Reservation{maxBytes, committedBytes});
+  const std::scoped_lock lock(reservationsMutex);
+  reservations.emplace(handle, Reservation{.reserved = maxBytes, .committed = committedBytes});
   return handle;
 }
 void ObjectDevice::growDevice(uintptr_t handle, size_t committedBytes) {
   POLYINVOKE_TRACE();
-  const std::lock_guard lock(reservationsMutex);
+  const std::scoped_lock lock(reservationsMutex);
   const auto it = reservations.find(handle);
   if (it == reservations.end()) throw std::invalid_argument(fmt::format("{} is not a growable allocation", handle));
   if (committedBytes > it->second.reserved)
@@ -564,13 +580,13 @@ static void rewriteCOFFRel32NegativeAddends(llvm::MutableArrayRef<char> buf) {
   std::memcpy(&machine, buf.data(), 2);
   if (machine != FileMachineAMD64) return; // not an x86_64 COFF; ELF/Mach-O/import-lib skip the parse
 
-  auto memBuf = llvm::MemoryBufferRef(llvm::StringRef(buf.data(), buf.size()), "<coff>");
+  const auto memBuf = llvm::MemoryBufferRef(llvm::StringRef(buf.data(), buf.size()), "<coff>");
   auto objOrErr = llvm::object::ObjectFile::createObjectFile(memBuf);
   if (!objOrErr) {
     llvm::consumeError(objOrErr.takeError());
     return;
   }
-  auto *coff = llvm::dyn_cast<llvm::object::COFFObjectFile>(objOrErr->get());
+  const auto *coff = llvm::dyn_cast<llvm::object::COFFObjectFile>(objOrErr->get());
   if (!coff) return;
 
   char *const base = buf.data();
@@ -582,7 +598,7 @@ static void rewriteCOFFRel32NegativeAddends(llvm::MutableArrayRef<char> buf) {
     constexpr size_t Reloc = 10; // sizeof(coff_relocation)
     size_t i = 0;
     for (const auto &rel : coff->getRelocations(cs)) {
-      const size_t relOff = static_cast<size_t>(cs->PointerToRelocations) + i * Reloc;
+      const size_t relOff = static_cast<size_t>(cs->PointerToRelocations) + (i * Reloc);
       ++i;
       if (rel.Type != Rel32 || rel.VirtualAddress < cs->VirtualAddress) continue;
       const uint32_t off = rel.VirtualAddress - cs->VirtualAddress;
@@ -696,8 +712,8 @@ std::string RelocatableDevice::name() {
 
 void RelocatableDevice::loadModule(const std::string &name, const std::string &image) {
   POLYINVOKE_TRACE();
-  WriteLock rw(mutex);
-  if (auto it = objects.find(name); it != objects.end()) {
+  const WriteLock rw(mutex);
+  if (const auto it = objects.find(name); it != objects.end()) {
     POLYINVOKE_FATAL(RELOBJ_PREFIX, "Module named %s was already loaded", name.c_str());
   } else {
     auto jdOrErr = es->createJITDylib(name);
@@ -719,8 +735,8 @@ void RelocatableDevice::loadModule(const std::string &name, const std::string &i
 
 bool RelocatableDevice::moduleLoaded(const std::string &name) {
   POLYINVOKE_TRACE();
-  ReadLock r(mutex);
-  return objects.find(name) != objects.end();
+  const ReadLock r(mutex);
+  return objects.contains(name);
 }
 std::unique_ptr<DeviceQueue> RelocatableDevice::createQueue(const std::chrono::duration<int64_t> &timeout) {
   POLYINVOKE_TRACE();
@@ -735,8 +751,8 @@ RelocatableDeviceQueue::RelocatableDeviceQueue(const std::chrono::duration<int64
 
 static size_t policyTasks(const Policy &policy) { return policy.global.x * (policy.local ? policy.local->first.x : 1); }
 
-void validatePolicyAndArgs(const char *prefix, std::vector<Type> types, const Policy &policy) {
-  if (auto scratchCount = types ^ count([](Type t) { return t == Type::Scratch; }); scratchCount != 0)
+static void validatePolicyAndArgs(const char *prefix, std::vector<Type> types, const Policy &policy) {
+  if (const auto scratchCount = types ^ count([](Type t) { return t == Type::Scratch; }); scratchCount != 0)
     POLYINVOKE_FATAL(prefix, "Scratch types are not supported on the CPU, found %td arg(s)", scratchCount);
   if (policy.global.y != 1) POLYINVOKE_FATAL(prefix, "Policy dimension Y > 1 is not supported: %zu", policy.global.y);
   if (policy.global.z != 1) POLYINVOKE_FATAL(prefix, "Policy dimension Z > 1 is not supported: %zu", policy.global.z);
@@ -763,12 +779,20 @@ void ObjectDeviceQueue::launchHost(const char *prefix, const Policy &policy, con
     case polyregion::program_meta::HostAbiGroup: {
       const size_t lanes = policy.local ? policy.local->first.x : 1;
       const size_t localBytes = staticLocalBytes(staticLocalBytesAddr) + (policy.local ? policy.local->second : 0);
-      return groupAbiLaunch(policy.global.x, lanes, localBytes, cb, std::move(task));
+      groupAbiLaunch(policy.global.x, lanes, localBytes, cb, std::move(task));
+      return;
     }
-    case polyregion::program_meta::HostAbiFlat: return threadedLaunch(policyTasks(policy), cb, std::move(task));
+    case polyregion::program_meta::HostAbiFlat: {
+      threadedLaunch(policyTasks(policy), cb, std::move(task));
+      return;
+    }
     case polyregion::program_meta::HostAbiLane:
-      if (groupedPolicy(policy)) return groupedLaunch(policy.global.x, policy.local->first.x, cb, std::move(task));
-      return threadedLaunch(policyTasks(policy), cb, std::move(task));
+      if (groupedPolicy(policy)) {
+        groupedLaunch(policy.global.x, policy.local->first.x, cb, std::move(task));
+        return;
+      }
+      threadedLaunch(policyTasks(policy), cb, std::move(task));
+      return;
     default: POLYINVOKE_FATAL(prefix, "unknown host abi %lld", static_cast<long long>(abi));
   }
 }
@@ -779,7 +803,7 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
 
   details::LoadedCodeObject *obj = nullptr;
   {
-    ReadLock r(mutex);
+    const ReadLock r(mutex);
     const auto moduleIt = objects.find(moduleName);
     if (moduleIt == objects.end()) POLYINVOKE_FATAL(RELOBJ_PREFIX, "No module named %s was loaded", moduleName.c_str());
     obj = moduleIt->second.get();
@@ -788,7 +812,7 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
     ReadLock r(obj->symbolCacheMutex);
     if (const auto it = obj->symbolCache.find(name); it != obj->symbolCache.end()) return it->second;
     r.unlock();
-    WriteLock w(obj->symbolCacheMutex);
+    const WriteLock w(obj->symbolCacheMutex);
     if (const auto it = obj->symbolCache.find(name); it != obj->symbolCache.end()) return it->second;
     const auto fnName = withGlobalPrefix(globalPrefix, name);
     auto symOrErr = es.lookup({obj->jd}, fnName);
@@ -805,7 +829,7 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
   const auto staticBytesAddr = resolve(symbol + polyregion::program_meta::HostStaticLocalBytesSuffix, false);
   validateLocalStorage(RELOBJ_PREFIX, policy, staticBytesAddr);
   const auto abiAddr = resolve(symbol + polyregion::program_meta::HostAbiSuffix, false);
-  const auto done = [cb, token = latch.acquire()]() {
+  const auto done = [cb, token = latch.acquire()] {
     if (cb) (*cb)();
   };
   const auto task = [symAddr, types, argData, global = policyTasks(policy)](size_t tid) {
@@ -826,11 +850,13 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
 
 static constexpr const char *SHOBJ_PREFIX = "SharedObject";
 
+namespace {
 struct HostTable {
 #define POLYREGION_HOST_TABLE_FIELD(name, ret, params) ret(*name) params;
   POLYREGION_HOST_TABLE(POLYREGION_HOST_TABLE_FIELD)
 #undef POLYREGION_HOST_TABLE_FIELD
 };
+} // namespace
 
 static void fillHostTable(polyregion_dl_handle handle) {
   if (auto *table = reinterpret_cast<HostTable *>(polyregion_dl_find(handle, polyregion::program_meta::HostTableSymbol))) {
@@ -891,14 +917,15 @@ std::vector<Property> SharedDevice::properties() {
 }
 void SharedDevice::loadModule(const std::string &name, const std::string &image) {
   POLYINVOKE_TRACE();
-  if (auto it = modules.find(name); it != modules.end()) POLYINVOKE_FATAL(SHOBJ_PREFIX, "Module named %s was already loaded", name.c_str());
+  if (const auto it = modules.find(name); it != modules.end())
+    POLYINVOKE_FATAL(SHOBJ_PREFIX, "Module named %s was already loaded", name.c_str());
   else {
     std::string built;
     if (llvm::identify_magic(image) == llvm::file_magic::unknown) {
       if (compiler.empty())
         POLYINVOKE_FATAL(SHOBJ_PREFIX, "Cannot build C source module %s: %s", name.c_str(), compilerUnavailable.c_str());
       try {
-        built = buildSharedObject({compiler, {}}, image);
+        built = buildSharedObject({.path = compiler, .unavailable = {}}, image);
       } catch (const std::exception &e) {
         POLYINVOKE_FATAL(SHOBJ_PREFIX, "Cannot build C source module %s: %s", name.c_str(), e.what());
       }
@@ -950,7 +977,7 @@ void SharedDevice::loadModule(const std::string &name, const std::string &image)
 }
 bool SharedDevice::moduleLoaded(const std::string &name) {
   POLYINVOKE_TRACE();
-  return modules.find(name) != modules.end();
+  return modules.contains(name);
 }
 std::unique_ptr<DeviceQueue> SharedDevice::createQueue(const std::chrono::duration<int64_t> &timeout) {
   POLYINVOKE_TRACE();
@@ -979,8 +1006,8 @@ void SharedDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
   POLYINVOKE_TRACE();
   validatePolicyAndArgs(SHOBJ_PREFIX, types, policy);
 
-  ReadLock r(mutex);
-  auto moduleIt = modules.find(moduleName);
+  const ReadLock r(mutex);
+  const auto moduleIt = modules.find(moduleName);
   if (moduleIt == modules.end()) POLYINVOKE_FATAL(SHOBJ_PREFIX, "No module named %s was loaded", moduleName.c_str());
 
   const auto staticBytesAddr =
@@ -989,7 +1016,7 @@ void SharedDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
   const auto abiAddr = sharedSymbolAddress(moduleName, moduleIt->second, symbol + polyregion::program_meta::HostAbiSuffix, false);
   const auto address = sharedSymbolAddress(moduleName, moduleIt->second, symbol, true);
 
-  const auto done = [cb, token = latch.acquire()]() {
+  const auto done = [cb, token = latch.acquire()] {
     if (cb) (*cb)();
   };
   const auto task = [address, types, argData, global = policyTasks(policy)](size_t tid) {

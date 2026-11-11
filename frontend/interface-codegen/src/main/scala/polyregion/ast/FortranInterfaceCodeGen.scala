@@ -3,7 +3,7 @@ package polyregion.ast
 import polyregion.ast.PolyAST as p
 
 private[ast] object FortranInterfaceCodeGen {
-  import InterfaceCodeGen.Support.*
+  import InterfaceCodeGenSupport.*
 
   private val Identifier = "[A-Za-z][A-Za-z0-9_]*".r
   private val IsoTypes =
@@ -16,23 +16,23 @@ private[ast] object FortranInterfaceCodeGen {
   }
 
   private def erased(tpe: p.Type): Boolean = tpe match {
-    case _: p.Type.Var | _: p.Type.Struct => true
-    case p.Type.Ptr(comp, _)              => erased(comp)
-    case p.Type.Arr(comp, _, _)           => erased(comp)
-    case p.Type.Exec(_, args, rtn)        => args.exists(erased) || erased(rtn)
-    case _                                => false
+    case p.Type.Var(_, _) | p.Type.Struct(_, _) => true
+    case p.Type.Ptr(comp, _)                    => erased(comp)
+    case p.Type.Arr(comp, _, _)                 => erased(comp)
+    case p.Type.Exec(_, args, rtn)              => args.exists(erased) || erased(rtn)
+    case _                                      => false
   }
 
   private def tpe(tpe: p.Type): String = tpe match {
-    case p.Type.Float32 => "real(c_float)"
-    case p.Type.Float64 => "real(c_double)"
-    case p.Type.IntS8   => "integer(c_int8_t)"
-    case p.Type.IntS16  => "integer(c_int16_t)"
-    case p.Type.IntS32  => "integer(c_int32_t)"
-    case p.Type.IntS64  => "integer(c_int64_t)"
-    case p.Type.Bool1   => "logical(c_bool)"
-    case _: p.Type.Var  => "type(*)"
-    case other          => fail(s"type has no exact Fortran interfaceDef projection: $other")
+    case p.Type.Float32   => "real(c_float)"
+    case p.Type.Float64   => "real(c_double)"
+    case p.Type.IntS8     => "integer(c_int8_t)"
+    case p.Type.IntS16    => "integer(c_int16_t)"
+    case p.Type.IntS32    => "integer(c_int32_t)"
+    case p.Type.IntS64    => "integer(c_int64_t)"
+    case p.Type.Bool1     => "logical(c_bool)"
+    case p.Type.Var(_, _) => "type(*)"
+    case other            => fail(s"type has no exact Fortran interfaceDef projection: $other")
   }
 
   private def defaultValue(tpe: p.Type): String = tpe match {
@@ -58,10 +58,10 @@ private[ast] object FortranInterfaceCodeGen {
     case p.Type.Ptr(comp, _) => s"${tpe(comp)}, intent(${access.getOrElse("in")}) :: $name(*)"
     case p.Type.Arr(comp, _, _) if erased(comp) =>
       s"type(*), dimension(*)${erasedIntent(access)} :: $name"
-    case p.Type.Arr(comp, length, _)      => s"${tpe(comp)}, intent(${access.getOrElse("in")}) :: $name($length)"
-    case _: p.Type.Var | _: p.Type.Struct => s"type(*)${erasedIntent(access)} :: $name"
-    case _: p.Type.Exec | p.Type.Unit0    => fail(s"unsupported Fortran value parameter `$name`: $tpe0")
-    case other                            => s"${tpe(other)}, intent(${access.getOrElse("in")}), value :: $name"
+    case p.Type.Arr(comp, length, _)            => s"${tpe(comp)}, intent(${access.getOrElse("in")}) :: $name($length)"
+    case p.Type.Var(_, _) | p.Type.Struct(_, _) => s"type(*)${erasedIntent(access)} :: $name"
+    case p.Type.Exec(_, _, _) | p.Type.Unit0    => fail(s"unsupported Fortran value parameter `$name`: $tpe0")
+    case other                                  => s"${tpe(other)}, intent(${access.getOrElse("in")}), value :: $name"
   }
 
   private def callableValue(tpe0: p.Type, name: String): String = tpe0 match {
@@ -94,10 +94,9 @@ private[ast] object FortranInterfaceCodeGen {
   private def parameter(decl: p.FunctionDecl, arg: p.Arg, overload: String): String = arg.named.tpe match {
     case signature: p.Type.Exec if signature.tpeVars.nonEmpty || erased(signature) =>
       s"    procedure() :: ${arg.named.symbol}"
-    case _: p.Type.Exec =>
+    case p.Type.Exec(_, _, _) =>
       s"    procedure(polyregion_${decl.name.last}${overload}_${arg.named.symbol}) :: ${arg.named.symbol}"
     case p: p.Type.Ptr => s"    ${value(p, arg.named.symbol, Some(intent(arg)))}"
-    case a: p.Type.Arr => s"    ${value(a, arg.named.symbol)}"
     case other         => s"    ${value(other, arg.named.symbol)}"
   }
 
@@ -106,6 +105,7 @@ private[ast] object FortranInterfaceCodeGen {
     Iterator.iterate("polyregion_result")(_ + "_").find(name => !used(name.toLowerCase)).get
   }
 
+  @SuppressWarnings(Array("bonsai:complexity"))
   private def procedure(interfaceDef: p.Interface, decl: p.FunctionDecl, overload: String): String = {
     val name         = s"polyregion_${decl.name.last}$overload"
     val erasedResult = erased(decl.rtn)
@@ -132,7 +132,7 @@ private[ast] object FortranInterfaceCodeGen {
          |  end function $name""".stripMargin
   }
 
-  def apply(interfaceDef: p.Interface, config: InterfaceCodeGen.FortranConfig): String = {
+  def apply(interfaceDef: p.Interface, config: FortranConfig): String = {
     identifier(config.moduleName, "module")
     val decls = declarations(interfaceDef)
     validatePortableOverloads(decls, "Fortran")
@@ -162,9 +162,10 @@ private[ast] object FortranInterfaceCodeGen {
       .toList
       .sortBy(_._1.fqn.mkString("."))
       .flatMap { case (_, overloads) =>
-        val sorted = overloads.sortBy(_.signatureKey)
+        val sorted     = overloads.sortBy(_.signatureKey)
+        val overloaded = sorted.size > 1
         sorted.zipWithIndex.map { case (decl, index) =>
-          decl -> Option.when(sorted.size > 1)(s"_o$index").getOrElse("")
+          decl -> Option.when(overloaded)(s"_o$index").getOrElse("")
         }
       }
     indexedDecls.groupBy(_._1.name).values.foreach { overloads =>

@@ -21,18 +21,15 @@ class ArenaLowerSuite extends munit.FunSuite {
       body = List(
         p.Stmt.Var(
           pointer,
-          Some(p.Expr.Alias(p.Term.Select(cap, List(p.PathStep.Field("data")), ptrTpe))),
-          isMutable = false
+          Some(p.Expr.Alias(p.Term.Select(cap, List(p.PathStep.Field("data")), ptrTpe)))
         ),
         p.Stmt.Var(
           loaded,
-          Some(p.Expr.SpecOp(p.Spec.GpuVolatileLoad(p.Term.Select(pointer, Nil, ptrTpe), p.Type.IntU32))),
-          isMutable = false
+          Some(p.Expr.SpecOp(p.Spec.GpuVolatileLoad(p.Term.Select(pointer, Nil, ptrTpe), p.Type.IntU32)))
         ),
         p.Stmt.Var(
           stored,
-          Some(p.Expr.SpecOp(p.Spec.GpuVolatileStore(p.Term.Select(pointer, Nil, ptrTpe), p.Term.IntU32Const(7)))),
-          isMutable = false
+          Some(p.Expr.SpecOp(p.Spec.GpuVolatileStore(p.Term.Select(pointer, Nil, ptrTpe), p.Term.IntU32Const(7))))
         ),
         p.Stmt.Var(
           swapped,
@@ -47,8 +44,7 @@ class ArenaLowerSuite extends munit.FunSuite {
                 p.Type.IntU32
               )
             )
-          ),
-          isMutable = false
+          )
         ),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       )
@@ -79,7 +75,7 @@ class ArenaLowerSuite extends munit.FunSuite {
     val e = entry(
       args = List(p.Arg(cap)),
       body = List(
-        p.Stmt.Var(self, Some(p.Expr.Alias(p.Term.Select(cap, Nil, cap.tpe))), isMutable = false),
+        p.Stmt.Var(self, Some(p.Expr.Alias(p.Term.Select(cap, Nil, cap.tpe)))),
         readX,
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       )
@@ -90,7 +86,7 @@ class ArenaLowerSuite extends munit.FunSuite {
     assertEquals(out.args.map(_.named), List(arena))
     assertEquals(
       out.body.headOption,
-      Some(p.Stmt.Var(cap, Some(p.Expr.Cast(p.Term.Select(arena, Nil, BytePtr), cap.tpe)), isMutable = false))
+      Some(p.Stmt.Var(cap, Some(p.Expr.Cast(p.Term.Select(arena, Nil, BytePtr), cap.tpe))))
     )
     assertEquals(
       out.body.collectFirst { case p.Stmt.Var(n, Some(expr), _) if n.symbol == "out" => expr },
@@ -130,13 +126,11 @@ class ArenaLowerSuite extends munit.FunSuite {
           ptr,
           Some(
             p.Expr.RefTo(data, Some(p.Term.IntS32Const(0)), p.Type.IntS8, p.Type.Space.Global, p.Region.Rooted(cap))
-          ),
-          isMutable = false
+          )
         ),
         p.Stmt.Var(
           ch,
-          Some(p.Expr.Index(p.Term.Select(ptr, Nil, ptr.tpe), p.Term.IntS64Const(0), p.Type.IntS8)),
-          isMutable = false
+          Some(p.Expr.Index(p.Term.Select(ptr, Nil, ptr.tpe), p.Term.IntS64Const(0), p.Type.IntS8))
         ),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       )
@@ -177,10 +171,9 @@ class ArenaLowerSuite extends munit.FunSuite {
       body = List(
         p.Stmt.Var(
           bufferPtr,
-          Some(p.Expr.RefTo(buffer, None, bufferTpe, p.Type.Space.Global, p.Region.Rooted(cap))),
-          isMutable = false
+          Some(p.Expr.RefTo(buffer, None, bufferTpe, p.Type.Space.Global, p.Region.Rooted(cap)))
         ),
-        p.Stmt.Var(ch, Some(p.Expr.Index(slots, p.Term.IntS64Const(2), p.Type.IntS32)), isMutable = false),
+        p.Stmt.Var(ch, Some(p.Expr.Index(slots, p.Term.IntS64Const(2), p.Type.IntS32))),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       )
     )
@@ -207,7 +200,7 @@ class ArenaLowerSuite extends munit.FunSuite {
     val e = entry(
       args = List(p.Arg(cap)),
       body = List(
-        p.Stmt.Var(p0, Some(p.Expr.Alias(data)), isMutable = false),
+        p.Stmt.Var(p0, Some(p.Expr.Alias(data))),
         p.Stmt.Var(
           p2,
           Some(
@@ -218,13 +211,11 @@ class ArenaLowerSuite extends munit.FunSuite {
               p.Type.Space.Global,
               p.Region.Opaque
             )
-          ),
-          isMutable = false
+          )
         ),
         p.Stmt.Var(
           ch,
-          Some(p.Expr.Index(p.Term.Select(p2, Nil, ptrTpe), p.Term.IntS64Const(0), p.Type.IntS8)),
-          isMutable = false
+          Some(p.Expr.Index(p.Term.Select(p2, Nil, ptrTpe), p.Term.IntS64Const(0), p.Type.IntS8))
         ),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       )
@@ -261,16 +252,14 @@ class ArenaLowerSuite extends munit.FunSuite {
     val e = entry(
       args = List(p.Arg(cap)),
       body = List(
-        p.Stmt.Var(outer, Some(p.Expr.Alias(data)), isMutable = false),
+        p.Stmt.Var(outer, Some(p.Expr.Alias(data))),
         p.Stmt.Var(
           inner,
-          Some(p.Expr.Index(p.Term.Select(outer, Nil, ptrPtrTpe), p.Term.IntS64Const(0), ptrTpe)),
-          isMutable = false
+          Some(p.Expr.Index(p.Term.Select(outer, Nil, ptrPtrTpe), p.Term.IntS64Const(0), ptrTpe))
         ),
         p.Stmt.Var(
           value,
-          Some(p.Expr.Index(p.Term.Select(inner, Nil, ptrTpe), p.Term.IntS64Const(0), p.Type.IntS32)),
-          isMutable = false
+          Some(p.Expr.Index(p.Term.Select(inner, Nil, ptrTpe), p.Term.IntS64Const(0), p.Type.IntS32))
         ),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       )
@@ -283,7 +272,7 @@ class ArenaLowerSuite extends munit.FunSuite {
         case p.Expr.Index(p.Term.Select(root, Nil, _), _, p.Type.IntS32) => root.symbol.startsWith("#ab")
         case _                                                           => false
       },
-      out.repr
+      out.body.map(_.repr).mkString("\n")
     )
     assertEquals(Verify.validateRegions(program(out, defs = List(capDef))), Nil)
   }
@@ -318,19 +307,16 @@ class ArenaLowerSuite extends munit.FunSuite {
               p.Type.Space.Private,
               p.Region.Rooted(holder)
             )
-          ),
-          isMutable = false
+          )
         ),
         p.Stmt.Mut(slot, p.Expr.Alias(data)),
         p.Stmt.Var(
           loaded,
-          Some(p.Expr.Cast(p.Term.Select(holder, List(p.PathStep.Field("data")), ptrTpe), ptrTpe)),
-          isMutable = false
+          Some(p.Expr.Cast(p.Term.Select(holder, List(p.PathStep.Field("data")), ptrTpe), ptrTpe))
         ),
         p.Stmt.Var(
           value,
-          Some(p.Expr.Index(p.Term.Select(loaded, Nil, ptrTpe), p.Term.IntS64Const(0), p.Type.IntS32)),
-          isMutable = false
+          Some(p.Expr.Index(p.Term.Select(loaded, Nil, ptrTpe), p.Term.IntS64Const(0), p.Type.IntS32))
         ),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       )
@@ -392,8 +378,7 @@ class ArenaLowerSuite extends munit.FunSuite {
               p.Type.Space.Private,
               p.Region.Rooted(holder)
             )
-          ),
-          isMutable = false
+          )
         ),
         p.Stmt.Mut(
           holderSlot,
@@ -401,15 +386,14 @@ class ArenaLowerSuite extends munit.FunSuite {
         ),
         p.Stmt.Var(copied, Some(p.Expr.Alias(p.Term.Select(holder, Nil, holderTpe))), isMutable = true),
         p.Stmt.Mut(copiedSlot, p.Expr.Alias(next)),
-        p.Stmt.Var(loaded, Some(p.Expr.Cast(copiedSlot, ptrTpe)), isMutable = false),
+        p.Stmt.Var(loaded, Some(p.Expr.Cast(copiedSlot, ptrTpe))),
         p.Stmt.Var(
           value,
           Some(
             p.Expr.Alias(
               p.Term.Select(loaded, List(p.PathStep.Field("value")), p.Type.IntS32)
             )
-          ),
-          isMutable = false
+          )
         ),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       )
@@ -455,8 +439,7 @@ class ArenaLowerSuite extends munit.FunSuite {
         ),
         p.Stmt.Var(
           data,
-          Some(p.Expr.Alias(p.Term.Select(copied, List(p.PathStep.Field("node"), p.PathStep.Field("data")), dataPtr))),
-          isMutable = false
+          Some(p.Expr.Alias(p.Term.Select(copied, List(p.PathStep.Field("node"), p.PathStep.Field("data")), dataPtr)))
         ),
         p.Stmt.Var(value, Some(p.Expr.Index(p.Term.Select(data, Nil, dataPtr), p.Term.IntS64Const(0), p.Type.IntS32))),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
@@ -520,8 +503,7 @@ class ArenaLowerSuite extends munit.FunSuite {
               p.Type.Space.Private,
               p.Region.Rooted(outer)
             )
-          ),
-          isMutable = false
+          )
         ),
         p.Stmt.Var(target, None, isMutable = true),
         p.Stmt.Var(
@@ -534,8 +516,7 @@ class ArenaLowerSuite extends munit.FunSuite {
               p.Type.Space.Private,
               p.Region.Rooted(target)
             )
-          ),
-          isMutable = false
+          )
         ),
         p.Stmt.Mut(targetSlot, p.Expr.Alias(nestedData)),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
@@ -572,7 +553,7 @@ class ArenaLowerSuite extends munit.FunSuite {
       body = List(
         p.Stmt.Var(iterator, None, isMutable = true),
         p.Stmt.Mut(iteratorNode, p.Expr.Alias(p.Term.Select(cap, List(p.PathStep.Field("head")), nodePtr))),
-        p.Stmt.Var(next, Some(p.Expr.Alias(iteratorNode)), isMutable = false),
+        p.Stmt.Var(next, Some(p.Expr.Alias(iteratorNode))),
         p.Stmt.Mut(iteratorNode, p.Expr.Alias(nextField)),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       )
@@ -585,7 +566,7 @@ class ArenaLowerSuite extends munit.FunSuite {
         case p.Stmt.Mut(`iteratorNode`, p.Expr.Alias(p.Term.Select(root, Nil, _))) => root.symbol.startsWith("#ab")
         case _                                                                     => false
       },
-      out.repr
+      out.body.map(_.repr).mkString("\n")
     )
     assertEquals(Verify.validateRegions(program(out, defs = List(capDef, nodeDef, iteratorDef))), Nil)
   }
@@ -634,13 +615,11 @@ class ArenaLowerSuite extends munit.FunSuite {
         ),
         p.Stmt.Var(
           loaded,
-          Some(p.Expr.Index(closureSlot, p.Term.IntS64Const(0), ptrTpe)),
-          isMutable = false
+          Some(p.Expr.Index(closureSlot, p.Term.IntS64Const(0), ptrTpe))
         ),
         p.Stmt.Var(
           value,
-          Some(p.Expr.Index(p.Term.Select(loaded, Nil, ptrTpe), p.Term.IntS64Const(0), p.Type.IntS32)),
-          isMutable = false
+          Some(p.Expr.Index(p.Term.Select(loaded, Nil, ptrTpe), p.Term.IntS64Const(0), p.Type.IntS32))
         ),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       )
@@ -653,7 +632,7 @@ class ArenaLowerSuite extends munit.FunSuite {
         case p.Expr.Index(p.Term.Select(root, Nil, _), _, p.Type.IntS32) => root.symbol.startsWith("#ab")
         case _                                                           => false
       },
-      out.repr
+      out.body.map(_.repr).mkString("\n")
     )
     assertEquals(Verify.validateRegions(program(out, defs = List(capDef, closureDef))), Nil)
   }
@@ -685,8 +664,7 @@ class ArenaLowerSuite extends munit.FunSuite {
               p.Type.Space.Global,
               p.Region.Opaque
             )
-          ),
-          isMutable = false
+          )
         ),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       )
@@ -733,7 +711,7 @@ class ArenaLowerSuite extends munit.FunSuite {
     val e = entry(
       args = List(p.Arg(cap)),
       body = List(
-        p.Stmt.Var(address, Some(p.Expr.Cast(data, p.Type.IntU64)), isMutable = false),
+        p.Stmt.Var(address, Some(p.Expr.Cast(data, p.Type.IntU64))),
         p.Stmt.Var(
           advanced,
           Some(
@@ -744,13 +722,11 @@ class ArenaLowerSuite extends munit.FunSuite {
                 p.Type.IntU64
               )
             )
-          ),
-          isMutable = false
+          )
         ),
         p.Stmt.Var(
           ptr,
-          Some(p.Expr.Cast(p.Term.Select(advanced, Nil, p.Type.IntU64), ptrTpe)),
-          isMutable = false
+          Some(p.Expr.Cast(p.Term.Select(advanced, Nil, p.Type.IntU64), ptrTpe))
         ),
         p.Stmt.Var(moving, Some(p.Expr.Alias(data)), isMutable = true),
         p.Stmt.Var(
@@ -763,8 +739,7 @@ class ArenaLowerSuite extends munit.FunSuite {
               p.Type.Space.Global,
               p.Region.Rooted(cap)
             )
-          ),
-          isMutable = false
+          )
         ),
         p.Stmt.Mut(p.Term.Select(moving, Nil, ptrTpe), p.Expr.Alias(p.Term.Select(next, Nil, ptrTpe))),
         p.Stmt.Var(holder, None, isMutable = true),
@@ -778,20 +753,17 @@ class ArenaLowerSuite extends munit.FunSuite {
               p.Type.Space.Private,
               p.Region.Rooted(holder)
             )
-          ),
-          isMutable = false
+          )
         ),
         p.Stmt.Mut(slot, p.Expr.Alias(p.Term.Select(ptr, Nil, ptrTpe))),
         p.Stmt.Mut(directSlot, p.Expr.Cast(p.Term.Select(advanced, Nil, p.Type.IntU64), ptrTpe)),
         p.Stmt.Var(
           value,
-          Some(p.Expr.Index(slot, p.Term.IntS64Const(0), p.Type.IntS32)),
-          isMutable = false
+          Some(p.Expr.Index(slot, p.Term.IntS64Const(0), p.Type.IntS32))
         ),
         p.Stmt.Var(
           moved,
-          Some(p.Expr.Index(p.Term.Select(moving, Nil, ptrTpe), p.Term.IntS64Const(0), p.Type.IntS32)),
-          isMutable = false
+          Some(p.Expr.Index(p.Term.Select(moving, Nil, ptrTpe), p.Term.IntS64Const(0), p.Type.IntS32))
         ),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       )
@@ -826,7 +798,7 @@ class ArenaLowerSuite extends munit.FunSuite {
     val e = entry(
       args = List(p.Arg(cap)),
       body = List(
-        p.Stmt.Var(address, Some(p.Expr.Cast(p.Term.Select(cap, Nil, capPtr), p.Type.IntU64)), isMutable = false),
+        p.Stmt.Var(address, Some(p.Expr.Cast(p.Term.Select(cap, Nil, capPtr), p.Type.IntU64))),
         p.Stmt.Var(
           advanced,
           Some(
@@ -837,14 +809,12 @@ class ArenaLowerSuite extends munit.FunSuite {
                 p.Type.IntU64
               )
             )
-          ),
-          isMutable = false
+          )
         ),
-        p.Stmt.Var(ptr, Some(p.Expr.Cast(p.Term.Select(advanced, Nil, p.Type.IntU64), capPtr)), isMutable = false),
+        p.Stmt.Var(ptr, Some(p.Expr.Cast(p.Term.Select(advanced, Nil, p.Type.IntU64), capPtr))),
         p.Stmt.Var(
           value,
-          Some(p.Expr.Alias(p.Term.Select(ptr, List(p.PathStep.Field("value")), p.Type.IntS32))),
-          isMutable = false
+          Some(p.Expr.Alias(p.Term.Select(ptr, List(p.PathStep.Field("value")), p.Type.IntS32)))
         ),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       )
@@ -1051,8 +1021,7 @@ class ArenaLowerSuite extends munit.FunSuite {
         p.Stmt.Update(endpointT, p.Term.IntS64Const(0), p.Term.IntS64Const(41)),
         p.Stmt.Var(
           result,
-          Some(p.Expr.Index(p.Term.Select(endpoint, Nil, ptrTpe), p.Term.IntS64Const(0), valueTpe)),
-          isMutable = false
+          Some(p.Expr.Index(p.Term.Select(endpoint, Nil, ptrTpe), p.Term.IntS64Const(0), valueTpe))
         ),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       )
@@ -1136,8 +1105,8 @@ class ArenaLowerSuite extends munit.FunSuite {
     val e = entry(
       args = List(p.Arg(cap)),
       body = List(
-        p.Stmt.Var(node, Some(p.Expr.Alias(nodeField)), isMutable = false),
-        p.Stmt.Var(other, Some(p.Expr.Alias(otherField)), isMutable = false),
+        p.Stmt.Var(node, Some(p.Expr.Alias(nodeField))),
+        p.Stmt.Var(other, Some(p.Expr.Alias(otherField))),
         p.Stmt.Mut(next, p.Expr.Alias(p.Term.Select(other, Nil, ptrTpe))),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       )
@@ -1145,9 +1114,10 @@ class ArenaLowerSuite extends munit.FunSuite {
 
     val out = ArenaLower(program(e, defs = List(capDef, nodeDef)), NoopLog).entry
 
+    val otherRef = p.Term.Select(other, Nil, ptrTpe)
     assert(out.body.exists {
       case p.Stmt.Mut(p.Term.Select(root, List(p.PathStep.Field("next")), _), p.Expr.Alias(value)) =>
-        root.symbol.startsWith("#ab") && value == p.Term.Select(other, Nil, ptrTpe)
+        root.symbol.startsWith("#ab") && value == otherRef
       case _ => false
     })
   }
@@ -1183,8 +1153,7 @@ class ArenaLowerSuite extends munit.FunSuite {
               p.Type.Space.Global,
               p.Region.Opaque
             )
-          ),
-          isMutable = false
+          )
         ),
         p.Stmt.Var(
           fromScalar,
@@ -1196,8 +1165,7 @@ class ArenaLowerSuite extends munit.FunSuite {
               p.Type.Space.Private,
               p.Region.Opaque
             )
-          ),
-          isMutable = false
+          )
         ),
         p.Stmt.Var(selected, None, isMutable = true),
         p.Stmt.Cond(
@@ -1213,11 +1181,10 @@ class ArenaLowerSuite extends munit.FunSuite {
             )
           )
         ),
-        p.Stmt.Var(winner, Some(p.Expr.Alias(p.Term.Select(selected, Nil, pointerTpe))), isMutable = false),
+        p.Stmt.Var(winner, Some(p.Expr.Alias(p.Term.Select(selected, Nil, pointerTpe)))),
         p.Stmt.Var(
           result,
-          Some(p.Expr.Index(p.Term.Select(winner, Nil, stalePointerTpe), p.Term.IntS64Const(0), p.Type.IntS32)),
-          isMutable = false
+          Some(p.Expr.Index(p.Term.Select(winner, Nil, stalePointerTpe), p.Term.IntS64Const(0), p.Type.IntS32))
         ),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       )

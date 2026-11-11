@@ -40,7 +40,7 @@ object Verify {
 
   def validateAlloc(program: p.Program): List[String] = {
     def isConstSize(t: p.Term): Boolean = t match {
-      case _: p.Term.IntS32Const | _: p.Term.IntS64Const | _: p.Term.IntU32Const | _: p.Term.IntU64Const => true
+      case p.Term.IntS32Const(_) | p.Term.IntS64Const(_) | p.Term.IntU32Const(_) | p.Term.IntU64Const(_) => true
       case _                                                                                             => false
     }
     (program.entry.toList ::: program.functions)
@@ -91,11 +91,7 @@ object Verify {
     locally {
       (program.entry.toList ::: program.functions).flatMap { f =>
         val analysis = refinement.solve(f)
-        val declared = (
-          f.receiver.iterator.map(_.named) ++ f.args.iterator.map(_.named) ++
-            f.moduleCaptures.iterator.map(_.named) ++ f.termCaptures.iterator.map(_.named) ++
-            f.collectAll[p.Stmt].iterator.collect { case p.Stmt.Var(n, _, _) => n }
-        ).map(n => n.symbol -> n).toMap
+        val declared = AddressRefinement.declaredNames(f)
         declared.valuesIterator.flatMap { name =>
           for {
             declaredSpace <- AddressRefinement.spaceOf(name.tpe)
@@ -121,17 +117,12 @@ object Verify {
       term.steps
         .foldLeft((initial, term.root.tpe: p.Type)) { case ((acc, currTpe), step) =>
           step match {
-            case p.PathStep.Deref =>
+            case step @ (p.PathStep.Deref | p.PathStep.Index(_)) =>
               currTpe match {
                 case p.Type.Ptr(comp, _) => (acc, comp)
                 case other =>
-                  (acc ~ s"Deref step on non-pointer type ${other.repr} in `$termRepr`", other)
-              }
-            case p.PathStep.Index(_) =>
-              currTpe match {
-                case p.Type.Ptr(comp, _) => (acc, comp)
-                case other =>
-                  (acc ~ s"Index step on non-pointer type ${other.repr} in `$termRepr`", other)
+                  val kind = if step == p.PathStep.Deref then "Deref" else "Index"
+                  (acc ~ s"$kind step on non-pointer type ${other.repr} in `$termRepr`", other)
               }
             case p.PathStep.IndexDyn(_) =>
               currTpe match {
@@ -234,38 +225,31 @@ object Verify {
         val c0                   = validateTerm(c, from)
         def isNumeric(t: p.Type) = t.kind == p.Type.Kind.Integral || t.kind == p.Type.Kind.Fractional
         (from.tpe, as) match {
-          case (a, b) if a == b                       => c0
-          case (_: p.Type.Struct, _: p.Type.Struct)   => c0
-          case (_: p.Type.Ptr, _: p.Type.Ptr)         => c0
-          case (a, b) if isNumeric(a) && isNumeric(b) => c0
+          case (a, b) if a == b                           => c0
+          case (p.Type.Struct(_, _), p.Type.Struct(_, _)) => c0
+          case (p.Type.Ptr(_, _), p.Type.Ptr(_, _))       => c0
+          case (a, b) if isNumeric(a) && isNumeric(b)     => c0
           case (a, b) => c0 ~ s"Cannot cast unrelated type ${a.repr} to ${b.repr}: ${e.repr}"
         }
       case p.Expr.BitCast(from, as) =>
         val c0 = validateTerm(c, from)
-        def width(tpe: p.Type): Option[Int] = tpe match {
-          case p.Type.Bool1 | p.Type.IntU8 | p.Type.IntS8     => Some(1)
-          case p.Type.IntU16 | p.Type.IntS16 | p.Type.Float16 => Some(2)
-          case p.Type.IntU32 | p.Type.IntS32 | p.Type.Float32 => Some(4)
-          case p.Type.IntU64 | p.Type.IntS64 | p.Type.Float64 => Some(8)
-          case _                                              => None
-        }
-        if (width(from.tpe).nonEmpty && width(from.tpe) == width(as)) c0
+        if (TypeOps.width(from.tpe).nonEmpty && TypeOps.width(from.tpe) == TypeOps.width(as)) c0
         else c0 ~ s"Cannot bit-cast differently-sized or non-scalar type ${from.tpe.repr} to ${as.repr}: ${e.repr}"
-      case p.Expr.Invoke(_, _, receiver, args, _) =>
-        val c0 = receiver.map(validateTerm(c, _)).getOrElse(c)
+      case p.Expr.Invoke(receiver = receiver, args = args) =>
+        val c0 = receiver.fold(c)(validateTerm(c, _))
         args.foldLeft(c0)(validateTerm(_, _))
       case p.Expr.ForeignCall(_, args, _) => args.foldLeft(c)(validateTerm(_, _))
       case p.Expr.OffsetOf(_, _)          => c
       case p.Expr.SizeOf(_)               => c
       case p.Expr.Index(lhs, idx, _)      => validateTerm(validateTerm(c, lhs), idx)
-      case p.Expr.RefTo(lhs, idx, _, _, _) =>
+      case p.Expr.RefTo(lhs = lhs, idx = idx) =>
         val c0 = validateTerm(c, lhs); idx.fold(c0)(validateTerm(c0, _))
-      case p.Expr.Alloc(_, size, _, _) => validateTerm(c, size)
+      case p.Expr.Alloc(size = size) => validateTerm(c, size)
     }
 
     def validateStmt(c: Context, s: p.Stmt): Context = s match {
       case p.Stmt.Var(name, expr, _) =>
-        val c0 = expr.map(e => validateExpr(_: Context, e)).getOrElse(identity[Context])(c + name)
+        val c0 = expr.fold(identity[Context])(e => validateExpr(_: Context, e))(c + name)
         def varCompatible(t: p.Type, u: p.Type): Boolean = (t, u) match {
           case (a, b) if a == b                                 => true
           case (p.Type.Var(_, _), _) | (_, p.Type.Var(_, _))    => true
@@ -290,8 +274,7 @@ object Verify {
       case p.Stmt.While(cond, body) =>
         val c0 = validateTerm(c, cond)
         body.foldLeft(c0)(validateStmt(_, _))
-      case p.Stmt.Break => c
-      case p.Stmt.Cont  => c
+      case p.Stmt.Break | p.Stmt.Cont => c
       case p.Stmt.Cond(cond, trueBr, falseBr) =>
         val c0 = validateTerm(c, cond)
         falseBr.foldLeft(trueBr.foldLeft(c0)(validateStmt(_, _)))(validateStmt(_, _))
@@ -358,13 +341,15 @@ object Verify {
           ivk.calleeSym.flatMap(allFnLUT.get) match {
             case None | Some(Nil) => s"Callsite `${ivk.repr}` invokes an undefined function" :: Nil
             case Some(candidates) =>
+              val argCount    = ivk.args.size
+              val tpeArgCount = ivk.tpeArgs.size
               val matching = candidates.find { f =>
                 val sig      = f.signature
                 val expected = sig.args.size + sig.moduleCaptures.size + sig.termCaptures.size
                 ivk.rtn == sig.rtn &&
                 ivk.receiver.map(_.tpe) == sig.receiver &&
-                ivk.args.size <= expected &&
-                ivk.tpeArgs.size == sig.tpeVars.size
+                argCount <= expected &&
+                tpeArgCount == sig.tpeVars.size
               }
               matching match {
                 case Some(_) => Nil
@@ -384,26 +369,14 @@ object Verify {
               allFnLUT.get(name) match {
                 case None | Some(Nil) => s"launch references an undefined kernel `${name.repr}`" :: Nil
                 case Some(candidates) =>
-                  def resolve(tpe: p.Type, bindings: Map[String, p.Type]): p.Type = tpe match {
-                    case p.Type.Var(name, _)                  => bindings.getOrElse(name, tpe)
-                    case p.Type.Struct(name, args)            => p.Type.Struct(name, args.map(resolve(_, bindings)))
-                    case p.Type.Ptr(component, space)         => p.Type.Ptr(resolve(component, bindings), space)
-                    case p.Type.Arr(component, length, space) => p.Type.Arr(resolve(component, bindings), length, space)
-                    case p.Type.Exec(vars, args, rtn) =>
-                      val nested = bindings -- vars.map(_.name)
-                      p.Type.Exec(vars, args.map(resolve(_, nested)), resolve(rtn, nested))
-                    case other => other
-                  }
+                  val tpeArgCount = launch.tpeArgs.size
+                  val argCount    = launch.args.size
                   val matching = candidates.exists { candidate =>
                     val bindings = candidate.tpeVars.map(_.name).zip(launch.tpeArgs).toMap
                     val parameters = (candidate.moduleCaptures ::: candidate.termCaptures ::: candidate.args)
-                      .map(arg => resolve(arg.named.tpe, bindings))
+                      .map(arg => Binders.substType(arg.named.tpe, bindings))
                       .filterNot(tpe => tpe == p.Type.Unit0 || tpe == p.Type.Nothing)
-                    candidate.affinity == p.Function.Affinity.Offload &&
-                    candidate.receiver.isEmpty &&
-                    candidate.rtn == p.Type.Unit0 &&
-                    candidate.tpeVars.size == launch.tpeArgs.size &&
-                    parameters.size == launch.args.size &&
+                    TypeOps.launchShaped(candidate, tpeArgCount, parameters, argCount) &&
                     parameters.zip(launch.args).forall { case (expected, actual) =>
                       (expected, actual.tpe) match {
                         case (p.Type.Ptr(expectedStruct: p.Type.Struct, _), actualStruct: p.Type.Struct) =>

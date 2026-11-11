@@ -16,6 +16,7 @@ import scala.quoted.*
 import scala.util.Try
 
 @compileTimeOnly("This class only exists at compile-time to expose offload methods")
+@SuppressWarnings(Array("bonsai:data-clump"))
 object compiletime {
   import Env.debug
 
@@ -86,7 +87,7 @@ object compiletime {
 
   private case class ReifiedConfig(target: ct.Target, arch: String, opt: ct.Opt)
 
-  private def reifyConfig(x: srt.Config[_, _]): List[ReifiedConfig] =
+  private def reifyConfig(x: srt.Config[?, ?]): List[ReifiedConfig] =
     x.targets.map((t, o) => ReifiedConfig(t.arch, t.uarch, o.value))
 
   private def reifyConfigFromTpe[C: Type](using
@@ -119,15 +120,15 @@ object compiletime {
     }
   }
 
-  private inline def checked[A](e: Result[A]): A = e match {
+  private inline def checked(e: Result[Expr[Unit]]): Expr[Unit] = e match {
     case Left(e)  => throw e
     case Right(x) => x
   }
 
   inline def offload0[C](inline queue: rt.Device.Queue, inline cb: Callback[Unit])(inline f: Any): Unit =
-    ${ generate0[C]('queue, 'f, 'cb, false) }
+    ${ generate0[C]('queue, 'f, 'cb, jit = false) }
   inline def offloadJit0[C](inline queue: rt.Device.Queue, inline cb: Callback[Unit])(inline f: Any): Unit =
-    ${ generate0[C]('queue, 'f, 'cb, true) }
+    ${ generate0[C]('queue, 'f, 'cb, jit = true) }
   private def generate0[C: Type](using
       q: Quotes
   )(queue: Expr[rt.Device.Queue], f: Expr[Any], cb: Expr[Callback[Unit]], jit: Boolean) = checked(for {
@@ -137,10 +138,10 @@ object compiletime {
 
   inline def offload1[C](inline queue: rt.Device.Queue, inline rangeX: Range, inline cb: Callback[Unit])(
       inline f: Any
-  ): Unit = ${ generate1[C]('queue, 'f, 'rangeX, 'cb, false) }
+  ): Unit = ${ generate1[C]('queue, 'f, 'rangeX, 'cb, jit = false) }
   inline def offloadJit1[C](inline queue: rt.Device.Queue, inline rangeX: Range, inline cb: Callback[Unit])(
       inline f: Any
-  ): Unit = ${ generate1[C]('queue, 'f, 'rangeX, 'cb, true) }
+  ): Unit = ${ generate1[C]('queue, 'f, 'rangeX, 'cb, jit = true) }
   private def generate1[C: Type](using
       q: Quotes
   )(queue: Expr[rt.Device.Queue], f: Expr[Any], rangeX: Expr[Range], cb: Expr[Callback[Unit]], jit: Boolean) = checked(
@@ -155,13 +156,13 @@ object compiletime {
       inline rangeX: Range,
       inline rangeY: Range,
       inline cb: Callback[Unit]
-  )(inline f: Any): Unit = ${ generate2[C]('queue, 'f, 'rangeX, 'rangeY, 'cb, false) }
+  )(inline f: Any): Unit = ${ generate2[C]('queue, 'f, 'rangeX, 'rangeY, 'cb, jit = false) }
   inline def offloadJit2[C](
       inline queue: rt.Device.Queue,
       inline rangeX: Range,
       inline rangeY: Range,
       inline cb: Callback[Unit]
-  )(inline f: Any): Unit = ${ generate2[C]('queue, 'f, 'rangeX, 'rangeY, 'cb, true) }
+  )(inline f: Any): Unit = ${ generate2[C]('queue, 'f, 'rangeX, 'rangeY, 'cb, jit = true) }
   private def generate2[C: Type](using
       q: Quotes
   )(
@@ -183,14 +184,14 @@ object compiletime {
       inline rangeY: Range,
       inline rangeZ: Range,
       inline cb: Callback[Unit]
-  )(inline f: Any): Unit = ${ generate3[C]('queue, 'f, 'rangeX, 'rangeY, 'rangeZ, 'cb, false) }
+  )(inline f: Any): Unit = ${ generate3[C]('queue, 'f, 'rangeX, 'rangeY, 'rangeZ, 'cb, jit = false) }
   inline def offloadJit3[C](
       inline queue: rt.Device.Queue,
       inline rangeX: Range,
       inline rangeY: Range,
       inline rangeZ: Range,
       inline cb: Callback[Unit]
-  )(inline f: Any): Unit = ${ generate3[C]('queue, 'f, 'rangeX, 'rangeY, 'rangeZ, 'cb, true) }
+  )(inline f: Any): Unit = ${ generate3[C]('queue, 'f, 'rangeX, 'rangeY, 'rangeZ, 'cb, jit = true) }
   private def generate3[C: Type](using
       q: Quotes
   )(
@@ -207,7 +208,10 @@ object compiletime {
   } yield expr)
 
   private val ProgramCounter = AtomicLong(0)
-  private def generate(using q: Quoted)(
+  @SuppressWarnings(Array("bonsai:invariant-in-loop"))
+  private def generate(using
+      q: Quoted
+  )(
       configs: List[ReifiedConfig],
       queue: Expr[rt.Device.Queue],
       f: Expr[Any],
@@ -221,7 +225,7 @@ object compiletime {
       // Name actual => type actual
       // configs               <- reifyConfigFromTpe[C](using q.underlying)()
 
-      (captures, prismRefs, monoMap, prog0) <- Compiler.compileExpr(log, f)
+      (captures, prismRefs, monoMap, prog0) <- Compiler.compileExpr(log, f, StdLib.Tables)
 
       resolveStructDef = (s: p.Type.Struct) => prog0.defs.find(_.name == s.name)
 
@@ -251,7 +255,9 @@ object compiletime {
         else
           configs.traverse(c =>
             Either
-              .catchNonFatal(compiler.compile(serialisedAst, true, ct.Options.of(c.target, c.arch), c.opt.value))
+              .catchNonFatal(
+                compiler.compile(serialisedAst, emitAssembly = true, ct.Options.of(c.target, c.arch), c.opt.value)
+              )
               .map(c -> _)
           )
       perConfigLayouts <-
@@ -301,7 +307,8 @@ object compiletime {
             val jitCompiler = ct.Compiler.create()
             val ast         = $serialisedAstExpr
             $jitConfigs.map { case (name, targetName, arch, opt) =>
-              val comp = jitCompiler.compile(ast, false, ct.Options.of(ct.Target.valueOf(targetName), arch), opt)
+              val comp =
+                jitCompiler.compile(ast, emitAssembly = false, ct.Options.of(ct.Target.valueOf(targetName), arch), opt)
               (name, comp.features.toSet, comp.program)
             }.toArray
           }
@@ -312,12 +319,12 @@ object compiletime {
                 Expr(
                   (
                     s"${config.arch}@${config.opt}(${config.target})",
-                    Set(compilation.features: _*),
+                    Set(compilation.features*),
                     compilation.program
                   )
                 )
               })
-            }: _*)
+            }*)
           }
 
       val code = '{
@@ -326,13 +333,13 @@ object compiletime {
 
         // Validate device features support this code object.
         val miss      = ArrayBuffer[(String, Set[String])]()
-        val available = Set($queue.device.features(): _*)
+        val available = Set($queue.device.features()*)
 
         lazy val modules = $modulesExpr
 
         var found = -1
         var i     = 0
-        while (i < modules.size && found == -1) {
+        while (i < modules.length && found == -1) {
           val (name, required, _) = modules(i)
           val missing             = required -- available
           if (missing.isEmpty) found = i
@@ -372,18 +379,19 @@ object compiletime {
 
           ${
 
+            val lut         = prog.defs.map(s => s.name -> s).toMap
+            val lutWithRefs = lut.map((s, sd) => s -> (sd, prismRefs.get(s)))
             q.Match(
               'found.asTerm,
               perConfigLayouts.zipWithIndex.map { case ((config, configLayouts), i) =>
                 val layouts0 = configLayouts.map(l => p.Sym(l.name) -> l).toMap
 
-                val lut = prog.defs.map(s => s.name -> s).toMap
                 val layouts = prog.defs.flatMap { sd =>
                   layouts0.get(sd.name).map(layout => sd -> (layout, prismRefs.get(sd.name)))
                 }.toMap
                 val allReprsInCaptures = capturesWithStructDefs
                   .collect { case (_, Some(sdef), term) =>
-                    Pickler.deriveAllRepr(lut.map((s, sd) => s -> (sd, prismRefs.get(s))), sdef, term.tpe)
+                    Pickler.deriveAllRepr(lutWithRefs, sdef, term.tpe)
                   }
                   .reduceLeftOption(_ ++ _)
                   .getOrElse(Map.empty)
@@ -502,7 +510,9 @@ object compiletime {
   //  - (var) $ptr == nullptr => ${inst.a} := null
   //  - (var) $ptr != nullptr => ${inst.a} := f(q, ${inst.a} ?, fromPtr($ptr)) : A
 
-  def bindWrite(using q: Quoted)(
+  def bindWrite(using
+      q: Quoted
+  )(
       offset: Int,
       write: (p.Sym, Expr[Any]) => Expr[Long],
       target: Expr[ByteBuffer],
@@ -512,7 +522,8 @@ object compiletime {
     given Quotes = q.underlying
     val (_, stmts) = capturesWithStructDefs.zipWithIndex.foldLeft((offset, List.empty[Expr[Any]])) {
       case ((byteOffset, exprs), ((name, structDef, ref), idx)) =>
-        debug(s"[Bind] [$idx, offset=${byteOffset}]  repr=${ref.show} name=${name.repr} (${structDef.map(_.repr)})")
+        lazy val refRepr = ref.show
+        debug(s"[Bind] [$idx, offset=${byteOffset}]  repr=${refRepr} name=${name.repr} (${structDef.map(_.repr)})")
 
         val mutable = ref.symbol.flags.is(q.Flags.Mutable)
 
@@ -522,11 +533,11 @@ object compiletime {
         val expr = ((name.tpe, structDef): @scala.unchecked) match {
           case (p.Type.Ptr(_, _), None) =>
             throw RuntimeException(
-              s"Top level arrays at parameter boundary is illegal: repr=${ref.show} name=${name.repr}"
+              s"Top level arrays at parameter boundary is illegal: repr=${refRepr} name=${name.repr}"
             )
           case (p.Type.Struct(_, _), None) =>
             throw RuntimeException(
-              s"Struct type without definition at parameter boundary is illegal: repr=${ref.show} name=${name.repr}"
+              s"Struct type without definition at parameter boundary is illegal: repr=${refRepr} name=${name.repr}"
             )
           case (p.Type.Struct(_, _), Some(sdef)) =>
             (ref.asExpr: @scala.unchecked) match {
@@ -541,15 +552,17 @@ object compiletime {
             }
           case (t, _) =>
             throw RuntimeException(
-              s"Unexpected type ${t.repr} at parameter boundary: repr=${ref.show} name=${name.repr}"
+              s"Unexpected type ${t.repr} at parameter boundary: repr=${refRepr} name=${name.repr}"
             )
         }
-        (byteOffset + Pickler.tpeAsRuntimeTpe(name.tpe).sizeInBytes, exprs :+ expr)
+        (byteOffset + Pickler.tpeAsRuntimeTpe(name.tpe).sizeInBytes, expr :: exprs)
     }
-    Expr.block(stmts, '{ () })
+    Expr.block(stmts.reverse, '{ () })
   }
 
-  def bindRead(using q: Quoted)(
+  def bindRead(using
+      q: Quoted
+  )(
       offset: Int,
       read: (p.Sym, Expr[Any], Expr[Long]) => Expr[Any],
       update: (p.Sym, Expr[Any], Expr[Long]) => Expr[Unit],
@@ -560,18 +573,19 @@ object compiletime {
     given Quotes = q.underlying
     val (_, stmts) = capturesWithStructDefs.zipWithIndex.foldLeft((offset, List.empty[Expr[Any]])) {
       case ((byteOffset, exprs), ((name, structDef, ref), idx)) =>
-        debug(s"[Bind] <-  [$idx, offset=${byteOffset}]  repr=${ref.show} name=${name.repr} (${structDef.map(_.repr)})")
+        lazy val refRepr = ref.show
+        debug(s"[Bind] <-  [$idx, offset=${byteOffset}]  repr=${refRepr} name=${name.repr} (${structDef.map(_.repr)})")
 
         val mutable = ref.symbol.flags.is(q.Flags.Mutable)
 
         val expr = ((name.tpe, structDef): @scala.unchecked) match {
           case (p.Type.Ptr(_, _), None) =>
             throw RuntimeException(
-              s"Top level arrays at parameter boundary is illegal: repr=${ref.show} name=${name.repr}"
+              s"Top level arrays at parameter boundary is illegal: repr=${refRepr} name=${name.repr}"
             )
           case (p.Type.Struct(_, _), None) =>
             throw RuntimeException(
-              s"Struct type without definition at parameter boundary is illegal: repr=${ref.show} name=${name.repr}"
+              s"Struct type without definition at parameter boundary is illegal: repr=${refRepr} name=${name.repr}"
             )
           case (p.Type.Struct(_, _), Some(sdef)) =>
             (ref.asExpr: @scala.unchecked) match {
@@ -598,12 +612,12 @@ object compiletime {
             }
           case (t, _) =>
             throw RuntimeException(
-              s"Unexpected type ${t.repr} at parameter boundary: repr=${ref.show} name=${name.repr}"
+              s"Unexpected type ${t.repr} at parameter boundary: repr=${refRepr} name=${name.repr}"
             )
         }
-        (byteOffset + Pickler.tpeAsRuntimeTpe(name.tpe).sizeInBytes, exprs :+ expr)
+        (byteOffset + Pickler.tpeAsRuntimeTpe(name.tpe).sizeInBytes, expr :: exprs)
     }
-    Expr.block(stmts, '{ () })
+    Expr.block(stmts.reverse, '{ () })
   }
 
 }

@@ -9,7 +9,7 @@ class ReflectStackPass : public llvm::PassInfoMixin<ReflectStackPass> {
 
 public:
   explicit ReflectStackPass(bool verbose);
-  llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &);
+  llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &) const;
 };
 
 } // namespace polyregion::polyreflect

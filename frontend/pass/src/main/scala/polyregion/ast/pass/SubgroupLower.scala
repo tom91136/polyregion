@@ -30,8 +30,7 @@ case class SubgroupLower(
     lowerSubgroups: Boolean = true,
     lowerGroups: Boolean = false,
     nativeGroups: String = ""
-) extends ProgramPass
-    derives PassArgCodec {
+) extends ProgramPass derives PassArgCodec {
   override def phase: p.Pass.Phase = p.Pass.Phase.PostMono
 
   override def apply(program: p.Program, log: Log): p.Program = {
@@ -91,18 +90,20 @@ private final class Lowering(
     private val pool = mutable.LinkedHashMap.empty[p.Type, mutable.ArrayBuffer[p.Named]]
 
     def allocFor(types: List[p.Type]): List[p.Named] = {
-      val drawn = mutable.HashMap.empty[p.Type, Int]
-      types.map { tpe =>
+      val drawn     = mutable.HashMap.empty[p.Type, Int]
+      val allocated = List.newBuilder[p.Named]
+      types.foreach { tpe =>
         val buffers = pool.getOrElseUpdate(tpe, mutable.ArrayBuffer.empty)
         val index   = drawn.getOrElse(tpe, 0)
         drawn(tpe) = index + 1
         if (index >= buffers.size) buffers += fresh("scratch", tpe)
-        buffers(index)
+        allocated += buffers(index)
       }
+      allocated.result()
     }
 
     def declarations: List[p.Stmt] =
-      pool.valuesIterator.flatMap(_.iterator).map(p.Stmt.Var(_, None, isMutable = false)).toList
+      pool.valuesIterator.flatMap(_.iterator).map(p.Stmt.Var(_, None)).toList
   }
 
   def run(): p.Program = {
@@ -140,8 +141,9 @@ private final class Lowering(
     if (!lowerSubgroups) return
 
     def requiresBarrier(op: p.Spec): Boolean = op match {
-      case _: p.Spec.GpuShuffleDown | _: p.Spec.GpuShuffleUp | _: p.Spec.GpuShuffleIdx | _: p.Spec.GpuShuffleXor |
-          _: p.Spec.GpuVoteAny | _: p.Spec.GpuVoteAll | _: p.Spec.GpuBallot | _: p.Spec.GpuSubgroupBarrier =>
+      case p.Spec.GpuShuffleDown(_, _, _, _, _) | p.Spec.GpuShuffleUp(_, _, _, _, _) |
+          p.Spec.GpuShuffleIdx(_, _, _, _, _) | p.Spec.GpuShuffleXor(_, _, _, _, _) | p.Spec.GpuVoteAny(_, _) |
+          p.Spec.GpuVoteAll(_, _) | p.Spec.GpuBallot(_, _) | p.Spec.GpuSubgroupBarrier(_) =>
         width > 1
       case _ => false
     }
@@ -181,8 +183,8 @@ private final class Lowering(
           s"Subgroup emulation requires whole-workgroup-uniform participation; ${function.decl.name.fqcn} contains a synchronising subgroup operation under $kind"
         )
     def exitsFunction(body: List[p.Stmt]): Boolean = body.collectAll[p.Stmt].exists {
-      case _: p.Stmt.Return | _: p.Stmt.Raise | p.Stmt.Rethrow => true
-      case _                                                   => false
+      case p.Stmt.Return(_) | p.Stmt.Raise(_, _, _) | p.Stmt.Rethrow => true
+      case _                                                         => false
     }
     def rejectEarlyExit(function: p.Function, kind: String, body: List[p.Stmt]): Unit =
       if (requiring(function.decl.name) && exitsFunction(body))
@@ -201,7 +203,7 @@ private final class Lowering(
         reject(function, "loop control flow", body)
         rejectEarlyExit(function, "loop control flow", body)
         validate(function, body)
-      case p.Stmt.ForRange(_, _, _, _, body) =>
+      case p.Stmt.ForRange(body = body) =>
         reject(function, "loop control flow", body)
         rejectEarlyExit(function, "loop control flow", body)
         validate(function, body)
@@ -227,27 +229,24 @@ private final class Lowering(
   private def barrier: p.Stmt =
     p.Stmt.Var(
       fresh("barrier", p.Type.Unit0),
-      Some(p.Expr.SpecOp(p.Spec.GpuBarrierLocal)),
-      isMutable = false
+      Some(p.Expr.SpecOp(p.Spec.GpuBarrierLocal))
     )
 
   private def lanePrelude(
       localId: p.Named,
       localSize: p.Named,
       lane: p.Named,
-      base: Option[p.Named] = None
+      base: Option[p.Named]
   ): List[p.Stmt] =
-    subgroupPrelude(localId, localSize) ::: List(
+    linearPrelude("subgroup", localId, localSize) ::: List(
       p.Stmt.Var(
         lane,
-        Some(p.Expr.IntrOp(p.Intr.BAnd(sel(localId), u32(width - 1), p.Type.IntU32))),
-        isMutable = false
+        Some(p.Expr.IntrOp(p.Intr.BAnd(sel(localId), u32(width - 1), p.Type.IntU32)))
       )
     ) ::: base.toList.map(name =>
       p.Stmt.Var(
         name,
-        Some(p.Expr.IntrOp(p.Intr.Sub(sel(localId), sel(lane), p.Type.IntU32))),
-        isMutable = false
+        Some(p.Expr.IntrOp(p.Intr.Sub(sel(localId), sel(lane), p.Type.IntU32)))
       )
     )
 
@@ -259,12 +258,12 @@ private final class Lowering(
     val present = fresh(s"${name}_present", p.Type.Bool1)
     val member  = fresh(s"${name}_member", p.Type.Bool1)
     member -> List(
-      p.Stmt.Var(bit, Some(p.Expr.IntrOp(p.Intr.BAnd(lane, u32(31), p.Type.IntU32))), isMutable = false),
-      p.Stmt.Var(shifted, Some(p.Expr.IntrOp(p.Intr.BSR(mask, sel(bit), p.Type.IntU32))), isMutable = false),
-      p.Stmt.Var(set, Some(p.Expr.IntrOp(p.Intr.BAnd(sel(shifted), u32(1), p.Type.IntU32))), isMutable = false),
-      p.Stmt.Var(bounded, Some(p.Expr.IntrOp(p.Intr.LogicLt(lane, u32(32)))), isMutable = false),
-      p.Stmt.Var(present, Some(p.Expr.IntrOp(p.Intr.LogicNeq(sel(set), u32(0)))), isMutable = false),
-      p.Stmt.Var(member, Some(p.Expr.IntrOp(p.Intr.LogicAnd(sel(bounded), sel(present)))), isMutable = false)
+      p.Stmt.Var(bit, Some(p.Expr.IntrOp(p.Intr.BAnd(lane, u32(31), p.Type.IntU32)))),
+      p.Stmt.Var(shifted, Some(p.Expr.IntrOp(p.Intr.BSR(mask, sel(bit), p.Type.IntU32)))),
+      p.Stmt.Var(set, Some(p.Expr.IntrOp(p.Intr.BAnd(sel(shifted), u32(1), p.Type.IntU32)))),
+      p.Stmt.Var(bounded, Some(p.Expr.IntrOp(p.Intr.LogicLt(lane, u32(32))))),
+      p.Stmt.Var(present, Some(p.Expr.IntrOp(p.Intr.LogicNeq(sel(set), u32(0))))),
+      p.Stmt.Var(member, Some(p.Expr.IntrOp(p.Intr.LogicAnd(sel(bounded), sel(present)))))
     )
   }
 
@@ -276,9 +275,9 @@ private final class Lowering(
       val localSize = fresh("local_size", p.Type.IntU32)
       Some(
         p.Expr.IntrOp(p.Intr.BAnd(sel(localId), u32(width - 1), p.Type.IntU32)) ->
-          subgroupPrelude(localId, localSize)
+          linearPrelude("subgroup", localId, localSize)
       )
-    case p.Spec.GpuShuffleDown(value, _, _, _, rtn) if lowerSubgroups && width == 1 =>
+    case p.Spec.GpuShuffleDown(value = value, rtn = rtn) if lowerSubgroups && width == 1 =>
       Some(singleLaneShuffle(value, rtn))
     case p.Spec.GpuShuffleDown(value, delta, clamp, mask, rtn) if lowerSubgroups =>
       Some(
@@ -292,7 +291,7 @@ private final class Lowering(
           (lane, _) => (p.Expr.IntrOp(p.Intr.Add(lane, delta, p.Type.IntU32)), Nil)
         )
       )
-    case p.Spec.GpuShuffleUp(value, _, _, _, rtn) if lowerSubgroups && width == 1 =>
+    case p.Spec.GpuShuffleUp(value = value, rtn = rtn) if lowerSubgroups && width == 1 =>
       Some(singleLaneShuffle(value, rtn))
     case p.Spec.GpuShuffleUp(value, delta, clamp, mask, rtn) if lowerSubgroups =>
       Some(
@@ -306,7 +305,7 @@ private final class Lowering(
           (lane, _) => (p.Expr.IntrOp(p.Intr.Sub(lane, delta, p.Type.IntU32)), Nil)
         )
       )
-    case p.Spec.GpuShuffleIdx(value, _, _, _, rtn) if lowerSubgroups && width == 1 =>
+    case p.Spec.GpuShuffleIdx(value = value, rtn = rtn) if lowerSubgroups && width == 1 =>
       Some(singleLaneShuffle(value, rtn))
     case p.Spec.GpuShuffleIdx(value, sourceLane, clamp, mask, rtn) if lowerSubgroups =>
       Some(
@@ -321,12 +320,12 @@ private final class Lowering(
             val relative = fresh("relative", p.Type.IntU32)
             p.Expr.IntrOp(p.Intr.BOr(segmentBase, sel(relative), p.Type.IntU32)) -> List(
               p.Stmt
-                .Var(relative, Some(p.Expr.IntrOp(p.Intr.BAnd(sourceLane, clamp, p.Type.IntU32))), isMutable = false)
+                .Var(relative, Some(p.Expr.IntrOp(p.Intr.BAnd(sourceLane, clamp, p.Type.IntU32))))
             )
           }
         )
       )
-    case p.Spec.GpuShuffleXor(value, _, _, _, rtn) if lowerSubgroups && width == 1 =>
+    case p.Spec.GpuShuffleXor(value = value, rtn = rtn) if lowerSubgroups && width == 1 =>
       Some(singleLaneShuffle(value, rtn))
     case p.Spec.GpuShuffleXor(value, laneMask, clamp, mask, rtn) if lowerSubgroups =>
       Some(
@@ -376,7 +375,7 @@ private final class Lowering(
       if (all) p.Expr.IntrOp(p.Intr.LogicOr(sel(included), predicate))
       else p.Expr.IntrOp(p.Intr.LogicAnd(sel(included), predicate))
     result -> List(
-      p.Stmt.Var(maskBit, Some(p.Expr.IntrOp(p.Intr.BAnd(mask, u32(1), p.Type.IntU32))), isMutable = false),
+      p.Stmt.Var(maskBit, Some(p.Expr.IntrOp(p.Intr.BAnd(mask, u32(1), p.Type.IntU32)))),
       p.Stmt.Var(
         included,
         Some(
@@ -384,8 +383,7 @@ private final class Lowering(
             if (all) p.Intr.LogicEq(sel(maskBit), u32(0))
             else p.Intr.LogicNeq(sel(maskBit), u32(0))
           )
-        ),
-        isMutable = false
+        )
       )
     )
   }
@@ -394,11 +392,10 @@ private final class Lowering(
     val predicateBit = fresh("predicate_bit", p.Type.IntU32)
     val masked       = fresh("masked", p.Type.IntU32)
     p.Expr.Alias(sel(masked)) -> List(
-      p.Stmt.Var(predicateBit, Some(p.Expr.Cast(predicate, p.Type.IntU32)), isMutable = false),
+      p.Stmt.Var(predicateBit, Some(p.Expr.Cast(predicate, p.Type.IntU32))),
       p.Stmt.Var(
         masked,
-        Some(p.Expr.IntrOp(p.Intr.BAnd(sel(predicateBit), mask, p.Type.IntU32))),
-        isMutable = false
+        Some(p.Expr.IntrOp(p.Intr.BAnd(sel(predicateBit), mask, p.Type.IntU32)))
       )
     )
   }
@@ -418,11 +415,11 @@ private final class Lowering(
             case _                   => false
           } =>
         val name = fresh("value", rtn)
-        (List(p.Stmt.Var(name, Some(p.Expr.Index(pointer, u32(0), rtn)), isMutable = false)), sel(name))
+        (List(p.Stmt.Var(name, Some(p.Expr.Index(pointer, u32(0), rtn)))), sel(name))
       case select: p.Term.Select => (Nil, select)
       case other =>
         val name = fresh("value", rtn)
-        (List(p.Stmt.Var(name, Some(p.Expr.Alias(other)), isMutable = false)), sel(name))
+        (List(p.Stmt.Var(name, Some(p.Expr.Alias(other)))), sel(name))
     }
     val leafList     = leaves(rtn)
     val buffers      = pool.allocFor(leafList.map((_, tpe) => p.Type.Arr(tpe, maxGroupSize, p.Type.Space.Local)))
@@ -458,40 +455,36 @@ private final class Lowering(
       fields.map((path, buffer, tpe) => p.Stmt.Update(sel(buffer), sel(localId), valueField(path, tpe))) :::
       List(
         barrier,
-        p.Stmt.Var(inverseClamp, Some(p.Expr.IntrOp(p.Intr.BNot(clamp, p.Type.IntU32))), isMutable = false),
+        p.Stmt.Var(inverseClamp, Some(p.Expr.IntrOp(p.Intr.BNot(clamp, p.Type.IntU32)))),
         p.Stmt.Var(
           segmentBase,
-          Some(p.Expr.IntrOp(p.Intr.BAnd(sel(lane), sel(inverseClamp), p.Type.IntU32))),
-          isMutable = false
+          Some(p.Expr.IntrOp(p.Intr.BAnd(sel(lane), sel(inverseClamp), p.Type.IntU32)))
         ),
         p.Stmt
-          .Var(segmentLast, Some(p.Expr.IntrOp(p.Intr.BOr(sel(segmentBase), clamp, p.Type.IntU32))), isMutable = false)
+          .Var(segmentLast, Some(p.Expr.IntrOp(p.Intr.BOr(sel(segmentBase), clamp, p.Type.IntU32))))
       ) ::: targetPrelude ::: List(
-        p.Stmt.Var(target, Some(targetExpr), isMutable = false)
+        p.Stmt.Var(target, Some(targetExpr))
       ) ::: callerMembership ::: sourceMembership ::: List(
-        p.Stmt.Var(source, Some(p.Expr.IntrOp(p.Intr.Add(sel(base), sel(target), p.Type.IntU32))), isMutable = false),
-        p.Stmt.Var(aboveBase, Some(p.Expr.IntrOp(p.Intr.LogicGte(sel(target), sel(segmentBase)))), isMutable = false),
-        p.Stmt.Var(belowLast, Some(p.Expr.IntrOp(p.Intr.LogicLte(sel(target), sel(segmentLast)))), isMutable = false),
-        p.Stmt.Var(inSegment, Some(p.Expr.IntrOp(p.Intr.LogicAnd(sel(aboveBase), sel(belowLast)))), isMutable = false),
+        p.Stmt.Var(source, Some(p.Expr.IntrOp(p.Intr.Add(sel(base), sel(target), p.Type.IntU32)))),
+        p.Stmt.Var(aboveBase, Some(p.Expr.IntrOp(p.Intr.LogicGte(sel(target), sel(segmentBase))))),
+        p.Stmt.Var(belowLast, Some(p.Expr.IntrOp(p.Intr.LogicLte(sel(target), sel(segmentLast))))),
+        p.Stmt.Var(inSegment, Some(p.Expr.IntrOp(p.Intr.LogicAnd(sel(aboveBase), sel(belowLast))))),
         p.Stmt.Var(
           inSubgroup,
-          Some(p.Expr.IntrOp(p.Intr.LogicLt(sel(target), u32(width)))),
-          isMutable = false
+          Some(p.Expr.IntrOp(p.Intr.LogicLt(sel(target), u32(width))))
         ),
         p.Stmt.Var(
           inGroup,
-          Some(p.Expr.IntrOp(p.Intr.LogicLt(sel(source), sel(localSize)))),
-          isMutable = false
+          Some(p.Expr.IntrOp(p.Intr.LogicLt(sel(source), sel(localSize))))
         ),
         p.Stmt
-          .Var(segmentLane, Some(p.Expr.IntrOp(p.Intr.LogicAnd(sel(inSegment), sel(inSubgroup)))), isMutable = false),
-        p.Stmt.Var(spatial, Some(p.Expr.IntrOp(p.Intr.LogicAnd(sel(segmentLane), sel(inGroup)))), isMutable = false),
+          .Var(segmentLane, Some(p.Expr.IntrOp(p.Intr.LogicAnd(sel(inSegment), sel(inSubgroup))))),
+        p.Stmt.Var(spatial, Some(p.Expr.IntrOp(p.Intr.LogicAnd(sel(segmentLane), sel(inGroup))))),
         p.Stmt
-          .Var(members, Some(p.Expr.IntrOp(p.Intr.LogicAnd(sel(callerMember), sel(sourceMember)))), isMutable = false),
+          .Var(members, Some(p.Expr.IntrOp(p.Intr.LogicAnd(sel(callerMember), sel(sourceMember))))),
         p.Stmt.Var(
           inRange,
-          Some(p.Expr.IntrOp(p.Intr.LogicAnd(sel(spatial), sel(members)))),
-          isMutable = false
+          Some(p.Expr.IntrOp(p.Intr.LogicAnd(sel(spatial), sel(members))))
         ),
         p.Stmt.Var(result, None, isMutable = true),
         p.Stmt.Cond(
@@ -506,72 +499,36 @@ private final class Lowering(
     (p.Expr.Alias(sel(result)), statements)
   }
 
-  private def groupPrelude(localId: p.Named, localSize: p.Named): List[p.Stmt] = {
-    val x    = fresh("group_x", p.Type.IntU32)
-    val y    = fresh("group_y", p.Type.IntU32)
-    val z    = fresh("group_z", p.Type.IntU32)
-    val sx   = fresh("group_sx", p.Type.IntU32)
-    val sy   = fresh("group_sy", p.Type.IntU32)
-    val sz   = fresh("group_sz", p.Type.IntU32)
-    val syz  = fresh("group_syz", p.Type.IntU32)
-    val yz   = fresh("group_yz", p.Type.IntU32)
-    val sxyz = fresh("group_sxyz", p.Type.IntU32)
-    val sxsy = fresh("group_sxsy", p.Type.IntU32)
+  private def linearPrelude(scope: String, localId: p.Named, localSize: p.Named): List[p.Stmt] = {
+    def named(suffix: String): p.Named = fresh(s"${scope}_$suffix", p.Type.IntU32)
+    val x                              = named("x")
+    val y                              = named("y")
+    val z                              = named("z")
+    val sx                             = named("sx")
+    val sy                             = named("sy")
+    val sz                             = named("sz")
+    val syz                            = named("syz")
+    val yz                             = named("yz")
+    val sxyz                           = named("sxyz")
+    val sxsy                           = named("sxsy")
     List(
-      p.Stmt.Var(x, Some(p.Expr.SpecOp(p.Spec.GpuLocalIdx(u32(0)))), isMutable = false),
-      p.Stmt.Var(y, Some(p.Expr.SpecOp(p.Spec.GpuLocalIdx(u32(1)))), isMutable = false),
-      p.Stmt.Var(z, Some(p.Expr.SpecOp(p.Spec.GpuLocalIdx(u32(2)))), isMutable = false),
-      p.Stmt.Var(sx, Some(p.Expr.SpecOp(p.Spec.GpuLocalSize(u32(0)))), isMutable = false),
-      p.Stmt.Var(sy, Some(p.Expr.SpecOp(p.Spec.GpuLocalSize(u32(1)))), isMutable = false),
-      p.Stmt.Var(sz, Some(p.Expr.SpecOp(p.Spec.GpuLocalSize(u32(2)))), isMutable = false),
-      p.Stmt.Var(syz, Some(p.Expr.IntrOp(p.Intr.Mul(sel(sy), sel(z), p.Type.IntU32))), isMutable = false),
-      p.Stmt.Var(yz, Some(p.Expr.IntrOp(p.Intr.Add(sel(y), sel(syz), p.Type.IntU32))), isMutable = false),
-      p.Stmt.Var(sxyz, Some(p.Expr.IntrOp(p.Intr.Mul(sel(sx), sel(yz), p.Type.IntU32))), isMutable = false),
+      p.Stmt.Var(x, Some(p.Expr.SpecOp(p.Spec.GpuLocalIdx(u32(0))))),
+      p.Stmt.Var(y, Some(p.Expr.SpecOp(p.Spec.GpuLocalIdx(u32(1))))),
+      p.Stmt.Var(z, Some(p.Expr.SpecOp(p.Spec.GpuLocalIdx(u32(2))))),
+      p.Stmt.Var(sx, Some(p.Expr.SpecOp(p.Spec.GpuLocalSize(u32(0))))),
+      p.Stmt.Var(sy, Some(p.Expr.SpecOp(p.Spec.GpuLocalSize(u32(1))))),
+      p.Stmt.Var(sz, Some(p.Expr.SpecOp(p.Spec.GpuLocalSize(u32(2))))),
+      p.Stmt.Var(syz, Some(p.Expr.IntrOp(p.Intr.Mul(sel(sy), sel(z), p.Type.IntU32)))),
+      p.Stmt.Var(yz, Some(p.Expr.IntrOp(p.Intr.Add(sel(y), sel(syz), p.Type.IntU32)))),
+      p.Stmt.Var(sxyz, Some(p.Expr.IntrOp(p.Intr.Mul(sel(sx), sel(yz), p.Type.IntU32)))),
       p.Stmt.Var(
         localId,
-        Some(p.Expr.IntrOp(p.Intr.Add(sel(x), sel(sxyz), p.Type.IntU32))),
-        isMutable = false
+        Some(p.Expr.IntrOp(p.Intr.Add(sel(x), sel(sxyz), p.Type.IntU32)))
       ),
-      p.Stmt.Var(sxsy, Some(p.Expr.IntrOp(p.Intr.Mul(sel(sx), sel(sy), p.Type.IntU32))), isMutable = false),
+      p.Stmt.Var(sxsy, Some(p.Expr.IntrOp(p.Intr.Mul(sel(sx), sel(sy), p.Type.IntU32)))),
       p.Stmt.Var(
         localSize,
-        Some(p.Expr.IntrOp(p.Intr.Mul(sel(sxsy), sel(sz), p.Type.IntU32))),
-        isMutable = false
-      )
-    )
-  }
-
-  private def subgroupPrelude(localId: p.Named, localSize: p.Named): List[p.Stmt] = {
-    val x    = fresh("subgroup_x", p.Type.IntU32)
-    val y    = fresh("subgroup_y", p.Type.IntU32)
-    val z    = fresh("subgroup_z", p.Type.IntU32)
-    val sx   = fresh("subgroup_sx", p.Type.IntU32)
-    val sy   = fresh("subgroup_sy", p.Type.IntU32)
-    val sz   = fresh("subgroup_sz", p.Type.IntU32)
-    val syz  = fresh("subgroup_syz", p.Type.IntU32)
-    val yz   = fresh("subgroup_yz", p.Type.IntU32)
-    val sxyz = fresh("subgroup_sxyz", p.Type.IntU32)
-    val sxsy = fresh("subgroup_sxsy", p.Type.IntU32)
-    List(
-      p.Stmt.Var(x, Some(p.Expr.SpecOp(p.Spec.GpuLocalIdx(u32(0)))), isMutable = false),
-      p.Stmt.Var(y, Some(p.Expr.SpecOp(p.Spec.GpuLocalIdx(u32(1)))), isMutable = false),
-      p.Stmt.Var(z, Some(p.Expr.SpecOp(p.Spec.GpuLocalIdx(u32(2)))), isMutable = false),
-      p.Stmt.Var(sx, Some(p.Expr.SpecOp(p.Spec.GpuLocalSize(u32(0)))), isMutable = false),
-      p.Stmt.Var(sy, Some(p.Expr.SpecOp(p.Spec.GpuLocalSize(u32(1)))), isMutable = false),
-      p.Stmt.Var(sz, Some(p.Expr.SpecOp(p.Spec.GpuLocalSize(u32(2)))), isMutable = false),
-      p.Stmt.Var(syz, Some(p.Expr.IntrOp(p.Intr.Mul(sel(sy), sel(z), p.Type.IntU32))), isMutable = false),
-      p.Stmt.Var(yz, Some(p.Expr.IntrOp(p.Intr.Add(sel(y), sel(syz), p.Type.IntU32))), isMutable = false),
-      p.Stmt.Var(sxyz, Some(p.Expr.IntrOp(p.Intr.Mul(sel(sx), sel(yz), p.Type.IntU32))), isMutable = false),
-      p.Stmt.Var(
-        localId,
-        Some(p.Expr.IntrOp(p.Intr.Add(sel(x), sel(sxyz), p.Type.IntU32))),
-        isMutable = false
-      ),
-      p.Stmt.Var(sxsy, Some(p.Expr.IntrOp(p.Intr.Mul(sel(sx), sel(sy), p.Type.IntU32))), isMutable = false),
-      p.Stmt.Var(
-        localSize,
-        Some(p.Expr.IntrOp(p.Intr.Mul(sel(sxsy), sel(sz), p.Type.IntU32))),
-        isMutable = false
+        Some(p.Expr.IntrOp(p.Intr.Mul(sel(sxsy), sel(sz), p.Type.IntU32)))
       )
     )
   }
@@ -593,7 +550,7 @@ private final class Lowering(
     val scratch   = pool.allocFor(List(p.Type.Arr(rtn, maxGroupSize, p.Type.Space.Local))).head
     val localId   = fresh("group_local_id", p.Type.IntU32)
     val localSize = fresh("group_local_size", p.Type.IntU32)
-    val setup = groupPrelude(localId, localSize) ::: List(
+    val setup = linearPrelude("group", localId, localSize) ::: List(
       p.Stmt.Update(sel(scratch), sel(localId), value),
       barrier
     )
@@ -610,20 +567,19 @@ private final class Lowering(
         val combined = fresh("group_combined", rtn)
         List(
           p.Stmt
-            .Var(peer, Some(p.Expr.IntrOp(p.Intr.Add(sel(localId), u32(stride), p.Type.IntU32))), isMutable = false),
-          p.Stmt.Var(below, Some(p.Expr.IntrOp(p.Intr.LogicLt(sel(localId), u32(stride)))), isMutable = false),
-          p.Stmt.Var(inRange, Some(p.Expr.IntrOp(p.Intr.LogicLt(sel(peer), sel(localSize)))), isMutable = false),
+            .Var(peer, Some(p.Expr.IntrOp(p.Intr.Add(sel(localId), u32(stride), p.Type.IntU32)))),
+          p.Stmt.Var(below, Some(p.Expr.IntrOp(p.Intr.LogicLt(sel(localId), u32(stride))))),
+          p.Stmt.Var(inRange, Some(p.Expr.IntrOp(p.Intr.LogicLt(sel(peer), sel(localSize))))),
           p.Stmt.Var(
             active,
-            Some(p.Expr.IntrOp(p.Intr.LogicAnd(sel(below), sel(inRange)))),
-            isMutable = false
+            Some(p.Expr.IntrOp(p.Intr.LogicAnd(sel(below), sel(inRange))))
           ),
           p.Stmt.Cond(
             sel(active),
             List(
-              p.Stmt.Var(current, Some(p.Expr.Index(sel(scratch), sel(localId), rtn)), isMutable = false),
-              p.Stmt.Var(incoming, Some(p.Expr.Index(sel(scratch), sel(peer), rtn)), isMutable = false),
-              p.Stmt.Var(combined, Some(combine(sel(current), sel(incoming), op, rtn)), isMutable = false),
+              p.Stmt.Var(current, Some(p.Expr.Index(sel(scratch), sel(localId), rtn))),
+              p.Stmt.Var(incoming, Some(p.Expr.Index(sel(scratch), sel(peer), rtn))),
+              p.Stmt.Var(combined, Some(combine(sel(current), sel(incoming), op, rtn))),
               p.Stmt.Update(sel(scratch), sel(localId), sel(combined))
             ),
             Nil
@@ -636,7 +592,7 @@ private final class Lowering(
     (
       p.Expr.Alias(sel(result)),
       setup ::: stages ::: List(
-        p.Stmt.Var(result, Some(p.Expr.Index(sel(scratch), u32(0), rtn)), false),
+        p.Stmt.Var(result, Some(p.Expr.Index(sel(scratch), u32(0), rtn))),
         barrier
       )
     )
@@ -672,26 +628,27 @@ private final class Lowering(
     val buffers   = pool.allocFor(List.fill(2)(p.Type.Arr(rtn, maxGroupSize, p.Type.Space.Local)))
     val localId   = fresh("group_local_id", p.Type.IntU32)
     val localSize = fresh("group_local_size", p.Type.IntU32)
-    val setup = groupPrelude(localId, localSize) ::: List(
+    val setup = linearPrelude("group", localId, localSize) ::: List(
       p.Stmt.Update(sel(buffers.head), sel(localId), value),
       barrier
     )
     var source = buffers.head
     var target = buffers(1)
-    val stages = Iterator
+    val stages = List.newBuilder[p.Stmt]
+    Iterator
       .iterate(1)(_ * 2)
       .takeWhile(_ < maxGroupSize)
-      .flatMap { stride =>
+      .foreach { stride =>
         val active   = fresh("group_active", p.Type.Bool1)
         val peer     = fresh("group_peer", p.Type.IntU32)
         val current  = fresh("group_current", rtn)
         val incoming = fresh("group_incoming", rtn)
         val next     = fresh("group_next", rtn)
         val statements = List(
-          p.Stmt.Var(active, Some(p.Expr.IntrOp(p.Intr.LogicGte(sel(localId), u32(stride)))), isMutable = false),
+          p.Stmt.Var(active, Some(p.Expr.IntrOp(p.Intr.LogicGte(sel(localId), u32(stride))))),
           p.Stmt
-            .Var(peer, Some(p.Expr.IntrOp(p.Intr.Sub(sel(localId), u32(stride), p.Type.IntU32))), isMutable = false),
-          p.Stmt.Var(current, Some(p.Expr.Index(sel(source), sel(localId), rtn)), isMutable = false),
+            .Var(peer, Some(p.Expr.IntrOp(p.Intr.Sub(sel(localId), u32(stride), p.Type.IntU32)))),
+          p.Stmt.Var(current, Some(p.Expr.Index(sel(source), sel(localId), rtn))),
           p.Stmt.Var(next, Some(p.Expr.Alias(sel(current))), isMutable = true),
           p.Stmt.Cond(
             sel(active),
@@ -700,8 +657,7 @@ private final class Lowering(
                 incoming,
                 Some(
                   p.Expr.Index(sel(source), sel(peer), rtn)
-                ),
-                isMutable = false
+                )
               ),
               p.Stmt.Mut(sel(next), combine(sel(incoming), sel(current), op, rtn))
             ),
@@ -713,18 +669,17 @@ private final class Lowering(
         val previous = source
         source = target
         target = previous
-        statements
+        stages ++= statements
       }
-      .toList
     val result = fresh("group_result", rtn)
     val finish =
-      if (inclusive) List(p.Stmt.Var(result, Some(p.Expr.Index(sel(source), sel(localId), rtn)), isMutable = false))
+      if (inclusive) List(p.Stmt.Var(result, Some(p.Expr.Index(sel(source), sel(localId), rtn))))
       else {
         val first    = fresh("group_first", p.Type.Bool1)
         val previous = fresh("group_previous", p.Type.IntU32)
         List(
-          p.Stmt.Var(first, Some(p.Expr.IntrOp(p.Intr.LogicEq(sel(localId), u32(0)))), isMutable = false),
-          p.Stmt.Var(previous, Some(p.Expr.IntrOp(p.Intr.Sub(sel(localId), u32(1), p.Type.IntU32))), isMutable = false),
+          p.Stmt.Var(first, Some(p.Expr.IntrOp(p.Intr.LogicEq(sel(localId), u32(0))))),
+          p.Stmt.Var(previous, Some(p.Expr.IntrOp(p.Intr.Sub(sel(localId), u32(1), p.Type.IntU32)))),
           p.Stmt.Var(result, Some(p.Expr.Alias(identity(op, rtn))), isMutable = true),
           p.Stmt.Cond(
             sel(first),
@@ -738,27 +693,40 @@ private final class Lowering(
           )
         )
       }
-    (p.Expr.Alias(sel(result)), setup ::: stages ::: finish ::: List(barrier))
+    (p.Expr.Alias(sel(result)), setup ::: stages.result() ::: finish ::: List(barrier))
   }
 
+  private def laneScratch(
+      pool: ScratchPool,
+      name: String
+  ): (p.Named, p.Named, p.Named, p.Named, p.Named, p.Named, p.Named) = {
+    val buffer = pool.allocFor(List(p.Type.Arr(p.Type.IntU32, maxGroupSize, p.Type.Space.Local))).head
+    (
+      buffer,
+      fresh(s"${name}_local_id", p.Type.IntU32),
+      fresh(s"${name}_local_size", p.Type.IntU32),
+      fresh(s"${name}_lane", p.Type.IntU32),
+      fresh(s"${name}_base", p.Type.IntU32),
+      fresh(s"${name}_index", p.Type.IntU32),
+      fresh(s"${name}_source", p.Type.IntU32)
+    )
+  }
+
+  private def loadIfInGroup(buffer: p.Named, source: p.Named, bit: p.Named, inGroup: p.Named): p.Stmt =
+    p.Stmt.Cond(sel(inGroup), List(p.Stmt.Mut(sel(bit), p.Expr.Index(sel(buffer), sel(source), p.Type.IntU32))), Nil)
+
   private def ballot(requestedMask: p.Term, predicate: p.Term, pool: ScratchPool): (p.Expr, List[p.Stmt]) = {
-    val buffer    = pool.allocFor(List(p.Type.Arr(p.Type.IntU32, maxGroupSize, p.Type.Space.Local))).head
-    val localId   = fresh("ballot_local_id", p.Type.IntU32)
-    val localSize = fresh("ballot_local_size", p.Type.IntU32)
-    val lane      = fresh("ballot_lane", p.Type.IntU32)
-    val base      = fresh("ballot_base", p.Type.IntU32)
-    val index     = fresh("ballot_index", p.Type.IntU32)
-    val source    = fresh("ballot_source", p.Type.IntU32)
-    val bit       = fresh("ballot_bit", p.Type.IntU32)
-    val inGroup   = fresh("ballot_in_group", p.Type.Bool1)
-    val write     = fresh("ballot_write", p.Type.Bool1)
-    val writeBit  = fresh("ballot_write_bit", p.Type.IntU32)
-    val bitSet    = fresh("ballot_bit_set", p.Type.Bool1)
-    val one       = fresh("ballot_one", p.Type.IntU32)
-    val mask      = fresh("ballot_mask", p.Type.IntU32)
-    val (member, membershipStatements) = membership("ballot", sel(lane), requestedMask)
+    val (buffer, localId, localSize, lane, base, index, source) = laneScratch(pool, "ballot")
+    val bit                                                     = fresh("ballot_bit", p.Type.IntU32)
+    val inGroup                                                 = fresh("ballot_in_group", p.Type.Bool1)
+    val write                                                   = fresh("ballot_write", p.Type.Bool1)
+    val writeBit                                                = fresh("ballot_write_bit", p.Type.IntU32)
+    val bitSet                                                  = fresh("ballot_bit_set", p.Type.Bool1)
+    val one                                                     = fresh("ballot_one", p.Type.IntU32)
+    val mask                                                    = fresh("ballot_mask", p.Type.IntU32)
+    val (member, membershipStatements)                          = membership("ballot", sel(lane), requestedMask)
     val statements = lanePrelude(localId, localSize, lane, Some(base)) ::: membershipStatements ::: List(
-      p.Stmt.Var(write, Some(p.Expr.IntrOp(p.Intr.LogicAnd(predicate, sel(member)))), isMutable = false),
+      p.Stmt.Var(write, Some(p.Expr.IntrOp(p.Intr.LogicAnd(predicate, sel(member))))),
       p.Stmt.Var(writeBit, Some(p.Expr.Alias(u32(0))), isMutable = true),
       p.Stmt.Cond(sel(write), List(p.Stmt.Mut(sel(writeBit), p.Expr.Alias(u32(1)))), Nil),
       p.Stmt.Update(sel(buffer), sel(localId), sel(writeBit)),
@@ -773,12 +741,11 @@ private final class Lowering(
         u32(1),
         List(
           p.Stmt.Mut(sel(source), p.Expr.IntrOp(p.Intr.Add(sel(base), sel(index), p.Type.IntU32))),
-          p.Stmt.Var(inGroup, Some(p.Expr.IntrOp(p.Intr.LogicLt(sel(source), sel(localSize)))), isMutable = false),
+          p.Stmt.Var(inGroup, Some(p.Expr.IntrOp(p.Intr.LogicLt(sel(source), sel(localSize))))),
           p.Stmt.Mut(sel(bit), p.Expr.Alias(u32(0))),
-          p.Stmt
-            .Cond(sel(inGroup), List(p.Stmt.Mut(sel(bit), p.Expr.Index(sel(buffer), sel(source), p.Type.IntU32))), Nil),
-          p.Stmt.Var(bitSet, Some(p.Expr.IntrOp(p.Intr.LogicNeq(sel(bit), u32(0)))), isMutable = false),
-          p.Stmt.Var(one, Some(p.Expr.IntrOp(p.Intr.BSL(u32(1), sel(index), p.Type.IntU32))), isMutable = false),
+          loadIfInGroup(buffer, source, bit, inGroup),
+          p.Stmt.Var(bitSet, Some(p.Expr.IntrOp(p.Intr.LogicNeq(sel(bit), u32(0))))),
+          p.Stmt.Var(one, Some(p.Expr.IntrOp(p.Intr.BSL(u32(1), sel(index), p.Type.IntU32)))),
           p.Stmt.Cond(
             sel(bitSet),
             List(p.Stmt.Mut(sel(mask), p.Expr.IntrOp(p.Intr.BOr(sel(mask), sel(one), p.Type.IntU32)))),
@@ -797,25 +764,19 @@ private final class Lowering(
       pool: ScratchPool,
       all: Boolean
   ): (p.Expr, List[p.Stmt]) = {
-    val buffer    = pool.allocFor(List(p.Type.Arr(p.Type.IntU32, maxGroupSize, p.Type.Space.Local))).head
-    val localId   = fresh("vote_local_id", p.Type.IntU32)
-    val localSize = fresh("vote_local_size", p.Type.IntU32)
-    val lane      = fresh("vote_lane", p.Type.IntU32)
-    val base      = fresh("vote_base", p.Type.IntU32)
-    val index     = fresh("vote_index", p.Type.IntU32)
-    val source    = fresh("vote_source", p.Type.IntU32)
-    val inGroup   = fresh("vote_in_group", p.Type.Bool1)
-    val opposite  = fresh("vote_opposite", p.Type.Bool1)
-    val fold      = fresh("vote_fold", p.Type.Bool1)
-    val writeBit  = fresh("vote_write_bit", p.Type.IntU32)
-    val bit       = fresh("vote_bit", p.Type.IntU32)
-    val bitSet    = fresh("vote_bit_set", p.Type.Bool1)
-    val result    = fresh("vote_result", p.Type.Bool1)
-    val (member, membershipStatements) = membership("vote", sel(lane), requestedMask)
-    val oppositeExpr                   = if (all) p.Expr.IntrOp(p.Intr.LogicNot(predicate)) else p.Expr.Alias(predicate)
+    val (buffer, localId, localSize, lane, base, index, source) = laneScratch(pool, "vote")
+    val inGroup                                                 = fresh("vote_in_group", p.Type.Bool1)
+    val opposite                                                = fresh("vote_opposite", p.Type.Bool1)
+    val fold                                                    = fresh("vote_fold", p.Type.Bool1)
+    val writeBit                                                = fresh("vote_write_bit", p.Type.IntU32)
+    val bit                                                     = fresh("vote_bit", p.Type.IntU32)
+    val bitSet                                                  = fresh("vote_bit_set", p.Type.Bool1)
+    val result                                                  = fresh("vote_result", p.Type.Bool1)
+    val (member, membershipStatements)                          = membership("vote", sel(lane), requestedMask)
+    val oppositeExpr = if (all) p.Expr.IntrOp(p.Intr.LogicNot(predicate)) else p.Expr.Alias(predicate)
     val statements = lanePrelude(localId, localSize, lane, Some(base)) ::: membershipStatements ::: List(
-      p.Stmt.Var(opposite, Some(oppositeExpr), isMutable = false),
-      p.Stmt.Var(fold, Some(p.Expr.IntrOp(p.Intr.LogicAnd(sel(member), sel(opposite)))), isMutable = false),
+      p.Stmt.Var(opposite, Some(oppositeExpr)),
+      p.Stmt.Var(fold, Some(p.Expr.IntrOp(p.Intr.LogicAnd(sel(member), sel(opposite))))),
       p.Stmt.Var(writeBit, Some(p.Expr.Alias(u32(0))), isMutable = true),
       p.Stmt.Cond(sel(fold), List(p.Stmt.Mut(sel(writeBit), p.Expr.Alias(u32(1)))), Nil),
       p.Stmt.Update(sel(buffer), sel(localId), sel(writeBit)),
@@ -827,12 +788,11 @@ private final class Lowering(
         u32(width),
         u32(1),
         List(
-          p.Stmt.Var(source, Some(p.Expr.IntrOp(p.Intr.Add(sel(base), sel(index), p.Type.IntU32))), isMutable = false),
-          p.Stmt.Var(inGroup, Some(p.Expr.IntrOp(p.Intr.LogicLt(sel(source), sel(localSize)))), isMutable = false),
+          p.Stmt.Var(source, Some(p.Expr.IntrOp(p.Intr.Add(sel(base), sel(index), p.Type.IntU32)))),
+          p.Stmt.Var(inGroup, Some(p.Expr.IntrOp(p.Intr.LogicLt(sel(source), sel(localSize))))),
           p.Stmt.Var(bit, Some(p.Expr.Alias(u32(0))), isMutable = true),
-          p.Stmt
-            .Cond(sel(inGroup), List(p.Stmt.Mut(sel(bit), p.Expr.Index(sel(buffer), sel(source), p.Type.IntU32))), Nil),
-          p.Stmt.Var(bitSet, Some(p.Expr.IntrOp(p.Intr.LogicNeq(sel(bit), u32(0)))), isMutable = false),
+          loadIfInGroup(buffer, source, bit, inGroup),
+          p.Stmt.Var(bitSet, Some(p.Expr.IntrOp(p.Intr.LogicNeq(sel(bit), u32(0))))),
           p.Stmt.Cond(sel(bitSet), List(p.Stmt.Mut(sel(result), p.Expr.Alias(p.Term.Bool1Const(!all)))), Nil)
         )
       ),

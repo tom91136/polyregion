@@ -2,6 +2,7 @@ package polyregion.ast
 
 import pprint.pprintln
 
+@SuppressWarnings(Array("bonsai:fixed-type-parameter"))
 private[polyregion] object compiletime {
 
   import scala.quoted.*
@@ -37,8 +38,9 @@ private[polyregion] object compiletime {
     //   case C(s : D)          # !singleton  case  enum !sealed
     // }
 
+    val symFlags = sym.flags
     val (parents, kind) =
-      (tpe.isSingleton, sym.flags.is(Flags.Case), sym.flags.is(Flags.Enum), sym.flags.is(Flags.Sealed)) match {
+      (tpe.isSingleton, symFlags.is(Flags.Case), symFlags.is(Flags.Enum), symFlags.is(Flags.Sealed)) match {
         case (false, true, false, false) => (tpe.baseClasses.tail, MirrorKind.CaseClass)
         case (false, false, true, true)  => (tpe.baseClasses, MirrorKind.CaseSum)
         case (false, false, false, true) => (tpe.baseClasses, MirrorKind.CaseSum)
@@ -54,22 +56,21 @@ private[polyregion] object compiletime {
 
     val names = parents.filter(s => flags.exists(s.flags.is(_))).reverse
 
-    val owners = names.headOption
-      .map { s =>
+    val nameList = names.map(_.name)
+    val owners = names.headOption.fold(nameList) { s =>
 
-        val prefix = List
-          .unfold(s.owner)(s =>
-            if (!s.isPackageDef && !s.owner.isPackageDef) Some((s.name.replace("$", ""), s.owner)) else None
-          )
-          .reverse
-          .mkString
+      val prefix = List
+        .unfold(s.owner)(s =>
+          if (!s.isPackageDef && !s.owner.isPackageDef) Some((s.name.replace("$", ""), s.owner)) else None
+        )
+        .reverse
+        .mkString
 
-        names.map(_.name) match {
-          case x :: xs => s"$prefix$x" :: xs
-          case xs      => xs
-        }
+      nameList match {
+        case x :: xs => s"$prefix$x" :: xs
+        case xs      => xs
       }
-      .getOrElse(names.map(_.name))
+    }
 
     Expr((owners, kind))
   }
@@ -90,6 +91,7 @@ private[polyregion] object compiletime {
     import q.reflect.*
     val tpe = TypeRepr.of[T].dealias.simplified
 
+    @SuppressWarnings(Array("bonsai:repeated-subexpression"))
     def matchCtor(t: Tree, parent: Option[TypeRepr]) = t match {
       case Apply(Select(New(tpeTree), "<init>"), args) //
           if parent.forall(tpeTree.tpe =:= _.widenTermRefByName) =>
@@ -139,7 +141,10 @@ private[polyregion] object compiletime {
         case '[Int]    => "int32_t"
         case '[Long]   => "int64_t"
         case _ =>
-          val sumParent = r.baseClasses.tail.find(s => s.flags.is(Flags.Enum) || s.flags.is(Flags.Sealed))
+          val sumParent = r.baseClasses.tail.find { s =>
+            val symFlags = s.flags
+            symFlags.is(Flags.Enum) || symFlags.is(Flags.Sealed)
+          }
           sumParent match {
             case Some(parent) =>
               s"${retype(r.baseType(parent)).stripSuffix("::Any")}::${r.typeSymbol.name}"
@@ -169,6 +174,7 @@ private[polyregion] object compiletime {
       if (const) s"const ${mapped}&" else mapped
     }
 
+    @SuppressWarnings(Array("bonsai:repeated-subexpression"))
     def remap(tree: Tree, scope: Map[String, String], depth: Int, fnDef: Boolean = false): String = tree match {
 
       case Block(Nil, term)            => remap(term, scope, depth + 1)
@@ -176,7 +182,7 @@ private[polyregion] object compiletime {
       case Block(stmts, term) =>
         s"${stmts.map(remap(_, scope, depth + 1)).mkString("\n")}\n${remap(term, scope, depth + 1)}"
       case ValDef(name, tpe, rhs) =>
-        s"${retype(tpe.tpe, const = fnDef)} ${normalise(name)}${rhs.map(x => s" = ${remap(x, scope, depth + 1)}").getOrElse("")}"
+        s"${retype(tpe.tpe, const = fnDef)} ${normalise(name)}${rhs.fold("")(x => s" = ${remap(x, scope, depth + 1)}")}"
       case Literal(StringConstant(s)) => s"\"${s.replaceAll("\n", "\\\\n")}\"s"
       case Literal(IntConstant(i))    => s"$i"
       case TypedOrTest(x, _)          => remap(x, scope, depth + 1)
@@ -188,9 +194,9 @@ private[polyregion] object compiletime {
         val (args, lambdaScope) = params.zipWithIndex.foldLeft((List.empty[String], scope)) {
           case ((acc, sc), (ValDef(name, tpe, _), i)) =>
             val newName = if name.startsWith("_$") then s"_v${depth}_$i" else name
-            (acc :+ s"${retype(tpe.tpe, const = true)} $newName", sc + (name -> newName))
+            (s"${retype(tpe.tpe, const = true)} $newName" :: acc, sc + (name -> newName))
         }
-        s"[&](${args.mkString(", ")}){ return ${remap(rhs, lambdaScope, depth + 1)}; }"
+        s"[&](${args.reverse.mkString(", ")}){ return ${remap(rhs, lambdaScope, depth + 1)}; }"
       case Match(term, cases) =>
         val names       = List("_x", "_y", "_z")
         val nameAtDepth = names((names.size - 1) % depth)
@@ -214,44 +220,43 @@ private[polyregion] object compiletime {
              term.tpe.widenTermRefByName
            )}) at {}:{})", __FILE__, __LINE__));
             |}()""".stripMargin
-      case Apply(Ident("repr"), x :: Nil)          => s"repr(${remap(x, scope, depth + 1)})"
-      case Apply(Ident("canonicalName"), x :: Nil) => s"canonicalName(${remap(x, scope, depth + 1)})"
-      case Apply(Select(x, "fqcn"), Nil)           => s"fqcn(${remap(x, scope, depth + 1)})"
-      case Select(x, "fqcn")                       => s"fqcn(${remap(x, scope, depth + 1)})"
-      case Apply(Select(x, "canonicalName"), Nil)  => s"canonicalName(${remap(x, scope, depth + 1)})"
-      case Select(x, "canonicalName")              => s"canonicalName(${remap(x, scope, depth + 1)})"
+      case Apply(Ident("repr"), x :: Nil)              => s"repr(${remap(x, scope, depth + 1)})"
+      case Apply(Select(_, "canonicalName"), x :: Nil) => s"canonicalName(${remap(x, scope, depth + 1)})"
+      case Apply(Ident("canonicalName"), x :: Nil)     => s"canonicalName(${remap(x, scope, depth + 1)})"
+      case Apply(Select(x, "fqcn"), Nil)               => s"fqcn(${remap(x, scope, depth + 1)})"
+      case Select(x, "fqcn")                           => s"fqcn(${remap(x, scope, depth + 1)})"
+      case Apply(Select(x, "canonicalName"), Nil)      => s"canonicalName(${remap(x, scope, depth + 1)})"
+      case Select(x, "canonicalName")                  => s"canonicalName(${remap(x, scope, depth + 1)})"
       case Apply(Select(xs, "mkString"), sep :: Nil) =>
         s"(${remap(xs, scope, depth + 1)} | mk_string(${remap(sep, scope, depth + 1)}))"
       case Select(xs, "mkString") => s"(${remap(xs, scope, depth + 1)} | mk_string(\"\"s))"
       case x =>
+        def piped(xs: Expr[?], op: String, arg: Expr[?]) =
+          s"${remap(xs.asTerm, scope, depth + 1)} | $op(${remap(arg.asTerm, scope, depth + 1)})"
         Expr.betaReduce(x.asExpr) match {
           case '{ ($x: Any).toString() } => s"std::to_string(${remap(x.asTerm, scope, depth + 1)})"
+          case '{ ($x: Option[t]).fold[r]($v)($f) } =>
+            val mapped = s"${remap(x.asTerm, scope, depth + 2)} ^ map(${remap(f.asTerm, scope, depth + 2)})"
+            s"$mapped ^ get_or_else(${remap(v.asTerm, scope, depth + 1)})"
           case '{ ($x: Option[t]).getOrElse($v) } =>
             s"${remap(x.asTerm, scope, depth + 1)} ^ get_or_else(${remap(v.asTerm, scope, depth + 1)})"
           case '{ ($x: Option[t]).map($f) } =>
             s"${remap(x.asTerm, scope, depth + 1)} ^ map(${remap(f.asTerm, scope, depth + 1)})"
           case '{ ($x: List[t]).isEmpty } =>
             s"${remap(x.asTerm, scope, depth + 1)}.empty()"
-          case '{ ($init: List[t]) :+ ($last) } =>
-            s"${remap(init.asTerm, scope, depth + 1)} | append(${remap(last.asTerm, scope, depth + 1)})"
-          case '{ ($x: Iterator[t]).map($f) } =>
-            s"${remap(x.asTerm, scope, depth + 1)} | map(${remap(f.asTerm, scope, depth + 1)})"
-          case '{ ($x: Set[t]).map($f) } =>
-            s"${remap(x.asTerm, scope, depth + 1)} | map(${remap(f.asTerm, scope, depth + 1)})"
-          case '{ ($x: List[t]).map($f) } =>
-            s"${remap(x.asTerm, scope, depth + 1)} | map(${remap(f.asTerm, scope, depth + 1)})"
-          case '{ ($x: List[t]).reduceLeftOption($f) } =>
-            s"(${remap(x.asTerm, scope, depth + 1)} | reduce(${remap(f.asTerm, scope, depth + 1)}))"
-          case '{ ($x: List[t]).mkString($sep) } =>
-            s"(${remap(x.asTerm, scope, depth + 1)} | mk_string(${remap(sep.asTerm, scope, depth + 1)}))"
-          case '{ ($x: Set[t]).mkString($sep) } =>
-            s"(${remap(x.asTerm, scope, depth + 1)} | mk_string(${remap(sep.asTerm, scope, depth + 1)}))"
+          case '{ ($init: List[t]) :+ ($last) }        => piped(init, "append", last)
+          case '{ ($x: Iterator[t]).map($f) }          => piped(x, "map", f)
+          case '{ ($x: Set[t]).map($f) }               => piped(x, "map", f)
+          case '{ ($x: List[t]).map($f) }              => piped(x, "map", f)
+          case '{ ($x: List[t]).reduceLeftOption($f) } => s"(${piped(x, "reduce", f)})"
+          case '{ ($x: List[t]).mkString($sep) }       => s"(${piped(x, "mk_string", sep)})"
+          case '{ ($x: Set[t]).mkString($sep) }        => s"(${piped(x, "mk_string", sep)})"
           case '{ ($x: String).indent($n) } =>
             s"${remap(x.asTerm, scope, depth + 1)} ^ indent(${remap(n.asTerm, scope, depth + 1)})"
           case '{ wrapString($x: String) } =>
             s"${remap(x.asTerm, scope, depth + 1)}"
           case '{ StringContext.apply(${ Varargs(Exprs(elems)) }*).s(${ Varargs(args) }*) } =>
-            if (elems.size == 1) return s"\"${elems(0)}\"s"
+            if (elems.size == 1) return s"\"${elems.head}\"s"
             else
               s"fmt::format(\"${elems.mkString("{}")}\", ${args.map(_.asTerm).map(remap(_, scope, depth + 1)).mkString(", ")})"
           case _ =>
@@ -303,9 +308,12 @@ private[polyregion] object compiletime {
       case Some(imp) => f(imp)
       case _         => report.errorAndAbort(s"No implicit found for ${TypeRepr.of[TermRes[A]].show}")
     }
-    def summonTypeRes(r: TypeRepr): Expr[TypeRes[Any]] = Implicits.search(TypeRepr.of[TypeRes].appliedTo(r)) match {
-      case s: ImplicitSearchSuccess => '{ ${ s.tree.asExpr }.asInstanceOf[TypeRes[Any]] }
-      case _ => report.errorAndAbort(s"No implicit found for ${TypeRepr.of[TypeRes].appliedTo(r).show}")
+    def summonTypeRes(r: TypeRepr): Expr[TypeRes[Any]] = {
+      val shape = TypeRepr.of[TypeRes].appliedTo(r)
+      Implicits.search(shape) match {
+        case s: ImplicitSearchSuccess => '{ ${ s.tree.asExpr }.asInstanceOf[TypeRes[Any]] }
+        case _                        => report.errorAndAbort(s"No implicit found for ${shape.show}")
+      }
     }
 
     def selectValue(name: String, tpe: TypeRepr, rest: List[(String, TypeRepr)]): Expr[Value[Tpe]] = {
@@ -345,11 +353,12 @@ private[polyregion] object compiletime {
           )
         }
       case i @ Ident(x) =>
-        if (i.symbol.owner == symbol) selectValue(x, i.tpe, Nil)
+        val sym = i.symbol
+        if (sym.owner == symbol) selectValue(x, i.tpe, Nil)
         else {
-          i.symbol.tree match {
-            case ValDef(_, _, Some(x)) if !i.symbol.flags.is(Flags.Case) => liftTermToValue(x)
-            case DefDef(_, Nil :: Nil, _, Some(x))                       => liftTermToValue(x)
+          sym.tree match {
+            case ValDef(_, _, Some(x)) if !sym.flags.is(Flags.Case) => liftTermToValue(x)
+            case DefDef(_, Nil :: Nil, _, Some(x))                  => liftTermToValue(x)
             case x =>
               '{ Value.CtorAp[Tpe](${ summonTypeRes(i.tpe.dealias) }(), Nil) }
             // report.errorAndAbort(
@@ -359,12 +368,14 @@ private[polyregion] object compiletime {
         }
       case s @ Select(qualifier, "asInstanceOf") => liftTermToValue(qualifier)
       case s @ Select(qualifier, name) =>
-        if (qualifier.symbol.owner == symbol) { // we're selecting from one of the ctor args
-          selectValue(qualifier.symbol.name, qualifier.tpe, (name, s.tpe) :: Nil)
+        val qualifierSym = qualifier.symbol
+        if (qualifierSym.owner == symbol) { // we're selecting from one of the ctor args
+          selectValue(qualifierSym.name, qualifier.tpe, (name, s.tpe) :: Nil)
         } else { // some other constant
-          s.symbol.tree match {
-            case ValDef(_, _, Some(x)) if !s.symbol.flags.is(Flags.Case) => liftTermToValue(x)
-            case DefDef(_, Nil :: Nil | Nil, _, Some(x))                 => liftTermToValue(x)
+          val sym = s.symbol
+          sym.tree match {
+            case ValDef(_, _, Some(x)) if !sym.flags.is(Flags.Case) => liftTermToValue(x)
+            case DefDef(_, Nil :: Nil | Nil, _, Some(x))            => liftTermToValue(x)
             case x =>
               '{ Value.CtorAp[Tpe](${ summonTypeRes(s.tpe.dealias) }(), Nil) }
           }
@@ -398,7 +409,7 @@ private[polyregion] object compiletime {
             case dd @ DefDef("<init>", head :: _, _, _) =>
               Expr.ofList(head.params.collect { case d @ ValDef(name, tpeTree, _) =>
                 val shape = TypeRepr.of[TypeRes].appliedTo(tpeTree.tpe)
-                val instance = Implicits.search(TypeRepr.of[TypeRes].appliedTo(tpeTree.tpe)) match {
+                val instance = Implicits.search(shape) match {
                   case s: ImplicitSearchSuccess => s.tree
                   case _                        => report.errorAndAbort(s"Cannot find an instance of ${shape.show}")
                 }

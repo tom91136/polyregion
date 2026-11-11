@@ -41,6 +41,7 @@ object Generator {
     if (fn.docComment.trim.isEmpty) typedef else s"${fn.docComment}\n$typedef"
   }
 
+  @SuppressWarnings(Array("bonsai:test-only-member"))
   def typedefFromSignature(prefix: String, fnName: String, signature: String): Option[String] =
     typedefFromSignature(prefix, fnName, fnName, signature)
 
@@ -126,6 +127,12 @@ object Generator {
     Output(renderHeader(wrangler, results, allHeaders), renderSource(wrangler, results, allHeaders))
   }
 
+  private def functionDecls(wrangler: Config.Wrangler, results: Vector[GroupResult]): Vector[String] =
+    results.flatMap { r =>
+      val prefix = s"${wrangler.name}_${r.group.name}"
+      r.probe.functions.map(fn => s"${prefix}_${publicName(fn)}* ${publicName(fn)};")
+    }
+
   private def renderHeader(wrangler: Config.Wrangler, results: Vector[GroupResult], headers: Vector[String]): String = {
     val W = wrangler.name
 
@@ -135,10 +142,7 @@ object Generator {
       val prefix = s"${W}_${r.group.name}"
       r.probe.functions.map(fn => fnTypedef(prefix, fn))
     }
-    val externs = results.flatMap { r =>
-      val prefix = s"${W}_${r.group.name}"
-      r.probe.functions.map(fn => s"extern ${prefix}_${publicName(fn)}* ${publicName(fn)};")
-    }
+    val externs = functionDecls(wrangler, results).map("extern " + _)
     val resolveDecls = results.map { r =>
       s"void ${W}_${r.group.name}_resolve(${W}_lookup_t lookup, void* user);"
     }
@@ -194,10 +198,7 @@ object Generator {
   private def renderSource(wrangler: Config.Wrangler, results: Vector[GroupResult], headers: Vector[String]): String = {
     val W = wrangler.name
 
-    val defs = results.flatMap { r =>
-      val prefix = s"${W}_${r.group.name}"
-      r.probe.functions.map(fn => s"${prefix}_${publicName(fn)}* ${publicName(fn)};")
-    }
+    val defs = functionDecls(wrangler, results)
 
     val resolveDefs = results.map { r =>
       val prefix = s"${W}_${r.group.name}"

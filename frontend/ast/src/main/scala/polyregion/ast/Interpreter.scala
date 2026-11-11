@@ -5,9 +5,15 @@ import polyregion.ast.PolyAST.Conventions.RuntimeAbi
 
 import scala.collection.mutable
 
+@SuppressWarnings(Array("bonsai:loop-boxing"))
 object Interpreter {
 
-  enum V { case I(v: Long); case D(v: Double); case U }
+  enum V {
+    case I(v: Long); case D(v: Double); case U
+
+    def asI: Long   = this match { case I(x) => x; case D(d) => d.toLong; case U => 0 }
+    def asD: Double = this match { case D(d) => d; case I(x) => x.toDouble; case U => 0 }
+  }
 
   private final class Ret(val v: V) extends scala.util.control.ControlThrowable
   private object Brk                extends scala.util.control.ControlThrowable
@@ -107,15 +113,16 @@ object Interpreter {
       s, {
         var off  = 0L
         var maxA = 1L
-        val offs = defs(s).members.map { m =>
+        val offs = List.newBuilder[(String, Long)]
+        defs(s).members.foreach { m =>
           val a = alignOf(m.tpe)
           off = alignUp(off, a)
           val o = off
           off += sizeOf(m.tpe)
           maxA = math.max(maxA, a)
-          m.symbol -> o
-        }.toMap
-        (offs, alignUp(off, maxA))
+          offs += m.symbol -> o
+        }
+        (offs.result().toMap, alignUp(off, maxA))
       }
     )
     def offsetOf(s: p.Sym, field: String): Long            = layout(s)._1(field)
@@ -157,13 +164,11 @@ object Interpreter {
     }
     private def cmpI(t: p.Type)(a: Long, b: Long): Int =
       if (isSigned(t)) java.lang.Long.compare(a, b) else java.lang.Long.compareUnsigned(a, b)
-    private def asI(v: V): Long   = v match { case V.I(x) => x; case V.D(d) => d.toLong; case V.U => 0 }
-    private def asD(v: V): Double = v match { case V.D(d) => d; case V.I(x) => x.toDouble; case V.U => 0 }
 
     private def encode(v: V, t: p.Type): Long = t match {
-      case p.Type.Float32 => java.lang.Float.floatToIntBits(asD(v).toFloat) & 0xffffffffL
-      case p.Type.Float64 => java.lang.Double.doubleToLongBits(asD(v))
-      case _              => asI(v)
+      case p.Type.Float32 => java.lang.Float.floatToIntBits(v.asD.toFloat) & 0xffffffffL
+      case p.Type.Float64 => java.lang.Double.doubleToLongBits(v.asD)
+      case _              => v.asI
     }
     private def decode(bits: Long, t: p.Type): V = t match {
       case p.Type.Float32 => V.D(java.lang.Float.intBitsToFloat((bits & 0xffffffffL).toInt).toDouble)
@@ -215,19 +220,19 @@ object Interpreter {
           case p.Type.Arr(c, _, _) => (addr, c)
           case x                   => (addr, x)
         }
-        store(b + asI(evalT(idx, fr)) * sizeOf(c), evalT(value, fr), c)
+        store(b + evalT(idx, fr).asI * sizeOf(c), evalT(value, fr), c)
       case p.Stmt.While(cond, body) =>
         try
-          while (asI(evalT(cond, fr)) != 0)
+          while (evalT(cond, fr).asI != 0)
             try body.foreach(exec(_, fr))
             catch { case Cnt => () }
         catch { case Brk => () }
       case p.Stmt.ForRange(ind, lb, ub, step, body) =>
         val slot = allocOf(ind.tpe)
         fr.slots(ind.symbol) = slot
-        var i  = asI(evalT(lb, fr))
-        val u  = asI(evalT(ub, fr))
-        val st = asI(evalT(step, fr))
+        var i  = evalT(lb, fr).asI
+        val u  = evalT(ub, fr).asI
+        val st = evalT(step, fr).asI
         try
           while (i < u) {
             store(slot, V.I(i), ind.tpe);
@@ -235,7 +240,7 @@ object Interpreter {
             catch { case Cnt => () }; i += st
           }
         catch { case Brk => () }
-      case p.Stmt.Cond(c, t, e) => if (asI(evalT(c, fr)) != 0) t.foreach(exec(_, fr)) else e.foreach(exec(_, fr))
+      case p.Stmt.Cond(c, t, e) => if (evalT(c, fr).asI != 0) t.foreach(exec(_, fr)) else e.foreach(exec(_, fr))
       case p.Stmt.Return(e)     => throw new Ret(eval(e, fr))
       case p.Stmt.Break         => throw Brk
       case p.Stmt.Cont          => throw Cnt
@@ -280,8 +285,8 @@ object Interpreter {
     }
 
     private def isAggregate(t: p.Type): Boolean = t match {
-      case _: p.Type.Struct | _: p.Type.Arr => true
-      case _                                => false
+      case p.Type.Struct(_, _) | p.Type.Arr(_, _, _) => true
+      case _                                         => false
     }
 
     private def projection(from: p.Type, to: p.Type): Option[List[String]] =
@@ -309,9 +314,9 @@ object Interpreter {
         }
 
     private def convertible(raised: p.Type, caught: p.Type): Boolean = (raised, caught) match {
-      case (s: p.Type.Struct, _: p.Type.Struct) =>
+      case (s: p.Type.Struct, p.Type.Struct(_, _)) =>
         defs.get(s.name).exists(_.parents.contains(caught)) && projection(raised, caught).isDefined
-      case (p.Type.Ptr(p.Type.Nothing, p.Type.Space.Constant), _: p.Type.Ptr)           => true
+      case (p.Type.Ptr(p.Type.Nothing, p.Type.Space.Constant), p.Type.Ptr(_, _))        => true
       case (p.Type.Ptr(from, _), p.Type.Ptr(p.Type.Unit0, _)) if from != p.Type.Nothing => true
       case (p.Type.Ptr(from: p.Type.Struct, _), p.Type.Ptr(to: p.Type.Struct, _)) =>
         defs.get(from.name).exists(_.parents.contains(to)) && projection(from, to).isDefined
@@ -355,7 +360,7 @@ object Interpreter {
             fr.slots(b.symbol) = slot
             (r.exceptionKind.tpe, h.caught.map(_.tpe)) match {
               case (from: p.Type.Ptr, Some(to: p.Type.Ptr)) if from != to =>
-                val source = asI(r.v)
+                val source = r.v.asI
                 val adjusted = (from.comp, to.comp) match {
                   case (p.Type.Nothing, _) if from.space == p.Type.Space.Constant => 0L
                   case (_, p.Type.Unit0)                                          => source
@@ -396,12 +401,12 @@ object Interpreter {
       case p.Expr.SpecOp(op)            => spec(op)
       case p.Expr.Cast(from, as)        => cast(evalT(from, fr), from.tpe, as)
       case p.Expr.BitCast(from, as)     => decode(encode(evalT(from, fr), from.tpe), as)
-      case p.Expr.Index(lhs, idx, comp) => load(base(lhs, fr) + asI(evalT(idx, fr)) * sizeOf(comp), comp)
+      case p.Expr.Index(lhs, idx, comp) => load(base(lhs, fr) + evalT(idx, fr).asI * sizeOf(comp), comp)
       case p.Expr.RefTo(lhs, idx, comp, _, _) =>
         val b = idx match { case Some(_) => base(lhs, fr); case None => addressOf(lhs, fr) }
-        V.I(idx.fold(b)(k => b + asI(evalT(k, fr)) * sizeOf(comp)))
-      case p.Expr.Alloc(comp, size, _, _) => V.I(alloc(sizeOf(comp) * asI(evalT(size, fr))))
-      case ivk @ p.Expr.Invoke(_, _, recv, args, _) =>
+        V.I(idx.fold(b)(k => b + evalT(k, fr).asI * sizeOf(comp)))
+      case p.Expr.Alloc(comp, size, _, _) => V.I(alloc(sizeOf(comp) * evalT(size, fr).asI))
+      case ivk @ p.Expr.Invoke(receiver = recv, args = args) =>
         call(ivk.calleeName, recv.toList.map(t => t.tpe -> evalT(t, fr)) ::: args.map(t => t.tpe -> evalT(t, fr)))
       case p.Expr.ForeignCall(name, args, rtn) => foreign(name, args.map(t => t.tpe -> evalT(t, fr)), rtn)
       case p.Expr.OffsetOf(st, field)          => V.I(offsetOf(structSym(st), field))
@@ -440,7 +445,7 @@ object Interpreter {
     }
 
     private def base(lhs: p.Term, fr: Frame): Long = lhs.tpe match {
-      case p.Type.Ptr(_, _) => asI(evalT(lhs, fr))
+      case p.Type.Ptr(_, _) => evalT(lhs, fr).asI
       case _                => addressOf(lhs, fr)
     }
     private def addressOf(t: p.Term, fr: Frame): Long = t match {
@@ -459,7 +464,7 @@ object Interpreter {
         }
       case p.PathStep.Deref        => indexStep(addr, t, 0)
       case p.PathStep.Index(k)     => indexStep(addr, t, k.toLong)
-      case p.PathStep.IndexDyn(it) => indexStep(addr, t, asI(evalT(it, fr)))
+      case p.PathStep.IndexDyn(it) => indexStep(addr, t, evalT(it, fr).asI)
     }
     private def indexStep(addr: Long, t: p.Type, i: Long): (Long, p.Type) = t match {
       case p.Type.Ptr(c, _)    => (loadBits(addr, 8) + i * sizeOf(c), c)
@@ -470,12 +475,12 @@ object Interpreter {
     private def binN(a: p.Term, b: p.Term, r: p.Type, fr: Frame)(
         fi: (Long, Long) => Long
     )(fd: (Double, Double) => Double): V =
-      if (isFloat(r)) V.D(fd(asD(evalT(a, fr)), asD(evalT(b, fr))))
-      else V.I(narrow(fi(asI(evalT(a, fr)), asI(evalT(b, fr))), r))
+      if (isFloat(r)) V.D(fd(evalT(a, fr).asD, evalT(b, fr).asD))
+      else V.I(narrow(fi(evalT(a, fr).asI, evalT(b, fr).asI), r))
     private def cmp(a: p.Term, b: p.Term, fr: Frame)(
         fi: (Long, Long) => Boolean
     )(fd: (Double, Double) => Boolean): V = {
-      val r = if (isFloat(a.tpe)) fd(asD(evalT(a, fr)), asD(evalT(b, fr))) else fi(asI(evalT(a, fr)), asI(evalT(b, fr)))
+      val r = if (isFloat(a.tpe)) fd(evalT(a, fr).asD, evalT(b, fr).asD) else fi(evalT(a, fr).asI, evalT(b, fr).asI)
       V.I(if (r) 1 else 0)
     }
 
@@ -491,28 +496,28 @@ object Interpreter {
         binN(a, b, r, fr)((x, y) => if (cmpI(r)(x, y) <= 0) x else y)((x, y) => math.min(x, y))
       case p.Intr.Max(a, b, r) =>
         binN(a, b, r, fr)((x, y) => if (cmpI(r)(x, y) >= 0) x else y)((x, y) => math.max(x, y))
-      case p.Intr.BAnd(a, b, r) => V.I(narrow(asI(evalT(a, fr)) & asI(evalT(b, fr)), r))
-      case p.Intr.BOr(a, b, r)  => V.I(narrow(asI(evalT(a, fr)) | asI(evalT(b, fr)), r))
-      case p.Intr.BXor(a, b, r) => V.I(narrow(asI(evalT(a, fr)) ^ asI(evalT(b, fr)), r))
-      case p.Intr.BSL(a, b, r)  => V.I(narrow(asI(evalT(a, fr)) << asI(evalT(b, fr)), r))
+      case p.Intr.BAnd(a, b, r) => V.I(narrow(evalT(a, fr).asI & evalT(b, fr).asI, r))
+      case p.Intr.BOr(a, b, r)  => V.I(narrow(evalT(a, fr).asI | evalT(b, fr).asI, r))
+      case p.Intr.BXor(a, b, r) => V.I(narrow(evalT(a, fr).asI ^ evalT(b, fr).asI, r))
+      case p.Intr.BSL(a, b, r)  => V.I(narrow(evalT(a, fr).asI << evalT(b, fr).asI, r))
       case p.Intr.BSR(a, b, r) =>
         V.I(
           narrow(
-            if (isSigned(r)) asI(evalT(a, fr)) >> asI(evalT(b, fr)) else asI(evalT(a, fr)) >>> asI(evalT(b, fr)),
+            if (isSigned(r)) evalT(a, fr).asI >> evalT(b, fr).asI else evalT(a, fr).asI >>> evalT(b, fr).asI,
             r
           )
         )
-      case p.Intr.BZSR(a, b, r) => V.I(narrow(asI(evalT(a, fr)) >>> asI(evalT(b, fr)), r))
+      case p.Intr.BZSR(a, b, r) => V.I(narrow(evalT(a, fr).asI >>> evalT(b, fr).asI, r))
       case p.Intr.PopCount(a, r) =>
         val bits  = sizeOf(r).toInt * 8
-        val value = asI(evalT(a, fr))
+        val value = evalT(a, fr).asI
         V.I(java.lang.Long.bitCount(if (bits >= 64) value else value & ((1L << bits) - 1)).toLong)
-      case p.Intr.BNot(a, r)     => V.I(narrow(~asI(evalT(a, fr)), r))
+      case p.Intr.BNot(a, r)     => V.I(narrow(~evalT(a, fr).asI, r))
       case p.Intr.Pos(a, _)      => evalT(a, fr)
-      case p.Intr.Neg(a, r)      => if (isFloat(r)) V.D(-asD(evalT(a, fr))) else V.I(narrow(-asI(evalT(a, fr)), r))
-      case p.Intr.LogicNot(a)    => V.I(if (asI(evalT(a, fr)) == 0) 1 else 0)
-      case p.Intr.LogicAnd(a, b) => V.I(if (asI(evalT(a, fr)) != 0 && asI(evalT(b, fr)) != 0) 1 else 0)
-      case p.Intr.LogicOr(a, b)  => V.I(if (asI(evalT(a, fr)) != 0 || asI(evalT(b, fr)) != 0) 1 else 0)
+      case p.Intr.Neg(a, r)      => if (isFloat(r)) V.D(-evalT(a, fr).asD) else V.I(narrow(-evalT(a, fr).asI, r))
+      case p.Intr.LogicNot(a)    => V.I(if (evalT(a, fr).asI == 0) 1 else 0)
+      case p.Intr.LogicAnd(a, b) => V.I(if (evalT(a, fr).asI != 0 && evalT(b, fr).asI != 0) 1 else 0)
+      case p.Intr.LogicOr(a, b)  => V.I(if (evalT(a, fr).asI != 0 || evalT(b, fr).asI != 0) 1 else 0)
       case p.Intr.LogicEq(a, b)  => cmp(a, b, fr)(_ == _)(_ == _)
       case p.Intr.LogicNeq(a, b) => cmp(a, b, fr)(_ != _)(_ != _)
       case p.Intr.LogicLt(a, b)  => cmp(a, b, fr)(cmpI(a.tpe)(_, _) < 0)(_ < _)
@@ -522,10 +527,10 @@ object Interpreter {
     }
 
     private def mathOp(op: p.Math, fr: Frame): V = {
-      def u(x: p.Term)(f: Double => Double) = V.D(f(asD(evalT(x, fr))))
+      def u(x: p.Term)(f: Double => Double) = V.D(f(evalT(x, fr).asD))
       op match {
         case p.Math.Abs(x, r) =>
-          if (isFloat(r)) V.D(math.abs(asD(evalT(x, fr)))) else V.I(narrow(math.abs(asI(evalT(x, fr))), r))
+          if (isFloat(r)) V.D(math.abs(evalT(x, fr).asD)) else V.I(narrow(math.abs(evalT(x, fr).asI), r))
         case p.Math.Sin(x, _)      => u(x)(math.sin)
         case p.Math.Cos(x, _)      => u(x)(math.cos)
         case p.Math.Tan(x, _)      => u(x)(math.tan)
@@ -547,19 +552,19 @@ object Interpreter {
         case p.Math.Log(x, _)      => u(x)(math.log)
         case p.Math.Log1p(x, _)    => u(x)(math.log1p)
         case p.Math.Log10(x, _)    => u(x)(math.log10)
-        case p.Math.Pow(x, y, _)   => V.D(math.pow(asD(evalT(x, fr)), asD(evalT(y, fr))))
-        case p.Math.Atan2(x, y, _) => V.D(math.atan2(asD(evalT(x, fr)), asD(evalT(y, fr))))
-        case p.Math.Hypot(x, y, _) => V.D(math.hypot(asD(evalT(x, fr)), asD(evalT(y, fr))))
+        case p.Math.Pow(x, y, _)   => V.D(math.pow(evalT(x, fr).asD, evalT(y, fr).asD))
+        case p.Math.Atan2(x, y, _) => V.D(math.atan2(evalT(x, fr).asD, evalT(y, fr).asD))
+        case p.Math.Hypot(x, y, _) => V.D(math.hypot(evalT(x, fr).asD, evalT(y, fr).asD))
       }
     }
 
     private def spec(op: p.Spec): V = op match {
-      case _: p.Spec.GpuGlobalIdx  => V.I(globalId)
-      case _: p.Spec.GpuGlobalSize => V.I(globalSize)
-      case _: p.Spec.GpuGroupIdx   => V.I(groupIdx)
-      case _: p.Spec.GpuGroupSize  => V.I(globalSize / localSize)
-      case _: p.Spec.GpuLocalIdx   => V.I(0)
-      case _: p.Spec.GpuLocalSize  => V.I(localSize)
+      case p.Spec.GpuGlobalIdx(_)  => V.I(globalId)
+      case p.Spec.GpuGlobalSize(_) => V.I(globalSize)
+      case p.Spec.GpuGroupIdx(_)   => V.I(groupIdx)
+      case p.Spec.GpuGroupSize(_)  => V.I(globalSize / localSize)
+      case p.Spec.GpuLocalIdx(_)   => V.I(0)
+      case p.Spec.GpuLocalSize(_)  => V.I(localSize)
       case p.Spec.GpuBarrierGlobal | p.Spec.GpuBarrierLocal | p.Spec.GpuBarrierAll =>
         barrierCount += 1
         V.U
@@ -567,10 +572,10 @@ object Interpreter {
     }
 
     private def cast(v: V, from: p.Type, to: p.Type): V =
-      if (isFloat(to) && !isFloat(from)) V.D(asI(v).toDouble)
-      else if (!isFloat(to) && isFloat(from)) V.I(narrow(asD(v).toLong, to))
-      else if (isFloat(to)) V.D(asD(v))
-      else V.I(narrow(asI(v), to))
+      if (isFloat(to) && !isFloat(from)) V.D(v.asI.toDouble)
+      else if (!isFloat(to) && isFloat(from)) V.I(narrow(v.asD.toLong, to))
+      else if (isFloat(to)) V.D(v.asD)
+      else V.I(narrow(v.asI, to))
   }
 
   final class Sma(vm: Vm) {
@@ -647,6 +652,7 @@ object Interpreter {
       graphNodes = nodes
       dmap(root)
     }
+    @SuppressWarnings(Array("bonsai:complexity"))
     private def readGraph(): Unit = graphNodes.foreach { host =>
       val (b, sz) = vm.findAlloc(host)
       if (!visited(b)) {

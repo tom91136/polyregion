@@ -2,12 +2,23 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <cstdint>
 #include <cstdlib>
+#include <exception>
+#include <functional>
 #include <future>
+#include <iterator>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
+#include <vector>
 
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
@@ -94,7 +105,7 @@ static backend::LLVMBackend::Options toLLVMBackendOptions(const compiler::Option
   auto opts = [&]() -> backend::LLVMBackend::Options {
     switch (options.target) {
       case compiletime::Target::Object_LLVM_HOST: {
-        auto host = backend::llvmc::defaultHostTriple();
+        const auto host = backend::llvmc::defaultHostTriple();
         validate(host.getArch());
         switch (host.getArch()) {
           case llvm::Triple::ArchType::x86_64: return {.target = backend::LLVMBackend::Target::x86_64, .arch = options.arch};
@@ -226,7 +237,7 @@ PluginRegistry &sharedPlugins() {
         throw std::logic_error(fmt::format("polyc: failed to load PolyPass plugin {}: {}", ref.path, rerr));
       const size_t idx = result.plugins.size();
       for (const auto &name : runner->passNames()) {
-        if (auto it = result.ownerByPass.find(name); it != result.ownerByPass.end()) {
+        if (const auto it = result.ownerByPass.find(name); it != result.ownerByPass.end()) {
           fmt::print(stderr, "polyc: pass '{}' from {} overrides earlier definition from {}\n", name, runner->tag(),
                      result.plugins[it->second]->tag());
           it->second = idx;
@@ -265,22 +276,22 @@ template <typename T, typename Decode>
 compiler::package::Result<T> invokePackage(const std::vector<uint8_t> &request, const std::string_view operation, Decode decode) {
   auto &registry = sharedPlugins();
   if (registry.packageProviders.size() != 1)
-    return {{}, {fmt::format("expected one package-service plugin, found {}", registry.packageProviders.size())}};
+    return {.value = {}, .errors = {fmt::format("expected one package-service plugin, found {}", registry.packageProviders.size())}};
   auto &provider = *registry.plugins[registry.packageProviders.front()];
-  std::lock_guard lock(packageMutex());
+  const std::scoped_lock lock(packageMutex());
   const auto version = provider.packageAbiVersion();
   if (!version || *version != POLYPACKAGE_ABI_VERSION)
-    return {{},
-            {fmt::format("PolyPackage ABI mismatch: service={}, polyc={}", version ? std::to_string(*version) : "<missing>",
-                         POLYPACKAGE_ABI_VERSION)}};
+    return {.value = {},
+            .errors = {fmt::format("PolyPackage ABI mismatch: service={}, polyc={}", version ? std::to_string(*version) : "<missing>",
+                                   POLYPACKAGE_ABI_VERSION)}};
   String error;
   const auto output = provider.runPackage(operation, request, error);
-  if (!error.empty()) return {{}, packageErrors(std::move(error))};
-  if (output.empty()) return {{}, {"package service returned an empty successful result"}};
+  if (!error.empty()) return {.value = {}, .errors = packageErrors(std::move(error))};
+  if (output.empty()) return {.value = {}, .errors = {"package service returned an empty successful result"}};
   try {
-    return {{decode(output.data(), output.data() + output.size())}, {}};
+    return {.value = decode(output.data(), output.data() + output.size()), .errors = {}};
   } catch (const std::exception &error) {
-    return {{}, {std::string("cannot decode package-service result: ") + error.what()}};
+    return {.value = {}, .errors = {std::string("cannot decode package-service result: ") + error.what()}};
   }
 }
 
@@ -307,18 +318,18 @@ compiler::package::Result<std::vector<compiler::package::Selection>> compiler::p
   auto selected = invokePackage<polyast::Program>(
       polyast::programlinkrequest_to_msgpack(request), polypackage::abi::SelectImplementations,
       [](const uint8_t *begin, const uint8_t *end) { return polyast::program_service_result_from_msgpack(begin, end); });
-  if (!selected) return {{}, std::move(selected.errors)};
+  if (!selected) return {.value = {}, .errors = std::move(selected.errors)};
   std::vector<Selection> selections;
   const auto add = [&](const polyast::Function &function) {
     if (!function.visibility.template is<polyast::FunctionVisibility::Exported>() || !function.implements) return;
     const auto key = conventions::LinkImplementationMeta + polyast::fqcn(function.decl.name);
     if (const auto found = selected.value->metadata ^ find([&](const auto &entry) { return entry.key == key; }))
-      selections.push_back({*function.implements, found->value});
+      selections.push_back({.declaration = *function.implements, .implementation = found->value});
   };
   if (request.consumer.entry) add(*request.consumer.entry);
   for (const auto &function : request.consumer.functions)
     add(function);
-  return {{std::move(selections)}, {}};
+  return {.value = std::move(selections), .errors = {}};
 }
 
 namespace {
@@ -427,7 +438,7 @@ std::vector<std::string> validateImportedEntries(const polyast::ProgramLinkReque
       const auto resolved = actual.args.back().named.tpe.get<polyast::Type::Ptr>();
       return resolved && resolved->space == polyast::TypeSpace::Global() && !resolved->comp.is<polyast::Type::Nothing>();
     }();
-    if (actual.tpeVars.size() || actual.receiver || actual.moduleCaptures.size() || actual.termCaptures.size()
+    if (!actual.tpeVars.empty() || actual.receiver || !actual.moduleCaptures.empty() || !actual.termCaptures.empty()
         || actual.rtn != polyast::Type::Unit0() || actual.affinity != polyast::FunctionAffinity::Host() || !argumentTypesMatch)
       errors.emplace_back(fmt::format("linked consumer entry `{}` has an invalid physical ABI", polyast::fqcn(root.decl.name)));
   };
@@ -506,19 +517,20 @@ compiler::package::compile(polyast::ProgramLinkRequest request, const compiletim
                            const std::optional<int> stackDepth) {
   if (!(deviceTargets
         ^ forall([&](const auto &target) { return compiletime::logicalAddressing(target.first) == request.logicalAddressing; })))
-    return {{}, {fmt::format("device targets do not all use {} addressing", request.logicalAddressing ? "logical" : "physical")}};
+    return {.value = {},
+            .errors = {fmt::format("device targets do not all use {} addressing", request.logicalAddressing ? "logical" : "physical")}};
   request.stackDepth = stackDepth;
   const auto linkRequest = polyast::programlinkrequest_to_msgpack(request);
   request.packages = {};
   auto linked = linkProgram(linkRequest);
-  if (!linked) return {{}, std::move(linked.errors)};
-  if (auto errors = validateImportedEntries(request, *linked.value); !errors.empty()) return {{}, std::move(errors)};
+  if (!linked) return {.value = {}, .errors = std::move(linked.errors)};
+  if (auto errors = validateImportedEntries(request, *linked.value); !errors.empty()) return {.value = {}, .errors = std::move(errors)};
   const auto roots = consumerRoots(request);
   auto implementations = linkMetadata(*linked.value, roots, conventions::LinkImplementationMeta);
   auto unfit = linkMetadata(*linked.value, roots, conventions::LinkUnfitMeta);
   if (implementations.empty() && !unfit.empty())
-    return {{polyast::CompileBundle({}, {}, {}, std::move(unfit), compileRoots(*linked.value, roots, {}))}, {}};
-  if (auto errors = validateRemoteEntries(*linked.value); !errors.empty()) return {{}, std::move(errors)};
+    return {.value = polyast::CompileBundle({}, {}, {}, std::move(unfit), compileRoots(*linked.value, roots, {})), .errors = {}};
+  if (auto errors = validateRemoteEntries(*linked.value); !errors.empty()) return {.value = {}, .errors = std::move(errors)};
   initialise();
   std::unordered_set<polyast::Sym> consumerEntries;
   const auto retainConsumerEntry = [&](const polyast::Function &function) {
@@ -570,7 +582,7 @@ compiler::package::compile(polyast::ProgramLinkRequest request, const compiletim
         internal = internal.withConvention(polyast::CallConvention::RegularCall());
       functions.emplace_back(std::move(internal));
     }
-    entryJobs.push_back({backend::normaliseSymbol(entry.decl.name), entry, std::move(functions)});
+    entryJobs.push_back({.moduleName = backend::normaliseSymbol(entry.decl.name), .entry = entry, .functions = std::move(functions)});
   }
   std::erase_if(program.functions,
                 [](const auto &function) { return !function.decl.affinity.template is<polyast::FunctionAffinity::Host>(); });
@@ -578,8 +590,9 @@ compiler::package::compile(polyast::ProgramLinkRequest request, const compiletim
   const auto sharedPhase = program.phase;
   const auto sharedMetadata = program.metadata;
 
-  auto hostStaged = compiler::stage(std::move(program), Options{hostTarget, hostArch, "StructuredExit", true});
-  auto hostCompile = submit(std::move(hostStaged), compiletime::OptLevel::O3);
+  auto hostStaged = compiler::stage(
+      std::move(program), Options{.target = hostTarget, .arch = hostArch, .pipelineSpec = "StructuredExit", .hostMirroring = true});
+  const auto hostCompile = submit(std::move(hostStaged), compiletime::OptLevel::O3);
 
   struct DeviceCompile {
     std::string moduleName;
@@ -595,17 +608,20 @@ compiler::package::compile(polyast::ProgramLinkRequest request, const compiletim
       auto entryProgram = last ? polyast::Program(std::move(job.entry), std::move(job.functions), sharedDefs, sharedPhase, sharedMetadata)
                                : polyast::Program(job.entry, job.functions, sharedDefs, sharedPhase, sharedMetadata);
       deviceCompiles.push_back(
-          {job.moduleName, target,
-           submit(compiler::stage(std::move(entryProgram), Options{target, arch, pipeline}), compiletime::OptLevel::O3)});
+          {.moduleName = job.moduleName,
+           .target = target,
+           .result = submit(compiler::stage(std::move(entryProgram), Options{.target = target, .arch = arch, .pipelineSpec = pipeline}),
+                            compiletime::OptLevel::O3)});
     }
   }
 
   const auto host = hostCompile.get();
-  if (!host->binary) return {{}, {"linked consumer program compilation failed: " + host->messages}};
+  if (!host->binary) return {.value = {}, .errors = {"linked consumer program compilation failed: " + host->messages}};
   std::vector<polyast::CompileModule> remoteModules;
   for (const auto &[moduleName, target, result] : deviceCompiles) {
     const auto device = result.get();
-    if (!device->binary) return {{}, {"linked consumer entry compilation failed for " + moduleName + ": " + device->messages}};
+    if (!device->binary)
+      return {.value = {}, .errors = {"linked consumer entry compilation failed for " + moduleName + ": " + device->messages}};
     const auto format = runtime::moduleFormatOf(target);
     if (!format) continue;
     auto features = device->features;
@@ -614,16 +630,16 @@ compiler::package::compile(polyast::ProgramLinkRequest request, const compiletim
     remoteModules.emplace_back(moduleName, static_cast<int32_t>(*format), static_cast<int32_t>(runtime::targetPlatformKind(target)),
                                std::move(features), std::move(*device->binary));
   }
-  return {{polyast::CompileBundle(std::move(*host->binary), std::move(remoteModules), std::move(implementations), std::move(unfit),
-                                  std::move(compileRootInfo))},
-          {}};
+  return {.value = polyast::CompileBundle(std::move(*host->binary), std::move(remoteModules), std::move(implementations), std::move(unfit),
+                                          std::move(compileRootInfo)),
+          .errors = {}};
 }
 
 static polyast::PassRunResult runPipelineChain(polyast::Program &&p, std::string_view rawSpec) {
   const std::string_view spec = rawSpec.empty() ? std::string_view{compiler::DefaultPipelineSpec} : rawSpec;
   const auto rootEpoch = compiler::nowMs();
   const auto rootStart = compiler::nowMono();
-  auto timed = [](const auto &name, const auto &data, const auto &f) {
+  const auto timed = [](const auto &name, const auto &data, const auto &f) {
     const auto epoch = compiler::nowMs();
     const auto start = compiler::nowMono();
     auto out = f();
@@ -662,7 +678,7 @@ static polyast::PassRunResult runPipelineChain(polyast::Program &&p, std::string
   items.push_back(std::move(serialiseEvent));
 
   std::optional<polyast::Program> currentProgram;
-  for (auto &[idx, stepStrings] : groups) {
+  for (const auto &[idx, stepStrings] : groups) {
     auto &runner = *reg.plugins[idx];
     std::string err;
     const std::string runnerTag(runner.tag());
@@ -714,10 +730,10 @@ compiler::Staged compiler::stage(polyast::Program &&program, const Options &opti
     case compiletime::Target::Source_C_OpenCL1_1:
     case compiletime::Target::Source_C_OpenCL2_0:
     case compiletime::Target::Source_C_Metal1_0: {
-      const auto strict = options.target == compiletime::Target::Source_C_C11 || options.target == compiletime::Target::Source_C_OpenCL2_0
-                              ? "false"
-                              : "true";
-      const auto metal = options.target == compiletime::Target::Source_C_Metal1_0 ? "true" : "false";
+      const auto *const strict =
+          options.target == compiletime::Target::Source_C_C11 || options.target == compiletime::Target::Source_C_OpenCL2_0 ? "false"
+                                                                                                                           : "true";
+      const auto *const metal = options.target == compiletime::Target::Source_C_Metal1_0 ? "true" : "false";
       auto passRun = runPipelineChain(std::move(effective), fmt::format("SourceStorageLegalise(elideRecursivelyEmptyAggregates={});"
                                                                         "SourcePointerLegalise(requiresConcreteSpaces={});"
                                                                         "SourceSelectionLegalise;SourceNameNormalise(metalKeywords={})",
@@ -739,24 +755,32 @@ compiler::Staged compiler::stage(polyast::Program &&program, const Options &opti
 
   if (options.hostMirroring) {
     if (!effective.entry)
-      return {std::nullopt, options, hadEntry, std::move(preEvents), "hostMirroring: pipeline removed the Program entry"};
+      return {.program = {},
+              .options = options,
+              .hadEntry = hadEntry,
+              .events = std::move(preEvents),
+              .error = "hostMirroring: pipeline removed the Program entry"};
     auto hostFns = std::vector<polyast::Function>{*effective.entry}                                                       //
                    | concat(effective.functions)                                                                          //
                    | filter([](const auto &f) { return f.decl.affinity.template is<polyast::FunctionAffinity::Host>(); }) //
                    | to_vector();
     if (hostFns.empty())
-      return {std::nullopt, options, hadEntry, std::move(preEvents), "hostMirroring: pipeline produced no Host-affinity functions"};
+      return {.program = {},
+              .options = options,
+              .hadEntry = hadEntry,
+              .events = std::move(preEvents),
+              .error = "hostMirroring: pipeline produced no Host-affinity functions"};
     effective = polyast::Program(hostFns.front(), std::vector<polyast::Function>(std::next(hostFns.begin()), hostFns.end()), effective.defs,
                                  effective.phase, effective.metadata);
   }
 
-  return {std::move(effective), options, hadEntry, std::move(preEvents), {}};
+  return {.program = std::move(effective), .options = options, .hadEntry = hadEntry, .events = std::move(preEvents), .error = {}};
 }
 
 polyast::CompileResult compiler::emit(Staged staged, const compiletime::OptLevel &opt) {
   if (!staged.error.empty()) return {{}, {}, std::move(staged.events), {}, std::move(staged.error), {}};
   const auto &options = staged.options;
-  auto mkBackend = [&]() -> std::unique_ptr<backend::Backend> {
+  const auto mkBackend = [&]() -> std::unique_ptr<backend::Backend> {
     switch (options.target) {
       case compiletime::Target::Object_LLVM_HOST:
       case compiletime::Target::Object_LLVM_x86_64:
@@ -796,8 +820,8 @@ polyast::CompileResult compiler::compile(const polyast::Program &program, const 
 }
 
 polyast::CompileResult compiler::compile(const polyast::Bytes &astBytes, const Options &options, const compiletime::OptLevel &opt) {
-  auto astStart = nowMono();
-  auto program = deserialiseProgram(astBytes);
+  const auto astStart = nowMono();
+  const auto program = deserialiseProgram(astBytes);
   // XXX `ast_deserialise` happens strictly before any event from compile(Program), so prepend
   // rather than re-running stable_sort over the merged list.
   auto c = compile(program, options, opt);

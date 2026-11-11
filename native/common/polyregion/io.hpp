@@ -14,7 +14,7 @@ template <typename T> std::vector<T> read_struct(const std::string &path) {
     throw std::invalid_argument("Cannot open binary file for reading: " + path);
   }
   s.ignore(std::numeric_limits<std::streamsize>::max());
-  auto len = s.gcount();
+  const auto len = s.gcount();
   s.clear();
   s.seekg(0, std::ios::beg);
   std::vector<T> xs(len / sizeof(T));

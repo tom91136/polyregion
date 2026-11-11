@@ -1,5 +1,11 @@
 #include <array>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <optional>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 #if defined(__linux__) || defined(__APPLE__)
   #include <dlfcn.h>
@@ -30,7 +36,7 @@ namespace {
 constexpr auto CompilerBasename = "clang";
 constexpr size_t MaxDistDepth = 4;
 
-#if defined(__APPLE__)
+#ifdef __APPLE__
 constexpr auto SharedSuffix = ".dylib";
 #else
 constexpr auto SharedSuffix = ".so";
@@ -93,21 +99,22 @@ std::string builtinsFor(const std::string &compiler, const std::string &triple) 
 
 CCompiler locateCCompiler() {
 #ifdef _WIN32
-  return {{}, "building C11 images is not supported on Windows"};
+  return {.path = {}, .unavailable = "building C11 images is not supported on Windows"};
 #else
   if (const char *explicitPath = std::getenv(polyregion::env::PolyinvokeCCompiler); explicitPath && *explicitPath)
     return llvm::sys::fs::exists(explicitPath)
-               ? CCompiler{explicitPath, {}}
-               : CCompiler{{}, fmt::format("{}={} does not exist", polyregion::env::PolyinvokeCCompiler, explicitPath)};
+               ? CCompiler{.path = explicitPath, .unavailable = {}}
+               : CCompiler{.path = {},
+                           .unavailable = fmt::format("{}={} does not exist", polyregion::env::PolyinvokeCCompiler, explicitPath)};
   const std::array<std::string, 3> found = {
       compilerFromBitcodeDir(),
       compilerAbove(moduleContaining(reinterpret_cast<const void *>(&anchor))),
       compilerAbove(llvm::sys::fs::getMainExecutable(nullptr, reinterpret_cast<void *>(&anchor))),
   };
-  if (const auto first = found ^ find([](const auto &c) { return !c.empty(); })) return {*first, {}};
-  return {{},
-          fmt::format("no dist {} found beside the runtime; set {} or {}", CompilerBasename, polyregion::env::PolyinvokeCCompiler,
-                      polyregion::env::PolyregionBitcodeDir)};
+  if (const auto first = found ^ find([](const auto &c) { return !c.empty(); })) return {.path = *first, .unavailable = {}};
+  return {.path = {},
+          .unavailable = fmt::format("no dist {} found beside the runtime; set {} or {}", CompilerBasename,
+                                     polyregion::env::PolyinvokeCCompiler, polyregion::env::PolyregionBitcodeDir)};
 #endif
 }
 

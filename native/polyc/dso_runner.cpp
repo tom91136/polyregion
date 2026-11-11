@@ -1,8 +1,13 @@
 #include "dso_runner.h"
 
+#include <cstddef>
 #include <cstdint>
+#include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
+#include <utility>
 
 #include "aspartame/all.hpp"
 #include "fmt/format.h"
@@ -140,10 +145,12 @@ Vector<uint8_t> DsoPassRunner::runPackage(const std::string_view operation, cons
     error = "DSO not loaded; call load() first";
     return {};
   }
-  const auto invoke = operation == polypackage::abi::LinkPackage             ? impl->linkPackage
-                      : operation == polypackage::abi::LinkProgram           ? impl->linkProgram
-                      : operation == polypackage::abi::SelectImplementations ? impl->selectImplementations
-                                                                             : nullptr;
+  const auto invoke = [&]() -> decltype(impl->linkPackage) {
+    if (operation == polypackage::abi::LinkPackage) return impl->linkPackage;
+    if (operation == polypackage::abi::LinkProgram) return impl->linkProgram;
+    if (operation == polypackage::abi::SelectImplementations) return impl->selectImplementations;
+    return nullptr;
+  }();
   if (!invoke) {
     error = fmt::format("unknown or unavailable package operation {}", operation);
     return {};

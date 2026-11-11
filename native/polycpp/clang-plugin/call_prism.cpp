@@ -13,10 +13,12 @@ using namespace aspartame;
 
 namespace call_prism {
 
+namespace {
 struct PrismGroup {
   std::string_view name;
   Vector<CallPrism> prisms;
 };
+} // namespace
 
 Vector<Term::Any> lowerArguments(const clang::CallExpr &call, Remapper &self, Remapper::RemapContext &r) {
   Vector<Term::Any> result;
@@ -67,8 +69,9 @@ Opt<MatchedCall> remoteRuntimePrism(const clang::CallExpr &call, const clang::Fu
   if (!allocate && !release && !copy && !fill) return {};
   const auto *expression = &call;
   return MatchedCall{
-      Lowering{[expression, allocate, release, copy, asyncCopy, asyncFill](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
-        const auto result = [&] { return self.integralConstOfType(self.handleType(expression->getType(), r), 0); };
+      .lower = Lowering{[expression, allocate, release, copy, asyncCopy, asyncFill](Remapper &self,
+                                                                                    Remapper::RemapContext &r) -> Expr::Any {
+        const auto result = [&] { return Remapper::integralConstOfType(self.handleType(expression->getType(), r), 0); };
         const auto arguments = lowerArguments(*expression, self, r);
         if ((asyncCopy || asyncFill)
             && !expression->getArg(expression->getNumArgs() - 1)
@@ -76,7 +79,7 @@ Opt<MatchedCall> remoteRuntimePrism(const clang::CallExpr &call, const clang::Fu
           raise(fmt::format("Non-default CUDA/HIP streams are not supported in package code at {}",
                             expression->getArg(expression->getNumArgs() - 1)->getExprLoc().printToString(self.context.getSourceManager())));
         if (allocate) {
-          const auto bytes = r.newVar(self.conform(r, Expr::Alias(arguments[1]), Type::IntU64()));
+          const auto bytes = r.newVar(Remapper::conform(r, Expr::Alias(arguments[1]), Type::IntU64()));
           const auto allocation = r.newVar(Expr::SpecOp(Spec::RemoteAlloc(packageContext(), bytes)));
           const auto target = arguments[0].tpe().get<Type::Ptr>();
           if (!target) raise("remote allocation output is not a pointer");
@@ -99,27 +102,30 @@ Opt<MatchedCall> remoteRuntimePrism(const clang::CallExpr &call, const clang::Fu
           else if (direction != 1) raise("unsupported remote copy direction");
           const auto destination = arguments[0];
           const auto source = arguments[1];
-          const auto bytes = r.newVar(self.conform(r, Expr::Alias(arguments[2]), Type::IntU64()));
+          const auto bytes = r.newVar(Remapper::conform(r, Expr::Alias(arguments[2]), Type::IntU64()));
           (void)r.newVar(Expr::SpecOp(Spec::RemoteMemcpy(packageContext(), destination, source, bytes, mapped)));
           return result();
         }
         const auto rawPointer = Type::Ptr(Type::IntU8(), TypeSpace::Global()).widen();
-        const auto destination = r.newVar(self.conform(r, Expr::Alias(arguments[0]), rawPointer));
-        const auto value = r.newVar(self.conform(r, Expr::Alias(arguments[1]), Type::IntS32()));
-        const auto bytes = r.newVar(self.conform(r, Expr::Alias(arguments[2]), Type::IntS64()));
+        const auto destination = r.newVar(Remapper::conform(r, Expr::Alias(arguments[0]), rawPointer));
+        const auto value = r.newVar(Remapper::conform(r, Expr::Alias(arguments[1]), Type::IntS32()));
+        const auto bytes = r.newVar(Remapper::conform(r, Expr::Alias(arguments[2]), Type::IntS64()));
         (void)r.newVar(Expr::ForeignCall("polyrt_device_memset", {packageContext(), destination, value, bytes}, Type::Unit0()));
         return result();
       }},
-      false};
+      .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> match(const clang::CallExpr &call, const clang::FunctionDecl &decl, const clang::ASTContext &context) {
   // These are source API dialects, not output targets: the remapper creates one
   // target-neutral PolyAST program before backend fanout. Add oneDPL and future
   // CUDA/HIP source rewrites here rather than branching on the selected backend.
-  const static Vector<PrismGroup> groups{
-      {"core", corePrisms()}, {"polyregion", polyregionPrisms()}, {"cuda", cudaPrisms()}, {"hip", hipPrisms()}, {"sycl", syclPrisms()}};
-  const static Vector<PrismGroup> fallbacks{{"host-fallback", coreFallbackPrisms()}};
+  const static Vector<PrismGroup> groups{{.name = "core", .prisms = corePrisms()},
+                                         {.name = "polyregion", .prisms = polyregionPrisms()},
+                                         {.name = "cuda", .prisms = cudaPrisms()},
+                                         {.name = "hip", .prisms = hipPrisms()},
+                                         {.name = "sycl", .prisms = syclPrisms()}};
+  const static Vector<PrismGroup> fallbacks{{.name = "host-fallback", .prisms = coreFallbackPrisms()}};
   Vector<Pair<std::string_view, MatchedCall>> matches;
   const auto collectMatches = [&](const auto &candidates) {
     for (const auto &group : candidates)

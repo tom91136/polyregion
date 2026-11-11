@@ -2,12 +2,10 @@ package polyregion.javalang
 
 import cats.syntax.all.*
 import com.sun.source.tree.*
-import com.sun.source.util.Trees
+import com.sun.source.util.TreeScanner
 import polyregion.ast.*
-import polyregion.javalang.Processor.{asCanonicalName, collectTree, collectTrees}
 
 import scala.annotation.nowarn
-import javax.annotation.processing.ProcessingEnvironment
 import javax.lang.model.`type`.{ExecutableType, TypeKind, TypeMirror}
 import javax.lang.model.element.{ExecutableElement, Modifier, TypeElement}
 import javax.lang.model.util.TypeKindVisitor6
@@ -16,8 +14,6 @@ import scala.jdk.CollectionConverters.*
 object LambdaOutliner {
 
   case class Reflector(
-      env: ProcessingEnvironment,
-      trees: Trees,
       classTable: Map[String, TypeElement],
       methodTable: Map[String, MethodTree]
   )
@@ -70,6 +66,9 @@ object LambdaOutliner {
                     resolveExecutableElementDesc(e) == target.methodSignature =>
                 e
             }
+            def unresolved(kind: String, outcome: String) =
+              s"$kind $invokeFn with signature ${target.methodSignature} (defined in $clsElem) $outcome, " +
+                s"available methods in the same class are:\n${matchingReflectedMethods.mkString("\n")}"
             matchingReflectedMethods match {
               case x :: Nil =>
                 // TODO workout <init>
@@ -77,12 +76,8 @@ object LambdaOutliner {
                   case Some(m) => m.success
                   case None    => s"Method $x (defined in $clsElem) has a non-reified tree".fail
                 }
-              case Nil =>
-                (s"Method $invokeFn with signature ${target.methodSignature} (defined in $clsElem) not found, " +
-                  s"available methods in the same class are:\n${matchingReflectedMethods.mkString("\n")}").fail
-              case xs =>
-                (s"More tha one overload of $invokeFn with signature ${target.methodSignature} (defined in $clsElem) found, " +
-                  s"available methods in the same class are:\n${matchingReflectedMethods.mkString("\n")}").fail
+              case Nil => unresolved("Method", "not found").fail
+              case xs  => unresolved("More tha one overload of", "found").fail
             }
         }
       case xs => s"More than one method match the name $invokeFn, all signatures: ${xs}".fail
@@ -228,5 +223,88 @@ object LambdaOutliner {
         s"More than one $$deserializeLambda$$ found, something is broken! Implementations:\n${xs.mkString("\n")}".fail
     }
   }
+
+  def asCanonicalName(clsName: String): String = clsName.replace('/', '.').replace('$', '.')
+
+  def collectTree[A](t: Tree)(f: Tree => List[A]): List[A] = new TreeScanner[List[A], Unit] {
+    private type U = Unit
+    override def reduce(l: List[A], r: List[A]) = (l, r) match {
+      case (null, null) => Nil
+      case (null, r)    => r
+      case (l, null)    => l
+      case (l, r)       => r ::: l
+    }
+    // Commented lines are trees introduced after Java 8
+    private inline def v[T <: Tree](n: T, inline g: (T, Unit) => List[A]) = reduce(f(n), g(n, ()))
+    override def visitCompilationUnit(n: CompilationUnitTree, p: U)       = v(n, super.visitCompilationUnit)
+    // override def visitPackage(n: PackageTree, p: U)                             = v(n, super.visitPackage)
+    override def visitImport(n: ImportTree, p: U)                     = v(n, super.visitImport)
+    override def visitClass(n: ClassTree, p: U)                       = v(n, super.visitClass)
+    override def visitMethod(n: MethodTree, p: U)                     = v(n, super.visitMethod)
+    override def visitVariable(n: VariableTree, p: U)                 = v(n, super.visitVariable)
+    override def visitEmptyStatement(n: EmptyStatementTree, p: U)     = v(n, super.visitEmptyStatement)
+    override def visitBlock(n: BlockTree, p: U)                       = v(n, super.visitBlock)
+    override def visitDoWhileLoop(n: DoWhileLoopTree, p: U)           = v(n, super.visitDoWhileLoop)
+    override def visitWhileLoop(n: WhileLoopTree, p: U)               = v(n, super.visitWhileLoop)
+    override def visitForLoop(n: ForLoopTree, p: U)                   = v(n, super.visitForLoop)
+    override def visitEnhancedForLoop(n: EnhancedForLoopTree, p: U)   = v(n, super.visitEnhancedForLoop)
+    override def visitLabeledStatement(n: LabeledStatementTree, p: U) = v(n, super.visitLabeledStatement)
+    override def visitSwitch(n: SwitchTree, p: U)                     = v(n, super.visitSwitch)
+    // override def visitSwitchExpression(n: SwitchExpressionTree, p: U)           = v(n, super.visitSwitchExpression)
+    override def visitCase(n: CaseTree, p: U)                                   = v(n, super.visitCase)
+    override def visitSynchronized(n: SynchronizedTree, p: U)                   = v(n, super.visitSynchronized)
+    override def visitTry(n: TryTree, p: U)                                     = v(n, super.visitTry)
+    override def visitCatch(n: CatchTree, p: U)                                 = v(n, super.visitCatch)
+    override def visitConditionalExpression(n: ConditionalExpressionTree, p: U) = v(n, super.visitConditionalExpression)
+    override def visitIf(n: IfTree, p: U)                                       = v(n, super.visitIf)
+    override def visitExpressionStatement(n: ExpressionStatementTree, p: U)     = v(n, super.visitExpressionStatement)
+    override def visitBreak(n: BreakTree, p: U)                                 = v(n, super.visitBreak)
+    override def visitContinue(n: ContinueTree, p: U)                           = v(n, super.visitContinue)
+    override def visitReturn(n: ReturnTree, p: U)                               = v(n, super.visitReturn)
+    override def visitThrow(n: ThrowTree, p: U)                                 = v(n, super.visitThrow)
+    override def visitAssert(n: AssertTree, p: U)                               = v(n, super.visitAssert)
+    override def visitMethodInvocation(n: MethodInvocationTree, p: U)           = v(n, super.visitMethodInvocation)
+    override def visitNewClass(n: NewClassTree, p: U)                           = v(n, super.visitNewClass)
+    override def visitNewArray(n: NewArrayTree, p: U)                           = v(n, super.visitNewArray)
+    override def visitLambdaExpression(n: LambdaExpressionTree, p: U)           = v(n, super.visitLambdaExpression)
+    override def visitParenthesized(n: ParenthesizedTree, p: U)                 = v(n, super.visitParenthesized)
+    override def visitAssignment(n: AssignmentTree, p: U)                       = v(n, super.visitAssignment)
+    override def visitCompoundAssignment(n: CompoundAssignmentTree, p: U)       = v(n, super.visitCompoundAssignment)
+    override def visitUnary(n: UnaryTree, p: U)                                 = v(n, super.visitUnary)
+    override def visitBinary(n: BinaryTree, p: U)                               = v(n, super.visitBinary)
+    override def visitTypeCast(n: TypeCastTree, p: U)                           = v(n, super.visitTypeCast)
+    override def visitInstanceOf(n: InstanceOfTree, p: U)                       = v(n, super.visitInstanceOf)
+    // override def visitBindingPattern(n: BindingPatternTree, p: U)               = v(n, super.visitBindingPattern)
+    // override def visitDefaultCaseLabel(n: DefaultCaseLabelTree, p: U)           = v(n, super.visitDefaultCaseLabel)
+    override def visitArrayAccess(n: ArrayAccessTree, p: U)   = v(n, super.visitArrayAccess)
+    override def visitMemberSelect(n: MemberSelectTree, p: U) = v(n, super.visitMemberSelect)
+    // override def visitParenthesizedPattern(n: ParenthesizedPatternTree, p: U)   = v(n, super.visitParenthesizedPattern)
+    // override def visitGuardedPattern(n: GuardedPatternTree, p: U)               = v(n, super.visitGuardedPattern)
+    override def visitMemberReference(n: MemberReferenceTree, p: U)     = v(n, super.visitMemberReference)
+    override def visitIdentifier(n: IdentifierTree, p: U)               = v(n, super.visitIdentifier)
+    override def visitLiteral(n: LiteralTree, p: U)                     = v(n, super.visitLiteral)
+    override def visitPrimitiveType(n: PrimitiveTypeTree, p: U)         = v(n, super.visitPrimitiveType)
+    override def visitArrayType(n: ArrayTypeTree, p: U)                 = v(n, super.visitArrayType)
+    override def visitParameterizedType(n: ParameterizedTypeTree, p: U) = v(n, super.visitParameterizedType)
+    override def visitUnionType(n: UnionTypeTree, p: U)                 = v(n, super.visitUnionType)
+    override def visitIntersectionType(n: IntersectionTypeTree, p: U)   = v(n, super.visitIntersectionType)
+    override def visitTypeParameter(n: TypeParameterTree, p: U)         = v(n, super.visitTypeParameter)
+    override def visitWildcard(n: WildcardTree, p: U)                   = v(n, super.visitWildcard)
+    override def visitModifiers(n: ModifiersTree, p: U)                 = v(n, super.visitModifiers)
+    override def visitAnnotation(n: AnnotationTree, p: U)               = v(n, super.visitAnnotation)
+    override def visitAnnotatedType(n: AnnotatedTypeTree, p: U)         = v(n, super.visitAnnotatedType)
+    // override def visitModule(n: ModuleTree, p: U)                               = v(n, super.visitModule)
+    // override def visitExports(n: ExportsTree, p: U)                             = v(n, super.visitExports)
+    // override def visitOpens(n: OpensTree, p: U)                                 = v(n, super.visitOpens)
+    // override def visitProvides(n: ProvidesTree, p: U)                           = v(n, super.visitProvides)
+    // override def visitRequires(n: RequiresTree, p: U)                           = v(n, super.visitRequires)
+    // override def visitUses(n: UsesTree, p: U)                                   = v(n, super.visitUses)
+    override def visitOther(n: Tree, p: U)              = v(n, super.visitOther)
+    override def visitErroneous(n: ErroneousTree, p: U) = v(n, super.visitErroneous)
+    // override def visitYield(n: YieldTree, p: U)                                 = v(n, super.visitYield)
+
+  }.scan(t, ())
+
+  def collectTrees[A](xs: List[Tree])(f: Tree => List[A]): List[A] = xs.flatMap(collectTree(_)(f))
 
 }

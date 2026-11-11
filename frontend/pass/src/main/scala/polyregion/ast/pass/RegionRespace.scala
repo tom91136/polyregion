@@ -21,11 +21,7 @@ object RegionRespace extends ProgramPass {
   ): (p.Function, Int) = {
     val solved   = solve(f)
     val analysis = if (requireSolved) solved.requireSolved else solved
-    val declared = (
-      f.receiver.iterator.map(_.named) ++ f.args.iterator.map(_.named) ++
-        f.moduleCaptures.iterator.map(_.named) ++ f.termCaptures.iterator.map(_.named) ++
-        f.collectAll[p.Stmt].iterator.collect { case p.Stmt.Var(n, _, _) => n }
-    ).map(n => n.symbol -> n).toMap
+    val declared = AddressRefinement.declaredNames(f)
     // a reference to the pointer itself reads the slot back at its declared type
     val addressTaken = f
       .collectAll[p.Expr]
@@ -111,8 +107,7 @@ object RegionRespace extends ProgramPass {
     val analysis = AddressRefinement.session(program)
     val (entry, ec) = program.entry
       .map(run(_, analysis.solve))
-      .map((function, count) => Some(function) -> count)
-      .getOrElse(None -> 0)
+      .fold[(Option[p.Function], Int)](None -> 0)((function, count) => Some(function) -> count)
     val (functions, fcs) = program.functions.map(run(_, analysis.solve)).unzip
     val total            = ec + fcs.sum
     if (total > 0) log.info(s"respaced $total rooted pointer(s) to their resource's address space")

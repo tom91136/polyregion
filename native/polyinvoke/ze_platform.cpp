@@ -1,6 +1,17 @@
 #include "polyinvoke/ze_platform.h"
 
+#include <array>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <string>
+#include <utility>
+#include <variant>
+#include <vector>
 
 #include "aspartame/all.hpp"
 #include "fmt/format.h"
@@ -19,7 +30,7 @@ static constexpr auto PREFIX = "LevelZero";
 
 #define CHECKED(f__)                                                                                                                       \
   do {                                                                                                                                     \
-    ze_result_t result__ = (f__);                                                                                                          \
+    const ze_result_t result__ = (f__);                                                                                                    \
     if (result__ != ZE_RESULT_SUCCESS) {                                                                                                   \
       POLYINVOKE_FATAL(PREFIX, "%s:%d: ze_result=0x%08X; callsite: `%s`", __FILE__, __LINE__, result__, #f__);                             \
     }                                                                                                                                      \
@@ -82,7 +93,7 @@ std::vector<std::unique_ptr<Device>> ZePlatform::enumerate() {
 namespace {
 
 ze_context_handle_t createContext(ze_driver_handle_t driver) {
-  ze_context_desc_t desc{ZE_STRUCTURE_TYPE_CONTEXT_DESC, nullptr, 0};
+  const ze_context_desc_t desc{.stype = ZE_STRUCTURE_TYPE_CONTEXT_DESC, .pNext = nullptr, .flags = 0};
   ze_context_handle_t ctx = {};
   CHECKED(zeContextCreate(driver, &desc, &ctx));
   return ctx;
@@ -113,7 +124,7 @@ std::string moduleIdentity(ze_driver_handle_t driver, ze_device_handle_t device)
 } // namespace
 
 ZeDevice::ZeDevice(ze_driver_handle_t driver, ze_device_handle_t device)
-    : driver(driver), device(device), context([this]() { return createContext(this->driver); },
+    : driver(driver), device(device), context([this] { return createContext(this->driver); },
                                               [](const auto &ctx) {
                                                 POLYINVOKE_TRACE();
                                                 CHECKED(zeContextDestroy(ctx));
@@ -124,7 +135,13 @@ ZeDevice::ZeDevice(ze_driver_handle_t driver, ze_device_handle_t device)
             POLYINVOKE_TRACE();
             context.touch();
             const auto create = [&](ze_module_format_t format, const uint8_t *data, size_t size, bool fatal) {
-              ze_module_desc_t desc{ZE_STRUCTURE_TYPE_MODULE_DESC, nullptr, format, size, data, nullptr, nullptr};
+              const ze_module_desc_t desc{.stype = ZE_STRUCTURE_TYPE_MODULE_DESC,
+                                          .pNext = nullptr,
+                                          .format = format,
+                                          .inputSize = size,
+                                          .pInputModule = data,
+                                          .pBuildFlags = nullptr,
+                                          .pConstants = nullptr};
               ze_module_handle_t module = {};
               ze_module_build_log_handle_t buildLog = {};
               if (const auto r = zeModuleCreate(*context, this->device, &desc, &module, &buildLog); r != ZE_RESULT_SUCCESS) {
@@ -158,7 +175,7 @@ ZeDevice::ZeDevice(ze_driver_handle_t driver, ze_device_handle_t device)
           },
           [](const auto &module, const auto &name, const auto &) {
             POLYINVOKE_TRACE();
-            ze_kernel_desc_t desc{ZE_STRUCTURE_TYPE_KERNEL_DESC, nullptr, 0, name.c_str()};
+            const ze_kernel_desc_t desc{ZE_STRUCTURE_TYPE_KERNEL_DESC, nullptr, 0, name.c_str()};
             ze_kernel_handle_t kernel = {};
             CHECKED(zeKernelCreate(module, &desc, &kernel));
             return kernel;
@@ -292,7 +309,7 @@ uintptr_t ZeDevice::mallocDevice(size_t size, Access) {
   POLYINVOKE_TRACE();
   context.touch();
   if (size == 0) POLYINVOKE_FATAL(PREFIX, "Cannot malloc size of %zu", size);
-  ze_device_mem_alloc_desc_t desc{ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC, nullptr, 0, 0};
+  const ze_device_mem_alloc_desc_t desc{.stype = ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC, .pNext = nullptr, .flags = 0, .ordinal = 0};
   void *ptr = nullptr;
   CHECKED(zeMemAllocDevice(*context, &desc, size, /*alignment*/ 0, device, &ptr));
   return reinterpret_cast<uintptr_t>(ptr);
@@ -306,8 +323,8 @@ std::optional<void *> ZeDevice::mallocShared(size_t size, Access) {
   POLYINVOKE_TRACE();
   context.touch();
   if (size == 0) POLYINVOKE_FATAL(PREFIX, "Cannot malloc size of %zu", size);
-  ze_device_mem_alloc_desc_t deviceDesc{ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC, nullptr, 0, 0};
-  ze_host_mem_alloc_desc_t hostDesc{ZE_STRUCTURE_TYPE_HOST_MEM_ALLOC_DESC, nullptr, 0};
+  const ze_device_mem_alloc_desc_t deviceDesc{.stype = ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC, .pNext = nullptr, .flags = 0, .ordinal = 0};
+  const ze_host_mem_alloc_desc_t hostDesc{.stype = ZE_STRUCTURE_TYPE_HOST_MEM_ALLOC_DESC, .pNext = nullptr, .flags = 0};
   void *ptr = nullptr;
   CHECKED(zeMemAllocShared(*context, &deviceDesc, &hostDesc, size, /*alignment*/ 0, device, &ptr));
   return ptr;
@@ -331,24 +348,28 @@ ZeDeviceQueue::ZeDeviceQueue(const std::chrono::duration<int64_t> &timeout, decl
   POLYINVOKE_TRACE();
   // Async immediate command list: appends submit straight to the device without an explicit
   // queue.  Ordinal 0 is always the default compute group.
-  ze_command_queue_desc_t desc{ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC,
-                               nullptr,
-                               /*ordinal=*/0,
-                               /*index=*/0,
-                               /*flags=*/0,
-                               ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS,
-                               ZE_COMMAND_QUEUE_PRIORITY_NORMAL};
+  const ze_command_queue_desc_t desc{.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC,
+                                     .pNext = nullptr,
+                                     .ordinal = 0,
+                                     .index = 0,
+                                     .flags = 0,
+                                     .mode = ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS,
+                                     .priority = ZE_COMMAND_QUEUE_PRIORITY_NORMAL};
   CHECKED(zeCommandListCreateImmediate(context, device, &desc, &cmdList));
 
   // Single-slot host-visible event pool.  Every append uses this event as its signal slot;
   // waitAndFire host-syncs and resets it before the next op.  v1.0-compatible (no
   // zeCommandListHostSynchronize).
-  ze_event_pool_desc_t poolDesc{ZE_STRUCTURE_TYPE_EVENT_POOL_DESC, nullptr, ZE_EVENT_POOL_FLAG_HOST_VISIBLE, /*count=*/1};
+  const ze_event_pool_desc_t poolDesc{
+      .stype = ZE_STRUCTURE_TYPE_EVENT_POOL_DESC, .pNext = nullptr, .flags = ZE_EVENT_POOL_FLAG_HOST_VISIBLE, .count = 1};
   CHECKED(zeEventPoolCreate(context, &poolDesc, /*numDevices=*/1, &device, &eventPool));
   // XXX signal scope must flush to host, else a completing op signals before its writes are
   // host-visible and zeEventHostSynchronize returns stale data (off-by-one under load).
-  ze_event_desc_t eventDesc{ZE_STRUCTURE_TYPE_EVENT_DESC, nullptr, /*index=*/0,
-                            /*signal=*/ZE_EVENT_SCOPE_FLAG_HOST, ZE_EVENT_SCOPE_FLAG_HOST};
+  const ze_event_desc_t eventDesc{.stype = ZE_STRUCTURE_TYPE_EVENT_DESC,
+                                  .pNext = nullptr,
+                                  .index = 0,
+                                  .signal = ZE_EVENT_SCOPE_FLAG_HOST,
+                                  .wait = ZE_EVENT_SCOPE_FLAG_HOST};
   CHECKED(zeEventCreate(eventPool, &eventDesc, &event));
 }
 ZeDeviceQueue::~ZeDeviceQueue() {
@@ -386,9 +407,9 @@ void ZeDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
   POLYINVOKE_TRACE();
   if (types.back() != Type::Void)
     POLYINVOKE_FATAL(PREFIX, "Non-void return type not supported: %s", magic_enum::enum_name(types.back()).data());
-  auto kernel = store.resolveFunction(moduleName, symbol, types);
+  auto *kernel = store.resolveFunction(moduleName, symbol, types);
 
-  auto grid = policy.global;
+  const auto grid = policy.global;
   auto [block, sharedMem] = policy.local.value_or(std::pair{Dim3{}, size_t{0}});
   CHECKED(zeKernelSetGroupSize(kernel, static_cast<uint32_t>(block.x), static_cast<uint32_t>(block.y), static_cast<uint32_t>(block.z)));
 
@@ -405,7 +426,9 @@ void ZeDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
     ++argIdx;
   }
 
-  ze_group_count_t groups{static_cast<uint32_t>(grid.x), static_cast<uint32_t>(grid.y), static_cast<uint32_t>(grid.z)};
+  const ze_group_count_t groups{.groupCountX = static_cast<uint32_t>(grid.x),
+                                .groupCountY = static_cast<uint32_t>(grid.y),
+                                .groupCountZ = static_cast<uint32_t>(grid.z)};
   CHECKED(zeCommandListAppendLaunchKernel(cmdList, kernel, &groups, event, 0, nullptr));
   waitAndFire(cb);
 }

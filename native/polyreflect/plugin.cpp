@@ -1,3 +1,8 @@
+#include <memory>
+#include <optional>
+#include <string>
+#include <utility>
+
 #include "llvm/Bitcode/BitcodeReader.h"
 #include "llvm/IR/Comdat.h"
 #include "llvm/IR/Constants.h"
@@ -34,14 +39,14 @@ llvm::cl::opt<std::string> latePassesOpt(llvm::StringRef(polyregion::conventions
 
 } // namespace
 
-namespace polyregion::polyreflect {
+namespace polyregion::polyreflect { namespace {
 class ProtectRTPass : public llvm::PassInfoMixin<ProtectRTPass> {
   bool verbose;
 
 public:
   explicit ProtectRTPass(bool verbose) : verbose(verbose) {}
 
-  llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &) {
+  llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &) const {
     // XXX COFF needs a comdat for LinkOnceODR; ELF/Mach-O don't.
     const bool isCOFF = M.getTargetTriple().isOSBinFormatCOFF();
     llvm_shared::findFunctionsWithStringAnnotations(M, [&](llvm::Function *F, llvm::StringRef Annotation) {
@@ -54,9 +59,9 @@ public:
     return llvm::PreservedAnalyses::none();
   }
 };
-} // namespace polyregion::polyreflect
+}} // namespace polyregion::polyreflect
 
-namespace polyregion::polyreflect {
+namespace polyregion::polyreflect { namespace {
 // links the embedded `polyregion_mirror_bc` global and wires prelude/postlude into each KernelBundle; no-op if absent
 class LinkMirrorPass : public llvm::PassInfoMixin<LinkMirrorPass> {
   bool verbose;
@@ -64,13 +69,13 @@ class LinkMirrorPass : public llvm::PassInfoMixin<LinkMirrorPass> {
 public:
   explicit LinkMirrorPass(bool verbose) : verbose(verbose) {}
 
-  llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &) {
-    auto bcGlobals = M.globals()                                                                                       //
-                     | filter([](const auto &G) {                                                                      //
-                         return G.hasInitializer() && G.getName().contains(conventions::reflect::MirrorBitcodeGlobal); //
-                       })                                                                                              //
-                     | map([](auto &G) { return &G; })                                                                 //
-                     | to_vector();
+  llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &) const {
+    const auto bcGlobals = M.globals()                                                                                       //
+                           | filter([](const auto &G) {                                                                      //
+                               return G.hasInitializer() && G.getName().contains(conventions::reflect::MirrorBitcodeGlobal); //
+                             })                                                                                              //
+                           | map([](auto &G) { return &G; })                                                                 //
+                           | to_vector();
 
     // re-applies at every EP: under `-g` a mid-pipeline GlobalOpt nulls the bundle fields after early wiring
     bool linked = false;
@@ -81,7 +86,7 @@ public:
       Ctx.setDiagnosticHandler(std::make_unique<llvm::DiagnosticHandler>(), /*RespectFilters*/ false);
 
       for (auto *G : bcGlobals) {
-        auto *init = llvm::dyn_cast<llvm::ConstantDataArray>(G->getInitializer());
+        const auto *init = llvm::dyn_cast<llvm::ConstantDataArray>(G->getInitializer());
         if (!init) continue;
         const llvm::StringRef bytes = init->getRawDataValues();
         auto buf = llvm::MemoryBuffer::getMemBuffer(bytes, "mirror.bc", /*RequiresNullTerminator*/ false);
@@ -102,7 +107,7 @@ public:
 
       if (linked) {
         llvm::removeFromUsedLists(M, [](llvm::Constant *c) {
-          auto *gv = llvm::dyn_cast<llvm::GlobalVariable>(c);
+          const auto *gv = llvm::dyn_cast<llvm::GlobalVariable>(c);
           return gv && gv->getName().contains(conventions::reflect::MirrorBitcodeGlobal);
         });
         for (auto *G : bcGlobals) {
@@ -122,12 +127,12 @@ public:
   }
 
   // wire each KernelBundle to its prelude/postlude via its mirrorId field; an empty id stays null
-  bool wireBundles(llvm::Module &M) {
+  bool wireBundles(llvm::Module &M) const {
     const auto bundleCString = [](llvm::ConstantStruct *cs, unsigned i) -> std::optional<std::string> {
       if (cs->getNumOperands() <= i) return std::nullopt;
       auto *gv = llvm::dyn_cast<llvm::GlobalVariable>(cs->getOperand(i)->stripPointerCasts());
       if (!gv || !gv->hasInitializer()) return std::nullopt;
-      auto *arr = llvm::dyn_cast<llvm::ConstantDataArray>(gv->getInitializer());
+      const auto *arr = llvm::dyn_cast<llvm::ConstantDataArray>(gv->getInitializer());
       if (!arr || !arr->isCString()) return std::nullopt;
       return arr->getAsCString().str();
     };
@@ -163,8 +168,8 @@ public:
       auto *init = G.getInitializer();
       if (auto *cs = llvm::dyn_cast<llvm::ConstantStruct>(init)) {
         if (auto *wired = wireStruct(cs, G.getName()); wired != cs) G.setInitializer(wired);
-      } else if (auto *ca = llvm::dyn_cast<llvm::ConstantArray>(init)) {
-        auto *elemTy = llvm::dyn_cast<llvm::StructType>(ca->getType()->getElementType());
+      } else if (const auto *ca = llvm::dyn_cast<llvm::ConstantArray>(init)) {
+        const auto *elemTy = llvm::dyn_cast<llvm::StructType>(ca->getType()->getElementType());
         if (!elemTy || !elemTy->hasName() || !elemTy->getName().contains(conventions::KernelBundleType)) return;
         llvm::SmallVector<llvm::Constant *, 4> elems;
         bool changed = false;
@@ -180,7 +185,7 @@ public:
     return wiredAny;
   }
 };
-} // namespace polyregion::polyreflect
+}} // namespace polyregion::polyreflect
 
 namespace {
 // add the polyreflect pass named by its conventions identifier; false if the name is unrecognised
@@ -206,7 +211,10 @@ void addReflectSpec(llvm::ModulePassManager &MPM, const std::string &spec) {
 } // namespace
 
 extern "C" POLYREGION_EXPORT LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginInfo() {
-  return {LLVM_PLUGIN_API_VERSION, "polyreflect", LLVM_VERSION_STRING, [](llvm::PassBuilder &PB) {
+  return {.APIVersion = LLVM_PLUGIN_API_VERSION,
+          .PluginName = "polyreflect",
+          .PluginVersion = LLVM_VERSION_STRING,
+          .RegisterPassBuilderCallbacks = [](llvm::PassBuilder &PB) {
             // wire before the inliner constant-folds the `bundle.prelude` load into the offload wrapper
             PB.registerPipelineStartEPCallback([&](llvm::ModulePassManager &MPM, llvm::OptimizationLevel) {
               MPM.addPass(polyregion::polyreflect::LinkMirrorPass(verboseOpt));

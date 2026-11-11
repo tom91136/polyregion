@@ -18,7 +18,7 @@ import polyregion.ast.Traversal.*
 //   a rematerialised value that divides                  ->  only by a literal other than 0 and -1, so replays cannot trap
 //   whole-array assignment to a crossing array           ->  declined, the entry keeps the lane abi
 private[pass] object GroupState {
-  import GroupFission.{Base, GroupId, Lanes, Lid, isBarrier, sel, u32}
+  import GroupVocabulary.{Base, GroupId, Lanes, Lid, addressOfOwn, isBarrier, sel, u32}
 
   val U32     = p.Type.IntU32
   val U64     = p.Type.IntU64
@@ -45,16 +45,16 @@ private[pass] object GroupState {
   }
 
   def scalar(tpe: p.Type): Boolean = tpe match {
-    case _: p.Type.Ptr => true
-    case t             => t.kind == p.Type.Kind.Integral || t.kind == p.Type.Kind.Fractional
+    case p.Type.Ptr(_, _) => true
+    case t                => t.kind == p.Type.Kind.Integral || t.kind == p.Type.Kind.Fractional
   }
 
   // variables whose storage is referenced: an address taken, or an array bound to another name
   def addressed(stmts: List[p.Stmt]): Set[String] =
     stmts
       .flatMap(_.collectWhere[p.Expr] {
-        case r: p.Expr.RefTo                                       => GroupFission.addressOfOwn(r).map(_.symbol)
-        case p.Expr.Alias(p.Term.Select(root, Nil, _: p.Type.Arr)) => Some(root.symbol)
+        case r: p.Expr.RefTo                                             => addressOfOwn(r).map(_.symbol)
+        case p.Expr.Alias(p.Term.Select(root, Nil, p.Type.Arr(_, _, _))) => Some(root.symbol)
       })
       .flatten
       .toSet
@@ -69,18 +69,18 @@ private[pass] object GroupState {
           case _                                                                      => Nil
         }
         here ::: (unwrap(s) match {
-          case p.Stmt.Cond(_, t, f)           => block(t) ::: block(f)
-          case p.Stmt.While(_, b)             => block(b)
-          case p.Stmt.ForRange(_, _, _, _, b) => block(b)
-          case _                              => Nil
+          case p.Stmt.Cond(_, t, f)      => block(t) ::: block(f)
+          case p.Stmt.While(_, b)        => block(b)
+          case p.Stmt.ForRange(body = b) => block(b)
+          case _                         => Nil
         })
       case Nil => Nil
     }
     block(body).toSet
   }
 
-  def fixed(prepared: GroupFission.Prepared): Set[String] =
-    (GroupFission.params(prepared.entry) ::: List(Lanes, GroupId, Base)).map(_.symbol).toSet ++
+  def fixed(prepared: GroupVocabulary.Prepared): Set[String] =
+    (GroupVocabulary.params(prepared.entry) ::: List(Lanes, GroupId, Base)).map(_.symbol).toSet ++
       prepared.prologue.collect { case p.Stmt.Var(n, _, _) => n.symbol }
 
   def fieldPath(defs: Map[p.Sym, p.StructDef], tpe: p.Type, steps: List[p.PathStep]): Boolean = steps match {
@@ -93,6 +93,13 @@ private[pass] object GroupState {
       }
     case _ => false
   }
+
+  def stableTerm(defs: Map[p.Sym, p.StructDef], fix: String => Boolean, bound: String => Boolean)(t: p.Term): Boolean =
+    t match {
+      case p.Term.Select(root, steps, _) =>
+        (steps.isEmpty && bound(root.symbol)) || (fix(root.symbol) && fieldPath(defs, root.tpe, steps))
+      case _ => true
+    }
 
   enum Storage {
     case Lane(view: p.Named, comp: p.Type, wrapped: Boolean)
@@ -130,7 +137,7 @@ private[pass] object GroupState {
   }
 
   def classify(
-      prepared: GroupFission.Prepared,
+      prepared: GroupVocabulary.Prepared,
       defs: List[p.StructDef],
       units: Vector[List[p.Stmt]],
       pinned: Set[String]
@@ -148,7 +155,7 @@ private[pass] object GroupState {
 
     val written = all
       .flatMap(_.collectWhere[p.Stmt] {
-        case p.Stmt.Mut(p.Term.Select(root, steps, _), _) if GroupFission.ownStorage(root, steps) => root.symbol
+        case p.Stmt.Mut(p.Term.Select(root, steps, _), _) if GroupVocabulary.ownStorage(root, steps) => root.symbol
       })
       .toSet
     val rebound =
@@ -156,20 +163,16 @@ private[pass] object GroupState {
     val aliased = addressed(all)
     val fix     = fixed(prepared)
 
-    var uniform = Set.empty[String]
-    def uniformTerm(t: p.Term): Boolean = t match {
-      case p.Term.Select(root, steps, _) =>
-        (steps.isEmpty && uniform(root.symbol)) || (fix(root.symbol) && fieldPath(defMap, root.tpe, steps))
-      case _ => true
-    }
+    var uniform                         = Set.empty[String]
+    def uniformTerm(t: p.Term): Boolean = stableTerm(defMap, fix, uniform)(t)
     def uniformExpr(e: p.Expr): Boolean = e match {
-      case p.Expr.Alias(t)      => uniformTerm(t)
-      case p.Expr.IntrOp(op)    => op.terms.forall(uniformTerm)
-      case p.Expr.MathOp(op)    => op.terms.forall(uniformTerm)
-      case p.Expr.Cast(t, _)    => uniformTerm(t)
-      case p.Expr.BitCast(t, _) => uniformTerm(t)
-      case _: p.Expr.SizeOf     => true
-      case _: p.Expr.OffsetOf   => true
+      case p.Expr.Alias(t)       => uniformTerm(t)
+      case p.Expr.IntrOp(op)     => op.terms.forall(uniformTerm)
+      case p.Expr.MathOp(op)     => op.terms.forall(uniformTerm)
+      case p.Expr.Cast(t, _)     => uniformTerm(t)
+      case p.Expr.BitCast(t, _)  => uniformTerm(t)
+      case p.Expr.SizeOf(_)      => true
+      case p.Expr.OffsetOf(_, _) => true
       case p.Expr.SpecOp(
             op @ (_: p.Spec.GpuGroupIdx | _: p.Spec.GpuGroupSize | _: p.Spec.GpuLocalSize | _: p.Spec.GpuGlobalSize)
           ) =>
@@ -201,13 +204,13 @@ private[pass] object GroupState {
       case _ => true
     }
     def replayable(e: p.Expr): Boolean = e match {
-      case p.Expr.Alias(t)                       => pure(t)
-      case p.Expr.Cast(t, _)                     => pure(t)
-      case p.Expr.BitCast(t, _)                  => pure(t)
-      case p.Expr.IntrOp(op)                     => op.terms.forall(pure) && total(op)
-      case p.Expr.MathOp(op)                     => op.terms.forall(pure)
-      case _: p.Expr.SizeOf | _: p.Expr.OffsetOf => true
-      case _                                     => false
+      case p.Expr.Alias(t)                          => pure(t)
+      case p.Expr.Cast(t, _)                        => pure(t)
+      case p.Expr.BitCast(t, _)                     => pure(t)
+      case p.Expr.IntrOp(op)                        => op.terms.forall(pure) && total(op)
+      case p.Expr.MathOp(op)                        => op.terms.forall(pure)
+      case p.Expr.SizeOf(_) | p.Expr.OffsetOf(_, _) => true
+      case _                                        => false
     }
     changed = true
     while (changed) {
@@ -222,9 +225,10 @@ private[pass] object GroupState {
     val crossing = used.filterNot(n => replayed.contains(n.symbol))
     val remat    = replayed.toList.map((sym, e) => Remat(declarations(sym).head.name, e))
 
-    val wrappers = mutable.ListBuffer.empty[p.StructDef]
-    val storage = crossing.map { n =>
-      n.symbol -> (n.tpe match {
+    val wrappers       = mutable.ListBuffer.empty[p.StructDef]
+    val storageBuilder = Map.newBuilder[String, Storage]
+    crossing.foreach { n =>
+      storageBuilder += n.symbol -> (n.tpe match {
         case p.Type.Unit0           => Storage.Unit
         case _ if uniform(n.symbol) => Storage.Shared
         case arr: p.Type.Arr =>
@@ -234,13 +238,14 @@ private[pass] object GroupState {
           Storage.Lane(fresh(s"${n.symbol}#gf_view", p.Type.Ptr(comp, G)), comp, wrapped = true)
         case tpe => Storage.Lane(fresh(s"${n.symbol}#gf_view", p.Type.Ptr(tpe, G)), tpe, wrapped = false)
       })
-    }.toMap
+    }
+    val storage = storageBuilder.result()
 
     val reassigned = crossing.find { n =>
       storage(n.symbol) match {
         case Storage.Lane(_, _, true) =>
           rebound(n.symbol) || declarations(n.symbol).exists {
-            case p.Stmt.Var(_, Some(p.Expr.Alias(_: p.Term.Poison)), _) | p.Stmt.Var(_, None, _) => false
+            case p.Stmt.Var(_, Some(p.Expr.Alias(p.Term.Poison(_))), _) | p.Stmt.Var(_, None, _) => false
             case _                                                                               => true
           }
         case _ => false
@@ -254,7 +259,7 @@ private[pass] object GroupState {
 
   case class Scope(at: Map[String, p.Named], re: Map[String, p.Named], prelude: List[p.Stmt])
 
-  final class Access(prepared: GroupFission.Prepared, classes: Classes) {
+  final class Access(prepared: GroupVocabulary.Prepared, classes: Classes) {
     private val fresh   = prepared.fresh
     private val storage = classes.storage
     private val replays = classes.remat.map(r => r.name.symbol -> r).toMap
@@ -291,7 +296,7 @@ private[pass] object GroupState {
       names.toList.sorted.foreach(sym => if (replays.contains(sym) && !declaredHere(sym)) visit(sym))
       val re = order.toList.map(sym => sym -> fresh(s"${sym}#gf_re", replays(sym).name.tpe)).toMap
       val prelude = order.toList.map { sym =>
-        p.Stmt.Var(re(sym), Some(GroupFission.renameRoots(replays(sym).init, re)))
+        p.Stmt.Var(re(sym), Some(GroupVocabulary.renameRoots(replays(sym).init, re)))
       }
       Scope(at, re, prelude)
     }
@@ -342,7 +347,7 @@ private[pass] object GroupState {
               val slot = rewrite(sel(n), scope)
               (n.tpe, init) match {
                 case _ if wrapped => Nil
-                case (_: p.Type.Struct, None) =>
+                case (p.Type.Struct(_, _), None) =>
                   val zero = fresh("#gf_zero", n.tpe)
                   List(p.Stmt.Var(zero, None), p.Stmt.Mut(slot, alias(sel(zero))))
                 case (_, None)    => Nil
@@ -385,9 +390,9 @@ private[pass] object GroupState {
             p.Stmt.Var(rounded, Some(intr(p.Intr.BAnd(sel(padded), u64(-64), U64)))),
             p.Stmt.Var(end, Some(intr(p.Intr.Add(start, sel(rounded), U64))))
           )
-          (acc :+ start, sel(end))
+          (start :: acc, sel(end))
       }
-      val views = perLane.zip(starts.drop(leading.size)).flatMap { case ((_, s), start) =>
+      val views = perLane.zip(starts.reverse.drop(leading.size)).flatMap { case ((_, s), start) =>
         val raw = fresh("#gf_raw", state.tpe)
         List(
           p.Stmt.Var(raw, Some(p.Expr.RefTo(sel(state), Some(start), p.Type.IntU8, G, p.Region.Rooted(state)))),

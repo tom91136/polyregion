@@ -17,9 +17,15 @@ import polyregion.ast.CppStructGen.CppType.Kind
 
 private[polyregion] object CppStructGen {
 
-  extension [A](xs: Seq[A]) {
+  def hashCombine(value: String): String = s"seed ^= $value + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);"
+
+  def declare(tpe: CppType, name: String, init: String): String =
+    s"${if (tpe.movable) "auto" else "const auto"} $name = $init;"
+
+  def consume(tpe: CppType, name: String): String = if (tpe.movable) s"std::move($name)" else name
+
+  extension (xs: Seq[String]) {
     def csv: String = xs.mkString(", ")
-    def ssv: String = xs.mkString(" ")
     def sym(prefix: String = "", delim: String = "", suffix: String): String =
       if (xs.isEmpty) "" else xs.mkString(prefix, delim, suffix)
   }
@@ -91,7 +97,7 @@ private[polyregion] object CppStructGen {
             |  std::size_t operator()(std::vector<T> const &xs) const noexcept {
             |    std::size_t seed = xs.size();
             |    for (auto &x : xs) {
-            |      seed ^= std::hash<T>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+            |      ${hashCombine("std::hash<T>()(x)")}
             |    }
             |    return seed;
             |  }
@@ -101,7 +107,7 @@ private[polyregion] object CppStructGen {
             |  std::size_t operator()(std::set<T> const &xs) const noexcept {
             |    std::size_t seed = xs.size();
             |    for (auto &x : xs) {
-            |      seed ^= std::hash<T>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+            |      ${hashCombine("std::hash<T>()(x)")}
             |    }
             |    return seed;
             |  }
@@ -205,18 +211,25 @@ private[polyregion] object CppStructGen {
       if (qualified) tpe.namespace.sym("", "::", "::") + name else name
     }
 
+    def ctorInvocation: String = members.map((n, t) => consume(t, n)) match {
+      case x :: Nil => s"${tpe.ref()}($x)"
+      case xs       => xs.mkString("{", ", ", "}")
+    }
+
+    @SuppressWarnings(Array("bonsai:complexity"))
     def emit(parent: Option[StructNode] = None): List[StructSource] = {
 
       val ctorInit = members.map { (n, tpe) =>
-        if (tpe.kind == CppType.Kind.Base) s"$n(std::move($n))"
-        else if (tpe.movable) s"$n(std::move($n))"
+        if (tpe.kind == CppType.Kind.Base || tpe.movable) s"$n(std::move($n))"
         else s"$n($n)"
       }
       val (ctorArgs, ctorChain) = (parent, parentTpe) match {
 
         case (Some(base), Some(_, Nil)) =>
-          (members ::: base.members) ->
-            (s"${base.clsName(qualified = true)}(${base.members.map((n, _) => n).csv})" :: ctorInit)
+          val baseInit =
+            if (base.members.isEmpty) Nil
+            else s"${base.clsName(qualified = true)}(${base.members.map((n, _) => n).csv})" :: Nil
+          (members ::: base.members) -> (baseInit ::: ctorInit)
         case (Some(base), Some(_, xs)) =>
           members ->
             (s"${base.clsName(qualified = true)}(${xs.csv})" :: ctorInit)
@@ -233,7 +246,7 @@ private[polyregion] object CppStructGen {
       }
 
       def ctorArg(n: String, t: CppType, default: Boolean) =
-        s"${t.ref(qualified = true)} $n${if (default) " = {}" else ""}"
+        s"${t.ref()} $n${if (default) " = {}" else ""}"
       val ctorArgExpr     = ctorArgs.map((n, t) => ctorArg(n, t, default = false)).csv
       val ctorAttrExpr    = ctorAttrs.map(_.spelling).sym("", " ", " ")
       val defaultFrom     = ctorArgs.lastIndexWhere((_, t) => !t.isDefaultable) + 1
@@ -242,7 +255,7 @@ private[polyregion] object CppStructGen {
           case Nil => ";"
           case _   => " noexcept;";
         }}"
-      val memberStmts = members.map((n, t) => s"${t.ref(qualified = true)} $n;")
+      val memberStmts = members.map((n, t) => s"${t.ref()} $n;")
 
       val ctorStmtImpl = s"${clsName(qualified = true)}::${clsName(qualified = false)}($ctorArgExpr)${ctorChain match {
           case Nil => " = default;"
@@ -254,23 +267,27 @@ private[polyregion] object CppStructGen {
 
       val hasMoreSumTypes = variants.exists(_.tpe.kind == CppType.Kind.Base)
 
-      def capitalCase(s: String): String = if (s.isEmpty) s else s.head.toUpper + s.tail
+      def capitalCase(s: String): String = s.capitalize
 
       val (memberSigs, memberImpls) = tpe.kind match {
         case CppType.Kind.Base if hasMoreSumTypes => (Nil, Nil)
         case CppType.Kind.Base                    => (Nil, Nil)
         case _ =>
+          val memberNames   = members.map(_._1)
+          val qualifiedName = clsName(qualified = true)
+          val nolint =
+            if (members.sizeIs == 1) "// NOLINTNEXTLINE(readability-convert-member-functions-to-static)" :: Nil
+            else Nil
           val stmts = members.flatMap((n, tpe) =>
-            s"${clsName(qualified = true)} ${clsName(qualified = true)}::with${capitalCase(n)}(const ${tpe.ref(true)} &v_) const {" ::
-              s"  return ${clsName(qualified = true)}(${members
-                  .map(_._1)
+            nolint ::: s"$qualifiedName ${qualifiedName}::with${capitalCase(n)}(const ${tpe.ref()} &v_) const {" ::
+              s"  return ${qualifiedName}(${memberNames
                   .map(v => if (v == n) "v_" else v)
                   .mkString(", ")});" ::
               "}" :: Nil
           )
 
           val sig = members.map((n, tpe) =>
-            s"[[nodiscard]] POLYREGION_EXPORT ${clsName(qualified = true)} with${capitalCase(n)}(const ${tpe.ref(true)} &v_) const;"
+            s"[[nodiscard]] POLYREGION_EXPORT $qualifiedName with${capitalCase(n)}(const ${tpe.ref()} &v_) const;"
           )
           (sig, stmts)
       }
@@ -302,13 +319,13 @@ private[polyregion] object CppStructGen {
       val (equalitySig, equalityImpl) = {
         val name = clsName(qualified = true)
 
-        def mkEqStmt(lhs: String, rhs: String, n: String, tpe: CppType) =
+        def mkEqStmt(lhs: String, n: String, tpe: CppType) =
           (tpe.kind, tpe.namespace ::: tpe.name :: Nil, tpe.ctors) match {
             case (CppType.Kind.StdLib, "std" :: "optional" :: Nil, x :: Nil) if x.kind == CppType.Kind.Base =>
-              s"( (!$lhs$n && !$rhs$n) || ($lhs$n && $rhs$n && *$lhs$n == *$rhs$n) )"
+              s"( (!$lhs$n && !rhs.$n) || ($lhs$n && rhs.$n && *$lhs$n == *rhs.$n) )"
             case (CppType.Kind.StdLib, "std" :: ("vector" | "set") :: Nil, x :: Nil) if x.kind == CppType.Kind.Base =>
-              s"std::equal($lhs$n.begin(), $lhs$n.end(), $rhs$n.begin(), $rhs$n.end(), [](auto &&l, auto &&r) { return l == r; })"
-            case _ => s"($lhs$n == $rhs$n)"
+              s"std::equal($lhs$n.begin(), $lhs$n.end(), rhs.$n.begin(), rhs.$n.end(), [](auto &&l, auto &&r) { return l == r; })"
+            case _ => s"($lhs$n == rhs.$n)"
           }
 
         tpe.kind match {
@@ -331,7 +348,7 @@ private[polyregion] object CppStructGen {
                 (members match {
                   case Nil => "  return true;" :: Nil
                   case xs =>
-                    xs.map((n, tpe) => mkEqStmt("this->", "rhs.", n, tpe)).mkString("  return ", " && ", ";") :: Nil
+                    xs.map((n, tpe) => mkEqStmt("this->", n, tpe)).mkString("  return ", " && ", ";") :: Nil
                 }) ::: "}"
                 ::
                 s"POLYREGION_EXPORT bool $name::operator==(const Base& rhs_) const {" ::
@@ -355,7 +372,7 @@ private[polyregion] object CppStructGen {
                 (members match {
                   case _ if tpe.noIdentity => "  return true;" :: Nil
                   case Nil                 => "  return true;" :: Nil
-                  case xs => xs.map((n, tpe) => mkEqStmt("", "rhs.", n, tpe)).mkString("  return ", " && ", ";") :: Nil
+                  case xs => xs.map((n, tpe) => mkEqStmt("", n, tpe)).mkString("  return ", " && ", ";") :: Nil
                 }) ::: "}" :: Nil
             )
         }
@@ -363,7 +380,7 @@ private[polyregion] object CppStructGen {
 
       val (idSig, idImpl) = (tpe.kind, parent) match {
         case (CppType.Kind.Variant, Some(p)) =>
-          val idxValue = p.variants.indexWhere(_.tpe == tpe) match {
+          val idxValue = p.variants.indexWhere(_.tpe eq tpe) match {
             case -1 => s"#error \"assert failed: invalid parent for variant ${tpe}\""
             case n  => s"$n"
           }
@@ -383,14 +400,12 @@ private[polyregion] object CppStructGen {
       val (hashCodeSig, hashCodeImpl) = (tpe.kind, parent) match {
 
         case (CppType.Kind.Variant, Some(p)) =>
+          val updates = members.map((n, _) => s"  ${hashCombine(s"std::hash<decltype($n)>()($n)")}")
           (
             s"[[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;" :: Nil,
             s"size_t ${clsName(qualified = true)}::hash_code() const { " ::
-              "  size_t seed = variant_id;" ::
-              members.map((n, t) =>
-                s"  seed ^= std::hash<decltype($n)>()($n) + 0x9e3779b9 + (seed << 6) + (seed >> 2);"
-              ) :::
-              "  return seed;" ::
+              (if (updates.isEmpty) "  return variant_id;" :: Nil
+               else "  size_t seed = variant_id;" :: updates ::: "  return seed;" :: Nil) :::
               "}" :: Nil
           )
         case (CppType.Kind.Base, _) =>
@@ -399,16 +414,16 @@ private[polyregion] object CppStructGen {
             Nil
           )
         case (CppType.Kind.Data, _) =>
+          val updates =
+            if (tpe.noIdentity) Nil
+            else members.map((n, _) => s"  ${hashCombine(s"std::hash<decltype($n)>()($n)")}")
           (
             s"[[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;" :: Nil,
-            s"size_t ${clsName(qualified = true)}::hash_code() const { " ::
-              "  size_t seed = 0;" ::
-              (if (tpe.noIdentity) Nil
-               else
-                 members.map((n, t) =>
-                   s"  seed ^= std::hash<decltype($n)>()($n) + 0x9e3779b9 + (seed << 6) + (seed >> 2);"
-                 )) :::
-              "  return seed;" ::
+            (if (updates.isEmpty) "// NOLINTNEXTLINE(readability-convert-member-functions-to-static)" :: Nil
+             else Nil) :::
+              s"size_t ${clsName(qualified = true)}::hash_code() const { " ::
+              (if (updates.isEmpty) "  return 0;" :: Nil
+               else "  size_t seed = 0;" :: updates ::: "  return seed;" :: Nil) :::
               "}" :: Nil
           )
         case (_, _) => (Nil, Nil)
@@ -457,7 +472,7 @@ private[polyregion] object CppStructGen {
              |${if (!pureEnum) "" else "[[nodiscard]] POLYREGION_EXPORT bool operator<(const Any &rhs) const;"}
              |  [[nodiscard]] POLYREGION_EXPORT uint32_t id() const;
              |  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
-             |${members.map((name, tpe) => s"  ${tpe.ref(true)} ${name}() const;").mkString("\n")}
+             |${members.map((name, tpe) => s"  ${tpe.ref()} ${name}() const;").mkString("\n")}
              |  template<typename T> [[nodiscard]] constexpr POLYREGION_EXPORT bool is() const;
              |  template<typename T> [[nodiscard]] constexpr POLYREGION_EXPORT std::optional<T> get() const;
              |  template<typename... F> constexpr POLYREGION_EXPORT auto match_total(F &&...fs) const;
@@ -478,20 +493,20 @@ private[polyregion] object CppStructGen {
 
       val variantImpl = if (tpe.kind == CppType.Kind.Base) {
 
-        s"uint32_t ${tpe.ref(true)}::id() const { return _v->id(); }" ::
-          s"size_t ${tpe.ref(true)}::hash_code() const { return _v->hash_code(); }" ::
-          members.map((name, t) => s"${t.ref(true)} ${tpe.ref(true)}::${name}() const { return _v->${name}; }") :::
-          s"bool ${tpe.ref(true)}::operator==(const ${tpe.ref(false)} &rhs) const { return _v->operator==(*rhs._v); }" ::
-          s"bool ${tpe.ref(true)}::operator!=(const ${tpe.ref(false)} &rhs) const { return !_v->operator==(*rhs._v); }" ::
+        s"uint32_t ${tpe.ref()}::id() const { return _v->id(); }" ::
+          s"size_t ${tpe.ref()}::hash_code() const { return _v->hash_code(); }" ::
+          members.map((name, t) => s"${t.ref()} ${tpe.ref()}::${name}() const { return _v->${name}; }") :::
+          s"bool ${tpe.ref()}::operator==(const ${tpe.ref(false)} &rhs) const { return _v->operator==(*rhs._v); }" ::
+          s"bool ${tpe.ref()}::operator!=(const ${tpe.ref(false)} &rhs) const { return !_v->operator==(*rhs._v); }" ::
           (if (!pureEnum) Nil
            else
-             s"bool ${tpe.ref(true)}::operator<(const ${tpe.ref(false)} &rhs) const { return _v->operator<(*rhs._v); };" :: Nil)
+             s"bool ${tpe.ref()}::operator<(const ${tpe.ref(false)} &rhs) const { return _v->operator<(*rhs._v); };" :: Nil)
       } else Nil
 
       val (nsDecl, nsImpl) = if (tpe.kind == CppType.Kind.Base && !hasMoreSumTypes && false) {
         members.map { (n, t) =>
-          val arg = tpe.ref(qualified = true)
-          val rtn = t.ref(qualified = true)
+          val arg = tpe.ref()
+          val rtn = t.ref()
           (
             s"POLYREGION_EXPORT $rtn $n(const $arg&);",
             s"$rtn ${ns(n)}(const $arg& x){ return select<&${clsName(qualified = true)}::$n>(x); }"
@@ -516,18 +531,18 @@ private[polyregion] object CppStructGen {
         if (tpe.kind == CppType.Kind.Base) {
           val qualifiedNs = (ns :: tpe.namespace).mkString("::")
           s"namespace $qualifiedNs{ using All = alternatives<${variants.map(_.tpe.applied(true)).mkString(", ")}>; }" ::
-            s"""|template<typename T> constexpr POLYREGION_EXPORT bool $ns::${tpe.ref(true)}::is() const { 
+            s"""|template<typename T> constexpr POLYREGION_EXPORT bool $ns::${tpe.ref()}::is() const { 
                 |  static_assert(($qualifiedNs::All::contains<T>), "type not part of the variant");
                 |  return T::variant_id == _v->id();
               |}""".stripMargin ::
             s"""|template<typename T> 
-                |constexpr POLYREGION_EXPORT std::optional<T> $ns::${tpe.ref(true)}::get() const { 
+                |constexpr POLYREGION_EXPORT std::optional<T> $ns::${tpe.ref()}::get() const { 
                 |  static_assert(($qualifiedNs::All::contains<T>), "type not part of the variant");
                 |  if (T::variant_id == _v->id()) return {*std::static_pointer_cast<T>(_v)};
                 |  else return {};
                 |}""".stripMargin ::
             s"""|template<typename ...Fs> 
-                |constexpr POLYREGION_EXPORT auto $ns::${tpe.ref(true)}::match_total(Fs &&...fs) const { 
+                |constexpr POLYREGION_EXPORT auto $ns::${tpe.ref()}::match_total(Fs &&...fs) const { 
                 |  using Ts = alternatives<std::decay_t<arg1_t<Fs>>...>;
                 |  using Rs = alternatives<std::invoke_result_t<Fs, std::decay_t<arg1_t<Fs>>>...>;
                 |  using R0 = typename Rs::template at<0>;
@@ -560,9 +575,9 @@ private[polyregion] object CppStructGen {
                 |  }
                 |}""".stripMargin ::
             s"""|template<typename T, typename U>
-                |POLYREGION_EXPORT void $ns::${tpe.ref(true)}::collect_where(std::vector<U> &results_, 
+                |POLYREGION_EXPORT void $ns::${tpe.ref()}::collect_where(std::vector<U> &results_, 
                 |    const std::function<std::optional<U>(const T&)> &f) const { 
-                |  if constexpr (std::is_same_v<T, $ns::${tpe.ref(true)}>) {
+                |  if constexpr (std::is_same_v<T, $ns::${tpe.ref()}>) {
                 |    if(auto x_ = f(_v)) { results_.emplace_back(*x_); }
                 |    return; 
                 |  }
@@ -574,23 +589,23 @@ private[polyregion] object CppStructGen {
                 |  }); 
                 |}""".stripMargin ::
             s"""|template<typename T, typename U>
-                |POLYREGION_EXPORT std::vector<U> $ns::${tpe.ref(true)}::collect_where(
+                |POLYREGION_EXPORT std::vector<U> $ns::${tpe.ref()}::collect_where(
                 |    const std::function<std::optional<U>(const T&)> &f) const { 
                 |  std::vector<U> results_;
                 |  collect_where<T, U>(results_, f);
                 |  return results_;
                 |}""".stripMargin ::
             s"""|template<typename T>
-                |POLYREGION_EXPORT std::vector<T> $ns::${tpe.ref(true)}::collect_all() const { 
+                |POLYREGION_EXPORT std::vector<T> $ns::${tpe.ref()}::collect_all() const { 
                 |  return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
                 |}""".stripMargin ::
             s"""|template<typename T>
-                |POLYREGION_EXPORT $ns::${tpe.ref(true)} $ns::${tpe.ref(true)}::modify_all(
+                |POLYREGION_EXPORT $ns::${tpe.ref()} $ns::${tpe.ref()}::modify_all(
                 |    const std::function<T(const T&)> &f) const { 
-                |  if constexpr (std::is_same_v<T, $ns::${tpe.ref(true)}>) {
+                |  if constexpr (std::is_same_v<T, $ns::${tpe.ref()}>) {
                 |    return f(*this); 
                 |  }
-                |  std::optional<$ns::${tpe.ref(true)}> result_;
+                |  std::optional<$ns::${tpe.ref()}> result_;
                 |  All::applyOr([&, id = _v->id()]<typename V>() -> bool {
                 |    if (V::variant_id != id) return false;
                 |    auto _x = std::static_pointer_cast<V>(_v);
@@ -758,14 +773,14 @@ private[polyregion] object CppStructGen {
 
   trait ToCppType[A] extends (() => CppType)
   object ToCppType {
-    given ToCppType[Int]     = () => CppType(Nil, "int32_t", constexpr = true, include = List("cstdint"))
-    given ToCppType[Long]    = () => CppType(Nil, "int64_t", constexpr = true, include = List("cstdint"))
-    given ToCppType[Short]   = () => CppType(Nil, "int16_t", constexpr = true, include = List("cstdint"))
-    given ToCppType[Char]    = () => CppType(Nil, "uint16_t", constexpr = true, include = List("cstdint"))
-    given ToCppType[Byte]    = () => CppType(Nil, "int8_t", constexpr = true, include = List("cstdint"))
-    given ToCppType[Boolean] = () => CppType(Nil, "bool", constexpr = true, include = Nil)
-    given ToCppType[Float]   = () => CppType(Nil, "float", constexpr = true, include = Nil)
-    given ToCppType[Double]  = () => CppType(Nil, "double", constexpr = true, include = Nil)
+    given ToCppType[Int]     = () => CppType(Nil, "int32_t", include = List("cstdint"))
+    given ToCppType[Long]    = () => CppType(Nil, "int64_t", include = List("cstdint"))
+    given ToCppType[Short]   = () => CppType(Nil, "int16_t", include = List("cstdint"))
+    given ToCppType[Char]    = () => CppType(Nil, "uint16_t", include = List("cstdint"))
+    given ToCppType[Byte]    = () => CppType(Nil, "int8_t", include = List("cstdint"))
+    given ToCppType[Boolean] = () => CppType(Nil, "bool")
+    given ToCppType[Float]   = () => CppType(Nil, "float")
+    given ToCppType[Double]  = () => CppType(Nil, "double")
     given ToCppType[String] = () =>
       CppType(
         "std" :: Nil,
@@ -776,12 +791,11 @@ private[polyregion] object CppStructGen {
         include = List("string")
       )
 
-    @targetName("vector") given [A: ToCppType, C[_] <: scala.collection.Seq[?]]: ToCppType[C[A]] = { () =>
-      val tpe    = summon[ToCppType[A]]()
+    private def collectionType(name: String, tpe: CppType, insert: String, defaultable: Boolean = false): CppType = {
       val strTpe = summon[ToCppType[String]]()
       CppType(
         "std" :: Nil,
-        s"vector",
+        name,
         movable = true,
         constexpr = false,
         initialiser = true,
@@ -799,50 +813,24 @@ private[polyregion] object CppStructGen {
           s"for (auto it = $v.begin(); it != $v.end(); ++it) {" :: (f("(*it)").map(v => s"  $v")) ::: "}" :: Nil
         ),
         mapOp = Some((v, o, f) =>
-          s"std::vector<${tpe.ref(true)}> $o;" ::
+          s"std::$name<${tpe.ref()}> $o;" ::
             s"for (auto it = $v.begin(); it != $v.end(); ++it) {" ::
-            s"  $o.emplace_back(${f("(*it)")});" ::
+            s"  $o.$insert(${f("(*it)")});" ::
             "}" ::
             Nil
         ),
-        include = List("vector"),
+        include = List(name),
         ctors = tpe :: Nil,
-        defaultable = true
+        defaultable = defaultable
       )
     }
 
+    @targetName("vector") given [A: ToCppType, C[_] <: scala.collection.Seq[?]]: ToCppType[C[A]] = { () =>
+      collectionType("vector", summon[ToCppType[A]](), "emplace_back", defaultable = true)
+    }
+
     @targetName("set") given [A: ToCppType, C[_] <: scala.collection.Set[?]]: ToCppType[C[A]] = { () =>
-      val tpe    = summon[ToCppType[A]]()
-      val strTpe = summon[ToCppType[String]]()
-      CppType(
-        "std" :: Nil,
-        s"set",
-        movable = true,
-        constexpr = false,
-        initialiser = true,
-        streamOp = { (s, v) =>
-          List(
-            s"$s << '{';",
-            s"for (auto it = $v.begin(); it != $v.end(); ++it) {",
-            s"  ${tpe.streamOp(s, s"*it").mkString(";")}",
-            s"  ${strTpe.streamOp(s, s"(std::next(it) != $v.end() ? \",\" : \"\")").mkString(";")}",
-            s"}",
-            s"$s << '}';"
-          )
-        },
-        eachOp = Some((v, f) =>
-          s"for (auto it = $v.begin(); it != $v.end(); ++it) {" :: (f("(*it)").map(v => s"  $v")) ::: "}" :: Nil
-        ),
-        mapOp = Some((v, o, f) =>
-          s"std::set<${tpe.ref(true)}> $o;" ::
-            s"for (auto it = $v.begin(); it != $v.end(); ++it) {" ::
-            s"  $o.emplace(${f("(*it)")});" ::
-            "}" ::
-            Nil
-        ),
-        include = List("set"),
-        ctors = tpe :: Nil
-      )
+      collectionType("set", summon[ToCppType[A]](), "emplace")
     }
 
     given [A: ToCppType]: ToCppType[Option[A]] = { () =>
@@ -850,7 +838,7 @@ private[polyregion] object CppStructGen {
       CppType(
         "std" :: Nil,
         s"optional",
-        movable = true,
+        movable = tpe.movable,
         constexpr = false,
         streamOp = { (s, v) =>
           List(
@@ -863,7 +851,7 @@ private[polyregion] object CppStructGen {
         },
         eachOp = Some((v, f) => s"if ($v) {" :: (f(s"(*$v)").map(v => s"  $v")) ::: "}" :: Nil),
         mapOp = Some((v, o, f) =>
-          s"std::optional<${tpe.ref(true)}> $o;" ::
+          s"std::optional<${tpe.ref()}> $o;" ::
             s"if ($v) { $o = ${f(s"(*$v)")}; }" :: Nil
         ),
         include = List("optional"),
@@ -897,39 +885,32 @@ private[polyregion] object CppStructGen {
         case _ => label
       }
       val noId = summonFrom { case _: (T <:< PolyAST.NoIdentity) => true; case _ => false }
+      val tpe = CppType(
+        ns,
+        name,
+        movable = true,
+        constexpr = false, // forAll[m.MirroredElemTypes](_.constexpr),
+        kind = CppType.Kind(kind),
+        noIdentity = noId
+      )
       inline m match {
-        case s: Mirror.SumOf[T] =>
-          CppType(
-            ns,
-            name,
-            movable = true,
-            constexpr = false, // forAll[m.MirroredElemTypes](_.constexpr),
-            kind = CppType.Kind(kind),
-            noIdentity = noId
-          )
-        case p: Mirror.ProductOf[T] =>
-          CppType(
-            ns,
-            name,
-            movable = true,
-            constexpr = false, // forAll[p.MirroredElemTypes](_.constexpr),
-            kind = CppType.Kind(kind),
-            noIdentity = noId
-          )
-        case x => error(s"Unhandled derive: $x")
+        case _: Mirror.SumOf[T]     => tpe
+        case _: Mirror.ProductOf[T] => tpe
+        case x                      => error(s"Unhandled derive: $x")
       }
     }
   }
 
-  inline def deriveSum[N <: Tuple, T <: Tuple](parent: Option[(CppType, List[String])] = None): List[StructNode] =
+  inline def deriveSum[N <: Tuple, T <: Tuple](parent: Option[(CppType, List[String])]): List[StructNode] =
     inline (erasedValue[N], erasedValue[T]) match {
       case (_: EmptyTuple, _: EmptyTuple) => Nil
       case (_: (n *: ns), _: (t *: ts)) =>
-        deriveStruct[t](parent)(using
+        def variant(): StructNode = deriveStruct[t](parent)(using
           summonInline[ToCppType[t]],
           summonInline[ToCppTerm[t]],
           summonInline[Mirror.Of[t]]
-        ) :: deriveSum[ns, ts](parent)
+        )
+        variant() :: deriveSum[ns, ts](parent)
     }
 
   inline def deriveProduct[L <: Tuple, T <: Tuple]: List[(String, CppType)] =
@@ -951,7 +932,7 @@ private[polyregion] object CppStructGen {
         case compiletime.Value.TermSelect(x, xs) =>
           throw RuntimeException(s"multiple path ${x :: xs} is not supported")
         case compiletime.Value.CtorAp(tpe, args) =>
-          if (!tpe.initialiser) tpe.ref(qualified = true) + s"(${args.map(write(_)).mkString(",")})"
+          if (!tpe.initialiser) tpe.ref() + s"(${args.map(write(_)).mkString(",")})"
           else s"{${args.map(write(_)).mkString(",")}}"
         case compiletime.Value.Prepend(_, _) =>
           @annotation.tailrec

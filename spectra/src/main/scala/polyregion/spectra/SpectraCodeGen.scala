@@ -5,15 +5,15 @@ import java.nio.file.{Files, Path, Paths}
 
 import polyregion.ast.generated.PolyPackageWireSchema
 import polyregion.ast.PolyAST as p
-import polyregion.ast.{Core, InterfaceCodeGen, MsgPack}
+import polyregion.ast.{Core, FortranConfig, InterfaceCodeGen, MsgPack, ScalaConfig}
 
 import scala.jdk.CollectionConverters.*
 import scala.util.Using
 
 object SpectraCodeGen {
 
-  private val fortran = InterfaceCodeGen.FortranConfig("spectra_api")
-  private val scala   = InterfaceCodeGen.ScalaConfig("polyregion", "spectra")
+  private val fortran = FortranConfig("spectra_api")
+  private val scala   = ScalaConfig("polyregion", "spectra")
 
   private[spectra] val cppHeader: String = InterfaceCodeGen.cppHeader(Spectra.interfaceDef)
   private val fortranModule: String      = InterfaceCodeGen.fortranModule(Spectra.interfaceDef, fortran)
@@ -35,6 +35,7 @@ object SpectraCodeGen {
       root.resolve("generated/package/polyregion.core.interface.polyast") -> interfaceBytes(Core.interfaceDef)
     )
 
+  @SuppressWarnings(Array("bonsai:test-only-member"))
   def checkGenerated(root: Path): List[String] = {
     val normalized     = root.toAbsolutePath.normalize
     val textExpected   = textOutputs(normalized)

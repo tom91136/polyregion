@@ -1,3 +1,5 @@
+#include <cstddef>
+#include <cstdint>
 #include <string_view>
 
 #include "clang/AST/Attr.h"
@@ -68,14 +70,14 @@ Opt<uint64_t> hipIndirectKernelBlockSize(const clang::FunctionDecl &decl, const 
 static Opt<MatchedCall> hipSleepScanState(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
   if (call.getNumArgs() != 2 || decl.getQualifiedNameAsString() != rocprimIsSleepScanStateUsed) return {};
   const auto *expression = &call;
-  return MatchedCall{Lowering{[expression](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+  return MatchedCall{.lower = Lowering{[expression](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
                        const auto args = lowerArguments(*expression, self, r);
                        const auto output = args[1].get<Term::Select>();
                        if (!output) raise("rocPRIM sleep scan state output did not lower to a selectable value");
                        r.push(Stmt::Mut(*output, Expr::Alias(Term::Bool1Const(false))));
-                       return self.integralConstOfType(self.handleType(expression->getType(), r), 0);
+                       return Remapper::integralConstOfType(self.handleType(expression->getType(), r), 0);
                      }},
-                     false};
+                     .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> hipIgnoredHelper(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
@@ -84,8 +86,9 @@ static Opt<MatchedCall> hipIgnoredHelper(const clang::CallExpr &call, const clan
   const bool sink = name == thrustTerminateWithMessage;
   if (!error && !sink) return {};
   const auto *expression = &call;
-  return MatchedCall{Lowering{[expression](Remapper &self, Remapper::RemapContext &r) { return unitAfterArguments(*expression, self, r); }},
-                     false};
+  return MatchedCall{
+      .lower = Lowering{[expression](Remapper &self, Remapper::RemapContext &r) { return unitAfterArguments(*expression, self, r); }},
+      .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> hipShuffle(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
@@ -93,17 +96,17 @@ static Opt<MatchedCall> hipShuffle(const clang::CallExpr &call, const clang::Fun
   if (call.getNumArgs() != 3 || (name != warpShuffleDown && name != warpShuffleUp)) return {};
   const auto down = name == warpShuffleDown;
   const auto *expression = &call;
-  return MatchedCall{Lowering{[expression, down](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+  return MatchedCall{.lower = Lowering{[expression, down](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
                        const auto result = self.handleType(expression->getType(), r);
-                       const auto value = r.newVar(self.conform(r, self.handleExpr(expression->getArg(0), r), result));
-                       const auto delta = r.newVar(self.conform(r, self.handleExpr(expression->getArg(1), r), Type::IntU32()));
-                       const auto width = r.newVar(self.conform(r, self.handleExpr(expression->getArg(2), r), Type::IntU32()));
+                       const auto value = r.newVar(Remapper::conform(r, self.handleExpr(expression->getArg(0), r), result));
+                       const auto delta = r.newVar(Remapper::conform(r, self.handleExpr(expression->getArg(1), r), Type::IntU32()));
+                       const auto width = r.newVar(Remapper::conform(r, self.handleExpr(expression->getArg(2), r), Type::IntU32()));
                        const auto clamp = r.newVar(Expr::IntrOp(Intr::Sub(width, Term::IntU32Const(1), Type::IntU32())));
-                       const auto mask = Term::IntU32Const(0xFFFFFFFFu);
+                       const auto mask = Term::IntU32Const(0xFFFFFFFFU);
                        return Expr::SpecOp(down ? Spec::Any(Spec::GpuShuffleDown(value, delta, clamp, mask, result))
                                                 : Spec::Any(Spec::GpuShuffleUp(value, delta, clamp, mask, result)));
                      }},
-                     false};
+                     .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> hipBuiltin(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
@@ -118,26 +121,27 @@ static Opt<MatchedCall> hipBuiltin(const clang::CallExpr &call, const clang::Fun
   if (countLo || countHi) {
     clang::Expr::EvalResult mask;
     if (!call.getArg(0)->EvaluateAsInt(mask, decl.getASTContext()) || !mask.Val.isInt()
-        || mask.Val.getInt().getLimitedValue() != 0xFFFFFFFFu)
+        || mask.Val.getInt().getLimitedValue() != 0xFFFFFFFFU)
       raise("HIP mbcnt currently requires a constant all-lanes mask");
   }
   const auto *expression = &call;
   return MatchedCall{
-      Lowering{[expression, barrier, waveSize, countLo, countHi, stream, device](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+      .lower = Lowering{[expression, barrier, waveSize, countLo, countHi, stream, device](Remapper &self,
+                                                                                          Remapper::RemapContext &r) -> Expr::Any {
         if (barrier) {
           (void)lowerArguments(*expression, self, r);
           return Expr::SpecOp(Spec::GpuBarrierLocal());
         }
-        if (waveSize) return self.conform(r, Expr::SpecOp(Spec::GpuSubgroupSize()), self.handleType(expression->getType(), r));
+        if (waveSize) return Remapper::conform(r, Expr::SpecOp(Spec::GpuSubgroupSize()), self.handleType(expression->getType(), r));
         if (countLo || countHi) {
           (void)r.newVar(self.handleExpr(expression->getArg(0), r));
-          const auto base = r.newVar(self.conform(r, self.handleExpr(expression->getArg(1), r), Type::IntU32()));
+          const auto base = r.newVar(Remapper::conform(r, self.handleExpr(expression->getArg(1), r), Type::IntU32()));
           const auto lane = r.newVar(Expr::SpecOp(Spec::GpuLaneIdx()));
           const auto count =
               countLo ? r.newVar(Expr::IntrOp(Intr::Min(lane, Term::IntU32Const(32), Type::IntU32())))
                       : r.newVar(Expr::IntrOp(Intr::Sub(r.newVar(Expr::IntrOp(Intr::Max(lane, Term::IntU32Const(32), Type::IntU32()))),
                                                         Term::IntU32Const(32), Type::IntU32())));
-          return self.conform(r, Expr::IntrOp(Intr::Add(base, count, Type::IntU32())), self.handleType(expression->getType(), r));
+          return Remapper::conform(r, Expr::IntrOp(Intr::Add(base, count, Type::IntU32())), self.handleType(expression->getType(), r));
         }
         if (stream || device) {
           (void)lowerArguments(*expression, self, r);
@@ -145,11 +149,11 @@ static Opt<MatchedCall> hipBuiltin(const clang::CallExpr &call, const clang::Fun
             raise(fmt::format("Non-default HIP streams are not supported in package code at {}",
                               expression->getArg(0)->getExprLoc().printToString(self.context.getSourceManager())));
           (void)r.newVar(Expr::SpecOp(Spec::RemoteSync(packageContext())));
-          return self.integralConstOfType(self.handleType(expression->getType(), r), 0);
+          return Remapper::integralConstOfType(self.handleType(expression->getType(), r), 0);
         }
         return Expr::Alias(Term::Poison(self.handleType(expression->getType(), r)));
       }},
-      false};
+      .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> hipOcklIndex(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
@@ -163,31 +167,33 @@ static Opt<MatchedCall> hipOcklIndex(const clang::CallExpr &call, const clang::F
   else if (name == "__ockl_get_global_size") operation = 'S';
   if (!operation || call.getNumArgs() != 1) return {};
   const auto *expression = &call;
-  return MatchedCall{Lowering{[expression, operation](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
-                       const auto dimension = r.newVar(self.conform(r, self.handleExpr(expression->getArg(0), r), Type::IntU32()));
-                       const Spec::Any spec = operation == 'l'   ? Spec::GpuLocalIdx(dimension).widen()
-                                              : operation == 'g' ? Spec::GpuGroupIdx(dimension).widen()
-                                              : operation == 'L' ? Spec::GpuLocalSize(dimension).widen()
-                                              : operation == 'G' ? Spec::GpuGroupSize(dimension).widen()
-                                              : operation == 'i' ? Spec::GpuGlobalIdx(dimension).widen()
-                                                                 : Spec::GpuGlobalSize(dimension).widen();
-                       return self.conform(r, Expr::SpecOp(spec), self.handleType(expression->getType(), r));
+  return MatchedCall{.lower = Lowering{[expression, operation](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+                       const auto dimension = r.newVar(Remapper::conform(r, self.handleExpr(expression->getArg(0), r), Type::IntU32()));
+                       const Spec::Any spec = [&]() -> Spec::Any {
+                         if (operation == 'l') return Spec::GpuLocalIdx(dimension).widen();
+                         if (operation == 'g') return Spec::GpuGroupIdx(dimension).widen();
+                         if (operation == 'L') return Spec::GpuLocalSize(dimension).widen();
+                         if (operation == 'G') return Spec::GpuGroupSize(dimension).widen();
+                         if (operation == 'i') return Spec::GpuGlobalIdx(dimension).widen();
+                         return Spec::GpuGlobalSize(dimension).widen();
+                       }();
+                       return Remapper::conform(r, Expr::SpecOp(spec), self.handleType(expression->getType(), r));
                      }},
-                     false};
+                     .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> hipBallot(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
   const auto name = decl.getQualifiedNameAsString();
   if ((name != "__builtin_amdgcn_ballot_w32" && name != "__builtin_amdgcn_ballot_w64") || call.getNumArgs() != 1) return {};
   const auto *expression = &call;
-  return MatchedCall{Lowering{[expression](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+  return MatchedCall{.lower = Lowering{[expression](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
                        const auto predicate = r.newVar(self.handleExpr(expression->getArg(0), r));
-                       const auto ballot = Expr::SpecOp(Spec::GpuBallot(Term::IntU32Const(0xffffffffu), predicate));
+                       const auto ballot = Expr::SpecOp(Spec::GpuBallot(Term::IntU32Const(0xffffffffU), predicate));
                        // PolyAST defines a portable 32-lane logical subgroup. A w64 source alternative may still be
                        // instantiated in host code for a wave32 target; widen the logical mask to its declared type.
-                       return self.conform(r, ballot, self.handleType(expression->getType(), r));
+                       return Remapper::conform(r, ballot, self.handleType(expression->getType(), r));
                      }},
-                     false};
+                     .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> hipWaveVote(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
@@ -195,16 +201,16 @@ static Opt<MatchedCall> hipWaveVote(const clang::CallExpr &call, const clang::Fu
   if ((name != "__ockl_wfall_i32" && name != "__ockl_wfany_i32") || call.getNumArgs() != 1) return {};
   const auto *expression = &call;
   const bool all = name == "__ockl_wfall_i32";
-  return MatchedCall{Lowering{[expression, all](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+  return MatchedCall{.lower = Lowering{[expression, all](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
                        const auto value = r.newVar(self.handleExpr(expression->getArg(0), r));
-                       const auto zero = r.newVar(self.integralConstOfType(value.tpe(), 0));
+                       const auto zero = r.newVar(Remapper::integralConstOfType(value.tpe(), 0));
                        const auto predicate = r.newVar(Expr::IntrOp(Intr::LogicNeq(value, zero)));
-                       const auto mask = Term::IntU32Const(0xffffffffu);
+                       const auto mask = Term::IntU32Const(0xffffffffU);
                        const auto vote =
                            all ? Expr::SpecOp(Spec::GpuVoteAll(mask, predicate)) : Expr::SpecOp(Spec::GpuVoteAny(mask, predicate));
-                       return self.conform(r, vote, self.handleType(expression->getType(), r));
+                       return Remapper::conform(r, vote, self.handleType(expression->getType(), r));
                      }},
-                     false};
+                     .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> hipRuntime(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
@@ -215,11 +221,11 @@ static Opt<MatchedCall> hipErrorState(const clang::CallExpr &call, const clang::
   const auto name = decl.getQualifiedNameAsString();
   if (call.getNumArgs() != 0 || (name != "hipPeekAtLastError" && name != "hipGetLastError")) return {};
   const auto *expression = &call;
-  return MatchedCall{Lowering{[expression](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+  return MatchedCall{.lower = Lowering{[expression](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
                        (void)lowerArguments(*expression, self, r);
-                       return self.integralConstOfType(self.handleType(expression->getType(), r), 0);
+                       return Remapper::integralConstOfType(self.handleType(expression->getType(), r), 0);
                      }},
-                     false};
+                     .preservesExceptionMetadata = false};
 }
 
 static Opt<MatchedCall> hipHostQuery(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
@@ -230,27 +236,28 @@ static Opt<MatchedCall> hipHostQuery(const clang::CallExpr &call, const clang::F
   const bool warpSize = attribute && warpSizeAttribute(*call.getArg(1));
   if (!architecture && !deviceOrdinal && !attribute) return {};
   const auto *expression = &call;
-  return MatchedCall{Lowering{[expression, architecture, deviceOrdinal, warpSize](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
-                       const auto arguments = lowerArguments(*expression, self, r);
-                       if (!architecture && !deviceOrdinal && !warpSize) raise("Unsupported HIP device attribute query");
-                       const auto output = arguments[architecture ? 1 : 0];
-                       const auto selection = output.get<Term::Select>();
-                       if (!selection) raise("HIP host query output did not lower to a selectable value");
-                       if (const auto pointer = output.tpe().get<Type::Ptr>()) {
-                         const auto stored =
-                             architecture    ? r.newVar(self.integralConstOfType(pointer->comp, 0xFFFFFFFFULL))
-                             : deviceOrdinal ? r.newVar(self.integralConstOfType(pointer->comp, 0))
-                                             : r.newVar(self.conform(
-                                                   r, Expr::ForeignCall("polyrt_device_subgroup_size", {packageContext()}, Type::IntU64()),
-                                                   pointer->comp));
-                         r.push(Stmt::Update(*selection, Term::IntU64Const(0), stored));
-                       } else {
-                         if (!architecture) raise("HIP host query output is not a pointer");
-                         r.push(Stmt::Mut(*selection, self.integralConstOfType(output.tpe(), 0xFFFFFFFFULL)));
-                       }
-                       return self.integralConstOfType(self.handleType(expression->getType(), r), 0);
-                     }},
-                     false};
+  return MatchedCall{
+      .lower = Lowering{[expression, architecture, deviceOrdinal, warpSize](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+        const auto arguments = lowerArguments(*expression, self, r);
+        if (!architecture && !deviceOrdinal && !warpSize) raise("Unsupported HIP device attribute query");
+        const auto output = arguments[architecture ? 1 : 0];
+        const auto selection = output.get<Term::Select>();
+        if (!selection) raise("HIP host query output did not lower to a selectable value");
+        if (const auto pointer = output.tpe().get<Type::Ptr>()) {
+          const auto stored = [&] {
+            if (architecture) return r.newVar(Remapper::integralConstOfType(pointer->comp, 0xFFFFFFFFULL));
+            if (deviceOrdinal) return r.newVar(Remapper::integralConstOfType(pointer->comp, 0));
+            return r.newVar(
+                Remapper::conform(r, Expr::ForeignCall("polyrt_device_subgroup_size", {packageContext()}, Type::IntU64()), pointer->comp));
+          }();
+          r.push(Stmt::Update(*selection, Term::IntU64Const(0), stored));
+        } else {
+          if (!architecture) raise("HIP host query output is not a pointer");
+          r.push(Stmt::Mut(*selection, Remapper::integralConstOfType(output.tpe(), 0xFFFFFFFFULL)));
+        }
+        return Remapper::integralConstOfType(self.handleType(expression->getType(), r), 0);
+      }},
+      .preservesExceptionMetadata = false};
 }
 
 Vector<CallPrism> hipPrisms() {

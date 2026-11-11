@@ -8,6 +8,7 @@ import scala.collection.{BuildFrom, Factory, mutable}
 import scala.compiletime.*
 import scala.reflect.ClassTag
 
+@SuppressWarnings(Array("bonsai:redundant-conversion"))
 class CastSuite extends BaseSuite {
 
   private inline def testExpr[A](inline name: String)(inline r: => A) = if (Toggles.CastSuite) {

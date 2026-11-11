@@ -32,6 +32,8 @@
 #include "ast.h"
 #include "polyast_codec.h"
 
+// NOLINTBEGIN(modernize-use-designated-initializers)
+
 namespace polyregion::polyfront::package {
 
 using namespace aspartame;
@@ -112,8 +114,8 @@ class Reader {
 public:
   explicit Reader(llvm::ArrayRef<uint8_t> bytes) : bytes(bytes) {}
 
-  size_t remaining() const { return bytes.size() - cursor; }
-  size_t position() const { return cursor; }
+  [[nodiscard]] [[nodiscard]] size_t remaining() const { return bytes.size() - cursor; }
+  [[nodiscard]] [[nodiscard]] size_t position() const { return cursor; }
 
   bool take(size_t size, llvm::ArrayRef<uint8_t> &out) {
     if (cursor > bytes.size() || size > bytes.size() - cursor) return false;
@@ -205,7 +207,8 @@ inline Checked<Archive> decodeArchive(const std::string &path, std::shared_ptr<c
   if (!interfaceBytes) return {{}, std::move(interfaceBytes.errors)};
   auto decodedInterface =
       polyast::decodeInterface(interfaceBytes.value->data(), interfaceBytes.value->data() + interfaceBytes.value->size());
-  if (const auto error = std::get_if<std::string>(&decodedInterface)) return {{}, {"cannot decode package archive interface: " + *error}};
+  if (const auto *const error = std::get_if<std::string>(&decodedInterface))
+    return {{}, {"cannot decode package archive interface: " + *error}};
   auto interface = std::move(std::get<polyast::Interface>(decodedInterface));
   if (auto errors = archiveInterfaceErrors(interface); !errors.empty()) return {{}, std::move(errors)};
   const auto declarations =
@@ -215,7 +218,7 @@ inline Checked<Archive> decodeArchive(const std::string &path, std::shared_ptr<c
   ranges.reserve(entries.size());
   const auto payloadOffset = static_cast<uint64_t>(reader.position());
   for (const auto &entry : entries) {
-    if (declarations.find(entry.declaration) == declarations.end())
+    if (!(declarations ^ contains(entry.declaration)))
       return {{}, {"package archive entry `" + entry.implementation + "` implements undeclared symbol `" + entry.declaration + "`"}};
     if (entry.implementation.empty() || entry.implementation.front() == '.' || entry.implementation.back() == '.'
         || entry.implementation.find("..") != std::string::npos)
@@ -242,7 +245,7 @@ inline Checked<Archive> decodeArchive(const std::string &path, std::shared_ptr<c
 
 inline Checked<polyast::Function> decodeHeader(const ArchiveEntry &entry) {
   auto decoded = polyast::decodeHashedProgram(entry.header.data(), entry.header.data() + entry.header.size());
-  if (const auto error = std::get_if<std::string>(&decoded))
+  if (const auto *const error = std::get_if<std::string>(&decoded))
     return {{}, {"cannot decode package implementation header `" + entry.implementation + "`: " + *error}};
   auto program = std::move(std::get<polyast::Program>(decoded));
   if (program.entry || !program.defs.empty() || !program.metadata.empty() || program.functions.size() != 1)
@@ -265,7 +268,7 @@ inline Checked<polyast::Program> decodeValidatedImplementation(const ArchiveEntr
   auto raw = decompress(bytes.slice(static_cast<size_t>(entry.offset), static_cast<size_t>(entry.compressedSize)), entry.uncompressedSize);
   if (!raw) return {{}, std::move(raw.errors)};
   auto decoded = polyast::decodeHashedProgram(raw.value->data(), raw.value->data() + raw.value->size());
-  if (const auto error = std::get_if<std::string>(&decoded))
+  if (const auto *const error = std::get_if<std::string>(&decoded))
     return {{}, {"cannot decode package implementation `" + entry.implementation + "`: " + *error}};
   auto program = std::move(std::get<polyast::Program>(decoded));
   if (program.entry) return {{}, {"package implementation `" + entry.implementation + "` has a program entry"}};
@@ -437,7 +440,7 @@ inline Checked<polyast::Package> hydratePackage(const Archive &archive, const po
   std::unordered_set<std::string> hydrated;
   for (const auto &header : headers.program.functions) {
     const auto implementation = polyast::fqcn(header.decl.name);
-    if (!header.implements || implementations.count(implementation) == 0) {
+    if (!header.implements || !(implementations ^ contains(implementation))) {
       functions.emplace_back(header);
       continue;
     }
@@ -491,7 +494,7 @@ inline std::vector<CapabilityGroup> capabilityGroups(const std::vector<std::stri
     auto resolved = capabilitiesFor(capabilities, target);
     const auto key = resolved ^ sort();
     const auto logical = compiletime::logicalAddressing(target);
-    auto group = std::find_if(groups.begin(), groups.end(), [&](const auto &existing) {
+    const auto group = std::find_if(groups.begin(), groups.end(), [&](const auto &existing) {
       return (existing.capabilities ^ sort()) == key && existing.logicalAddressing == logical;
     });
     if (group == groups.end()) groups.push_back({{{target, arch}}, std::move(resolved), logical});
@@ -544,3 +547,5 @@ inline Checked<polyast::CompileBundle> sliceBundle(const polyast::CompileBundle 
 }
 
 } // namespace polyregion::polyfront::package
+
+// NOLINTEND(modernize-use-designated-initializers)

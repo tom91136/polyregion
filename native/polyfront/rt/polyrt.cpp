@@ -1,19 +1,28 @@
 #include <algorithm>
+#include <array>
 #include <atomic>
+#include <cerrno>
 #include <charconv>
 #include <chrono>
 #include <cstdarg>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <deque>
 #include <exception>
+#include <iterator>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <new>
 #include <optional>
+#include <shared_mutex>
 #include <stdexcept>
+#include <string>
 #include <string_view>
+#include <system_error>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -77,6 +86,7 @@ struct RoSegment {
   size_t size;
 };
 #if !defined(_WIN32) && !defined(__APPLE__)
+// NOLINTNEXTLINE(misc-const-correctness)
 POLYREGION_RT_PROTECT int collectRoSegment(struct dl_phdr_info *info, size_t, void *data) {
   if (info->dlpi_name && info->dlpi_name[0] != '\0') return 0;
   auto &out = *static_cast<std::vector<RoSegment> *>(data);
@@ -86,7 +96,7 @@ POLYREGION_RT_PROTECT int collectRoSegment(struct dl_phdr_info *info, size_t, vo
     if ((ph.p_flags & PF_W) != 0) continue;
     if ((ph.p_flags & PF_X) != 0) continue;
     if (ph.p_memsz == 0) continue;
-    out.push_back({info->dlpi_addr + ph.p_vaddr, ph.p_memsz});
+    out.push_back({.base = info->dlpi_addr + ph.p_vaddr, .size = ph.p_memsz});
   }
   return 0;
 }
@@ -221,7 +231,7 @@ static void selectDevice(Platform &p, const std::vector<std::string_view> &requi
 
 static std::optional<polyregion::compiletime::TargetSpec::ParsedRef> selectPlatform() {
   std::optional<std::string> envValue;
-  if (const auto env = std::getenv(polyregion::env::PolyrtPlatform)) envValue = env;
+  if (auto *const env = std::getenv(polyregion::env::PolyrtPlatform)) envValue = env;
   if (!envValue) {
     log(DebugLevel::Debug, "Backend selector %s is not set: using default host platform", polyregion::env::PolyrtPlatform);
     setupBackend(Backend::RelocatableObject);
@@ -238,12 +248,12 @@ static std::optional<polyregion::compiletime::TargetSpec::ParsedRef> selectPlatf
 
 void polyregion::polyrt::initialise() {
   static std::once_flag flag;
-  std::call_once(flag, []() {
+  std::call_once(flag, [] {
     if (!currentPlatform) {
-      log(DebugLevel::Info, "Initialising backends... (addr=%p)", (void *)&initialise);
+      log(DebugLevel::Info, "Initialising backends... (addr=%p)", reinterpret_cast<void *>(&initialise));
       auto parsed = selectPlatform();
       bool strict = false;
-      if (const auto env = std::getenv(polyregion::env::PolyrtStrictSelect); env && env[0] && env[0] != '0') strict = true;
+      if (const char *const env = std::getenv(polyregion::env::PolyrtStrictSelect); env && env[0] && env[0] != '0') strict = true;
       if (parsed && strict && !currentPlatform)
         skipExit(fmt::format("Backend {} selected by {} failed to initialise (strict)", magic_enum::enum_name(parsed->spec.runtime),
                              polyregion::env::PolyrtPlatform)
@@ -251,13 +261,13 @@ void polyregion::polyrt::initialise() {
       if (currentPlatform) {
         const auto requiredFeatures = parsed ? parsed->spec.requiredDeviceFeatures : std::vector<std::string_view>{};
         std::string glob = parsed ? parsed->deviceGlob : std::string{};
-        if (const auto env = std::getenv(polyregion::env::PolyrtDevice)) glob = env;
+        if (const char *const env = std::getenv(polyregion::env::PolyrtDevice)) glob = env;
         selectDevice(*currentPlatform, requiredFeatures, glob, strict);
       }
       // Test-only: cross-process lock so ctest -j workers do not race on the same device.
       // Held for process lifetime; the file lock auto-releases on exit.
       if (currentDevice && selectedBackend) {
-        if (const auto env = std::getenv(polyregion::env::PolyinvokeTestLock); env && env[0] == '1') {
+        if (const char *const env = std::getenv(polyregion::env::PolyinvokeTestLock); env && env[0] == '1') {
           static std::optional<polyregion::invoke::DeviceLock> currentDeviceLock;
           const auto physical = currentDevice->physicalDevice();
           // No-op for host/CPU devices; GPU backends sharing one physical device serialise.
@@ -268,7 +278,7 @@ void polyregion::polyrt::initialise() {
       }
       if (currentDevice) {
         auto timeout = std::chrono::seconds(10);
-        if (const auto env = std::getenv(polyregion::env::PolyrtQueueTimeoutSec); env && env[0]) {
+        if (const char *const env = std::getenv(polyregion::env::PolyrtQueueTimeoutSec); env && env[0]) {
           if (const auto secs = std::strtol(env, nullptr, 10); secs > 0) timeout = std::chrono::seconds(secs);
         }
         currentQueue = currentDevice->createQueue(timeout);
@@ -302,6 +312,7 @@ polyregion::polyrt::ExecutionContext *polyregion::polyrt::currentContext() {
 
 POLYREGION_EXPORT extern "C" void *polyrt_context_current() { return polyregion::polyrt::currentContext(); }
 
+// NOLINTNEXTLINE(misc-const-correctness)
 POLYREGION_EXPORT extern "C" bool polyrt_context_available(void *context, const char *site) noexcept {
   if (!context) log(DebugLevel::Debug, "<%s> No execution context, running the interface fallback", site);
   return context != nullptr;
@@ -387,29 +398,29 @@ std::vector<polyregion::polyrt::ExecutionContext *> &contextRegistry() {
 PolyrtStats snapshotStats(const polyregion::polyrt::ExecutionContext &execution) {
   const auto &counters = execution.counters;
   const auto &heap = execution.heapCounters;
-  return {counters.launches.load(),
-          counters.arenaLaunches.load(),
-          counters.arenaWindowMoves.load(),
-          counters.d2dCopies.load(),
-          counters.h2dCopies.load(),
-          counters.d2hCopies.load(),
-          counters.waits.load(),
-          counters.remoteMallocs.load(),
-          heap.live.load(),
-          heap.committed.load(),
-          heap.growths.load()};
+  return {.launches = counters.launches.load(),
+          .arenaLaunches = counters.arenaLaunches.load(),
+          .arenaWindowMoves = counters.arenaWindowMoves.load(),
+          .d2dCopies = counters.d2dCopies.load(),
+          .h2dCopies = counters.h2dCopies.load(),
+          .d2hCopies = counters.d2hCopies.load(),
+          .waits = counters.waits.load(),
+          .remoteMallocs = counters.remoteMallocs.load(),
+          .heapBytesLive = heap.live.load(),
+          .heapBytesCommitted = heap.committed.load(),
+          .heapGrowths = heap.growths.load()};
 }
 } // namespace
 
 polyregion::polyrt::ExecutionContext::ExecutionContext(Platform *platform, Device *device, DeviceQueue *queue)
     : platform(platform), device(device), queue(queue) {
-  const std::lock_guard lock(contextRegistryMutex());
+  const std::scoped_lock lock(contextRegistryMutex());
   contextRegistry().emplace_back(this);
 }
 
 static polyregion::polyrt::ExecutionContext *contextOf(DeviceQueue &queue) {
   polyregion::polyrt::ExecutionContext *owner = nullptr;
-  const std::lock_guard lock(contextRegistryMutex());
+  const std::scoped_lock lock(contextRegistryMutex());
   for (auto *context : contextRegistry())
     if (context->queue == &queue) owner = context;
   return owner;
@@ -449,7 +460,7 @@ POLYREGION_EXPORT extern "C" bool polyrt_stats(void *context, PolyrtStats *stats
 
 polyregion::polyrt::ExecutionContext::~ExecutionContext() {
   {
-    const std::lock_guard registry(contextRegistryMutex());
+    const std::scoped_lock registry(contextRegistryMutex());
     std::erase(contextRegistry(), this);
   }
   if (const auto *target = std::getenv(polyregion::env::PolyrtStats); target && *target) {
@@ -505,7 +516,7 @@ POLYREGION_EXPORT extern "C" bool polyrt_context_release(void *context) noexcept
       throw std::logic_error("polyrt_context_release: no matching acquire");
     }
     const std::unique_lock transaction(execution.transaction, std::adopt_lock);
-    auto temporaries = std::move(execution.temporaryAllocationScopes.back());
+    const auto temporaries = std::move(execution.temporaryAllocationScopes.back());
     execution.temporaryAllocationScopes.pop_back();
     std::exception_ptr failure;
     for (const auto pointer : temporaries) {
@@ -546,7 +557,7 @@ POLYREGION_EXPORT extern "C" uint64_t polyrt_device_max_threads_per_block_u64(vo
   return requireContext(context, __func__).device->maxThreadsPerBlock();
 }
 POLYREGION_EXPORT extern "C" uint64_t polyrt_device_subgroup_size(void *context) {
-  auto &execution = requireContext(context, __func__);
+  const auto &execution = requireContext(context, __func__);
   auto &device = *execution.device;
   switch (device.moduleFormat()) {
     case polyregion::runtime::ModuleFormat::Source: {
@@ -559,7 +570,7 @@ POLYREGION_EXPORT extern "C" uint64_t polyrt_device_subgroup_size(void *context)
     default: return device.subgroupSize();
   }
 }
-template <typename F> uint64_t requireDeviceCapability(void *context, const char *name, F query) {
+template <typename F> static uint64_t requireDeviceCapability(void *context, const char *name, F query) {
   const auto value = query(*requireContext(context, name).device);
   if (value == 0) POLYREGION_FATAL("PolyRT", "%s is unavailable for the active device", name);
   return value;
@@ -600,12 +611,12 @@ static size_t tailPadded(const size_t bytes) { return bytes < std::numeric_limit
 static uintptr_t remoteMalloc(void *context, const size_t bytes) {
   if (bytes == 0) return 0;
   auto &execution = requireContext(context, __func__);
-  const std::lock_guard lock(execution.transaction);
+  const std::scoped_lock lock(execution.transaction);
   auto *heap = heapOf(execution);
   execution.counters.remoteMallocs.fetch_add(1, std::memory_order_relaxed);
   const auto pointer = heap ? heap->allocate(bytes) : execution.device->mallocDevice(tailPadded(bytes), Access::RW);
   try {
-    execution.remoteAllocations.insert_or_assign(pointer, polyregion::polyrt::ExecutionContext::RemoteAllocation{bytes});
+    execution.remoteAllocations.insert_or_assign(pointer, polyregion::polyrt::ExecutionContext::RemoteAllocation{.bytes = bytes});
   } catch (...) {
     const auto failure = std::current_exception();
     try {
@@ -619,7 +630,7 @@ static uintptr_t remoteMalloc(void *context, const size_t bytes) {
 
 static uintptr_t remoteTempMalloc(void *context, const size_t bytes) {
   auto &execution = requireContext(context, __func__);
-  const std::lock_guard lock(execution.transaction);
+  const std::scoped_lock lock(execution.transaction);
   if (execution.temporaryAllocationScopes.empty()) throw std::logic_error("polyrt_remote_temp_malloc: no active context transaction");
   for (auto &scope : execution.temporaryAllocationScopes)
     scope.reserve(scope.size() + 1);
@@ -632,7 +643,7 @@ static uintptr_t remoteTempMalloc(void *context, const size_t bytes) {
 static void remoteFree(void *context, const uintptr_t ptr) {
   if (ptr == 0) return;
   auto &execution = requireContext(context, __func__);
-  const std::lock_guard lock(execution.transaction);
+  const std::scoped_lock lock(execution.transaction);
   releaseRemote(execution, ptr);
   execution.remoteAllocations.erase(ptr);
   forgetTemporaryAllocation(execution, ptr);
@@ -680,6 +691,7 @@ static void remoteMemcpy(void *context, const uintptr_t dst, const uintptr_t src
   if (enqueueRemoteMemcpy(context, dst, src, bytes, direction)) requireContext(context, __func__).settle();
 }
 
+// NOLINTNEXTLINE(misc-const-correctness)
 POLYREGION_EXPORT extern "C" void *polyrt_device_usm_host_acquire(void *context, void *remote, const uint64_t bytes, const int32_t mode) {
   if (bytes == 0) return nullptr;
   if (bytes > std::numeric_limits<size_t>::max()) POLYREGION_FATAL("PolyRT", "%s", "Host accessor size exceeds size_t");
@@ -695,6 +707,7 @@ POLYREGION_EXPORT extern "C" void *polyrt_device_usm_host_acquire(void *context,
   return local;
 }
 
+// NOLINTNEXTLINE(misc-const-correctness)
 POLYREGION_EXPORT extern "C" void polyrt_device_usm_host_release(void *context, void *remote, void *local, const uint64_t bytes,
                                                                  const int32_t mode) {
   if (!local) return;
@@ -713,6 +726,7 @@ POLYREGION_EXPORT extern "C" void polyrt_device_usm_host_release(void *context, 
   std::free(local);
 }
 
+// NOLINTNEXTLINE(misc-const-correctness)
 POLYREGION_EXPORT extern "C" void polyrt_device_memset(void *context, void *dst, const int32_t value, const uint64_t count) {
   if (count == 0) return;
   if (count > std::numeric_limits<size_t>::max()) POLYREGION_FATAL("PolyRT", "%s", "Device memset size exceeds size_t");
@@ -736,7 +750,7 @@ static std::unordered_set<std::string> &assertingModules() {
 }
 
 static bool takesErrorBuffer(const char *moduleName) {
-  const std::lock_guard lock(assertingModulesMutex());
+  const std::scoped_lock lock(assertingModulesMutex());
   return assertingModules().contains(moduleName);
 }
 
@@ -744,22 +758,22 @@ POLYREGION_EXPORT extern "C" bool polyrt_remote_load(void *context, const char *
                                                      const size_t featureCount, const char **features, const size_t imageLength,
                                                      const uint8_t *image) {
   (void)requireContext(context, __func__);
-  const polyregion::runtime::KernelObject object{static_cast<polyregion::runtime::PlatformKind>(kind),
-                                                 static_cast<polyregion::runtime::ModuleFormat>(format),
-                                                 featureCount,
-                                                 features,
-                                                 imageLength,
-                                                 image,
-                                                 polyregion::compiletime::Target::Object_LLVM_HOST,
-                                                 "",
-                                                 "",
-                                                 polyregion::compiletime::OptLevel::O3,
-                                                 0,
-                                                 nullptr};
+  const polyregion::runtime::KernelObject object{.kind = static_cast<polyregion::runtime::PlatformKind>(kind),
+                                                 .format = static_cast<polyregion::runtime::ModuleFormat>(format),
+                                                 .featureCount = featureCount,
+                                                 .features = features,
+                                                 .imageLength = imageLength,
+                                                 .image = image,
+                                                 .target = polyregion::compiletime::Target::Object_LLVM_HOST,
+                                                 .arch = "",
+                                                 .pipelineSpec = "",
+                                                 .opt = polyregion::compiletime::OptLevel::O3,
+                                                 .programLength = 0,
+                                                 .program = nullptr};
   if (!polyregion::polyrt::loadKernelObject(moduleName, object)) return false;
   if (std::any_of(features, features + featureCount,
                   [](const char *feature) { return std::string_view(feature) == polyregion::conventions::ErrorArg; })) {
-    const std::lock_guard lock(assertingModulesMutex());
+    const std::scoped_lock lock(assertingModulesMutex());
     assertingModules().emplace(moduleName);
   }
   return true;
@@ -786,7 +800,7 @@ static void zeroRemote(void *context, const uintptr_t block) {
 }
 
 uintptr_t polyregion::polyrt::acquireErrorBlock(ExecutionContext &execution) {
-  const std::lock_guard lock(execution.transaction);
+  const std::scoped_lock lock(execution.transaction);
   if (!execution.errorBlocks.empty()) {
     const auto block = execution.errorBlocks.back();
     execution.errorBlocks.pop_back();
@@ -808,7 +822,7 @@ uintptr_t polyregion::polyrt::acquireErrorBlock(ExecutionContext &execution) {
 
 void polyregion::polyrt::releaseErrorBlock(ExecutionContext &execution, const uintptr_t block, const bool dirty) {
   try {
-    const std::lock_guard lock(execution.transaction);
+    const std::scoped_lock lock(execution.transaction);
     if (dirty) zeroRemote(&execution, block);
     execution.errorBlocks.emplace_back(block);
   } catch (...) {
@@ -855,8 +869,8 @@ static void remoteLaunch(void *context, const char *moduleName, const char *kern
         blockY, blockZ);
     value.queue->enqueueInvokeAsync(
         moduleName, kernelName, buffer,
-        Policy{Dim3{gridX, gridY, gridZ},
-               blockX > 0 ? std::optional{std::pair{Dim3{blockX, blockY, blockZ}, localMemBytes}} : std::nullopt},
+        Policy{.global = Dim3{gridX, gridY, gridZ},
+               .local = blockX > 0 ? std::optional{std::pair{Dim3{blockX, blockY, blockZ}, localMemBytes}} : std::nullopt},
         {});
     value.settle();
     if (error) {
@@ -881,7 +895,7 @@ static void remoteLaunch(void *context, const char *moduleName, const char *kern
 
 static std::optional<std::pair<uintptr_t, size_t>> remoteAllocation(polyregion::polyrt::ExecutionContext &execution,
                                                                     const uintptr_t pointer) {
-  const std::lock_guard lock(execution.transaction);
+  const std::scoped_lock lock(execution.transaction);
   const auto upper = execution.remoteAllocations.upper_bound(pointer);
   if (upper == execution.remoteAllocations.begin()) return std::nullopt;
   const auto &[base, allocation] = *std::prev(upper);
@@ -893,12 +907,12 @@ static polyregion::polyrt::ArenaPlacement arenaPlacement(polyregion::polyrt::Exe
   polyregion::polyrt::ArenaPlacement placement;
   placement.mutex = execution.arenaMutex;
   placement.isPackage = [&execution](const uintptr_t pointer) { return remoteAllocation(execution, pointer).has_value(); };
-  const std::lock_guard lock(execution.transaction);
+  const std::scoped_lock lock(execution.transaction);
   auto *heap = heapOf(execution);
   if (!heap) return placement;
   const auto locked = [&execution](auto &&fn) {
     return [&execution, fn](auto... arguments) {
-      const std::lock_guard lock(execution.transaction);
+      const std::scoped_lock lock(execution.transaction);
       return fn(arguments...);
     };
   };
@@ -935,7 +949,7 @@ static void remoteLaunchMarshalled(void *context, const char *moduleName, const 
                                    const polyregion::runtime::TypeLayout *const *layouts) {
   namespace sma = polyregion::polyrt::sma;
   auto &execution = requireContext(context, __func__);
-  const std::lock_guard transaction(execution.transaction);
+  const std::scoped_lock transaction(execution.transaction);
   struct Mirror {
     uintptr_t remote = 0;
     uintptr_t source = 0;
@@ -1002,9 +1016,9 @@ static void remoteLaunchMarshalled(void *context, const char *moduleName, const 
       } else {
         source = reinterpret_cast<uintptr_t>(argPtrs[i]);
       }
-      mirrors[i] = {remoteMalloc(context, mirrorSizes[i]), source};
+      mirrors[i] = {.remote = remoteMalloc(context, mirrorSizes[i]), .source = source};
       {
-        const std::lock_guard lock(execution.transaction);
+        const std::scoped_lock lock(execution.transaction);
         execution.remoteAllocations.at(mirrors[i].remote).cleanupPending = true;
       }
       enqueueRemoteMemcpy(context, mirrors[i].remote, source, mirrorSizes[i], 0);
@@ -1102,8 +1116,8 @@ void polyregion::polyrt::skipExit(const char *reason) {
 
 bool polyregion::polyrt::hostFallback() {
   if (currentDevice && lacksRequiredPaging(*currentDevice, currentPlatform->kind())) return false;
-  static bool fallback = []() {
-    if (const auto env = std::getenv(polyregion::env::PolyrtHostFallback); env) {
+  static const bool fallback = [] {
+    if (const char *const env = std::getenv(polyregion::env::PolyrtHostFallback); env) {
       if (const auto v = parseIntNoExcept(env); v && *v == 0) {
         log(DebugLevel::Debug, "<%s> No compatible backend and host fallback disabled, returning...", __func__);
         return false;
@@ -1115,8 +1129,8 @@ bool polyregion::polyrt::hostFallback() {
 }
 
 polyregion::polyrt::DebugLevel polyregion::polyrt::debugLevel() {
-  static DebugLevel level = []() {
-    if (const auto env = std::getenv(polyregion::env::PolyrtDebug); env) {
+  static const DebugLevel level = [] {
+    if (const char *const env = std::getenv(polyregion::env::PolyrtDebug); env) {
       if (const auto v = parseIntNoExcept(env)) {
         if (*v <= static_cast<std::underlying_type_t<DebugLevel>>(DebugLevel::Trace)) {
           return static_cast<DebugLevel>(*v);
@@ -1128,6 +1142,7 @@ polyregion::polyrt::DebugLevel polyregion::polyrt::debugLevel() {
   return level;
 }
 
+// NOLINTNEXTLINE(modernize-avoid-variadic-functions)
 void polyregion::polyrt::log(const DebugLevel level, const char *fmt, ...) {
   if (debugLevel() < level) return;
   va_list args;
@@ -1139,6 +1154,7 @@ void polyregion::polyrt::log(const DebugLevel level, const char *fmt, ...) {
   va_end(args);
 }
 
+namespace {
 struct JitAbi {
   polyregion::polyc_jit::abi::AbiVersionFn abiVersion = nullptr;
   polyregion::polyc_jit::abi::CompileFn compile = nullptr;
@@ -1146,17 +1162,19 @@ struct JitAbi {
   polyregion::polyc_jit::abi::FreeFn free = nullptr;
   std::optional<uint32_t> reportedVersion;
 };
+} // namespace
 
 // Prefer linked symbols; fall back to POLYRT_JIT_LIB or the platform default.
 static const JitAbi &resolveJitAbi() {
-  static JitAbi abi = []() -> JitAbi {
+  static const JitAbi abi = []() -> JitAbi {
     namespace a = polyregion::polyc_jit::abi;
     const auto from = [](polyregion_dl_handle h) {
       const auto abiVersion = reinterpret_cast<a::AbiVersionFn>(polyregion_dl_find(h, a::AbiVersion));
-      return JitAbi{abiVersion, reinterpret_cast<a::CompileFn>(polyregion_dl_find(h, a::Compile)),
-                    reinterpret_cast<a::LastErrorFn>(polyregion_dl_find(h, a::LastError)),
-                    reinterpret_cast<a::FreeFn>(polyregion_dl_find(h, a::Free)),
-                    abiVersion ? std::optional<uint32_t>{abiVersion()} : std::nullopt};
+      return JitAbi{.abiVersion = abiVersion,
+                    .compile = reinterpret_cast<a::CompileFn>(polyregion_dl_find(h, a::Compile)),
+                    .lastError = reinterpret_cast<a::LastErrorFn>(polyregion_dl_find(h, a::LastError)),
+                    .free = reinterpret_cast<a::FreeFn>(polyregion_dl_find(h, a::Free)),
+                    .reportedVersion = abiVersion ? std::optional<uint32_t>{abiVersion()} : std::nullopt};
     };
     std::optional<JitAbi> incompatible;
     const auto select = [&](JitAbi r) -> std::optional<JitAbi> {
@@ -1165,12 +1183,12 @@ static const JitAbi &resolveJitAbi() {
       if (!incompatible) incompatible = r;
       return std::nullopt;
     };
-#if defined(_WIN32)
+#ifdef _WIN32
     if (auto r = select(from(GetModuleHandleW(nullptr)))) return *r;
 #else
     if (auto r = select(from(RTLD_DEFAULT))) return *r;
 #endif
-#if defined(_WIN32)
+#ifdef _WIN32
     constexpr auto defaultJitLib = "polyc.dll";
 #elif defined(__APPLE__)
     constexpr auto defaultJitLib = "libpolyc.dylib";
@@ -1179,7 +1197,7 @@ static const JitAbi &resolveJitAbi() {
 #endif
     for (const auto *name : std::array<const char *, 2>{std::getenv(polyregion::env::PolyrtJitLib), defaultJitLib})
       if (name && name[0])
-        if (auto handle = polyregion_dl_open(name))
+        if (auto *handle = polyregion_dl_open(name))
           if (const auto resolved = select(from(handle))) return *resolved;
     return incompatible.value_or(JitAbi{});
   }();
@@ -1197,7 +1215,8 @@ static void collectSpecScalars(const unsigned char *base, const polyregion::runt
       if (polyregion::runtime::isSet(m.type->attrs, polyregion::runtime::LayoutAttrs::Primitive)) {
         if (m.readOnly && m.sizeInBytes > 0 && m.sizeInBytes <= 8) {
           names.push_back(name);
-          out.push_back({names.back().c_str(), m.type->name, base + m.offsetInBytes, m.sizeInBytes});
+          out.push_back(
+              {.field = names.back().c_str(), .typeName = m.type->name, .data = base + m.offsetInBytes, .dataLen = m.sizeInBytes});
         }
       } else if (m.type->memberCount > 0) collectSpecScalars(base + m.offsetInBytes, m.type, name, depth + 1, names, out);
     } else if (m.ptrIndirection == 1 && m.type->memberCount > 0)
@@ -1205,10 +1224,12 @@ static void collectSpecScalars(const unsigned char *base, const polyregion::runt
   }
 }
 
+namespace {
 struct SpecConsts {
   std::deque<std::string> names; // stable storage borrowed by values[].field
   std::vector<polyc_jit_spec_const_t> values;
 };
+} // namespace
 
 static SpecConsts collectSpecConsts(const void *capture, const polyregion::runtime::TypeLayout *layout) {
   SpecConsts out;
@@ -1220,9 +1241,9 @@ static uint64_t hashSpecs(const std::vector<polyc_jit_spec_const_t> &specs) {
   const auto add = [](uint64_t h, const void *p, size_t n) {
     const auto *begin = static_cast<const unsigned char *>(p);
     return view(begin, n ? begin + n : begin)
-           | fold_left(h, [](const uint64_t acc, const unsigned char x) { return (acc ^ x) * 1099511628211ull; });
+           | fold_left(h, [](const uint64_t acc, const unsigned char x) { return (acc ^ x) * 1099511628211ULL; });
   };
-  return specs ^ fold_left(uint64_t{1469598103934665603ull}, [&](uint64_t h, const auto &s) {
+  return specs ^ fold_left(uint64_t{1469598103934665603ULL}, [&](uint64_t h, const auto &s) {
            const auto fieldLen = std::strlen(s.field);
            const auto typeNameLen = std::strlen(s.typeName);
            h = add(h, &fieldLen, sizeof(fieldLen));
@@ -1301,14 +1322,20 @@ bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelOb
   initialise();
   std::optional<SkipReasons::Device> on;
   if (currentPlatform && currentDevice)
-    on = SkipReasons::Device{currentPlatform->name(), currentDevice->name(), std::string(magic_enum::enum_name(currentPlatform->kind())),
-                             std::string(magic_enum::enum_name(currentDevice->moduleFormat()))};
+    on = SkipReasons::Device{.platform = currentPlatform->name(),
+                             .name = currentDevice->name(),
+                             .kind = std::string(magic_enum::enum_name(currentPlatform->kind())),
+                             .format = std::string(magic_enum::enum_name(currentDevice->moduleFormat()))};
   const auto note = [&](const char *outcome, std::vector<std::string> detail = {}) {
     std::vector<std::string> features;
     for (size_t i = 0; i < object.featureCount; ++i)
       features.emplace_back(object.features[i]);
-    skipReasons().attempt(on, {moduleName, std::string(magic_enum::enum_name(object.kind)),
-                               std::string(magic_enum::enum_name(object.format)), std::move(features), outcome, std::move(detail)});
+    skipReasons().attempt(on, {.module = moduleName,
+                               .kind = std::string(magic_enum::enum_name(object.kind)),
+                               .format = std::string(magic_enum::enum_name(object.format)),
+                               .features = std::move(features),
+                               .outcome = outcome,
+                               .detail = std::move(detail)});
   };
   if (!currentPlatform || !currentDevice || !currentQueue) {
     note("no-device");
@@ -1332,7 +1359,7 @@ bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelOb
 
   std::vector<std::string> missing;
   for (size_t i = 0; i < object.featureCount; ++i) {
-    std::string_view req(object.features[i]);
+    const std::string_view req(object.features[i]);
     if (!polyregion::runtime::deviceGatedFeature(req)) continue;
     if (!hasFeature(*currentDevice, req)) {
       log(DebugLevel::Debug, "Device %s lacks required feature `%s` for module `%s`; skipping", currentDevice->name().c_str(),
@@ -1356,7 +1383,7 @@ bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelOb
                                          object.arch ? object.arch : "", object.pipelineSpec ? object.pipelineSpec : "");
       polyregion::polyrt::JitPolicyChoice choice{};
       {
-        std::lock_guard lock(jitPolicyMutex());
+        const std::scoped_lock lock(jitPolicyMutex());
         choice = jitPolicy().select(policyKey, specKey);
       }
       if (choice.specialise) {
@@ -1384,9 +1411,9 @@ bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelOb
       note("unprepared", {"image"});
       return false;
     }
-    if (auto dumpDir = std::getenv(polyregion::env::PolyrtDumpKernel)) {
+    if (const char *dumpDir = std::getenv(polyregion::env::PolyrtDumpKernel)) {
       static int counter = 0;
-      auto path = std::string(dumpDir) + "/kernel_" + std::to_string(counter++) + ".o";
+      const auto path = std::string(dumpDir) + "/kernel_" + std::to_string(counter++) + ".o";
       if (FILE *f = std::fopen(path.c_str(), "wb")) {
         std::fwrite(image.data(), 1, image.size(), f);
         std::fclose(f);
@@ -1406,7 +1433,9 @@ bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelOb
 //
 // XXX Intentionally leaked: the SMA destructor at shutdown re-enters this allocator via delete
 // callbacks; function-local statics would already be destroyed.
+namespace {
 enum class UsmOwner : uint8_t { Host, Shared };
+} // namespace
 static std::mutex &usmAllocMutex() {
   static auto *m = new std::mutex();
   return *m;
@@ -1427,7 +1456,7 @@ static void *sharedAllocTracked(const size_t size, const polyregion::rt_reflect:
   }
   if (!p) p = std::malloc(tailPadded(size));
   if (p) {
-    std::lock_guard<std::mutex> g(usmAllocMutex());
+    const std::scoped_lock g(usmAllocMutex());
     usmAllocOwners().insert_or_assign(p, owner);
     // Recording lets SMA's localReflect size the pointer when walking captured fields;
     // safe because polyreflect-rt's allocator bypasses InterposePass.
@@ -1440,8 +1469,8 @@ static void sharedFreeTracked(void *p, const polyregion::rt_reflect::Type releas
   if (!p) return;
   std::optional<UsmOwner> owner;
   {
-    std::lock_guard<std::mutex> g(usmAllocMutex());
-    if (auto node = usmAllocOwners().extract(p)) owner = node.mapped();
+    const std::scoped_lock g(usmAllocMutex());
+    if (const auto node = usmAllocOwners().extract(p)) owner = node.mapped();
   }
   polyregion::rt_reflect::_rt_release(p, releaseType);
   // An untracked pointer is a free spliced by InterposePass over a foreign alloc (pre-init, foreign
@@ -1452,21 +1481,21 @@ static void sharedFreeTracked(void *p, const polyregion::rt_reflect::Type releas
 }
 
 POLYREGION_EXPORT extern "C" bool polyrt_usm_shared(const void *base) {
-  std::lock_guard<std::mutex> g(usmAllocMutex());
+  const std::scoped_lock g(usmAllocMutex());
   const auto it = usmAllocOwners().find(const_cast<void *>(base));
   return it != usmAllocOwners().end() && it->second == UsmOwner::Shared;
 }
 
 POLYREGION_EXPORT extern "C" void *polyrt_usm_malloc(const size_t size) {
   polyregion::polyrt::initialise();
-  const auto p = sharedAllocTracked(size, polyregion::rt_reflect::Type::HeapMalloc);
+  auto *const p = sharedAllocTracked(size, polyregion::rt_reflect::Type::HeapMalloc);
   log(DebugLevel::Debug, "%p = polyrt_usm_malloc(%zu)", p, size);
   return p;
 }
 
 POLYREGION_EXPORT extern "C" void *polyrt_usm_aligned_alloc(size_t /*alignment*/, const size_t size) {
   polyregion::polyrt::initialise();
-  const auto p = sharedAllocTracked(size, polyregion::rt_reflect::Type::HeapAlignedAlloc);
+  auto *const p = sharedAllocTracked(size, polyregion::rt_reflect::Type::HeapAlignedAlloc);
   log(DebugLevel::Debug, "%p = polyrt_usm_aligned_alloc(%zu)", p, size);
   return p;
 }
@@ -1479,7 +1508,7 @@ POLYREGION_EXPORT extern "C" void polyrt_usm_free(void *ptr) {
 
 POLYREGION_EXPORT extern "C" void *polyrt_usm_operator_new(const size_t size) {
   polyregion::polyrt::initialise();
-  const auto p = sharedAllocTracked(size, polyregion::rt_reflect::Type::HeapCXXNew);
+  auto *const p = sharedAllocTracked(size, polyregion::rt_reflect::Type::HeapCXXNew);
   log(DebugLevel::Debug, "%p = polyrt_usm_operator_new(%zu)", p, size);
   return p;
 }

@@ -28,7 +28,7 @@ import polyregion.ast.Traversal.*
 //   return inside a barrier-free loop               ->  exit flag and break chain, then exit at region level
 //   whole-array assignment to a crossing array      ->  declined, the entry keeps the lane abi
 private[pass] object GroupRegions {
-  import GroupFission.{Lanes, Lid, isBarrier, sel, u32}
+  import GroupVocabulary.{Lanes, Lid, isBarrier, sel, u32}
   import GroupState.*
 
   private val Parked = Int.MinValue
@@ -104,7 +104,7 @@ private[pass] object GroupRegions {
       loops.headOption.getOrElse(throw IllegalStateException("GroupFission: break or continue outside a loop"))
 
     private def onReturn(e: p.Expr): List[p.Stmt] = e match {
-      case _: p.Expr.Alias => Nil
+      case p.Expr.Alias(_) => Nil
       case other           => List(p.Stmt.Var(fresh("#gf_discard", p.Type.Unit0), Some(other)))
     }
 
@@ -194,7 +194,7 @@ private[pass] object GroupRegions {
 
   private def forward(items: List[Item]): List[Int] = items.flatMap {
     case Item.Jump(Target.To(id), _, false) => List(id)
-    case Item.Branch(_, t, f, _, _)         => forward(t) ::: forward(f)
+    case Item.Branch(t = t, f = f)          => forward(t) ::: forward(f)
     case _                                  => Nil
   }
 
@@ -220,31 +220,31 @@ private[pass] object GroupRegions {
 
   private def statements(items: List[Item]): List[p.Stmt] = items.map {
     case Item.S(s)                  => s
-    case _: Item.Jump               => p.Stmt.Cont
+    case Item.Jump(_, _, _)         => p.Stmt.Cont
     case Item.Branch(c, t, f, _, _) => p.Stmt.Cond(c, statements(t), statements(f))
   }
 
   private def jumps(items: List[Item]): List[Item.Jump] = items.flatMap {
-    case j: Item.Jump               => List(j)
-    case Item.Branch(_, t, f, _, _) => jumps(t) ::: jumps(f)
-    case _                          => Nil
+    case j: Item.Jump              => List(j)
+    case Item.Branch(t = t, f = f) => jumps(t) ::: jumps(f)
+    case _                         => Nil
   }
 
-  def apply(prepared: GroupFission.Prepared, defs: List[p.StructDef]): Either[String, Lowered] = {
+  def apply(prepared: GroupVocabulary.Prepared, defs: List[p.StructDef]): Either[String, Lowered] = {
     val formation = Formation(prepared.fresh)
     val entry     = formation.entry(prepared.body)
     lower(prepared, defs, ordered(formation.bodies.toVector, entry), pinned(prepared.body))
   }
 
   private def lower(
-      prepared: GroupFission.Prepared,
+      prepared: GroupVocabulary.Prepared,
       defs: List[p.StructDef],
       regions: Vector[List[Item]],
       pinned: Set[String]
   ): Either[String, Lowered] =
     classify(prepared, defs, regions.map(statements), pinned).map(emit(prepared, regions, _))
 
-  private def emit(prepared: GroupFission.Prepared, regions: Vector[List[Item]], classes: Classes): Lowered = {
+  private def emit(prepared: GroupVocabulary.Prepared, regions: Vector[List[Item]], classes: Classes): Lowered = {
     val fresh  = prepared.fresh
     val access = Access(prepared, classes)
 

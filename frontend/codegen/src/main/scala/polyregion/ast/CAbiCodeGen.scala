@@ -56,7 +56,8 @@ object CAbiCodeGen {
     val prefix = readConstString(abi.declaredField("Prefix"))
       .getOrElse(report.errorAndAbort(s"$fqn.Prefix: not a literal inline val"))
 
-    val fns = abi.declarations
+    val declarations = abi.declarations
+    val fns = declarations
       .filter(s => s.isValDef && s.flags.is(Flags.Module) && s.moduleClass.declarations.exists(_.name == "Name"))
       .map(extractFn(_, fqn, prefix))
 
@@ -64,7 +65,7 @@ object CAbiCodeGen {
       module = fqn.split('.').last,
       version = readConstInt(abi.declaredField("Version")).getOrElse(report.errorAndAbort(s"$fqn.Version")),
       prefix = prefix,
-      envPlugins = abi.declarations.find(_.name == "EnvPlugins").flatMap(readConstString),
+      envPlugins = declarations.find(_.name == "EnvPlugins").flatMap(readConstString),
       status = status,
       structs = fns.flatMap(_.structs).distinctBy(_.cName),
       fns = fns.map(_.fn)
@@ -75,20 +76,21 @@ object CAbiCodeGen {
 
   private def extractFn(using Quotes)(sym: quotes.reflect.Symbol, fqn: String, prefix: String): ExtractedFn = {
     import quotes.reflect.*
+    val name = sym.name
     val applyDef = sym.moduleClass.tree
       .asInstanceOf[ClassDef]
       .body
       .collectFirst { case dd: DefDef if dd.name == "apply" => dd }
-      .getOrElse(report.errorAndAbort(s"$fqn.${sym.name}: no `apply`"))
+      .getOrElse(report.errorAndAbort(s"$fqn.$name: no `apply`"))
     val params = applyDef.paramss match {
       case Nil                               => Nil
       case List(termParams: TermParamClause) => termParams.params
-      case _ => report.errorAndAbort(s"$fqn.${sym.name}: only a single term-param list supported")
+      case _ => report.errorAndAbort(s"$fqn.$name: only a single term-param list supported")
     }
     val (rtn, extraParams) = expandReturn(applyDef.returnTpt.tpe, prefix)
     ExtractedFn(
       Fn(
-        cName = prefix + AbiMacros.pascalToSnake(sym.name),
+        cName = prefix + AbiMacros.pascalToSnake(name),
         docs = extractDocs(applyDef),
         rtn = rtn,
         params = params.flatMap(p => expandParam(p.name, p.tpt.tpe, prefix)) ++ extraParams
@@ -100,8 +102,9 @@ object CAbiCodeGen {
   private def listOfCaseClass(using Quotes)(tpe: quotes.reflect.TypeRepr): Option[quotes.reflect.Symbol] = {
     import quotes.reflect.*
     tpe match {
-      case AppliedType(l, List(arg)) if l.typeSymbol.name == "List" && arg.typeSymbol.flags.is(Flags.Case) =>
-        Some(arg.typeSymbol)
+      case AppliedType(l, List(arg)) if l.typeSymbol.name == "List" =>
+        val sym = arg.typeSymbol
+        Option.when(sym.flags.is(Flags.Case))(sym)
       case _ => None
     }
   }
@@ -152,18 +155,10 @@ object CAbiCodeGen {
     quotes.reflect.report.errorAndAbort(s"unmapped Scala type: ${tpe.show}")
   )
 
-  private def isArrayOfByte(using Quotes)(tpe: quotes.reflect.TypeRepr): Boolean = {
+  private def isAppliedTo(using Quotes)(tpe: quotes.reflect.TypeRepr, container: String, element: String): Boolean = {
     import quotes.reflect.*
     tpe match {
-      case AppliedType(tycon, List(arg)) => tycon.typeSymbol.name == "Array" && arg.typeSymbol.name == "Byte"
-      case _                             => false
-    }
-  }
-
-  private def isListOfString(using Quotes)(tpe: quotes.reflect.TypeRepr): Boolean = {
-    import quotes.reflect.*
-    tpe match {
-      case AppliedType(tycon, List(arg)) => tycon.typeSymbol.name == "List" && arg.typeSymbol.name == "String"
+      case AppliedType(tycon, List(arg)) => tycon.typeSymbol.name == container && arg.typeSymbol.name == element
       case _                             => false
     }
   }
@@ -171,8 +166,8 @@ object CAbiCodeGen {
   private def expandParam(using
       Quotes
   )(name: String, tpe: quotes.reflect.TypeRepr, prefix: String): List[(String, String)] =
-    if (isArrayOfByte(tpe)) List(name -> "const uint8_t *", s"${name}Len" -> "size_t")
-    else if (isListOfString(tpe)) List(name -> "const char *const *")
+    if (isAppliedTo(tpe, "Array", "Byte")) List(name -> "const uint8_t *", s"${name}Len" -> "size_t")
+    else if (isAppliedTo(tpe, "List", "String")) List(name -> "const char *const *")
     else
       listOfCaseClass(tpe) match {
         case Some(sym) =>
@@ -180,10 +175,12 @@ object CAbiCodeGen {
         case None => List(name -> mapScalarToC(tpe))
       }
 
+  private val byteArrayOutParams = List("out" -> "uint8_t **", "outLen" -> "size_t *")
+
   private def expandReturn(using
       Quotes
   )(tpe: quotes.reflect.TypeRepr, prefix: String): (String, List[(String, String)]) =
-    if (isArrayOfByte(tpe)) (s"${prefix}status_t", List("out" -> "uint8_t **", "outLen" -> "size_t *"))
+    if (isAppliedTo(tpe, "Array", "Byte")) (s"${prefix}status_t", byteArrayOutParams)
     else (mapScalarToC(tpe), Nil)
 
   private def cParams(fn: Fn, withNames: Boolean): String =
@@ -195,7 +192,7 @@ object CAbiCodeGen {
       s.status.map { case (n, v) => s"  ${s.macroPfx}${AbiMacros.pascalToSnake(n).toUpperCase} = $v" }.mkString(",\n")
     val decls = s.fns
       .map { fn =>
-        val doc = fn.docs.map(d => s"/**\n * $d\n */\n").getOrElse("")
+        val doc = fn.docs.fold("")(d => s"/**\n * $d\n */\n")
         s"$doc${s.macroPfx}EXPORT ${fn.rtn} ${fn.cName}(${cParams(fn, withNames = true)});"
       }
       .mkString("\n\n")
@@ -209,7 +206,7 @@ object CAbiCodeGen {
             s"typedef struct ${st.cName} {\n${st.members.map((n, t) => s"  $t $n;").mkString("\n")}\n} ${st.cName}_t;"
           )
           .mkString("", "\n\n", "\n\n")
-    val envDefine = s.envPlugins.map(e => s"""#define ${s.macroPfx}ENV_PLUGINS "$e"\n""").getOrElse("")
+    val envDefine = s.envPlugins.fold("")(e => s"""#define ${s.macroPfx}ENV_PLUGINS "$e"\n""")
     s"""${s.banner}
        |
        |#ifndef ${s.guard}
@@ -254,12 +251,12 @@ object CAbiCodeGen {
   private def renderSymbols(s: Spec): String = {
     val consts = s.fns
       .map { fn =>
-        val doc = fn.docs.map(d => s"// $d\n").getOrElse("")
+        val doc = fn.docs.fold("")(d => s"// $d\n")
         s"""${doc}inline constexpr auto ${cppId(fn.cName, s.prefix, "")} = "${fn.cName}";"""
       }
       .mkString("\n\n")
     val aliases  = s.fns.map(fn => s"using ${cppId(fn.cName, s.prefix, "Fn")} = ${fn.cName}_fn;").mkString("\n")
-    val envConst = s.envPlugins.map(e => s"""inline constexpr auto EnvPlugins = "$e";\n\n""").getOrElse("")
+    val envConst = s.envPlugins.fold("")(e => s"""inline constexpr auto EnvPlugins = "$e";\n\n""")
     s"""${s.banner}
        |#pragma once
        |

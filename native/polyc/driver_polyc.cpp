@@ -1,6 +1,17 @@
 #include "driver_polyc.h"
 
+#include <array>
+#include <cerrno>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <exception>
 #include <fstream>
+#include <ios>
+#include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -25,7 +36,7 @@ using namespace polyregion;
 using namespace aspartame;
 
 // See https://stackoverflow.com/a/39758021/896997
-template <typename T = std::byte> std::vector<T> readFromStdIn() {
+template <typename T = std::byte> static std::vector<T> readFromStdIn() {
   std::freopen(nullptr, "rb", stdin);
   if (std::ferror(stdin)) throw std::runtime_error(std::strerror(errno));
   std::size_t len;
@@ -39,19 +50,20 @@ template <typename T = std::byte> std::vector<T> readFromStdIn() {
 }
 
 static std::string targetDescription = [] {
-  std::string targets =
+  const std::string targets =
       compiletime::TargetSpec::registry() ^ mk_string("\n\t", "\n\t", "", [](const compiletime::TargetSpec &s) {
         std::string names(s.canonical);
         for (const auto &a : s.aliases)
           names += std::string("|") + std::string(a);
         return names + ": \t" + std::string(magic_enum::enum_name(s.codegen)) + " via " + std::string(magic_enum::enum_name(s.runtime));
       });
-  std::string env = std::string("\n\nEnvironment:\n  ") + polypass::abi::EnvPlugins
-                    + " - PATH-separated list of PolyPass plugin paths (libpolypass.so / polypass.js). "
-                      "Overrides the bundled default plugin.";
+  const std::string env = std::string("\n\nEnvironment:\n  ") + polypass::abi::EnvPlugins
+                          + " - PATH-separated list of PolyPass plugin paths (libpolypass.so / polypass.js). "
+                            "Overrides the bundled default plugin.";
   return "PolyAST to object code compiler.\nSupported targets:" + targets + env;
 }();
 
+namespace {
 int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-value-param)
                fire::arg({0, "Input source, in either JSON or MessagePack format. Format is auto detected based on ASCII ranges."}),
                std::string out = // NOLINT(*-unnecessary-value-param)
@@ -100,9 +112,9 @@ int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-v
                auto isJson = bytes ^ forall([](const auto &c) { return c <= 127; });
 
                try {
-                 auto program = [&]() {
+                 auto program = [&] {
                    if (isJson) {
-                     auto raw = nlohmann::json::parse(bytes.begin(), bytes.end());
+                     const auto raw = nlohmann::json::parse(bytes.begin(), bytes.end());
                      return polyast::program_from_json(polyast::hashed_from_json(raw));
                    }
                    return polyast::hashed_program_from_msgpack(bytes.data(), bytes.data() + bytes.size());
@@ -172,14 +184,16 @@ int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-v
                }
                return EXIT_SUCCESS;
              },
-             [&]() {
+             [&] {
                fmt::print(stderr, "Unknown target: {}\n", rawTarget);
                return EXIT_FAILURE;
              });
 }
+} // namespace
 
 int polyregion::polyc(int argc, const char *argv[]) {
   if (const auto result = packageDriver(argc, argv)) return *result;
+  // NOLINTNEXTLINE(misc-const-correctness)
   PREPARE_FIRE_(argc, argv, false, fired_main, targetDescription);
   fire::_::logger.set_program_descr(FIRE_EXTRACT_2_PAD_(fired_main, targetDescription));
   return FIRE_EXTRACT_1_PAD_(fired_main, targetDescription)();

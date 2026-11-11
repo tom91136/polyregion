@@ -3,6 +3,7 @@ package polyregion.examples
 import java.nio.{Buffer, ByteBuffer, ByteOrder}
 import polyregion.jvm.Natives
 import polyregion.scalalang.DefaultQueueCapacity
+import scala.language.implicitConversions
 
 object CheckApi {
 
@@ -107,18 +108,18 @@ object CheckApi {
       val xs = r.devices()
       println(xs.map(x => s"\t$x\n${x.properties().map(x => s"\t\t$x").mkString("\n")}").mkString("\n"))
 
+      val image = r.name match {
+        case "OpenCL"                  => clImage
+        case "CUDA"                    => cudaImage
+        case "CPU (RelocatableObject)" => relImage
+      }
+
       xs.foreach { d0 =>
 
         println(s"D0 = $d0")
         val m = d0.malloc(10, Access.RW)
         println(s"alloc = ${m}")
         d0.free(m)
-
-        val image = r.name match {
-          case "OpenCL"                  => clImage
-          case "CUDA"                    => cudaImage
-          case "CPU (RelocatableObject)" => relImage
-        }
 
         d0.loadModule("a", image)
 

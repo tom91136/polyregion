@@ -34,7 +34,7 @@ template <typename T> auto to_string(const T &x) -> decltype(repr(x)) { return r
 std::string qualified(const Term::Select &);
 
 Term::Select selectNamed(const Named &name);
-Term::Select selectField(const Term::Select &select, const Named &field);
+Term::Select selectField(const Term::Select &base, const Named &field);
 
 Type::Struct typeOf(const StructDef &def);
 
@@ -91,7 +91,7 @@ std::vector<Stmt::Any> whileLoop(const std::vector<Stmt::Any> &prelude, const Te
 struct AssignmentBuilder {
   std::string name;
   bool isMutable;
-  AssignmentBuilder(const std::string &name, bool isMutable);
+  AssignmentBuilder(std::string name, bool isMutable);
   Stmt::Any operator=(Term::Any t) const;        // NOLINT(misc-unconventional-assign-operator)
   Stmt::Any operator=(Type::Any) const;          // NOLINT(misc-unconventional-assign-operator)
   Stmt::Any operator=(const Expr::Any &e) const; // NOLINT(misc-unconventional-assign-operator)
@@ -99,7 +99,7 @@ struct AssignmentBuilder {
 
 struct IndexBuilder {
   Index index;
-  explicit IndexBuilder(const Index &index);
+  explicit IndexBuilder(Index index);
   operator Expr::Any() const; // NOLINT(google-explicit-constructor)
   // Update lhs requires a Term::Select; convert from the held lhs term if possible.
   Update operator=(const Term::Any &that) const;
@@ -107,7 +107,7 @@ struct IndexBuilder {
 
 struct NamedBuilder {
   Named named;
-  explicit NamedBuilder(const Named &named);
+  explicit NamedBuilder(Named named);
   operator Term::Any() const; // NOLINT(google-explicit-constructor)
   operator Term::Select() const;
   operator Named() const; // NOLINT(google-explicit-constructor)

@@ -33,7 +33,7 @@ public:
   };
 
   Options options;
-  explicit LLVMBackend(const Options &options);
+  explicit LLVMBackend(Options options);
   [[nodiscard]] std::vector<StructLayout> resolveLayouts(const std::vector<StructDef> &structs) override;
   [[nodiscard]] CompileResult compileProgram(const Program &program, const compiletime::OptLevel &opt) override;
 };
@@ -96,8 +96,6 @@ struct TargetedContext {
   [[nodiscard]] AS addressSpaceForKernelArg(const TypeSpace::Any &s) const;
   [[nodiscard]] llvm::PointerType *loadedPtrTy(llvm::IRBuilder<> &B, const TypeSpace::Any &space) const;
   [[nodiscard]] ValPtr allocaAS(llvm::IRBuilder<> &B, llvm::Type *ty, unsigned int AS, const std::string &key) const;
-  [[nodiscard]] ValPtr load(llvm::IRBuilder<> &B, ValPtr rhs, llvm::Type *ty) const;
-  [[nodiscard]] ValPtr store(llvm::IRBuilder<> &B, ValPtr rhsVal, ValPtr lhsPtr) const;
   [[nodiscard]] ValPtr sizeOf(llvm::IRBuilder<> &B, llvm::Type *ptrTpe);
   [[nodiscard]] llvm::Type *resolveType(const AnyType &tpe, const Map<std::string, StructInfo> &structs, bool functionBoundary = false,
                                         bool kernelEntryArg = false);
@@ -158,12 +156,12 @@ struct CodeGen {
   llvm::IRBuilder<> B;
   llvm::Module M;
 
-  Map<std::string, Pair<AnyType, llvm::Value *>> stackVarPtrs{};
-  Map<std::string, StructInfo> structTypes{};
+  Map<std::string, Pair<AnyType, llvm::Value *>> stackVarPtrs;
+  Map<std::string, StructInfo> structTypes;
   // LDS reuse-union names de-aliased for this program (AMDGPU only, budget-capped); reused by the metadata pass
-  Set<std::string> deAliasedUnions{};
-  Map<Signature, llvm::Function *> functions{};
-  Map<Signature, llvm::Function *> externalFunctions{};
+  Set<std::string> deAliasedUnions;
+  Map<Signature, llvm::Function *> functions;
+  Map<Signature, llvm::Function *> externalFunctions;
   std::unique_ptr<PointerModel> ptrModel;
   // Out-pointer for sret-transformed bodies; `Stmt::Return` writes through it. Reset per body.
   llvm::Value *currentSretParam = nullptr;
@@ -173,7 +171,7 @@ struct CodeGen {
   uint64_t sharedDynamicLocalBytes = 0;
   uint64_t hostLocalCursor = 0;
   // logical SPIR-V cannot reinterpret one byte arena, so each element type gets its own share of it
-  Set<Type::Any> sharedDynamicLocalTypes{};
+  Set<Type::Any> sharedDynamicLocalTypes;
 
   // XXX SPIR-V Kernel only: byte arithmetic + memcpy works around Intel IGC's mis-routing of
   // `OpInBoundsPtrAccessChain` with `OpConstantNull` element. Logical SPIR-V (GLCompute) runs

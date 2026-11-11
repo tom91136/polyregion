@@ -97,7 +97,7 @@ object Download {
           .foreach(Files.deleteIfExists)
       }
 
-  def extract(archive: Path, destDir: Path, stripComponents: Int): Path = {
+  def extract(archive: Path, destDir: Path, stripComponents: Int): Unit = {
     if (Files.exists(destDir)) deleteTree(destDir)
     Files.createDirectories(destDir)
     println(s"  [extract] $archive -> $destDir (strip=$stripComponents)")
@@ -111,6 +111,5 @@ object Download {
         else sys.error(s"Unsupported archive extension: $name")
       extractTarStream(stream, destDir, stripComponents)
     }
-    destDir
   }
 }
