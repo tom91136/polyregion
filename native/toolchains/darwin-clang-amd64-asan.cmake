@@ -47,7 +47,10 @@ set(_SAN_FLAGS_EXTRA "-mllvm -asan-globals=0")
 set(_SAN_FLAGS "${_SAN_BASE} ${_SAN_FLAGS_EXTRA} -fno-omit-frame-pointer -g")
 set(_SAN_LINK_FLAGS "${_SAN_BASE} -frtlib-add-rpath")
 set(CMAKE_C_FLAGS_INIT "${CMAKE_C_FLAGS_INIT} ${_SAN_FLAGS}")
-set(CMAKE_CXX_FLAGS_INIT "${CMAKE_CXX_FLAGS_INIT} ${_SAN_FLAGS}")
+# XXX the bundled libc++ headers outpace the system libc++.dylib the link resolves against
+execute_process(COMMAND xcrun --sdk macosx --show-sdk-path
+        OUTPUT_VARIABLE _POLYREGION_MACOS_SDK OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
+set(CMAKE_CXX_FLAGS_INIT "${CMAKE_CXX_FLAGS_INIT} ${_SAN_FLAGS} -stdlib++-isystem ${_POLYREGION_MACOS_SDK}/usr/include/c++/v1")
 set(CMAKE_ASM_FLAGS_INIT "${CMAKE_ASM_FLAGS_INIT} ${_SAN_FLAGS}")
 set(CMAKE_SHARED_LINKER_FLAGS_INIT "${_SAN_LINK_FLAGS}")
 set(CMAKE_MODULE_LINKER_FLAGS_INIT "${_SAN_LINK_FLAGS}")
