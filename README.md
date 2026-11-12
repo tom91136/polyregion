@@ -32,6 +32,7 @@ just build-sysroot             # AL8 sysroot for portable binaries (optional; po
 just build-llvm                # bundled LLVM/Clang/LLD/Flang/MLIR; installs its small compression deps
 just build-vcpkg-deps          # manifest deps (Catch2, fmt, libffi, JS engine, ...) into native/.vcpkg
 just build-pass-native         # Scala-Native pass DSO (libpolypass) that polyc embeds (needs sbt)
+just build-jvm-sdk             # JVM SDK Maven repo (ast, bindgen) that configure requires (needs sbt)
 just configure                 # CMake-configure the native build
 just build-dist                # polyregion dist (bin/ + lib/)
 just check-dist                # smoke test
