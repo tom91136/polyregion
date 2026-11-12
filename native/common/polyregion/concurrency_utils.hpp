@@ -80,8 +80,8 @@ std::pair<std::vector<T>, std::vector<T>> splitStaticExclusive(T start, T end, T
     const auto k = range / N;
     const auto m = range % N;
     for (T i = 0; i < N; ++i) {
-      const auto a = (i * k) + std::min(i, m);
-      const auto b = ((i + 1) * k) + std::min((i + 1), m);
+      const auto a = (i * k) + (std::min)(i, m);
+      const auto b = ((i + 1) * k) + (std::min)(i + 1, m);
       xs[i] = start + a;
       ys[i] = start + b;
     }

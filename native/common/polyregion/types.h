@@ -246,7 +246,7 @@ POLYREGION_RT_PROTECT static std::pair<std::vector<size_t>, size_t> std140Scalar
     off = (off + a - 1) / a * a;
     offsets[i] = off;
     off += memberSizes[i];
-    maxAlign = std::max(a, maxAlign);
+    maxAlign = (std::max)(a, maxAlign);
   }
   return {std::move(offsets), (off + maxAlign - 1) / maxAlign * maxAlign};
 }
