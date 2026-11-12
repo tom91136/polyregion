@@ -43,7 +43,7 @@ std::uint64_t apply(Pair *destination, const Pair *source, int *values, std::var
 #if defined(_MSC_VER)
   if (bits == UINT64_MAX) std::_Throw_bad_variant_access();
 #elif defined(_LIBCPP_VERSION)
-  if (bits == UINT64_MAX) std::__throw_bad_variant_access();
+  if (bits == UINT64_MAX) std::__throw_bad_variant_access("source idioms");
 #else
   if (bits == UINT64_MAX) std::__throw_bad_variant_access(false);
 #endif
