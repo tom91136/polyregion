@@ -314,7 +314,10 @@ lazy val pass = (projectMatrix in file("pass"))
     scalaVersions = Seq(scala3Version),
     settings = Seq(
       nativeConfig := Def.uncached {
-        val cfg      = nativeConfig.value
+        // XXX the plugin default is cached across checkouts without LLVM_BIN in its key, so resolve clang here
+        val cfg = nativeConfig.value
+          .withClang(scala.scalanative.build.Discover.clang())
+          .withClangPP(scala.scalanative.build.Discover.clangpp())
         val gcPrefix = findBdwgcPrefix
         val isMac    = scala.util.Properties.isMac
         val isWin    = scala.util.Properties.isWin
