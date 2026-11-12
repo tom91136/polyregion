@@ -59,8 +59,8 @@ lazy val spectra = Project("spectra", file("."))
     },
     updateCacheName := s"${updateCacheName.value}_${Hash.toHex(Hash(polyregionSdk.value)).take(8)}",
     libraryDependencies ++= Seq(
-      "uk.ac.bristol.uob-hpc" %% "bindgen"           % polyregionVersion,
-      "org.scalameta"         %% "munit"             % "1.3.4" % Test
+      "uk.ac.bristol.uob-hpc" %% "bindgen" % polyregionVersion,
+      "org.scalameta"         %% "munit"   % "1.3.4" % Test
     ),
     genSpectra := Def.uncached {
       Def.taskDyn {

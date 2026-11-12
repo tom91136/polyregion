@@ -449,8 +449,14 @@ private[spectra] object SpectraTestCodeGen {
     fortranZero = ".false.",
     cppType = "bool"
   )
-  private val surfaceUnit =
-    SurfaceValue(suffix = "unit", scalaType = "Unit", scalaZero = "()", fortranType = "", fortranZero = "", cppType = "void")
+  private val surfaceUnit = SurfaceValue(
+    suffix = "unit",
+    scalaType = "Unit",
+    scalaZero = "()",
+    fortranType = "",
+    fortranZero = "",
+    cppType = "void"
+  )
 
   private def surfaceMapping(decl: p.FunctionDecl): Map[String, SurfaceValue] = {
     val base = Math.floorMod(decl.name.last.hashCode, surfaceValues.size)
