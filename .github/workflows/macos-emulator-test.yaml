@@ -35,7 +35,7 @@ jobs:
         name: Install dependencies
         run: |
           if brew tap | grep -qx 'aws/tap'; then brew untap aws/tap; fi
-          brew install --quiet cmake
+          command -v cmake >/dev/null || brew install --quiet cmake
       - &sdkroot
         name: Pin the SDK to the selected Xcode
         run: echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"

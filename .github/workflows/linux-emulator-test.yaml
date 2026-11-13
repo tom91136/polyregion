@@ -38,8 +38,10 @@ jobs:
       - &apt-cmake
         name: Install dependencies
         run: |
-          sudo apt-get ${{ env.APT_OPTIONS }} update
-          sudo apt-get ${{ env.APT_OPTIONS }} install -y cmake
+          command -v cmake >/dev/null || {
+            sudo apt-get ${{ env.APT_OPTIONS }} update
+            sudo apt-get ${{ env.APT_OPTIONS }} install -y cmake
+          }
 
       - name: Download dist
         if: ${{ !env.ACT }}
