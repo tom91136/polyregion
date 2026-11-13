@@ -404,6 +404,7 @@ test-native-dist profile='' junit='native-test-results' *args='':
     fi
     j=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")
     to=600; if [ "{{ profile }}" = emulators ] || [ -n "${QEMU_LD_PREFIX:-}" ]; then to=1500; fi
+    [ -n "${QEMU_LD_PREFIX:-}" ] && export POLYTEST_TIMEOUT_SCALE="${POLYTEST_TIMEOUT_SCALE:-2}"
     {{ core_guard }}
     junit="$TESTS/{{ junit }}.xml"; rm -f "$junit"
     rc=0; CLICOLOR_FORCE=$([ -t 1 ] && echo 1 || echo 0) ctest --test-dir "$TESTS" -j "$j" --timeout "$to" --output-on-failure --output-junit "$junit" {{ args }} || rc=$?

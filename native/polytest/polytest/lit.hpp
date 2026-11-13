@@ -2,6 +2,7 @@
 
 #include <fstream>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -37,6 +38,7 @@ struct TestCase {
   bool offloadOnly = false;
   std::vector<std::string> targets;
   std::optional<std::string> compileFailure;
+  std::optional<unsigned> timeoutSecs;
   std::vector<Run> runs;
 
   static std::vector<TestCase> parseTestCase(std::ifstream &file,          //
@@ -134,6 +136,11 @@ struct TestCase {
                                .targets = parseValue("targets:") ^ map([](const auto &xs) { return xs ^ split(' '); })
                                           ^ get_or_else(std::vector<std::string>{}),
                                .compileFailure = parseValue("compile-fails:"),
+                               .timeoutSecs = parseValue("timeout:") ^ map([](const auto &secs) {
+                                                if (secs.empty() || !(secs ^ forall([](char c) { return c >= '0' && c <= '9'; })))
+                                                  throw std::invalid_argument("invalid timeout directive: '" + secs + "'");
+                                                return static_cast<unsigned>(std::stoul(secs));
+                                              }),
                                .runs = parseRuns()};
              });
     });

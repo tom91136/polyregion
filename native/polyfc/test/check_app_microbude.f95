@@ -1,5 +1,6 @@
 !CHECK case: microbude
 !CHECK using: ppwi=1,2,64,128
+!CHECK timeout: 750
 !CHECK do: polyfc {polyfc_defaults} {polyfc_stdpar} -DCHECK_SUMMARY_ONLY -DCHECK_PPWI={ppwi} -o {output} {input}
 !CHECK do: {output} 938 20 128 {mini_app_iters}
 !CHECK requires: Energies OK

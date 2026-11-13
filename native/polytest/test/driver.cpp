@@ -140,13 +140,14 @@ TEST_CASE("A source name limits enumeration to that file") {
   TempDir dir;
   polyregion::env::ScopedEnv targets(polyregion::env::PolyregionTestTargets, "host@native");
   std::ofstream(dir.file("check_a.cpp")) << "#pragma region case: a\n#pragma region do: echo {output}\n";
-  std::ofstream(dir.file("check_b.cpp")) << "#pragma region case: b\n#pragma region do: echo {output}\n";
+  std::ofstream(dir.file("check_b.cpp")) << "#pragma region case: b\n#pragma region timeout: 700\n#pragma region do: echo {output}\n";
   auto cfg = testConfig(dir.path);
   cfg.testFiles = {dir.file("check_a.cpp"), dir.file("check_b.cpp")};
   CHECK(enumerateTasks(cfg, true, false, {}).size() == 2);
   const auto tasks = enumerateTasks(cfg, true, false, {}, "check_b.cpp");
   REQUIRE(tasks.size() == 1);
   CHECK(tasks[0].caseName == "b");
+  CHECK(tasks[0].timeoutSecs == 700U);
   CHECK(enumerateTasks(cfg, true, false, {}, "check_c.cpp").empty());
 }
 
@@ -157,7 +158,7 @@ TEST_CASE("Cache and library locations reach the child environment") {
   polyregion::env::ScopedEnv xdg("XDG_CACHE_HOME", "/polytest/xdg");
   polyregion::env::ScopedEnv pocl("POCL_CACHE_DIR", "/polytest/pocl");
   const auto cfg = testConfig(dir.path);
-  const Task task{Mode::Offload, "check_x.cpp", "c", {}, "out_x", "out_x/out", std::nullopt, {}, {}};
+  const Task task{Mode::Offload, "check_x.cpp", "c", {}, "out_x", "out_x/out", std::nullopt, {}, {}, std::nullopt};
   const auto envs = detail::baseEnvs(task, cfg, false);
   const auto has = [&](const std::string &kv) { return std::find(envs.begin(), envs.end(), kv) != envs.end(); };
   CHECK(has("POLYREGION_CACHE_DIR=/polytest/cache"));
@@ -192,7 +193,8 @@ polyregion::polytest::Task skippingTask(const TempDir &dir, const std::string &r
           dir.file("out"),
           std::nullopt,
           {{"compile", {}, {}}, {dir.file("skip.sh"), {}, {}}},
-          {}};
+          {},
+          std::nullopt};
 }
 
 constexpr const char *Fp64Manifest = R"({"module":"m","images":[{"kind":"Managed","format":"SPIRV_GLCompute","features":["fp64"]}]})";
@@ -333,7 +335,8 @@ TEST_CASE("A compile step exiting 77 fails") {
   TempDir dir;
   script(dir, "compile.sh", "exit 77");
   const Task task{
-      Mode::Offload, "check_x.cpp", "c", {}, dir.file("task"), dir.file("task/out"), std::nullopt, {{dir.file("compile.sh"), {}, {}}}, {}};
+      Mode::Offload, "check_x.cpp", "c", {}, dir.file("task"), dir.file("task/out"), std::nullopt, {{dir.file("compile.sh"), {}, {}}}, {},
+      std::nullopt};
   CHECK(detail::compileTask(task, testConfig(dir.path)).status == TaskStatus::Fail);
 }
 
@@ -343,7 +346,8 @@ TEST_CASE("A failing repro compile reports its own stderr") {
   script(dir, "compile.sh", R"sh(case " $* " in *" -c "*) echo 'repro diagnostic' >&2; exit 3 ;; esac
 : > "$3")sh");
   const auto command = dir.file("compile.sh") + " -fstdpar -o " + dir.file("task/out") + " check_x.cpp";
-  const Task task{Mode::Offload, "check_x.cpp", "c", {}, dir.file("task"), dir.file("task/out"), std::nullopt, {{command, {}, {}}}, {}};
+  const Task task{Mode::Offload, "check_x.cpp",       "c", {},          dir.file("task"), dir.file("task/out"),
+                  std::nullopt,  {{command, {}, {}}}, {},  std::nullopt};
   const auto o = detail::compileTask(task, testConfig(dir.path));
   CHECK(o.status == TaskStatus::Fail);
   CHECK(o.failReason.find("repro -c compile failed") != std::string::npos);

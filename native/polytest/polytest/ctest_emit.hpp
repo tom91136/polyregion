@@ -22,6 +22,9 @@ inline void reportSkip(const std::string &id, const std::string &reason) {
   fmt::print(stderr, "[SKIP] {}{}{}\n", id, reason.empty() ? "" : ": ", reason);
 }
 
+inline constexpr unsigned DefaultTimeoutSecs = 150;
+inline constexpr auto TimeoutScaleEnv = "POLYTEST_TIMEOUT_SCALE";
+
 // empty `variants` => a self-contained `--run-task`; non-empty => one FIXTURES_SETUP compile, a
 // FIXTURES_REQUIRED run per variant (name suffix + extra ENVIRONMENT), and a FIXTURES_CLEANUP
 struct CtestEntry {
@@ -30,6 +33,7 @@ struct CtestEntry {
   std::vector<std::pair<std::string, std::string>> variants;
   // NOLINTNEXTLINE(readability-redundant-member-init)
   std::string source = {};
+  unsigned timeoutSecs = DefaultTimeoutSecs;
 };
 
 inline void emitCtestFragment(const std::string &file, const std::string &prefix, const std::string &binary,
@@ -46,7 +50,15 @@ inline void emitCtestFragment(const std::string &file, const std::string &prefix
     return e.empty() ? std::string{} : fmt::format(" ENVIRONMENT \"{}\"", e);
   };
 
+  const auto timeoutProp = [](unsigned secs) { return fmt::format(" TIMEOUT ${{polytest_timeout_{}}}", secs); };
   const auto sourceArg = [](const std::string &source) { return source.empty() ? std::string{} : fmt::format(" --source \"{}\"", source); };
+  const auto timeouts = tasks ^ map([](const auto &t) { return t.timeoutSecs; }) ^ append(DefaultTimeoutSecs) ^ distinct() ^ sort();
+  const auto prologue = fmt::format("if(\"$ENV{{{0}}}\" MATCHES \"^[1-9][0-9]*$\")\n  set(polytest_timeout_scale "
+                                    "\"$ENV{{{0}}}\")\nelse()\n  set(polytest_timeout_scale 1)\nendif()\n",
+                                    TimeoutScaleEnv)
+                        + (timeouts ^ mk_string("", [](unsigned secs) {
+                             return fmt::format("math(EXPR polytest_timeout_{0} \"{0} * ${{polytest_timeout_scale}}\")\n", secs);
+                           }));
 
   unsigned long long seed = 0x9e3779b97f4a7c15ULL;
   if (const char *s = std::getenv(env::PolytestSeed)) {
@@ -55,6 +67,7 @@ inline void emitCtestFragment(const std::string &file, const std::string &prefix
   }
 
   std::ofstream(file, std::ios::binary)
+      << prologue
       << (tasks                                         //
           ^ sort_by([](const auto &t) { return t.id; }) //
           ^ shuffle(std::mt19937_64(seed))              //
@@ -63,25 +76,26 @@ inline void emitCtestFragment(const std::string &file, const std::string &prefix
               if (t.variants.empty()) {
                 const auto labelsProp = t.labels.empty() ? std::string{} : fmt::format(" LABELS \"{}\"", t.labels);
                 return fmt::format("add_test(\"{}\" \"{}\" --run-task \"{}\"{})\n", name, binary, t.id, sourceArg(t.source))
-                       + fmt::format("set_tests_properties(\"{}\" PROPERTIES SKIP_RETURN_CODE 77{}{})\n", name, labelsProp, envProp({}));
+                       + fmt::format("set_tests_properties(\"{}\" PROPERTIES SKIP_RETURN_CODE 77{}{}{})\n", name,
+                                     timeoutProp(t.timeoutSecs), labelsProp, envProp({}));
               }
               // shared-compile: one setup, a run per variant, one cleanup, gated on a per-task fixture
               const auto fix = "fix-" + name;
               const auto labelsProp = t.labels.empty() ? std::string{} : fmt::format(" LABELS \"{}\"", t.labels);
               auto frag = fmt::format("add_test(\"compile-{}\" \"{}\" --compile-task \"{}\"{})\n", name, binary, t.id, sourceArg(t.source))
-                          + fmt::format("set_tests_properties(\"compile-{}\" PROPERTIES SKIP_RETURN_CODE 77 FIXTURES_SETUP \"{}\"{}{})\n",
-                                        name, fix, labelsProp, envProp({}));
+                          + fmt::format("set_tests_properties(\"compile-{}\" PROPERTIES SKIP_RETURN_CODE 77 FIXTURES_SETUP \"{}\"{}{}{})\n",
+                                        name, fix, timeoutProp(t.timeoutSecs), labelsProp, envProp({}));
               frag += t.variants ^ mk_string("", [&](const auto &suffix, const auto &extraEnv) {
                         const auto vname = suffix.empty() ? name : name + "-" + suffix;
                         return fmt::format("add_test(\"{}\" \"{}\" --run-only-task \"{}\"{})\n", vname, binary, t.id, sourceArg(t.source))
                                + fmt::format("set_tests_properties(\"{}\" PROPERTIES SKIP_RETURN_CODE 77 FIXTURES_REQUIRED \"{}\" "
-                                             "RESOURCE_LOCK \"{}\"{}{})\n",
-                                             vname, fix, fix, labelsProp, envProp(extraEnv));
+                                             "RESOURCE_LOCK \"{}\"{}{}{})\n",
+                                             vname, fix, fix, timeoutProp(t.timeoutSecs), labelsProp, envProp(extraEnv));
                       });
               return frag
                      + fmt::format("add_test(\"cleanup-{}\" \"{}\" --cleanup-task \"{}\"{})\n", name, binary, t.id, sourceArg(t.source))
-                     + fmt::format("set_tests_properties(\"cleanup-{}\" PROPERTIES FIXTURES_CLEANUP \"{}\"{}{})\n", name, fix, labelsProp,
-                                   envProp({}));
+                     + fmt::format("set_tests_properties(\"cleanup-{}\" PROPERTIES FIXTURES_CLEANUP \"{}\"{}{}{})\n", name, fix,
+                                   timeoutProp(DefaultTimeoutSecs), labelsProp, envProp({}));
             }));
 }
 

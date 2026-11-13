@@ -105,6 +105,7 @@ struct Task {
   std::optional<std::string> compileFailure;
   std::vector<TestCase::Run> runs; // templates already expanded against (variables + defaults + stdpar + input + output)
   std::vector<RunVariant> variants;
+  std::optional<unsigned> timeoutSecs;
 
   [[nodiscard]] std::string display() const {
     return fmt::format("[{}] {}/{} {}", modeName(mode), extractTestName(testFile), caseName,
@@ -611,7 +612,8 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
              const auto store = mkArgStore(augmented ^ append(std::pair{std::string("output"), output}));
              auto runs =
                  tc.runs ^ map([&](const auto &r) { return TestCase::Run{fmt::vformat(r.command, store), r.expect, r.stderrCounts}; });
-             return {mode, file, tc.name, varsWithLabel, dir, output, tc.compileFailure, std::move(runs), std::move(variants)};
+             return {mode,          file, tc.name, varsWithLabel, dir, output, tc.compileFailure, std::move(runs), std::move(variants),
+                     tc.timeoutSecs};
            });
   };
 
@@ -675,7 +677,8 @@ inline void emitCtest(const std::vector<Task> &tasks, const DriverConfig &cfg, c
                         });
         const auto target = detail::archFor(t, cfg);
         const auto labels = target.empty() ? std::string{} : "codegen;" + ctestSafe(target);
-        return CtestEntry{t.id(), labels, vs, std::string(llvm::sys::path::filename(t.testFile))};
+        return CtestEntry{t.id(), labels, vs, std::string(llvm::sys::path::filename(t.testFile)),
+                          t.timeoutSecs.value_or(DefaultTimeoutSecs)};
       });
   emitCtestFragment(file, prefix, binary, workdir, env, entries);
 }
