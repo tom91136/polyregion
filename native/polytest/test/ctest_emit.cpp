@@ -73,3 +73,31 @@ TEST_CASE("CTest entries name their source file and carry a scaled timeout") {
                                   DefaultTimeoutSecs))
         != std::string::npos);
 }
+
+TEST_CASE("CTest runs of a shared compile are named and labelled per variant") {
+  using namespace polyregion::polytest;
+
+  const std::string path = "polytest-ctest-variant-test.cmake";
+  struct Remove {
+    const std::string &path;
+    ~Remove() { std::remove(path.c_str()); }
+  } remove{path};
+
+  const std::vector<CtestEntry> entries{
+      {"compile-id",
+       "codegen;shard",
+       {{"", {}, "run-a", "codegen;a;shard"}, {"usm", "MODE=off", "run-a", "codegen;a;shard"}, {"", {}, "run-b"}}}};
+  emitCtestFragment(path, "p", "runner", {}, {}, entries);
+  const auto fragment = polyregion::read_string(path);
+  CHECK(fragment.find("add_test(\"compile-p-compile-id\" \"runner\" --compile-task \"compile-id\")") != std::string::npos);
+  CHECK(fragment.find("add_test(\"p-run-a\" \"runner\" --run-only-task \"run-a\")") != std::string::npos);
+  CHECK(fragment.find("add_test(\"p-run-a-usm\" \"runner\" --run-only-task \"run-a\")") != std::string::npos);
+  CHECK(fragment.find("add_test(\"p-run-b\" \"runner\" --run-only-task \"run-b\")") != std::string::npos);
+  CHECK(fragment.find("FIXTURES_SETUP \"fix-p-compile-id\" TIMEOUT ${polytest_timeout_150} LABELS \"codegen;shard\"") != std::string::npos);
+  CHECK(fragment.find("RESOURCE_LOCK \"fix-p-compile-id\" TIMEOUT ${polytest_timeout_150} LABELS \"codegen;a;shard\"")
+        != std::string::npos);
+  CHECK(
+      fragment.find("\"p-run-b\" PROPERTIES SKIP_RETURN_CODE 77 FIXTURES_REQUIRED \"fix-p-compile-id\" RESOURCE_LOCK \"fix-p-compile-id\" "
+                    "TIMEOUT ${polytest_timeout_150} LABELS \"codegen;shard\"")
+      != std::string::npos);
+}

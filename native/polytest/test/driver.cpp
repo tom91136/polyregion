@@ -177,9 +177,10 @@ TEST_CASE("A directive name inside a message stays part of that message") {
   const auto tasks = enumerateTasks(cfg, true, false, {});
   REQUIRE(tasks.size() == 2);
   CHECK(tasks[0].compileFailure == "requires do: x");
-  REQUIRE(tasks[1].runs.size() == 2);
-  CHECK(tasks[1].runs[1].expect.empty());
-  CHECK(tasks[1].runs[1].failure == "requires stderr-count: 1");
+  REQUIRE(tasks[1].variants.size() == 1);
+  REQUIRE(tasks[1].variants[0].runs.size() == 1);
+  CHECK(tasks[1].variants[0].runs[0].expect.empty());
+  CHECK(tasks[1].variants[0].runs[0].failure == "requires stderr-count: 1");
 }
 
 TEST_CASE("An expected failure on the first step is rejected") {
@@ -201,12 +202,126 @@ TEST_CASE("Cache and library locations reach the child environment") {
   polyregion::env::ScopedEnv pocl("POCL_CACHE_DIR", "/polytest/pocl");
   const auto cfg = testConfig(dir.path);
   const Task task{Mode::Offload, "check_x.cpp", "c", {}, "out_x", "out_x/out", std::nullopt, {}, {}, std::nullopt};
-  const auto envs = detail::baseEnvs(task, cfg, false);
+  const auto envs = detail::baseEnvs(task, cfg, false, "");
   const auto has = [&](const std::string &kv) { return std::find(envs.begin(), envs.end(), kv) != envs.end(); };
   CHECK(has("POLYREGION_CACHE_DIR=/polytest/cache"));
   CHECK(has("XDG_CACHE_HOME=/polytest/xdg"));
   CHECK(has("POCL_CACHE_DIR=/polytest/pocl"));
 }
+
+TEST_CASE("Targets that differ in device alone share one compile") {
+  using namespace polyregion::polytest;
+  using namespace aspartame;
+  TempDir dir;
+  polyregion::env::ScopedEnv targets(polyregion::env::PolyregionTestTargets,
+                                     "spirv_glcompute@!spirv_glcompute@*llvmpipe*;spirv_glcompute@!spirv_glcompute@*SwiftShader*;"
+                                     "host@native!host@*;cuda@sm_35!cuda@*");
+  std::ofstream(dir.file("check_group.cpp")) << "#pragma region case: g\n#pragma region do: build {arch} {output}\n"
+                                                "#pragma region do: run {arch} {output}\n";
+  auto cfg = testConfig(dir.path);
+  cfg.testFiles = {dir.file("check_group.cpp")};
+  const auto tasks = enumerateTasks(cfg, true, false, {});
+  REQUIRE(tasks.size() == 3);
+
+  const auto named = [&](const std::string &arch) {
+    return tasks ^ filter([&](const auto &t) { return detail::archFor(t, cfg) == arch; });
+  };
+  const auto merged = named("spirv_glcompute@");
+  REQUIRE(merged.size() == 1);
+  CHECK(merged[0].runs.size() == 1);
+  CHECK(merged[0].runs[0].command == "build spirv_glcompute@ " + merged[0].output);
+  REQUIRE(merged[0].variants.size() == 2);
+  CHECK(merged[0].variants[0].id != merged[0].variants[1].id);
+  CHECK((merged[0].variants ^ map([](const auto &v) { return v.target; }) ^ sort())
+        == std::vector<std::string>{"spirv_glcompute@!spirv_glcompute@*SwiftShader*", "spirv_glcompute@!spirv_glcompute@*llvmpipe*"});
+  for (const auto &v : merged[0].variants) {
+    REQUIRE(v.runs.size() == 1);
+    CHECK(v.runs[0].command == "run " + v.target + " " + merged[0].output);
+  }
+
+  const auto host = named("host@native!host@*");
+  REQUIRE(host.size() == 1);
+  REQUIRE(host[0].variants.size() == 1);
+  CHECK(host[0].id() == host[0].variants[0].id);
+  CHECK(host[0].runs[0].command == "build host@native " + host[0].output);
+
+  const auto cuda = named("cuda@sm_35!cuda@*");
+  REQUIRE(cuda.size() == 1);
+  CHECK((cuda[0].variants ^ map([](const auto &v) { return v.suffix; })) == std::vector<std::string>{"", "runtime", "usm"});
+  CHECK((cuda[0].variants ^ map([](const auto &v) { return v.id; }) ^ distinct()).size() == 1);
+}
+
+TEST_CASE("Merged tasks list one run per device and emit one compile") {
+  using namespace polyregion::polytest;
+  using namespace aspartame;
+  TempDir dir;
+  polyregion::env::ScopedEnv targets(polyregion::env::PolyregionTestTargets,
+                                     "spirv_glcompute@!spirv_glcompute@*llvmpipe*;spirv_glcompute@!spirv_glcompute@*SwiftShader*;"
+                                     "host@native!host@*");
+  std::ofstream(dir.file("check_emit.cpp")) << "#pragma region case: e\n#pragma region do: build {arch} {output}\n"
+                                               "#pragma region do: run {arch} {output}\n";
+  auto cfg = testConfig(dir.path);
+  cfg.testFiles = {dir.file("check_emit.cpp")};
+  const auto tasks = enumerateTasks(cfg, true, false, {});
+  const auto fragment = dir.file("fragment.cmake");
+  emitCtest(tasks, cfg, fragment, "p", "runner", {}, {});
+  const auto text = polyregion::read_string(fragment);
+  const auto count = [&](const std::string &needle) {
+    std::size_t n = 0;
+    for (auto at = text.find(needle); at != std::string::npos; at = text.find(needle, at + needle.size()))
+      ++n;
+    return n;
+  };
+  CHECK(count("--compile-task") == 1);
+  CHECK(count("--run-only-task") == 2);
+  CHECK(count("--run-task") == 1);
+  CHECK(count("LABELS \"codegen;spirv_glcompute_40\"") == 2);
+  CHECK(count("LABELS \"codegen;spirv_glcompute_40_21spirv_glcompute_40_2allvmpipe_2a;spirv_glcompute_40\"") == 1);
+  CHECK(count("LABELS \"codegen;spirv_glcompute_40_21spirv_glcompute_40_2aSwiftShader_2a;spirv_glcompute_40\"") == 1);
+  CHECK(count("LABELS \"codegen;host_40native_21host_40_2a;host_40native\"") == 1);
+}
+
+#ifndef _WIN32
+TEST_CASE("A run selects its own device in the child environment") {
+  using namespace polyregion::polytest;
+  TempDir dir;
+  dir.touch("rusticl.icd");
+  dir.touch("pocl.icd");
+  polyregion::env::ScopedEnv vk("VK_DRIVER_FILES", "/icd/lvp_icd.json:/icd/swiftshader.json");
+  polyregion::env::ScopedEnv ocl("OCL_ICD_VENDORS", dir.path.c_str());
+  polyregion::env::ScopedEnv rusticl("RUSTICL_ENABLE", "llvmpipe");
+  const auto cfg = testConfig(dir.path);
+  const Task task{Mode::Offload, "check_x.cpp", "c", {{"arch", "spirv_glcompute@"}}, "out_x", "out_x/out", std::nullopt, {}, {},
+                  std::nullopt};
+  const auto has = [](const std::vector<std::string> &envs, const std::string &kv) {
+    return std::find(envs.begin(), envs.end(), kv) != envs.end();
+  };
+  const auto hasKey = [](const std::vector<std::string> &envs, const std::string &key) {
+    return std::any_of(envs.begin(), envs.end(), [&](const auto &kv) { return kv.rfind(key + "=", 0) == 0; });
+  };
+
+  const std::string swift = "spirv_glcompute@!spirv_glcompute@*SwiftShader*", lvp = "spirv_glcompute@!spirv_glcompute@*llvmpipe*";
+  const auto swiftEnv = detail::baseEnvs(task, cfg, false, swift);
+  CHECK(has(swiftEnv, "VK_DRIVER_FILES=/icd/swiftshader.json"));
+  CHECK(has(swiftEnv, "POLYRT_PLATFORM=" + swift));
+  const auto lvpEnv = detail::baseEnvs(task, cfg, false, lvp);
+  CHECK(has(lvpEnv, "VK_DRIVER_FILES=/icd/lvp_icd.json"));
+  CHECK(has(lvpEnv, "POLYRT_PLATFORM=" + lvp));
+  const auto compileEnv = detail::baseEnvs(task, cfg, false, detail::compileTargetFor(task, cfg));
+  CHECK(has(compileEnv, "POLYRT_PLATFORM=spirv_glcompute@"));
+  CHECK_FALSE(hasKey(compileEnv, "VK_DRIVER_FILES"));
+
+  const auto rusticlEnv = detail::baseEnvs(task, cfg, false, "opencl1_1@!opencl1_1@rusticl:*source*");
+  CHECK(has(rusticlEnv, "OCL_ICD_VENDORS=" + dir.path + "/rusticl.icd"));
+  CHECK(has(rusticlEnv, "GALLIUM_DRIVER=llvmpipe"));
+  CHECK(has(rusticlEnv, "POLYINVOKE_DISABLE_SVM=1"));
+  const auto poclEnv = detail::baseEnvs(task, cfg, false, "opencl1_1@!opencl1_1@*Portable*source*");
+  CHECK(has(poclEnv, "OCL_ICD_VENDORS=" + dir.path + "/pocl.icd"));
+  CHECK_FALSE(hasKey(poclEnv, "GALLIUM_DRIVER"));
+  CHECK(has(poclEnv, "POLYINVOKE_DISABLE_SVM=1"));
+}
+
+#endif
 
 #ifndef _WIN32
 namespace {
@@ -234,8 +349,8 @@ polyregion::polytest::Task skippingTask(const TempDir &dir, const std::string &r
           dir.path,
           dir.file("out"),
           std::nullopt,
-          {{"compile", {}, {}}, {dir.file("skip.sh"), {}, {}}},
-          {},
+          {{"compile", {}, {}}},
+          {RunVariant{"c", selector, "", {}, {{dir.file("skip.sh"), {}, {}}}, "c"}},
           std::nullopt};
 }
 
@@ -268,7 +383,7 @@ TEST_CASE("A skip whose device lacks the feature its image requires stays a skip
   TempDir dir;
   const auto task =
       skippingTask(dir, record("SwiftShader Device", "Managed", "SPIRV_GLCompute", "\"fp64\"", "lacks", "\"fp64\""), Fp64Manifest);
-  const auto outcome = detail::runTask(task, testConfig(dir.path));
+  const auto outcome = detail::runTask(task, testConfig(dir.path), task.variants[0]);
   INFO(outcome.failReason);
   CHECK(outcome.status == TaskStatus::Skip);
   CHECK(outcome.failReason.find("SwiftShader Device lacks a feature its image or run requires") != std::string::npos);
@@ -279,7 +394,7 @@ TEST_CASE("A usm skip on a device without system paging stays a skip") {
   TempDir dir;
   polyregion::env::ScopedEnv mirror(polyregion::env::PolyrtMirror, "off");
   const auto task = skippingTask(dir, PagingRecord, PtxManifest, CudaSelector, cudaInventory("paging:None"));
-  const auto outcome = detail::runTask(task, testConfig(dir.path));
+  const auto outcome = detail::runTask(task, testConfig(dir.path), task.variants[0]);
   INFO(outcome.failReason);
   CHECK(outcome.status == TaskStatus::Skip);
   CHECK(outcome.failReason.find("Ocelot PTX Emulator lacks a feature its image or run requires") != std::string::npos);
@@ -290,7 +405,7 @@ TEST_CASE("A usm skip on a device with system paging fails") {
   TempDir dir;
   polyregion::env::ScopedEnv mirror(polyregion::env::PolyrtMirror, "off");
   const auto task = skippingTask(dir, PagingRecord, PtxManifest, CudaSelector, cudaInventory("paging:System"));
-  const auto outcome = detail::runTask(task, testConfig(dir.path));
+  const auto outcome = detail::runTask(task, testConfig(dir.path), task.variants[0]);
   CHECK(outcome.status == TaskStatus::Fail);
   CHECK(outcome.failReason.find("has every feature required for image") != std::string::npos);
 }
@@ -300,7 +415,7 @@ TEST_CASE("A paging skip outside a usm run fails") {
   TempDir dir;
   polyregion::env::ScopedEnv mirror(polyregion::env::PolyrtMirror, "runtime");
   const auto task = skippingTask(dir, PagingRecord, PtxManifest, CudaSelector, cudaInventory("paging:None"));
-  const auto outcome = detail::runTask(task, testConfig(dir.path));
+  const auto outcome = detail::runTask(task, testConfig(dir.path), task.variants[0]);
   CHECK(outcome.status == TaskStatus::Fail);
   CHECK(outcome.failReason.find("has every feature required for image") != std::string::npos);
 }
@@ -309,7 +424,7 @@ TEST_CASE("A skip on a device that has every required feature fails") {
   using namespace polyregion::polytest;
   TempDir dir;
   const auto task = skippingTask(dir, record("SwiftShader Device", "Managed", "SPIRV_GLCompute", "", "lacks", "\"fp64\""), PlainManifest);
-  const auto outcome = detail::runTask(task, testConfig(dir.path));
+  const auto outcome = detail::runTask(task, testConfig(dir.path), task.variants[0]);
   CHECK(outcome.status == TaskStatus::Fail);
   CHECK(outcome.failReason.find("has every feature") != std::string::npos);
 }
@@ -319,7 +434,7 @@ TEST_CASE("A skip whose selector matches no device fails") {
   TempDir dir;
   const auto task = skippingTask(dir, record("SwiftShader Device", "Managed", "SPIRV_GLCompute", "\"fp64\"", "lacks", "\"fp64\""),
                                  Fp64Manifest, "spirv_glcompute@!spirv_glcompute@*NoSuchGpu*");
-  const auto outcome = detail::runTask(task, testConfig(dir.path));
+  const auto outcome = detail::runTask(task, testConfig(dir.path), task.variants[0]);
   CHECK(outcome.status == TaskStatus::Fail);
   CHECK(outcome.failReason.find("matched 0 of 1") != std::string::npos);
 }
@@ -330,7 +445,7 @@ TEST_CASE("A skip with no image for the device format fails") {
   const std::string objectManifest = R"({"module":"m","images":[{"kind":"HostThreaded","format":"Object","features":["fp64"]}]})";
   const auto task =
       skippingTask(dir, record("SwiftShader Device", "HostThreaded", "Object", "\"fp64\"", "format", "\"Object\""), objectManifest);
-  const auto outcome = detail::runTask(task, testConfig(dir.path));
+  const auto outcome = detail::runTask(task, testConfig(dir.path), task.variants[0]);
   CHECK(outcome.status == TaskStatus::Fail);
   CHECK(outcome.failReason.find("no image for Managed/SPIRV_GLCompute") != std::string::npos);
 }
@@ -339,7 +454,7 @@ TEST_CASE("A skip without a runtime record fails") {
   using namespace polyregion::polytest;
   TempDir dir;
   const auto task = skippingTask(dir, "polyrt: no compatible target: Selector 'x' matched none (strict)", Fp64Manifest);
-  const auto outcome = detail::runTask(task, testConfig(dir.path));
+  const auto outcome = detail::runTask(task, testConfig(dir.path), task.variants[0]);
   CHECK(outcome.status == TaskStatus::Fail);
   CHECK(outcome.failReason.find("without a skip record") != std::string::npos);
 }
@@ -348,7 +463,7 @@ TEST_CASE("A skip with no manifest from the compile step fails") {
   using namespace polyregion::polytest;
   TempDir dir;
   const auto task = skippingTask(dir, record("SwiftShader Device", "Managed", "SPIRV_GLCompute", "\"fp64\"", "lacks", "\"fp64\""), "");
-  const auto outcome = detail::runTask(task, testConfig(dir.path));
+  const auto outcome = detail::runTask(task, testConfig(dir.path), task.variants[0]);
   CHECK(outcome.status == TaskStatus::Fail);
   CHECK(outcome.failReason.find("no compile-time image manifest") != std::string::npos);
 }
@@ -409,16 +524,46 @@ TEST_CASE("A later step expected to fail passes only with its diagnostic") {
                 dir.path,
                 dir.file("out"),
                 std::nullopt,
-                {{"compile", {}, {}}, {dir.file(step), {}, {}, message}},
-                {},
+                {{"compile", {}, {}}},
+                {RunVariant{"c", "", "", {}, {{dir.file(step), {}, {}, message}}, "c"}},
                 std::nullopt};
   };
-  CHECK(detail::runTask(task("fails.sh", "include not found"), testConfig(dir.path)).status == TaskStatus::Pass);
-  const auto wrong = detail::runTask(task("fails.sh", "other diagnostic"), testConfig(dir.path));
+  const auto run = [&](const std::string &step, const std::string &message) {
+    const auto t = task(step, message);
+    return detail::runTask(t, testConfig(dir.path), t.variants[0]);
+  };
+  CHECK(run("fails.sh", "include not found").status == TaskStatus::Pass);
+  const auto wrong = run("fails.sh", "other diagnostic");
   CHECK(wrong.status == TaskStatus::Fail);
   CHECK(wrong.failReason.find("without expected diagnostic") != std::string::npos);
-  const auto succeeded = detail::runTask(task("passes.sh", "include not found"), testConfig(dir.path));
+  const auto succeeded = run("passes.sh", "include not found");
   CHECK(succeeded.status == TaskStatus::Fail);
   CHECK(succeeded.failReason.find("unexpectedly succeeded") != std::string::npos);
+}
+
+TEST_CASE("A skip is judged against the device the run selected") {
+  using namespace polyregion::polytest;
+  TempDir dir;
+  const std::string twoDevices =
+      R"json({"backend":"Vulkan","platform":"Vulkan","kind":"Managed","devices":[)json"
+      R"json({"name":"llvmpipe (LLVM 21)","format":"SPIRV_GLCompute","features":["vulkan","spirv_glcompute"]},)json"
+      R"json({"name":"SwiftShader Device","format":"SPIRV_GLCompute","features":["vulkan","spirv_glcompute","unknown"]}]})json";
+  auto task = skippingTask(dir, record("SwiftShader Device", "Managed", "SPIRV_GLCompute", "\"fp64\"", "lacks", "\"fp64\""), Fp64Manifest,
+                           "spirv_glcompute@", twoDevices);
+  const auto cfg = testConfig(dir.path);
+
+  task.variants[0].target = Selector;
+  const auto onSwiftShader = detail::runTask(task, cfg, task.variants[0]);
+  INFO(onSwiftShader.failReason);
+  CHECK(onSwiftShader.status == TaskStatus::Skip);
+
+  task.variants[0].target = "spirv_glcompute@!spirv_glcompute@*llvmpipe*";
+  const auto onLlvmpipe = detail::runTask(task, cfg, task.variants[0]);
+  CHECK(onLlvmpipe.status == TaskStatus::Fail);
+  CHECK(onLlvmpipe.failReason.find("runtime used 'SwiftShader Device' but the selector resolves to 'llvmpipe (LLVM 21)'")
+        != std::string::npos);
+
+  task.variants[0].target = "spirv_glcompute@";
+  CHECK(detail::runTask(task, cfg, task.variants[0]).status == TaskStatus::Fail);
 }
 #endif

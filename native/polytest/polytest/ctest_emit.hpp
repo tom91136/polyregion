@@ -25,12 +25,22 @@ inline void reportSkip(const std::string &id, const std::string &reason) {
 inline constexpr unsigned DefaultTimeoutSecs = 150;
 inline constexpr auto TimeoutScaleEnv = "POLYTEST_TIMEOUT_SCALE";
 
+// a run of a shared compile: `runId` names it (default: the entry id), `labels` replaces the entry labels
+struct CtestVariant {
+  std::string suffix;
+  std::string env;
+  // NOLINTNEXTLINE(readability-redundant-member-init)
+  std::string runId = {};
+  // NOLINTNEXTLINE(readability-redundant-member-init)
+  std::string labels = {};
+};
+
 // empty `variants` => a self-contained `--run-task`; non-empty => one FIXTURES_SETUP compile, a
 // FIXTURES_REQUIRED run per variant (name suffix + extra ENVIRONMENT), and a FIXTURES_CLEANUP
 struct CtestEntry {
   std::string id;
   std::string labels;
-  std::vector<std::pair<std::string, std::string>> variants;
+  std::vector<CtestVariant> variants;
   // NOLINTNEXTLINE(readability-redundant-member-init)
   std::string source = {};
   unsigned timeoutSecs = DefaultTimeoutSecs;
@@ -85,12 +95,15 @@ inline void emitCtestFragment(const std::string &file, const std::string &prefix
               auto frag = fmt::format("add_test(\"compile-{}\" \"{}\" --compile-task \"{}\"{})\n", name, binary, t.id, sourceArg(t.source))
                           + fmt::format("set_tests_properties(\"compile-{}\" PROPERTIES SKIP_RETURN_CODE 77 FIXTURES_SETUP \"{}\"{}{}{})\n",
                                         name, fix, timeoutProp(t.timeoutSecs), labelsProp, envProp({}));
-              frag += t.variants ^ mk_string("", [&](const auto &suffix, const auto &extraEnv) {
-                        const auto vname = suffix.empty() ? name : name + "-" + suffix;
-                        return fmt::format("add_test(\"{}\" \"{}\" --run-only-task \"{}\"{})\n", vname, binary, t.id, sourceArg(t.source))
+              frag += t.variants ^ mk_string("", [&](const CtestVariant &v) {
+                        const auto runId = v.runId.empty() ? t.id : v.runId;
+                        const auto base = prefix.empty() ? runId : prefix + "-" + runId;
+                        const auto vname = v.suffix.empty() ? base : base + "-" + v.suffix;
+                        const auto runLabels = v.labels.empty() ? labelsProp : fmt::format(" LABELS \"{}\"", v.labels);
+                        return fmt::format("add_test(\"{}\" \"{}\" --run-only-task \"{}\"{})\n", vname, binary, runId, sourceArg(t.source))
                                + fmt::format("set_tests_properties(\"{}\" PROPERTIES SKIP_RETURN_CODE 77 FIXTURES_REQUIRED \"{}\" "
                                              "RESOURCE_LOCK \"{}\"{}{}{})\n",
-                                             vname, fix, fix, timeoutProp(t.timeoutSecs), labelsProp, envProp(extraEnv));
+                                             vname, fix, fix, timeoutProp(t.timeoutSecs), runLabels, envProp(v.env));
                       });
               return frag
                      + fmt::format("add_test(\"cleanup-{}\" \"{}\" --cleanup-task \"{}\"{})\n", name, binary, t.id, sourceArg(t.source))

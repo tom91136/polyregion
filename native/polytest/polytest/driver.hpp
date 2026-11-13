@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -81,9 +82,15 @@ inline constexpr const char *OutputName = "out";
 enum class Mode : std::uint8_t { Offload, Passthrough };
 inline constexpr const char *modeName(Mode m) { return m == Mode::Offload ? "offload" : "passthrough"; }
 
+// one execution of a compiled task: `id` names the (case, device) pair, `target` is the full `<compile>!<device>`
+// string every run-side read of the target uses, `runs` are the steps after the compile expanded for that target
 struct RunVariant {
+  std::string id;
+  std::string target;
   std::string suffix;
   std::vector<std::pair<std::string, std::string>> env;
+  std::vector<TestCase::Run> runs;
+  std::string display;
 };
 
 // ctest-name-safe: alnum + `_` + `-` kept, else hex-escaped so distinct inputs don't collide
@@ -103,7 +110,7 @@ struct Task {
   std::string dir;
   std::string output;
   std::optional<std::string> compileFailure;
-  std::vector<TestCase::Run> runs; // templates already expanded against (variables + defaults + stdpar + input + output)
+  std::vector<TestCase::Run> runs; // the compile step, expanded against the compile target only
   std::vector<RunVariant> variants;
   std::optional<unsigned> timeoutSecs;
 
@@ -137,7 +144,9 @@ inline std::string archFor(const Task &t, const DriverConfig &cfg) {
          ^ get_or_else(std::string{});
 }
 
-inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg, bool preloadSanitizer) {
+inline std::string compileTargetFor(const Task &t, const DriverConfig &cfg) { return compileTargetOf(archFor(t, cfg)); }
+
+inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg, bool preloadSanitizer, const std::string &target) {
   std::vector<std::pair<std::string, std::string>> kvs;
   auto put = [&](std::string_view k, std::string_view v) {
     for (auto &e : kvs)
@@ -154,7 +163,7 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
     for (const auto &kv : cfg.passthroughEnvs)
       putKv(kv);
   put(cfg.driverEnvVar, cfg.driverPath);
-  put(polyregion::env::PolyrtPlatform, archFor(t, cfg));
+  put(polyregion::env::PolyrtPlatform, target);
   put(polyregion::env::PolyrtHostFallback, "0");
   {
     llvm::SmallString<256> manifest(t.output + ".images");
@@ -168,13 +177,13 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
   put("__GL_SHADER_DISK_CACHE", "0");
   // XXX rusticl loads Mesa's LLVM in-process; the ICD loader pulls it in for ANY OpenCL target, clashing
   // with polydco/polystl's LLVM (two libLLVMSPIRVLib) -> bad_alloc. expose it only when it's selected
-  const bool rusticlTarget = archFor(t, cfg) ^ contains_slice("rusticl");
+  const bool rusticlTarget = target ^ contains_slice("rusticl");
   materialiseProfileEnvironment(loadProfileEnv(cfg.profileDir))                                         //
       | filter([&](const auto &kv) { return rusticlTarget || !(kv ^ starts_with("RUSTICL_ENABLE=")); }) //
       | for_each(putKv);
   const char *const lockEnv = std::getenv(polyregion::env::PolyinvokeTestLock);
   const bool configuredLock = kvs | exists([&](const auto &entry) { return entry.first == polyregion::env::PolyinvokeTestLock; });
-  if (archFor(t, cfg) ^ starts_with("metal")) put(polyregion::env::PolyinvokeTestLock, "1");
+  if (target ^ starts_with("metal")) put(polyregion::env::PolyinvokeTestLock, "1");
   else if (lockEnv) put(polyregion::env::PolyinvokeTestLock, lockEnv);
   else if (!configuredLock) put(polyregion::env::PolyinvokeTestLock, "1");
   if (const char *const v = std::getenv("ASAN_OPTIONS")) put("ASAN_OPTIONS", v);
@@ -212,14 +221,13 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
   for (const auto *name : {polyregion::env::PolyfrontLibraryPath, polyregion::env::PolyfrontLibraryCapabilities,
                            polyregion::env::PolyinvokeVulkanLib, "VK_LOADER_DEBUG"})
     if (const char *v = std::getenv(name)) put(name, v);
-  if (const auto a = archFor(t, cfg); a ^ starts_with("opencl")) put(polyregion::env::PolyinvokeDisableSvm, "1");
+  if (target ^ starts_with("opencl")) put(polyregion::env::PolyinvokeDisableSvm, "1");
   // XXX forward OCL_ICD_VENDORS (dropped by the wholesale child env) narrowed to one vendor: rusticl pulls
   // Mesa's LLVM in-process clashing with polystl's, so a pocl target must never see rusticl.icd (or vice versa)
   if (const char *vendors = std::getenv("OCL_ICD_VENDORS")) {
-    const auto a = archFor(t, cfg);
     const char *vendorIcd = [&]() -> const char * {
       if (rusticlTarget) return "rusticl.icd";
-      if (a ^ contains_slice("Portable")) return "pocl.icd";
+      if (target ^ contains_slice("Portable")) return "pocl.icd";
       return nullptr;
     }();
     if (vendorIcd) {
@@ -240,10 +248,9 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
   constexpr char VkIcdSeparator = ':';
 #endif
   if (const char *icds = std::getenv("VK_DRIVER_FILES") ? std::getenv("VK_DRIVER_FILES") : std::getenv("VK_ICD_FILENAMES")) {
-    const auto a = archFor(t, cfg);
     const char *want = [&]() -> const char * {
-      if (a ^ contains_slice("llvmpipe")) return "lvp_icd";
-      if (a ^ contains_slice("SwiftShader")) return "swiftshader";
+      if (target ^ contains_slice("llvmpipe")) return "lvp_icd";
+      if (target ^ contains_slice("SwiftShader")) return "swiftshader";
       return nullptr;
     }();
     if (want)
@@ -338,16 +345,16 @@ inline void removeArtifacts(const std::string &dir) {
   llvm::sys::fs::remove_directories(absolute);
 }
 
-inline StepResult runStep(const Task &task, const DriverConfig &cfg, const std::string &command) {
+inline StepResult runStep(const Task &task, const DriverConfig &cfg, const std::string &command, const std::string &target) {
   const auto fragments = command ^ words();
   auto [envBits, args] = fragments ^ span([](const auto &x) { return x ^ contains('='); });
 
-  auto envs =
-      baseEnvs(task, cfg, args ^ head_maybe() ^ exists([&](const auto &arg) { return arg == task.output; })) ^ filter([&](const auto &e) {
-        return !(envBits ^ exists([&](const auto &kv) {
-                   return kv ^ split_once('=') ^ exists([&](const auto &entry) { return e ^ starts_with(entry.first + "="); });
-                 }));
-      });
+  auto envs = baseEnvs(task, cfg, args ^ head_maybe() ^ exists([&](const auto &arg) { return arg == task.output; }), target) //
+              ^ filter([&](const auto &e) {
+                  return !(envBits ^ exists([&](const auto &kv) {
+                             return kv ^ split_once('=') ^ exists([&](const auto &entry) { return e ^ starts_with(entry.first + "="); });
+                           }));
+                });
   envs ^= concat(envBits);
 
   const std::vector<llvm::StringRef> envRefs = envs ^ map([](const auto &x) -> llvm::StringRef { return x; });
@@ -383,12 +390,11 @@ inline StepResult runStep(const Task &task, const DriverConfig &cfg, const std::
   return {.exitCode = code, .stdoutText = std::move(stdoutText), .stderrText = std::move(stderrText), .cmdline = std::move(cmdline)};
 }
 
-inline skip::Verdict skipVerdict(const Task &task, const DriverConfig &cfg, const std::string &stderrText) {
-  const auto selector = archFor(task, cfg);
+inline skip::Verdict skipVerdict(const Task &task, const DriverConfig &cfg, const std::string &selector, const std::string &stderrText) {
   std::optional<skip::Inventory> inventory;
   if (compiletime::TargetSpec::parse(selector)) {
     const std::vector<std::string> args{resolveBin("polyinfo", cfg), "--json", "--select", selector};
-    const auto envs = baseEnvs(task, cfg, false);
+    const auto envs = baseEnvs(task, cfg, false, selector);
     const std::vector<llvm::StringRef> envRefs = envs ^ map([](const auto &x) -> llvm::StringRef { return x; });
     const std::vector<llvm::StringRef> argRefs = args ^ map([](const auto &x) -> llvm::StringRef { return x; });
     const auto outPath = task.output + ".inventory";
@@ -445,7 +451,8 @@ inline TaskOutcome compileTask(const Task &task, const DriverConfig &cfg) {
   removeArtifacts(task.dir);
   llvm::sys::fs::create_directories(task.dir);
   const auto start = std::chrono::steady_clock::now();
-  auto r = runStep(task, cfg, task.runs[0].command);
+  const auto target = compileTargetFor(task, cfg);
+  auto r = runStep(task, cfg, task.runs[0].command, target);
   const auto exit = r.exitCode;
   if (std::getenv(polyregion::env::PolyregionPassLog) && !r.stderrText.empty())
     std::fprintf(stderr, "[%s]\n%s\n", task.display().c_str(), r.stderrText.c_str());
@@ -474,9 +481,9 @@ inline TaskOutcome compileTask(const Task &task, const DriverConfig &cfg) {
         constexpr const char *reproFlags = " -c";
 #endif
         const auto objCmd = (toks ^ mk_string(" ", [&](const auto &t) { return t == out ? obj : t; })) + reproFlags;
-        auto r1 = runStep(task, cfg, objCmd);
+        auto r1 = runStep(task, cfg, objCmd, target);
         const auto first = r1.exitCode == 0 ? polyregion::read_string(obj) : std::string{};
-        auto r2 = runStep(task, cfg, objCmd);
+        auto r2 = runStep(task, cfg, objCmd, target);
         if (r1.exitCode != 0 || r2.exitCode != 0)
           reproReason = fmt::format("repro -c compile failed (exit {}/{})", r1.exitCode, r2.exitCode),
           reproFailure = r1.exitCode != 0 ? std::move(r1) : std::move(r2);
@@ -499,40 +506,58 @@ inline TaskOutcome compileTask(const Task &task, const DriverConfig &cfg) {
   return o;
 }
 
-inline TaskOutcome runTask(const Task &task, const DriverConfig &cfg) {
+inline TaskOutcome runTask(const Task &task, const DriverConfig &cfg, const RunVariant &variant) {
   if (task.compileFailure) return {};
   TaskOutcome o;
   const auto start = std::chrono::steady_clock::now();
-  for (std::size_t i = 1; i < task.runs.size(); ++i) {
-    auto r = runStep(task, cfg, task.runs[i].command);
+  for (std::size_t i = 0; i < variant.runs.size(); ++i) {
+    const auto step = i + 1;
+    auto r = runStep(task, cfg, variant.runs[i].command, variant.target);
     const auto exit = r.exitCode;
     absorbStep(o, std::move(r));
-    if (const auto &failure = task.runs[i].failure) {
-      if (exit == 0) o.status = TaskStatus::Fail, o.failReason = fmt::format("run step {} unexpectedly succeeded", i);
+    if (const auto &failure = variant.runs[i].failure) {
+      if (exit == 0) o.status = TaskStatus::Fail, o.failReason = fmt::format("run step {} unexpectedly succeeded", step);
       else if (o.stderrCapture.find(*failure) == std::string::npos)
-        o.status = TaskStatus::Fail, o.failReason = fmt::format("run step {} failed without expected diagnostic '{}'", i, *failure);
+        o.status = TaskStatus::Fail, o.failReason = fmt::format("run step {} failed without expected diagnostic '{}'", step, *failure);
       break;
     }
     if (exit == 77) {
-      const auto verdict = skipVerdict(task, cfg, o.stderrCapture);
+      const auto verdict = skipVerdict(task, cfg, variant.target, o.stderrCapture);
       o.status = verdict.justified ? TaskStatus::Skip : TaskStatus::Fail;
       o.failReason = verdict.justified ? verdict.reason : "unjustified skip (exit 77): " + verdict.reason;
       break;
     }
     if (exit != 0) {
       o.status = TaskStatus::Fail;
-      o.failReason = fmt::format("run step {} failed (exit {})", i, exit);
+      o.failReason = fmt::format("run step {} failed (exit {})", step, exit);
       break;
     }
     const auto lines = o.stdoutCapture ^ split('\n');
-    if (!(task.runs[i].expect | forall([&](const auto &e) { return checkExpect(e, lines, o.stdoutCapture, o); }))) break;
-    if (!checkStderrCounts(task.runs[i], o)) break;
+    if (!(variant.runs[i].expect | forall([&](const auto &e) { return checkExpect(e, lines, o.stdoutCapture, o); }))) break;
+    if (!checkStderrCounts(variant.runs[i], o)) break;
   }
   o.secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
   return o;
 }
 
 } // namespace detail
+
+// tasks with the same compile step and output directory differ in device alone: compile once, run on each device. A task
+// that stays single-device keeps its own target; a merged one is named by the compile target.
+inline std::vector<Task> mergeByCompile(const std::vector<Task> &tasks, const DriverConfig &cfg) {
+  std::vector<Task> merged;
+  std::unordered_map<std::string, std::size_t> index;
+  for (const auto &t : tasks) {
+    const auto key = t.dir + '\0' + (t.runs.empty() ? std::string{} : t.runs[0].command);
+    if (const auto it = index.find(key); it != index.end()) merged[it->second].variants ^= concat(t.variants);
+    else index.emplace(key, merged.size()), merged.push_back(t);
+  }
+  for (auto &t : merged)
+    if ((t.variants ^ map([](const auto &v) { return v.id; }) ^ distinct()).size() > 1)
+      t.variables =
+          t.variables ^ map([&](const auto &k, const auto &v) { return std::pair{k, k == cfg.archVar ? compileTargetOf(v) : v}; });
+  return merged;
+}
 
 inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, bool passthrough,
                                         const std::vector<std::string> &caseFilters, const std::string &source = {}) {
@@ -568,7 +593,8 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
            });
   };
 
-  // one Task per mode for a (case, matrix-row, defaults-variant) combination
+  // one single-device Task per mode for a (case, matrix-row, defaults-variant) combination; output paths and the compile
+  // step derive from the compile target only, so tasks that differ in device alone can be merged by `mergeByCompile`
   const auto tasksFor = [&](const std::string &file, const std::string &shortName, const auto &tc, const auto &vars,
                             const std::string &label, const std::string &value) {
     const auto varsWithLabel = vars ^ append(std::pair{cfg.defaultsLabelVar, label});
@@ -589,16 +615,22 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
       if (!targetValue) return std::vector<Task>{};
       targetVars.emplace_back(cfg.targetVar, *targetValue);
     }
-    const auto augmented = varsWithLabel //
-                           ^ concat(extraVars) ^ concat(targetVars)
-                           ^ concat(std::vector<std::pair<std::string, std::string>>{
-                               {cfg.defaultsVar, value},
-                               {cfg.stdpar.first, fmt::vformat(cfg.stdpar.second, mkArgStore(varsWithLabel ^ concat(targetVars)))},
-                               {"input", file},
-                               {"libm", libmFlag}});
-    const auto unevalStore = mkArgStore(augmented ^ append(std::pair{std::string("output"), std::string("<unevaluated>")}));
+    const auto augment = [&](const auto &bound) {
+      return bound //
+             ^ concat(extraVars) ^ concat(targetVars)
+             ^ concat(std::vector<std::pair<std::string, std::string>>{
+                 {cfg.defaultsVar, value},
+                 {cfg.stdpar.first, fmt::vformat(cfg.stdpar.second, mkArgStore(bound ^ concat(targetVars)))},
+                 {"input", file},
+                 {"libm", libmFlag}});
+    };
+    const auto compileVars =
+        varsWithLabel ^ map([&](const auto &k, const auto &v) { return std::pair{k, k == cfg.archVar ? compileTargetOf(v) : v}; });
+    const auto compileAugmented = augment(compileVars);
+    const auto augmented = augment(varsWithLabel);
+    const auto unevalStore = mkArgStore(compileAugmented ^ append(std::pair{std::string("output"), std::string("<unevaluated>")}));
     const auto runsCmd = tc.runs ^ mk_string("", [&](const auto &r) { return fmt::vformat(r.command, unevalStore); });
-    const auto varsKey = varsWithLabel ^ mk_string("|", [](const auto &k, const auto &v) { return k + "=" + v; });
+    const auto varsKey = compileVars ^ mk_string("|", [](const auto &k, const auto &v) { return k + "=" + v; });
     const auto runsHash = std::hash<std::string>{}(runsCmd + '\0' + varsKey + '\0' + tc.name);
     const auto arch = varsWithLabel                                                                                                     //
                       ^ collect_first([&](const auto &k, const auto &v) { return k == cfg.archVar ? std::optional{v} : std::nullopt; }) //
@@ -608,19 +640,28 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
         fmt::format("{}{}_{:08x}", cfg.outputPrefix, shortName.empty() ? "anon" : shortName, static_cast<std::uint32_t>(runsHash));
     const auto caseModes = tc.offloadOnly ? (modes ^ filter([](const auto &m) { return m == Mode::Offload; })) : modes;
     return caseModes ^ map([&](const auto &mode) -> Task {
-             std::vector<RunVariant> variants;
-             if (mode == Mode::Offload && physical)
-               variants = {RunVariant{.suffix = "", .env = {}},                                                   // compiletime (default)
-                           RunVariant{.suffix = "runtime", .env = {{std::string(env::PolyrtMirror), "runtime"}}}, // generic SMA walk
-                           RunVariant{.suffix = "usm", .env = {{std::string(env::PolyrtMirror), "off"}}}};        // USM; 77 if no USM
              const auto dir = fmt::format("{}_{}", baseOutput, modeName(mode));
              const auto output = dir + "/" + OutputName;
+             const auto compileStore = mkArgStore(compileAugmented ^ append(std::pair{std::string("output"), output}));
              const auto store = mkArgStore(augmented ^ append(std::pair{std::string("output"), output}));
-             auto runs = tc.runs ^ map([&](const auto &r) {
-                           return TestCase::Run{fmt::vformat(r.command, store), r.expect, r.stderrCounts, r.failure};
-                         });
-             return {mode,          file, tc.name, varsWithLabel, dir, output, tc.compileFailure, std::move(runs), std::move(variants),
-                     tc.timeoutSecs};
+             const auto expand = [](const auto &r, const auto &bound) {
+               return TestCase::Run{fmt::vformat(r.command, bound), r.expect, r.stderrCounts, r.failure};
+             };
+             Task task{
+                 mode, file,          tc.name,           varsWithLabel,
+                 dir,  output,        tc.compileFailure, tc.runs ^ take(1) ^ map([&](const auto &r) { return expand(r, compileStore); }),
+                 {},   tc.timeoutSecs};
+             const auto steps = tc.runs ^ drop(1) ^ map([&](const auto &r) { return expand(r, store); });
+             using Mirror = std::pair<std::string, std::vector<std::pair<std::string, std::string>>>;
+             const auto mirrors = mode == Mode::Offload && physical
+                                      ? std::vector<Mirror>{{"", {}}, // compiletime (default)
+                                                            {"runtime", {{std::string(env::PolyrtMirror), "runtime"}}}, // generic SMA walk
+                                                            {"usm", {{std::string(env::PolyrtMirror), "off"}}}}         // USM; 77 if no USM
+                                      : std::vector<Mirror>{{"", {}}};
+             task.variants = mirrors ^ map([&](const auto &suffix, const auto &mirrorEnv) {
+                               return RunVariant{task.id(), arch, suffix, mirrorEnv, steps, task.display()};
+                             });
+             return task;
            });
   };
 
@@ -640,12 +681,14 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
                             });
                    });
 
-  return all ^ distinct_by([&](const Task &t) -> std::string {
-           if (t.mode != Mode::Passthrough) return t.id();
-           return fmt::format("P|{}|{}|{}", t.testFile, t.caseName, t.variables ^ mk_string("|", [&](const auto &k, const auto &v) {
-                                                                      return k + "=" + (k == cfg.archVar ? std::string{} : v);
-                                                                    }));
-         });
+  return mergeByCompile(all ^ distinct_by([&](const Task &t) -> std::string {
+                          if (t.mode != Mode::Passthrough) return t.id();
+                          return fmt::format("P|{}|{}|{}", t.testFile, t.caseName,
+                                             t.variables ^ mk_string("|", [&](const auto &k, const auto &v) {
+                                               return k + "=" + (k == cfg.archVar ? std::string{} : v);
+                                             }));
+                        }),
+                        cfg);
 }
 
 // NOLINTBEGIN(readability-redundant-member-init)
@@ -675,17 +718,29 @@ struct RunnerOptions {
 };
 // NOLINTEND(readability-redundant-member-init)
 
+inline std::string runLabels(const RunVariant &v) {
+  if (v.target.empty()) return {};
+  const auto device = ctestSafe(v.target);
+  const auto compile = ctestSafe(compileTargetOf(v.target));
+  return device == compile ? "codegen;" + device : "codegen;" + device + ";" + compile;
+}
+
 inline void emitCtest(const std::vector<Task> &tasks, const DriverConfig &cfg, const std::string &file, const std::string &prefix,
                       const std::string &binary, const std::string &workdir, const std::string &env) {
   const auto entries =
       tasks ^ map([&](const auto &t) {
-        const auto vs = t.variants ^ map([](const auto &v) {
-                          return std::pair{v.suffix, v.env ^ mk_string(";", [](const auto &k, const auto &val) { return k + "=" + val; })};
-                        });
+        const auto source = std::string(llvm::sys::path::filename(t.testFile));
+        const auto timeout = t.timeoutSecs.value_or(DefaultTimeoutSecs);
         const auto target = detail::archFor(t, cfg);
-        const auto labels = target.empty() ? std::string{} : "codegen;" + ctestSafe(target);
-        return CtestEntry{t.id(), labels, vs, std::string(llvm::sys::path::filename(t.testFile)),
-                          t.timeoutSecs.value_or(DefaultTimeoutSecs)};
+        if (t.variants.size() == 1 && t.variants[0].suffix.empty())
+          return CtestEntry{t.id(), target.empty() ? std::string{} : runLabels(t.variants[0]), {}, source, timeout};
+        const auto labels = target.empty() ? std::string{} : "codegen;" + ctestSafe(compileTargetOf(target));
+        const auto vs =
+            t.variants ^ map([](const auto &v) {
+              return CtestVariant{v.suffix, v.env ^ mk_string(";", [](const auto &k, const auto &val) { return k + "=" + val; }), v.id,
+                                  runLabels(v)};
+            });
+        return CtestEntry{t.id(), labels, vs, source, timeout};
       });
   emitCtestFragment(file, prefix, binary, workdir, env, entries);
 }
@@ -699,6 +754,26 @@ inline const char *statusTag(TaskStatus s) {
   return "?";
 }
 
+// the device-level runs (the default mirror variant) of a task
+inline std::vector<const RunVariant *> deviceRuns(const Task &t) {
+  std::vector<const RunVariant *> runs;
+  for (const auto &v : t.variants)
+    if (v.suffix.empty()) runs.push_back(&v);
+  return runs;
+}
+
+// a task id selects all its device runs, a run id selects that run alone
+inline std::vector<Task> selectTasks(const std::vector<Task> &tasks, const std::string &id) {
+  if (const auto whole = tasks ^ filter([&](const auto &t) { return t.id() == id; }); !whole.empty()) return whole;
+  return tasks ^ collect([&](const auto &t) -> std::optional<Task> {
+           const auto run = t.variants ^ filter([&](const auto &v) { return v.suffix.empty() && v.id == id; });
+           if (run.empty()) return std::nullopt;
+           auto only = t;
+           only.variants = run;
+           return only;
+         });
+}
+
 inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
   // XXX ROCr writes a ~150 MB gpucore.<pid> per GPU VM fault (honours RLIMIT_CORE)
   disableUncollectedCoreDumps();
@@ -707,29 +782,30 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
     return 0;
   }
   if (opts.listShards) {
-    loadTestTargets(cfg.profileDir)                           //
-            ^ map([](const auto &t) { return ctestSafe(t); }) //
-            ^ distinct()                                      //
+    loadTestTargets(cfg.profileDir)                                            //
+            ^ map([](const auto &t) { return ctestSafe(compileTargetOf(t)); }) //
+            ^ distinct()                                                       //
         | for_each([](const auto &s) { std::fprintf(stdout, "%s\n", s.c_str()); });
     return 0;
   }
   auto allTasks = enumerateTasks(cfg, opts.offload, opts.passthrough, opts.caseFilters, opts.source);
-  // single-task compile / run / cleanup, driven by ctest fixtures for shared-compile variant tasks
+  // single-task compile / run / cleanup, driven by ctest fixtures for shared-compile tasks
   const auto single = [&]() -> std::string {
     if (!opts.compileTask.empty()) return opts.compileTask;
     if (!opts.runOnlyTask.empty()) return opts.runOnlyTask;
     return opts.cleanupTask;
   }();
   if (!single.empty()) {
-    auto it = allTasks ^ find([&](const auto &t) { return t.id() == single; });
-    if (!it) return std::fprintf(stderr, "polytest: no task with id '%s'\n", single.c_str()), 1;
-    const Task &t = *it;
-    if (!opts.cleanupTask.empty()) {
+    const bool compiles = !opts.compileTask.empty(), cleans = !opts.cleanupTask.empty();
+    const auto selected =
+        compiles || cleans ? allTasks ^ filter([&](const auto &t) { return t.id() == single; }) : selectTasks(allTasks, single);
+    if (selected.empty()) return std::fprintf(stderr, "polytest: no task with id '%s'\n", single.c_str()), 1;
+    const Task &t = selected.front();
+    if (cleans) {
       detail::removeArtifacts(t.dir);
       return 0;
     }
-    const bool isCompile = !opts.compileTask.empty();
-    const auto o = isCompile ? detail::compileTask(t, cfg) : detail::runTask(t, cfg);
+    const auto o = compiles ? detail::compileTask(t, cfg) : detail::runTask(t, cfg, *deviceRuns(t).front());
     if (o.status == TaskStatus::Fail) {
       if (!o.failReason.empty()) std::fprintf(stderr, "  reason: %s\n", o.failReason.c_str());
       if (!o.cmdline.empty()) std::fprintf(stderr, "  cmd: %s\n", o.cmdline.c_str());
@@ -739,14 +815,11 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
     return o.status == TaskStatus::Pass ? 0 : 1;
   }
   if (!opts.runTask.empty()) {
-    auto it = allTasks ^ find([&](const auto &t) { return t.id() == opts.runTask; });
-    if (!it) {
+    allTasks = selectTasks(allTasks, opts.runTask);
+    if (allTasks.empty()) {
       std::fprintf(stderr, "polytest: no task with id '%s'\n", opts.runTask.c_str());
       return 1;
     }
-    Task only = std::move(const_cast<Task &>(*it));
-    allTasks.clear();
-    allTasks.push_back(std::move(only));
   }
   const auto &tasks = allTasks;
   if (tasks.empty()) {
@@ -754,7 +827,7 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
     return 0;
   }
   if (opts.listIds) {
-    const auto ids = tasks ^ map([](const auto &t) { return t.id(); });
+    const auto ids = tasks ^ flat_map([](const auto &t) { return deviceRuns(t) ^ map([](const auto *v) { return v->id; }); });
     ids | for_each([](const auto &id) { std::fprintf(stdout, "%s\n", id.c_str()); });
     // XXX duplicate ids shadow tasks: ctest registers both names but --run-task resolves the first
     const auto groupedIds = ids ^ group_by([](const auto &id) { return id; });
@@ -771,14 +844,17 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
     return 0;
   }
   if (opts.list) {
-    tasks | for_each([](const auto &t) { std::fprintf(stdout, "%s\n", t.display().c_str()); });
+    tasks | for_each([](const auto &t) {
+      deviceRuns(t) | for_each([](const auto *v) { std::fprintf(stdout, "%s\n", v->display.c_str()); });
+    });
     return 0;
   }
 
   const auto requestedJobs =
       opts.compileJobs > 0 ? static_cast<std::size_t>(opts.compileJobs) : std::max(1U, std::thread::hardware_concurrency());
   const auto jobs = std::min(requestedJobs, tasks.size());
-  std::fprintf(stderr, "polytest: %zu tasks; compile -j%zu, run -j1\n", tasks.size(), jobs);
+  const auto runCount = tasks ^ fold_left(std::size_t{0}, [](const auto &acc, const auto &t) { return acc + deviceRuns(t).size(); });
+  std::fprintf(stderr, "polytest: %zu compiles, %zu runs; compile -j%zu, run -j1\n", tasks.size(), runCount, jobs);
 
   std::vector<TaskOutcome> compileOutcomes(tasks.size());
   std::atomic<std::size_t> nextIdx{0};
@@ -816,25 +892,32 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
   pool | for_each([](auto &t) { t.join(); });
   const auto compileSecs = std::chrono::duration<double>(std::chrono::steady_clock::now() - compileStart).count();
 
-  std::vector<TaskOutcome> finalOutcomes(tasks.size());
+  std::vector<TaskOutcome> finalOutcomes;
+  std::vector<std::string> finalDisplays;
   const auto runStart = std::chrono::steady_clock::now();
+  std::size_t runIdx = 0;
   for (std::size_t i = 0; i < tasks.size(); ++i) {
     const auto &co = compileOutcomes[i];
-    if (co.status != TaskStatus::Pass) {
-      finalOutcomes[i] = co;
-      if (co.status == TaskStatus::Skip) reportSkip(tasks[i].id(), co.failReason);
-      const char *label = co.status == TaskStatus::Skip ? "compile-skip" : "compile-fail";
-      std::fprintf(stderr, "[run %zu/%zu] %s %s (%s)\n", i + 1, tasks.size(), statusTag(co.status), tasks[i].display().c_str(), label);
-      continue;
+    bool cleanable = true;
+    for (const auto *variant : deviceRuns(tasks[i])) {
+      ++runIdx;
+      finalDisplays.push_back(variant->display);
+      if (co.status != TaskStatus::Pass) {
+        finalOutcomes.push_back(co);
+        cleanable = false;
+        if (co.status == TaskStatus::Skip) reportSkip(variant->id, co.failReason);
+        const char *label = co.status == TaskStatus::Skip ? "compile-skip" : "compile-fail";
+        std::fprintf(stderr, "[run %zu/%zu] %s %s (%s)\n", runIdx, runCount, statusTag(co.status), variant->display.c_str(), label);
+        continue;
+      }
+      const auto out = detail::runTask(tasks[i], cfg, *variant);
+      finalOutcomes.push_back(out);
+      if (out.status == TaskStatus::Skip) reportSkip(variant->id, out.failReason);
+      else if (out.status == TaskStatus::Fail) cleanable = false;
+      std::fprintf(stderr, "[run %zu/%zu] %s %s (%.2fs)\n", runIdx, runCount, statusTag(out.status), variant->display.c_str(), out.secs);
+      dumpDetails(out, /*includeStdout*/ true);
     }
-    const auto out = detail::runTask(tasks[i], cfg);
-    finalOutcomes[i] = out;
-    if (out.status == TaskStatus::Skip) reportSkip(tasks[i].id(), out.failReason);
-    std::fprintf(stderr, "[run %zu/%zu] %s %s (%.2fs)\n", i + 1, tasks.size(), statusTag(out.status), tasks[i].display().c_str(), out.secs);
-    dumpDetails(out, /*includeStdout*/ true);
-    if (cfg.cleanupOnSuccess && (out.status == TaskStatus::Pass || out.status == TaskStatus::Skip)) {
-      detail::removeArtifacts(tasks[i].dir);
-    }
+    if (cfg.cleanupOnSuccess && cleanable) detail::removeArtifacts(tasks[i].dir);
   }
   const auto runSecs = std::chrono::duration<double>(std::chrono::steady_clock::now() - runStart).count();
 
@@ -843,13 +926,13 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
   const auto skip = countBy(TaskStatus::Skip);
   const auto fail = countBy(TaskStatus::Fail);
   if (fail > 0) {
-    const auto failedDisplay = tasks                                                                              //
+    const auto failedDisplay = finalDisplays                                                                      //
                                | zip(finalOutcomes)                                                               //
                                | filter([](const auto &, const auto &o) { return o.status == TaskStatus::Fail; }) //
-                               | mk_string("\n", [](const auto &t, const auto &) { return "  - " + t.display(); });
+                               | mk_string("\n", [](const auto &d, const auto &) { return "  - " + d; });
     std::fprintf(stderr, "polytest: failures (%zu):\n%s\n", fail, failedDisplay.c_str());
   }
-  std::fprintf(stderr, "polytest: pass=%zu skip=%zu fail=%zu total=%zu compile=%.1fs run=%.1fs\n", pass, skip, fail, tasks.size(),
+  std::fprintf(stderr, "polytest: pass=%zu skip=%zu fail=%zu total=%zu compile=%.1fs run=%.1fs\n", pass, skip, fail, finalOutcomes.size(),
                compileSecs, runSecs);
   if (fail > 0) return 1;
   if (!opts.runTask.empty() && skip > 0) return 77;
