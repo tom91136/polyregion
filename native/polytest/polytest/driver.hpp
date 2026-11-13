@@ -538,7 +538,7 @@ inline TaskOutcome runTask(const Task &task, const DriverConfig &cfg) {
 } // namespace detail
 
 inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, bool passthrough,
-                                        const std::vector<std::string> &caseFilters) {
+                                        const std::vector<std::string> &caseFilters, const std::string &source = {}) {
   auto mkArgStore = [](const std::vector<std::pair<std::string, std::string>> &xs) {
     fmt::dynamic_format_arg_store<fmt::format_context> s;
     xs | for_each([&](const auto &k, const auto &v) { s.push_back(fmt::arg(k.c_str(), v)); });
@@ -624,7 +624,9 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
            });
   };
 
-  const auto all = cfg.testFiles ^ flat_map([&](const auto &file) {
+  const auto files =
+      source.empty() ? cfg.testFiles : cfg.testFiles ^ filter([&](const auto &f) { return llvm::sys::path::filename(f) == source; });
+  const auto all = files ^ flat_map([&](const auto &file) {
                      std::ifstream src(file, std::ios::in | std::ios::binary);
                      const auto cases = TestCase::parseTestCase(src, cfg.directive, {{cfg.archVar, targets}});
                      const auto shortName = extractTestName(file);
@@ -653,6 +655,7 @@ struct RunnerOptions {
   std::string compileTask = {};
   std::string runOnlyTask = {};
   std::string cleanupTask = {};
+  std::string source = {};
   int compileJobs = -1;
   bool verbose = false;
   bool offload = true;
@@ -681,7 +684,7 @@ inline void emitCtest(const std::vector<Task> &tasks, const DriverConfig &cfg, c
                         });
         const auto target = detail::archFor(t, cfg);
         const auto labels = target.empty() ? std::string{} : "codegen;" + ctestSafe(target);
-        return CtestEntry{t.id(), labels, vs};
+        return CtestEntry{t.id(), labels, vs, std::string(llvm::sys::path::filename(t.testFile))};
       });
   emitCtestFragment(file, prefix, binary, workdir, env, entries);
 }
@@ -709,7 +712,7 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
         | for_each([](const auto &s) { std::fprintf(stdout, "%s\n", s.c_str()); });
     return 0;
   }
-  auto allTasks = enumerateTasks(cfg, opts.offload, opts.passthrough, opts.caseFilters);
+  auto allTasks = enumerateTasks(cfg, opts.offload, opts.passthrough, opts.caseFilters, opts.source);
   // single-task compile / run / cleanup, driven by ctest fixtures for shared-compile variant tasks
   const auto single = [&]() -> std::string {
     if (!opts.compileTask.empty()) return opts.compileTask;
@@ -771,8 +774,10 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
     return 0;
   }
 
-  const int jobs = opts.compileJobs > 0 ? opts.compileJobs : static_cast<int>(std::max(1U, std::thread::hardware_concurrency()));
-  std::fprintf(stderr, "polytest: %zu tasks; compile -j%d, run -j1\n", tasks.size(), jobs);
+  const auto requestedJobs =
+      opts.compileJobs > 0 ? static_cast<std::size_t>(opts.compileJobs) : std::max(1U, std::thread::hardware_concurrency());
+  const auto jobs = std::min(requestedJobs, tasks.size());
+  std::fprintf(stderr, "polytest: %zu tasks; compile -j%zu, run -j1\n", tasks.size(), jobs);
 
   std::vector<TaskOutcome> compileOutcomes(tasks.size());
   std::atomic<std::size_t> nextIdx{0};
@@ -805,7 +810,7 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
   };
   std::vector<std::thread> pool;
   pool.reserve(jobs);
-  for (int t = 0; t < jobs; ++t)
+  for (std::size_t t = 0; t < jobs; ++t)
     pool.emplace_back(worker);
   pool | for_each([](auto &t) { t.join(); });
   const auto compileSecs = std::chrono::duration<double>(std::chrono::steady_clock::now() - compileStart).count();
@@ -862,6 +867,8 @@ inline int fired_main( //
     fire::optional<std::string> compileTask = fire::arg({"--compile-task", "Compile one task by id, no run (ctest fixture setup)"}),
     fire::optional<std::string> runOnlyTask = fire::arg({"--run-only-task", "Run one already-compiled task by id, no compile"}),
     fire::optional<std::string> cleanupTask = fire::arg({"--cleanup-task", "Remove one task's binary (ctest fixture cleanup)"}),
+    fire::optional<std::string> source = fire::arg({"--source",
+                                                    "Enumerate only the test file with this name (with the single-task options)"}),
     int jobs = fire::arg({"-j", "--jobs", "Compile parallelism (default: hardware_concurrency)"}, -1),
     bool verbose = fire::arg({"-v", "--verbose", "Dump stdout/stderr for every task"}),
     bool offloadOnly = fire::arg({"--offload-only", "Skip passthrough mode"}),
@@ -891,6 +898,7 @@ inline int fired_main( //
   if (compileTask) opts.compileTask = compileTask.value();
   if (runOnlyTask) opts.runOnlyTask = runOnlyTask.value();
   if (cleanupTask) opts.cleanupTask = cleanupTask.value();
+  if (source) opts.source = source.value();
   if (emitCtest) opts.emitFile = emitCtest.value();
   if (emitPrefix) opts.emitPrefix = emitPrefix.value();
   if (emitBinary) opts.emitBinary = emitBinary.value();

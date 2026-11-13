@@ -143,6 +143,21 @@ TEST_CASE("Passthrough runs once however many targets are listed") {
   CHECK(detail::archFor(passthrough[0], cfg) == "host@native");
 }
 
+TEST_CASE("A source name limits enumeration to that file") {
+  using namespace polyregion::polytest;
+  TempDir dir;
+  polyregion::env::ScopedEnv targets(polyregion::env::PolyregionTestTargets, "host@native");
+  std::ofstream(dir.file("check_a.cpp")) << "#pragma region case: a\n#pragma region do: echo {output}\n";
+  std::ofstream(dir.file("check_b.cpp")) << "#pragma region case: b\n#pragma region do: echo {output}\n";
+  auto cfg = testConfig(dir.path);
+  cfg.testFiles = {dir.file("check_a.cpp"), dir.file("check_b.cpp")};
+  CHECK(enumerateTasks(cfg, true, false, {}).size() == 2);
+  const auto tasks = enumerateTasks(cfg, true, false, {}, "check_b.cpp");
+  REQUIRE(tasks.size() == 1);
+  CHECK(tasks[0].caseName == "b");
+  CHECK(enumerateTasks(cfg, true, false, {}, "check_c.cpp").empty());
+}
+
 TEST_CASE("Cache and library locations reach the child environment") {
   using namespace polyregion::polytest;
   TempDir dir;
