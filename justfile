@@ -285,7 +285,7 @@ test-native *args='': build-pass-native
         if [ -s "$package_service" ]; then export POLYPASS_PLUGINS="$package_service"; break; fi
     done
     rm -f "$BUILD/Testing/Temporary/CTestCostData.txt"
-    ninja -C "$BUILD" polyinvoke-tests-discover polycpp-tests-discover polyfc-tests-discover \
+    cmake --build "$BUILD" --target polyinvoke-tests-discover polycpp-tests-discover polyfc-tests-discover \
         polycommon-tests polyc-tests polyrt-tests polyreflect-rt-tests polytest-tests
     # force ctest colour on a terminal; auto (off) when piped to a log so it stays greppable
     junit="$BUILD/Testing/test-native.xml"; rm -f "$junit"
@@ -300,7 +300,7 @@ list-shards profile='':
     set -euo pipefail
     {{ msvc_reenter }}
     BUILD=$(just _native-build)
-    ninja -C "$BUILD" polycpp-tests >/dev/null
+    cmake --build "$BUILD" --target polycpp-tests >/dev/null
     bin=$(find "$BUILD" \( -name polycpp-tests -o -name polycpp-tests.exe \) -type f | head -1)
     POLYREGION_TEST_PROFILE="{{ profile }}" "$bin" --list-shards
 
@@ -339,7 +339,7 @@ test-native-with-emulators *args='': _pass-bundle
     BUILD=$(just _native-build)
     export POLYREGION_TEST_PROFILE=emulators
     export POLYINVOKE_TEST_LOCK="${POLYINVOKE_TEST_LOCK:-0}"
-    ninja -C "$BUILD" polyinvoke-tests-discover polycpp-tests-discover polyfc-tests-discover \
+    cmake --build "$BUILD" --target polyinvoke-tests-discover polycpp-tests-discover polyfc-tests-discover \
         polycommon-tests polyc-tests polyrt-tests polyreflect-rt-tests polytest-tests
     CLICOLOR_FORCE=$([ -t 1 ] && echo 1 || echo 0) ctest --test-dir "$BUILD" --timeout 600 {{ args }}
 
