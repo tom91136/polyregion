@@ -15,9 +15,10 @@ FROM almalinux:8 AS base
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 COPY --from=ci dnf_retry.sh /usr/local/bin/dnf-retry
 
+# XXX LLVM 21 does not detect gcc-toolset-13, so PoCL kernel links need the system gcc
 RUN dnf-retry -y --setopt=retries=5 --setopt=timeout=30 install epel-release dnf-plugins-core \
  && dnf config-manager --set-enabled powertools \
- && dnf-retry -y --setopt=retries=5 --setopt=timeout=30 install gcc-toolset-13 git make cmake ninja-build pkgconfig \
+ && dnf-retry -y --setopt=retries=5 --setopt=timeout=30 install gcc gcc-toolset-13 git make cmake ninja-build pkgconfig \
       python3.11 python3.11-pip flex bison wget xz tar which file patch \
       zlib-devel expat-devel libzstd-devel libffi-devel ncurses-devel \
       libxml2-devel libdrm-devel elfutils-libelf-devel \
