@@ -497,18 +497,44 @@ TEST_CASE("A compile step exiting 77 fails") {
   CHECK(detail::compileTask(task, testConfig(dir.path)).status == TaskStatus::Fail);
 }
 
-TEST_CASE("A failing repro compile reports its own stderr") {
+TEST_CASE("The repro check rebuilds the output and compares it") {
   using namespace polyregion::polytest;
   TempDir dir;
-  script(dir, "compile.sh", R"sh(case " $* " in *" -c "*) echo 'repro diagnostic' >&2; exit 3 ;; esac
+  const auto compile = [&](const std::string &body) {
+    script(dir, "compile.sh",
+           "n=$(cat " + dir.file("count") + " 2>/dev/null || echo 0); echo $((n + 1)) > " + dir.file("count") + "\n" + body);
+    llvm::sys::fs::remove(dir.file("count"));
+    const auto command = dir.file("compile.sh") + " -fstdpar -o " + dir.file("task/out") + " check_x.cpp";
+    return detail::compileTask(Task{Mode::Offload,
+                                    "check_x.cpp",
+                                    "c",
+                                    {},
+                                    dir.file("task"),
+                                    dir.file("task/out"),
+                                    std::nullopt,
+                                    {{command, {}, {}}},
+                                    {},
+                                    std::nullopt},
+                               testConfig(dir.path));
+  };
+  SECTION("identical outputs pass and keep the output") {
+    const auto o = compile(R"sh(echo same > "$3")sh");
+    CHECK(o.status == TaskStatus::Pass);
+    CHECK(polyregion::read_string(dir.file("task/out")) == "same\n");
+    CHECK_FALSE(llvm::sys::fs::exists(dir.file("task/out.repro.o")));
+  }
+  SECTION("differing outputs fail") {
+    const auto o = compile(R"sh(echo "$n" > "$3")sh");
+    CHECK(o.status == TaskStatus::Fail);
+    CHECK(o.failReason.find("non-reproducible build") != std::string::npos);
+  }
+  SECTION("a failing rebuild reports its own stderr") {
+    const auto o = compile(R"sh([ "$n" -gt 0 ] && { echo 'repro diagnostic' >&2; exit 3; }
 : > "$3")sh");
-  const auto command = dir.file("compile.sh") + " -fstdpar -o " + dir.file("task/out") + " check_x.cpp";
-  const Task task{Mode::Offload, "check_x.cpp",       "c", {},          dir.file("task"), dir.file("task/out"),
-                  std::nullopt,  {{command, {}, {}}}, {},  std::nullopt};
-  const auto o = detail::compileTask(task, testConfig(dir.path));
-  CHECK(o.status == TaskStatus::Fail);
-  CHECK(o.failReason.find("repro -c compile failed") != std::string::npos);
-  CHECK(o.stderrCapture == "repro diagnostic\n");
+    CHECK(o.status == TaskStatus::Fail);
+    CHECK(o.failReason.find("repro compile failed") != std::string::npos);
+    CHECK(o.stderrCapture == "repro diagnostic\n");
+  }
 }
 
 TEST_CASE("A later step expected to fail passes only with its diagnostic") {

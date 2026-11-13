@@ -452,46 +452,49 @@ inline TaskOutcome compileTask(const Task &task, const DriverConfig &cfg) {
   llvm::sys::fs::create_directories(task.dir);
   const auto start = std::chrono::steady_clock::now();
   const auto target = compileTargetFor(task, cfg);
-  auto r = runStep(task, cfg, task.runs[0].command, target);
+  const auto toks = task.runs[0].command ^ split(' ');
+  const auto out = toks                                                            //
+                   | sliding(2, 1)                                                 //
+                   | fold_left(std::string{}, [](const auto &acc, const auto &w) { //
+                       return w.size() == 2 && w[0] == "-o" ? w[1] : acc;
+                     });
+  const char *reproEnv = std::getenv(polyregion::env::PolytestReproCheck);
+  const bool repro = !task.compileFailure && !out.empty() && !(reproEnv && reproEnv[0] == '0')
+                     && toks ^ exists([](const auto &t) { return t == "-fstdpar"; });
+#ifdef __APPLE__
+  // XXX ld64.lld puts ThinLTO objects in a randomly named directory and records that path in the debug map
+  const auto cmd = task.runs[0].command + (repro ? " -Wl,-object_path_lto," + task.dir + "/lto" : "");
+#else
+  const auto &cmd = task.runs[0].command;
+#endif
+  auto r = runStep(task, cfg, cmd, target);
   const auto exit = r.exitCode;
   if (std::getenv(polyregion::env::PolyregionPassLog) && !r.stderrText.empty())
     std::fprintf(stderr, "[%s]\n%s\n", task.display().c_str(), r.stderrText.c_str());
   TaskOutcome o;
   std::string reproReason;
   std::optional<StepResult> reproFailure;
-  if (exit == 0 && !task.compileFailure)
-    if (const char *e = std::getenv(polyregion::env::PolytestReproCheck); !(e && e[0] == '0')) {
-      const auto &cmd = task.runs[0].command;
-      const auto toks = cmd ^ split(' ');
-      const auto out = toks                                                            //
-                       | sliding(2, 1)                                                 //
-                       | fold_left(std::string{}, [](const auto &acc, const auto &w) { //
-                           return w.size() == 2 && w[0] == "-o" ? w[1] : acc;
-                         });
-      const bool offloadCompile = toks ^ exists([](const auto &t) { return t == "-fstdpar"; });
-      if (!out.empty() && offloadCompile) {
-        // XXX macOS embeds a non-deterministic LC_UUID and ad-hoc code signature in linked executables, just compare objects here
-        const std::string obj = out + ".repro.o";
+  if (exit == 0 && repro) {
 #ifdef _WIN32
-        // Clang emits COFF timestamps by default; Flang rejects this Clang-only flag and already
-        // emits reproducible objects.
-        const bool isPolyfc = toks ^ exists([](const auto &t) { return t.ends_with("polyfc") || t.ends_with("polyfc.exe"); });
-        const char *reproFlags = isPolyfc ? " -c" : " -mno-incremental-linker-compatible -c";
+    // XXX PDBs record the driver's randomly named temporary objects, so compare two objects instead; Flang rejects this
+    // Clang-only flag and already emits reproducible objects
+    const std::string sample = out + ".repro.o";
+    const bool isPolyfc = toks ^ exists([](const auto &t) { return t.ends_with("polyfc") || t.ends_with("polyfc.exe"); });
+    const auto rebuild = (toks ^ mk_string(" ", [&](const auto &t) { return t == out ? sample : t; }))
+                         + (isPolyfc ? " -c" : " -mno-incremental-linker-compatible -c");
+    const auto firstBuild = runStep(task, cfg, rebuild, target);
 #else
-        constexpr const char *reproFlags = " -c";
+    const auto &sample = out;
+    const auto &rebuild = cmd;
+    const StepResult firstBuild;
 #endif
-        const auto objCmd = (toks ^ mk_string(" ", [&](const auto &t) { return t == out ? obj : t; })) + reproFlags;
-        auto r1 = runStep(task, cfg, objCmd, target);
-        const auto first = r1.exitCode == 0 ? polyregion::read_string(obj) : std::string{};
-        auto r2 = runStep(task, cfg, objCmd, target);
-        if (r1.exitCode != 0 || r2.exitCode != 0)
-          reproReason = fmt::format("repro -c compile failed (exit {}/{})", r1.exitCode, r2.exitCode),
-          reproFailure = r1.exitCode != 0 ? std::move(r1) : std::move(r2);
-        else if (first != polyregion::read_string(obj))
-          reproReason = "non-reproducible build: two compiles of the same source produced different objects";
-        llvm::sys::fs::remove(obj);
-      }
-    }
+    const auto first = firstBuild.exitCode == 0 ? polyregion::read_string(sample) : std::string{};
+    if (auto again = firstBuild.exitCode != 0 ? firstBuild : runStep(task, cfg, rebuild, target); again.exitCode != 0)
+      reproReason = fmt::format("repro compile failed (exit {})", again.exitCode), reproFailure = std::move(again);
+    else if (first != polyregion::read_string(sample))
+      reproReason = "non-reproducible build: two compiles of the same source produced different outputs";
+    if (sample != out) llvm::sys::fs::remove(sample);
+  }
   if (reproFailure) absorbStep(o, std::move(*reproFailure));
   else absorbStep(o, std::move(r));
   o.secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
