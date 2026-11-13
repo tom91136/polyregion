@@ -114,10 +114,12 @@ int main(int argc, const char *argv[]) {
   // XXX fused build has no external driver; --driver/POLYCPP_DRIVER are accepted but ignored.
   (void)args.popValue("--driver");
 #else
-  clangPath = resolveExternalDriver(args, polyregion::env::PolycppDriver, "clang++", execParentPath);
+  clangPath = resolveExternalDriver(args, polyregion::env::PolycppDriver, "clang++", execPath);
   if (clangPath.empty()) {
-    fmt::print(stderr, "[PolyCpp] Cannot locate driver executable at {}, manually specify the driver with `--driver <path_to_clang++>`\n",
-               execPath);
+    fmt::print(
+        stderr,
+        "[PolyCpp] No usable driver next to {} (it must exist and not be polycpp itself), specify one with `--driver <path_to_clang++>`\n",
+        execPath);
     return EXIT_FAILURE;
   }
 #endif

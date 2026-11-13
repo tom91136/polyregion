@@ -145,13 +145,17 @@ struct CliArgs {
 };
 
 // Locates the external driver in priority order: `--driver <path>`, ${envVar},
-// then ${execParent}/<coLocatedName>(.exe). Returns "" if none found.
-inline std::string resolveExternalDriver(CliArgs &args, const char *envVar, const std::string &coLocatedName,
-                                         const std::string &execParentPath) {
-  if (auto driverArg = args.popValue("--driver")) return *driverArg;
-  if (const char *driverEnv = std::getenv(envVar)) return driverEnv;
-  if (auto coLocated = joinPath(execParentPath, executableName(coLocatedName)); llvm::sys::fs::exists(coLocated)) return coLocated;
-  return {};
+// then ${execParent}/<coLocatedName>(.exe). Returns "" if none found or if it is the running executable.
+inline std::string resolveExternalDriver(CliArgs &args, const char *envVar, const std::string &coLocatedName, const std::string &execPath) {
+  const auto driver = [&]() -> std::string {
+    if (auto driverArg = args.popValue("--driver")) return *driverArg;
+    if (const char *driverEnv = std::getenv(envVar)) return driverEnv;
+    if (auto coLocated = joinPath(llvm::sys::path::parent_path(execPath), executableName(coLocatedName)); llvm::sys::fs::exists(coLocated))
+      return coLocated;
+    return {};
+  }();
+  // XXX a driver that is this executable would spawn itself without bound
+  return llvm::sys::fs::equivalent(driver, execPath) ? std::string{} : driver;
 }
 
 struct Driver {

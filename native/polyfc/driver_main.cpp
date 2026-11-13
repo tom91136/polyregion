@@ -63,10 +63,12 @@ int main(int argc, const char *argv[]) {
   // XXX fused build has no external driver; --driver/POLYFC_DRIVER are accepted but ignored.
   (void)args.popValue("--driver");
 #else
-  flangPath = resolveExternalDriver(args, polyregion::env::PolyfcDriver, "flang-new", execParentPath);
+  flangPath = resolveExternalDriver(args, polyregion::env::PolyfcDriver, "flang-new", execPath);
   if (flangPath.empty()) {
-    fmt::print(stderr, "[PolyFC] Cannot locate driver executable at {}, manually specify the driver with `--driver <path_to_flang-new>`\n",
-               execPath);
+    fmt::print(
+        stderr,
+        "[PolyFC] No usable driver next to {} (it must exist and not be polyfc itself), specify one with `--driver <path_to_flang-new>`\n",
+        execPath);
     return EXIT_FAILURE;
   }
 #endif
