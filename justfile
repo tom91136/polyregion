@@ -272,7 +272,7 @@ test-scala *args='':
     for package_service in "$PWD/native/polyc/libpolypass.so" "$PWD/native/polyc/libpolypass.dylib" "$PWD/native/polyc/libpolypass.dll"; do
         if [ -s "$package_service" ]; then export POLYPASS_PLUGINS="${POLYPASS_PLUGINS:-$package_service}"; break; fi
     done
-    cd frontend && {{ sbt }} 'compiler-testsuite-scala/testFull' {{ args }}
+    cd frontend && {{ sbt }} 'pass/testFull' 'codegen/testFull' 'compiler/testFull' 'runtime-scala/testFull' 'ewgen/testFull' 'compiler-testsuite-scala/testFull' {{ args }}
 
 # Run the native ctest suite; device targets skip without a GPU/emulator. Extra ctest flags via *args.
 test-native *args='': build-pass-native

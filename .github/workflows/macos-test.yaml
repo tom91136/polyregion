@@ -98,7 +98,7 @@ jobs:
         if: always()
         uses: ./.github/actions/annotate-junit
         with:
-          junit: frontend/target/out/**/compiler-testsuite-scala/test-reports/*.xml
+          junit: frontend/target/out/**/test-reports/*.xml
           label: scala
 
       - name: Upload test results
@@ -108,7 +108,7 @@ jobs:
         uses: &upload actions/upload-artifact@v7
         with:
           name: scala-test-results-darwin-${{ matrix.arch }}-Release
-          path: ./frontend/target/out/**/compiler-testsuite-scala/test-reports/*.xml
+          path: ./frontend/target/out/**/test-reports/*.xml
           if-no-files-found: warn
 
   build-san:
