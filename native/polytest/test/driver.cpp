@@ -43,39 +43,32 @@ polyregion::polytest::DriverConfig testConfig(const std::string &dir) {
 
 } // namespace
 
-TEST_CASE("Artifact removal clears the output and its dotted siblings only") {
+TEST_CASE("Artifact removal clears the task directory only") {
   using namespace polyregion::polytest;
   TempDir dir;
-  const auto output = dir.file("out_a_offload");
-  dir.touch("out_a_offload");
-  dir.touch("out_a_offload.o");
-  dir.touch("out_a_offload.polyast");
-  dir.touch("out_a_offload.stdout");
-  llvm::sys::fs::create_directories(output + ".packages/nested");
-  dir.touch("out_a_offload.packages/nested/blob");
-  dir.touch("out_a_offload_other.o");
-  dir.touch("out_a_offloadx");
+  const auto taskDir = dir.file("out_a_offload");
+  llvm::sys::fs::create_directories(taskDir + "/out.packages/nested");
+  dir.touch("out_a_offload/out");
+  dir.touch("out_a_offload/out.o");
+  dir.touch("out_a_offload/out.stdout");
+  dir.touch("out_a_offload/out.packages/nested/blob");
+  dir.touch("out_a_offload_other");
   dir.touch("module-cache");
 
-  detail::removeArtifacts(output);
+  detail::removeArtifacts(taskDir);
 
-  CHECK_FALSE(llvm::sys::fs::exists(output));
-  CHECK_FALSE(llvm::sys::fs::exists(output + ".o"));
-  CHECK_FALSE(llvm::sys::fs::exists(output + ".polyast"));
-  CHECK_FALSE(llvm::sys::fs::exists(output + ".stdout"));
-  CHECK_FALSE(llvm::sys::fs::exists(output + ".packages"));
-  CHECK(llvm::sys::fs::exists(dir.file("out_a_offload_other.o")));
-  CHECK(llvm::sys::fs::exists(dir.file("out_a_offloadx")));
+  CHECK_FALSE(llvm::sys::fs::exists(taskDir));
+  CHECK(llvm::sys::fs::exists(dir.file("out_a_offload_other")));
   CHECK(llvm::sys::fs::exists(dir.file("module-cache")));
 }
 
-TEST_CASE("Artifact removal through a relative output name clears its siblings") {
+TEST_CASE("Artifact removal through a relative directory clears it") {
   using namespace polyregion::polytest;
   TempDir dir;
-  dir.touch("out_b_offload");
-  dir.touch("out_b_offload.pdb");
-  llvm::sys::fs::create_directories(dir.file("out_b_offload.packages/nested"));
-  dir.touch("out_b_offload.packages/nested/blob");
+  llvm::sys::fs::create_directories(dir.file("out_b_offload/out.packages/nested"));
+  dir.touch("out_b_offload/out");
+  dir.touch("out_b_offload/out.pdb");
+  dir.touch("out_b_offload/out.packages/nested/blob");
   llvm::SmallString<256> cwd;
   REQUIRE_FALSE(llvm::sys::fs::current_path(cwd));
   REQUIRE_FALSE(llvm::sys::fs::set_current_path(dir.path));
@@ -84,8 +77,6 @@ TEST_CASE("Artifact removal through a relative output name clears its siblings")
 
   REQUIRE_FALSE(llvm::sys::fs::set_current_path(cwd));
   CHECK_FALSE(llvm::sys::fs::exists(dir.file("out_b_offload")));
-  CHECK_FALSE(llvm::sys::fs::exists(dir.file("out_b_offload.pdb")));
-  CHECK_FALSE(llvm::sys::fs::exists(dir.file("out_b_offload.packages")));
 }
 
 TEST_CASE("Task output names are stable across processes") {
@@ -101,7 +92,8 @@ TEST_CASE("Task output names are stable across processes") {
   CHECK(tasks[0].output != tasks[1].output);
   for (const auto &t : tasks) {
     CHECK(t.output.find(std::to_string(llvm::sys::Process::getProcessId())) == std::string::npos);
-    CHECK(t.output.starts_with("out_one_"));
+    CHECK(t.dir.starts_with("out_one_"));
+    CHECK(t.output == t.dir + "/" + OutputName);
   }
 }
 
@@ -165,7 +157,7 @@ TEST_CASE("Cache and library locations reach the child environment") {
   polyregion::env::ScopedEnv xdg("XDG_CACHE_HOME", "/polytest/xdg");
   polyregion::env::ScopedEnv pocl("POCL_CACHE_DIR", "/polytest/pocl");
   const auto cfg = testConfig(dir.path);
-  const Task task{Mode::Offload, "check_x.cpp", "c", {}, "out", std::nullopt, {}, {}};
+  const Task task{Mode::Offload, "check_x.cpp", "c", {}, "out_x", "out_x/out", std::nullopt, {}, {}};
   const auto envs = detail::baseEnvs(task, cfg, false);
   const auto has = [&](const std::string &kv) { return std::find(envs.begin(), envs.end(), kv) != envs.end(); };
   CHECK(has("POLYREGION_CACHE_DIR=/polytest/cache"));
@@ -196,6 +188,7 @@ polyregion::polytest::Task skippingTask(const TempDir &dir, const std::string &r
           "check_x.cpp",
           "c",
           {{"arch", selector}},
+          dir.path,
           dir.file("out"),
           std::nullopt,
           {{"compile", {}, {}}, {dir.file("skip.sh"), {}, {}}},
@@ -339,7 +332,8 @@ TEST_CASE("A compile step exiting 77 fails") {
   using namespace polyregion::polytest;
   TempDir dir;
   script(dir, "compile.sh", "exit 77");
-  const Task task{Mode::Offload, "check_x.cpp", "c", {}, dir.file("out"), std::nullopt, {{dir.file("compile.sh"), {}, {}}}, {}};
+  const Task task{
+      Mode::Offload, "check_x.cpp", "c", {}, dir.file("task"), dir.file("task/out"), std::nullopt, {{dir.file("compile.sh"), {}, {}}}, {}};
   CHECK(detail::compileTask(task, testConfig(dir.path)).status == TaskStatus::Fail);
 }
 
@@ -348,8 +342,8 @@ TEST_CASE("A failing repro compile reports its own stderr") {
   TempDir dir;
   script(dir, "compile.sh", R"sh(case " $* " in *" -c "*) echo 'repro diagnostic' >&2; exit 3 ;; esac
 : > "$3")sh");
-  const auto command = dir.file("compile.sh") + " -fstdpar -o " + dir.file("out") + " check_x.cpp";
-  const Task task{Mode::Offload, "check_x.cpp", "c", {}, dir.file("out"), std::nullopt, {{command, {}, {}}}, {}};
+  const auto command = dir.file("compile.sh") + " -fstdpar -o " + dir.file("task/out") + " check_x.cpp";
+  const Task task{Mode::Offload, "check_x.cpp", "c", {}, dir.file("task"), dir.file("task/out"), std::nullopt, {{command, {}, {}}}, {}};
   const auto o = detail::compileTask(task, testConfig(dir.path));
   CHECK(o.status == TaskStatus::Fail);
   CHECK(o.failReason.find("repro -c compile failed") != std::string::npos);

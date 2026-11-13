@@ -76,6 +76,8 @@ struct DriverConfig {
   std::vector<std::pair<std::string, std::string>> targetValues = {};
 };
 
+inline constexpr const char *OutputName = "out";
+
 enum class Mode : std::uint8_t { Offload, Passthrough };
 inline constexpr const char *modeName(Mode m) { return m == Mode::Offload ? "offload" : "passthrough"; }
 
@@ -98,6 +100,7 @@ struct Task {
   std::string testFile;
   std::string caseName;
   std::vector<std::pair<std::string, std::string>> variables;
+  std::string dir;
   std::string output;
   std::optional<std::string> compileFailure;
   std::vector<TestCase::Run> runs; // templates already expanded against (variables + defaults + stdpar + input + output)
@@ -328,24 +331,10 @@ struct StepResult {
   std::string cmdline;
 };
 
-inline void removeArtifacts(const std::string &output) {
-  namespace fs = llvm::sys::fs;
-  const auto dir = llvm::sys::path::parent_path(output);
-  const auto stem = llvm::sys::path::filename(output).str() + ".";
-  std::vector<std::string> siblings;
-  std::error_code ec;
-  for (fs::directory_iterator it(dir.empty() ? "." : dir, ec), end; !ec && it != end; it.increment(ec))
-    if (llvm::sys::path::filename(it->path()).starts_with(stem)) siblings.emplace_back(it->path());
-  fs::remove(output);
-  siblings | for_each([](const auto &p) {
-    if (!fs::is_directory(p)) {
-      fs::remove(p);
-      return;
-    }
-    llvm::SmallString<256> absolute(p);
-    fs::make_absolute(absolute);
-    fs::remove_directories(absolute);
-  });
+inline void removeArtifacts(const std::string &dir) {
+  llvm::SmallString<256> absolute(dir);
+  llvm::sys::fs::make_absolute(absolute);
+  llvm::sys::fs::remove_directories(absolute);
 }
 
 inline StepResult runStep(const Task &task, const DriverConfig &cfg, const std::string &command) {
@@ -452,7 +441,8 @@ inline bool checkStderrCounts(const TestCase::Run &run, TaskOutcome &o) {
 
 inline TaskOutcome compileTask(const Task &task, const DriverConfig &cfg) {
   if (task.runs.empty()) return {};
-  removeArtifacts(task.output);
+  removeArtifacts(task.dir);
+  llvm::sys::fs::create_directories(task.dir);
   const auto start = std::chrono::steady_clock::now();
   auto r = runStep(task, cfg, task.runs[0].command);
   const auto exit = r.exitCode;
@@ -616,11 +606,12 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
                variants = {RunVariant{.suffix = "", .env = {}},                                                   // compiletime (default)
                            RunVariant{.suffix = "runtime", .env = {{std::string(env::PolyrtMirror), "runtime"}}}, // generic SMA walk
                            RunVariant{.suffix = "usm", .env = {{std::string(env::PolyrtMirror), "off"}}}};        // USM; 77 if no USM
-             const auto output = fmt::format("{}_{}", baseOutput, modeName(mode));
+             const auto dir = fmt::format("{}_{}", baseOutput, modeName(mode));
+             const auto output = dir + "/" + OutputName;
              const auto store = mkArgStore(augmented ^ append(std::pair{std::string("output"), output}));
              auto runs =
                  tc.runs ^ map([&](const auto &r) { return TestCase::Run{fmt::vformat(r.command, store), r.expect, r.stderrCounts}; });
-             return {mode, file, tc.name, varsWithLabel, output, tc.compileFailure, std::move(runs), std::move(variants)};
+             return {mode, file, tc.name, varsWithLabel, dir, output, tc.compileFailure, std::move(runs), std::move(variants)};
            });
   };
 
@@ -724,7 +715,7 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
     if (!it) return std::fprintf(stderr, "polytest: no task with id '%s'\n", single.c_str()), 1;
     const Task &t = *it;
     if (!opts.cleanupTask.empty()) {
-      detail::removeArtifacts(t.output);
+      detail::removeArtifacts(t.dir);
       return 0;
     }
     const bool isCompile = !opts.compileTask.empty();
@@ -832,7 +823,7 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
     std::fprintf(stderr, "[run %zu/%zu] %s %s (%.2fs)\n", i + 1, tasks.size(), statusTag(out.status), tasks[i].display().c_str(), out.secs);
     dumpDetails(out, /*includeStdout*/ true);
     if (cfg.cleanupOnSuccess && (out.status == TaskStatus::Pass || out.status == TaskStatus::Skip)) {
-      detail::removeArtifacts(tasks[i].output);
+      detail::removeArtifacts(tasks[i].dir);
     }
   }
   const auto runSecs = std::chrono::duration<double>(std::chrono::steady_clock::now() - runStart).count();
