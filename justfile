@@ -780,6 +780,7 @@ _native-build:
     kept=()
     for c in "${caches[@]}"; do
         case "$c" in
+            */build-dist-check-*/CMakeCache.txt) ;;
             */build-*-asan/CMakeCache.txt)  [ "${POLYREGION_ASAN:-}" = "ON" ] && kept+=("$c") ;;
             */build-*-fused/CMakeCache.txt) [ "${POLYREGION_FUSED_DRIVER:-}" = "ON" ] && kept+=("$c") ;;
             *) [ "${POLYREGION_ASAN:-}" != "ON" ] && [ "${POLYREGION_FUSED_DRIVER:-}" != "ON" ] && kept+=("$c") ;;
