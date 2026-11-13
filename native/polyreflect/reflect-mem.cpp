@@ -41,6 +41,7 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/ModuleSlotTracker.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/IR/Value.h"
 #include "llvm/Pass.h"
@@ -139,15 +140,24 @@ struct MemAccess {
   }
 };
 
-std::string showConcise(const llvm::Value *V) {
-  if (llvm::isa<llvm::Function>(V)) {
-    return V->getName().str();
+// XXX Value::print without a tracker renumbers the whole module on every call
+class ValuePrinter {
+  const llvm::Module &M;
+  std::optional<llvm::ModuleSlotTracker> mst;
+
+public:
+  explicit ValuePrinter(const llvm::Module &M) : M(M) {}
+  // the tracker numbers each function once, so values created after that need a fresh one
+  void invalidate() { mst.reset(); }
+  std::string operator()(const llvm::Value &V) {
+    if (llvm::isa<llvm::Function>(V)) return V.getName().str();
+    if (!mst) mst.emplace(&M, false);
+    std::string s;
+    llvm::raw_string_ostream os(s);
+    V.print(os, *mst);
+    return s;
   }
-  std::string s;
-  llvm::raw_string_ostream os(s);
-  V->print(os);
-  return s;
-}
+};
 
 class CoarseGrainedTaintAnalysis {
 
@@ -156,6 +166,7 @@ class CoarseGrainedTaintAnalysis {
   std::unordered_multimap<llvm::Value *, llvm::Value *> globals;
   std::function<bool(llvm::Function *)> fnPredicate = [](const auto &) { return true; };
   bool debug = false;
+  std::optional<ValuePrinter> show;
 
   bool isTainted(llvm::Value *V) const { return tainted ^ contains(V); }
 
@@ -191,15 +202,15 @@ class CoarseGrainedTaintAnalysis {
 
     if (auto *const I = llvm::dyn_cast<llvm::Instruction>(V)) {
       if (!fnPredicate(I->getFunction())) return;
-      if (debug) llvm::errs() << "[CGTA]       marking ins `" << *I << "` (from: " << I->getFunction()->getName() << ")\n";
+      if (debug) llvm::errs() << "[CGTA]       marking ins `" << (*show)(*I) << "` (from: " << I->getFunction()->getName() << ")\n";
     } else if (auto *const A = llvm::dyn_cast<llvm::Argument>(V)) {
       if (!fnPredicate(A->getParent())) return;
-      if (debug) llvm::errs() << "[CGTA]       marking arg `" << *A << "` (from: " << A->getParent()->getName() << ")\n";
+      if (debug) llvm::errs() << "[CGTA]       marking arg `" << (*show)(*A) << "` (from: " << A->getParent()->getName() << ")\n";
     } else if (auto *const F = llvm::dyn_cast<llvm::Function>(V)) {
       if (!fnPredicate(F)) return;
-      if (debug) llvm::errs() << "[CGTA]       marking fn  `" << showConcise(F) << "`\n";
+      if (debug) llvm::errs() << "[CGTA]       marking fn  `" << (*show)(*F) << "`\n";
     } else {
-      if (debug) llvm::errs() << "[CGTA]       marking val`" << *V << "`\n";
+      if (debug) llvm::errs() << "[CGTA]       marking val`" << (*show)(*V) << "`\n";
     }
 
     if (tainted.insert(V).second) workList.push(V);
@@ -212,7 +223,7 @@ class CoarseGrainedTaintAnalysis {
       while (!workList.empty()) {
         llvm::Value *V = workList.top();
         workList.pop();
-        if (debug) llvm::errs() << "[CGTA]   propagating value `" << showConcise(V) << "`\n";
+        if (debug) llvm::errs() << "[CGTA]   propagating value `" << (*show)(*V) << "`\n";
         // 0. forwarding propagation
         if (debug) llvm::errs() << "[CGTA]     globals:\n";
         for (auto [it, end] = globals.equal_range(V); it != end; ++it) {
@@ -246,7 +257,7 @@ class CoarseGrainedTaintAnalysis {
             });
         // 2. forwarding propagation
         for (llvm::User *U : V->users()) {
-          if (debug) llvm::errs() << "[CGTA]     uses: `" << showConcise(U) << "`\n";
+          if (debug) llvm::errs() << "[CGTA]     uses: `" << (*show)(*U) << "`\n";
           //  XXX do not taint the unwrapped instruction directly as it may be a constant
           llvm_shared::visitDyn0( //
               U,                  //
@@ -315,6 +326,7 @@ public:
                                                      const std::function<bool(llvm::Function *)> &fnPredicate, const bool debug = false) {
     CoarseGrainedTaintAnalysis t;
     t.debug = debug;
+    if (debug) t.show.emplace(M);
     t.fnPredicate = fnPredicate;
     std::unordered_set<llvm::Function *> visited;
     std::stack<llvm::Function *> workList;
@@ -343,7 +355,7 @@ public:
       auto *F = workList.top();
       workList.pop();
       if (!visited.insert(F).second) continue;
-      if (debug) llvm::errs() << "[CGTA] function: `" << showConcise(F) << "`\n";
+      if (debug) llvm::errs() << "[CGTA] function: `" << (*t.show)(*F) << "`\n";
       if (F->hasAddressTaken()) {
         t.taint(F);
         for (auto &a : F->args()) {
@@ -353,7 +365,7 @@ public:
       t.propagateForward();
       for (auto &arg : F->args()) {
         if (!t.isTainted(&arg)) continue;
-        if (debug) llvm::errs() << "[CGTA]   tainted arg: `" << arg << "`\n";
+        if (debug) llvm::errs() << "[CGTA]   tainted arg: `" << (*t.show)(arg) << "`\n";
         for (const auto &U : F->uses()) {
           if (const auto ACS = llvm::AbstractCallSite(&U)) {
             t.taint(ACS.getCallArgOperand(arg.getArgNo()));
@@ -426,6 +438,7 @@ void insertMapCalls(llvm::Module &M, //
                     const bool verbose) {
 
   if (verbose) llvm::errs() << "[ReflectMemPass] Inserting map calls for " << groups.size() << " functions\n";
+  ValuePrinter show(M);
 
   // XXX order tainted values by module position so instrumentation is deterministic
   llvm::DenseMap<const llvm::Instruction *, size_t> instrPos;
@@ -470,10 +483,10 @@ void insertMapCalls(llvm::Module &M, //
 
       const auto emplaceNonSCEV = [&](const std::string &prefix) {
         if (verbose)
-          llvm::errs() << "[ReflectMemPass]   " << static_cast<char>(access->kind) << " " << prefix << "@`" << *I << "`"
-                       << " origin=`" << *access->origin << "`"
-                       << " size=`" << *access->sizeInBytes << "`"
-                       << " unit=`" << *access->unitInBytes << "`"
+          llvm::errs() << "[ReflectMemPass]   " << static_cast<char>(access->kind) << " " << prefix << "@`" << show(*I) << "`"
+                       << " origin=`" << show(*access->origin) << "`"
+                       << " size=`" << show(*access->sizeInBytes) << "`"
+                       << " unit=`" << show(*access->unitInBytes) << "`"
                        << "\n";
         targets[I->getParent()].emplace_back(Target{
             .access = access->kind,             //
@@ -523,11 +536,12 @@ void insertMapCalls(llvm::Module &M, //
         // ptr-diff width = IntPtrTy; SCEVExpander folds via getMulExpr on aarch32
         auto *diffTy = B.getIntPtrTy(M.getDataLayout());
         auto *const ptrDiff = B.CreateSub(B.CreatePtrToInt(ub, diffTy), B.CreatePtrToInt(lb, diffTy));
+        show.invalidate();
         if (verbose)
-          llvm::errs() << "[ReflectMemPass]   " << static_cast<char>(access->kind) << " InvariantSCEV@`" << *predecessor << "`"
-                       << " origin=`" << *lb << "`"
-                       << " size=`" << *ptrDiff << "`"
-                       << " unit=`" << *access->unitInBytes << "`"
+          llvm::errs() << "[ReflectMemPass]   " << static_cast<char>(access->kind) << " InvariantSCEV@`" << show(*predecessor) << "`"
+                       << " origin=`" << show(*lb) << "`"
+                       << " size=`" << show(*ptrDiff) << "`"
+                       << " unit=`" << show(*access->unitInBytes) << "`"
                        << "\n";
         targets[I->getParent()].emplace_back(Target{
             .access = access->kind,     //
@@ -562,36 +576,40 @@ void insertMapCalls(llvm::Module &M, //
     for (const auto &[range, ct] : coalesced.map) {
       if (verbose)
         llvm::errs() << "[ReflectMemPass] Insert coalesced: [" << range.offset << ", " << range.end() << ") ["
-                     << static_cast<char>(ct.access) << "] `" << *ct.origin << "`\n";
+                     << static_cast<char>(ct.access) << "] `" << show(*ct.origin) << "`\n";
       B.SetInsertPoint(ct.insertPoint);
       callMap(B, M, //
               B.CreateConstInBoundsGEP1_64(B.getInt8Ty(), ct.origin, range.offset), B.getInt64(range.size), B.getInt64(1), ct.access);
+      show.invalidate();
     }
     for (const auto &t : independent) {
 
-      if (verbose) llvm::errs() << "[ReflectMemPass] Insert independent: [" << static_cast<char>(t.access) << "] `" << *t.origin << "`\n";
+      if (verbose)
+        llvm::errs() << "[ReflectMemPass] Insert independent: [" << static_cast<char>(t.access) << "] `" << show(*t.origin) << "`\n";
       B.SetInsertPoint(t.insertPoint);
       callMap(B, M, t.origin, t.sizeInBytes, t.unitInBytes, t.access);
+      show.invalidate();
     }
   }
 }
 
 bool runSplice(llvm::Module &M, llvm::FunctionAnalysisManager &FAM, const bool verbose) {
+  ValuePrinter show(M);
   std::vector<llvm::Function *> roots;
   std::vector<llvm::Value *> values;
   llvm_shared::findValuesWithStringAnnotations(M, [&](llvm::Function &F, llvm::Value *V, llvm::StringRef Annotation) {
     if (!Annotation.starts_with(POLYREFLECT_TRACK_ANNOTATION)) return;
     auto *const U = llvm::getUnderlyingObject(V, 0);
     if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(U)) {
-      if (verbose) llvm::errs() << "[ReflectMemPass] Found annotated (GV) in " << F.getName() << ": `" << *GV << "`\n";
+      if (verbose) llvm::errs() << "[ReflectMemPass] Found annotated (GV) in " << F.getName() << ": `" << show(*GV) << "`\n";
       roots.emplace_back(&F);
       values.emplace_back(GV);
     } else if (auto *I = llvm::dyn_cast<llvm::Instruction>(U)) {
-      if (verbose) llvm::errs() << "[ReflectMemPass] Found annotated (Ins) in " << F.getName() << ": `" << *I << "`\n";
+      if (verbose) llvm::errs() << "[ReflectMemPass] Found annotated (Ins) in " << F.getName() << ": `" << show(*I) << "`\n";
       roots.emplace_back(&F);
       values.emplace_back(I);
     } else {
-      if (verbose) llvm::errs() << "[ReflectMemPass] Skipping unknown annotated in " << F.getName() << ": `" << *V << "`\n";
+      if (verbose) llvm::errs() << "[ReflectMemPass] Skipping unknown annotated in " << F.getName() << ": `" << show(*V) << "`\n";
     }
   });
   std::unordered_set<const llvm::Function *> ignored;
@@ -631,7 +649,7 @@ bool runSplice(llvm::Module &M, llvm::FunctionAnalysisManager &FAM, const bool v
     for (const auto &[F, Vs] : groups) {
       llvm::errs() << "[ReflectMemPass]   - " << (F ? F->getName() : llvm::StringRef("(top-level)")) << "\n";
       for (const auto &V : Vs) {
-        llvm::errs() << "[ReflectMemPass]     `" << showConcise(V) << "`\n";
+        llvm::errs() << "[ReflectMemPass]     `" << show(*V) << "`\n";
         if (llvm::isa<llvm::LoadInst>(V)) cgtaLoads++;
         else if (llvm::isa<llvm::StoreInst>(V)) cgtaStores++;
       }
@@ -655,7 +673,6 @@ bool runSplice(llvm::Module &M, llvm::FunctionAnalysisManager &FAM, const bool v
   insertMapCalls(M, FAM, groups, verbose);
 
   if (verbose) llvm::errs() << "[ReflectMemPass] Completed for module " << M.getName() << "\n";
-  if (verbose) llvm::errs() << M << "\n";
   return !groups.empty();
 }
 
