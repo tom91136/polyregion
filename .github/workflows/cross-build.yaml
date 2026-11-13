@@ -130,7 +130,7 @@ jobs:
         uses: &cache-restore actions/cache/restore@v5
         with:
           path: &sysroot-path ./sysroot/out/sysroot-${{ matrix.sysroot_variant }}-${{ matrix.arch }}.tar.xz
-          key: &sysroot-key sysroot-${{ matrix.sysroot_variant }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles(format('./sysroot/{0}', matrix.sysroot_dockerfile), './justfile') }}
+          key: &sysroot-key sysroot-${{ matrix.sysroot_variant }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles(format('./sysroot/{0}', matrix.sysroot_dockerfile), './sysroot/build.sh') }}
 
       - name: Build sysroot
         id: build-sysroot
@@ -326,7 +326,7 @@ jobs:
         uses: *cache-restore
         with:
           path: &vcpkg-path ./native/.vcpkg/vcpkg_installed
-          key: &vcpkg-key vcpkg-cross-${{ matrix.arch }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('./native/vcpkg.json', './native/vcpkg-configuration.json', format('./native/toolchains/linux-clang-{0}.cmake', matrix.arch), './native/.env', './native/ports/**', './native/cmake/linux-clang-cross-common.cmake') }}
+          key: &vcpkg-key vcpkg-cross-${{ matrix.arch }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('./native/vcpkg.json', './native/vcpkg-configuration.json', format('./native/toolchains/linux-clang-{0}.cmake', matrix.arch), './native/.env', './native/ports/**', './native/cmake/linux-clang-cross-common.cmake', './native/cmake/sysroot_gcc_dir.cmake', format('./sysroot/{0}', matrix.sysroot_dockerfile)) }}
 
       - name: Install vcpkg deps
         id: build-vcpkg

@@ -62,7 +62,7 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: ./sysroot/out/sysroot-${{ matrix.sysroot_variant }}-${{ matrix.arch }}.tar.xz
-          key: sysroot-${{ matrix.sysroot_variant }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles(format('./sysroot/{0}', matrix.sysroot_dockerfile), './justfile') }}
+          key: sysroot-${{ matrix.sysroot_variant }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles(format('./sysroot/{0}', matrix.sysroot_dockerfile), './sysroot/build.sh') }}
 
       - &prepare-sysroot-env
         name: Prepare sysroot
