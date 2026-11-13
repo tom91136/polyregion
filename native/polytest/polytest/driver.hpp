@@ -641,7 +641,7 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
   return all ^ distinct_by([&](const Task &t) -> std::string {
            if (t.mode != Mode::Passthrough) return t.id();
            return fmt::format("P|{}|{}|{}", t.testFile, t.caseName, t.variables ^ mk_string("|", [&](const auto &k, const auto &v) {
-                                                                      return k + "=" + (k == cfg.archVar ? v.substr(0, v.find('@')) : v);
+                                                                      return k + "=" + (k == cfg.archVar ? std::string{} : v);
                                                                     }));
          });
 }

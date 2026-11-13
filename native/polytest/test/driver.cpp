@@ -128,6 +128,21 @@ TEST_CASE("A case limited to listed targets expands for those targets only") {
   CHECK(archesOf("cpu") == std::vector<std::string>{"arm@native", "host@native"});
 }
 
+TEST_CASE("Passthrough runs once however many targets are listed") {
+  using namespace polyregion::polytest;
+  using namespace aspartame;
+  TempDir dir;
+  polyregion::env::ScopedEnv targets(polyregion::env::PolyregionTestTargets, "host@native;cuda@sm_89;arm@native");
+  std::ofstream(dir.file("check_three.cpp")) << "#pragma region case: any\n#pragma region do: echo {output}\n";
+  auto cfg = testConfig(dir.path);
+  cfg.testFiles = {dir.file("check_three.cpp")};
+  const auto tasks = enumerateTasks(cfg, true, true, {});
+  CHECK((tasks ^ count([](const auto &t) { return t.mode == Mode::Offload; })) == 3);
+  const auto passthrough = tasks ^ filter([](const auto &t) { return t.mode == Mode::Passthrough; });
+  REQUIRE(passthrough.size() == 1);
+  CHECK(detail::archFor(passthrough[0], cfg) == "host@native");
+}
+
 TEST_CASE("Cache and library locations reach the child environment") {
   using namespace polyregion::polytest;
   TempDir dir;
