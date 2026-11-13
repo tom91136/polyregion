@@ -22,3 +22,11 @@ TEST_CASE("Profile environment separates generic inherited-variable directives")
   CHECK(materialiseProfileEnvironment({"STATIC=profile", "POLYTEST_FORWARD_ENV=:POLYTEST_TEST_INHERITED"})
         == std::vector<std::string>{"STATIC=profile", "POLYTEST_TEST_INHERITED=dynamic"});
 }
+
+TEST_CASE("The compile part of a target is what precedes the device selector") {
+  using namespace polyregion::polytest;
+
+  CHECK(compileTargetOf("spirv_glcompute@!spirv_glcompute@*llvmpipe*") == "spirv_glcompute@");
+  CHECK(compileTargetOf("spirv64_kernel@1_1!spirv64_kernel@rusticl:*SPIR-V*") == "spirv64_kernel@1_1");
+  CHECK(compileTargetOf("host@native") == "host@native");
+}

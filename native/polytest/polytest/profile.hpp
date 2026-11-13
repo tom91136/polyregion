@@ -5,6 +5,7 @@
 #include <fstream>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #ifdef _WIN32
@@ -128,6 +129,9 @@ inline std::vector<std::string> profileCandidates(const std::string &profileDir)
          ^ flat_map([&](const auto &b) { return std::vector{path(b + "." + std::string(hostOs()) + ".env"), path(b + ".env")}; }) //
          ^ append(path("default.env"));
 }
+
+// the part of a `<compile target>!<device selector>` entry the compiler consumes; the whole string without a `!`
+inline std::string compileTargetOf(std::string_view target) { return std::string(target.substr(0, target.find('!'))); }
 
 inline std::vector<std::string> loadTestTargets(const std::string &profileDir,
                                                 const char *envKey = polyregion::env::PolyregionTestTargets) {
