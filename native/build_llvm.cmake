@@ -207,7 +207,7 @@ if (UNIX AND NOT APPLE)
     list(APPEND BUILD_OPTIONS -DLLVM_HOST_TRIPLE=${_llvm_host_triple})
 endif ()
 
-if (POLYREGION_CROSS_FLANG_NEW AND APPLE)
+if (POLYREGION_CROSS_CLANG AND APPLE)
     # XXX otherwise cross binaries report the host triple by default.
     list(APPEND BUILD_OPTIONS
             -DLLVM_DEFAULT_TARGET_TRIPLE=${CMAKE_SYSTEM_PROCESSOR}-apple-darwin
