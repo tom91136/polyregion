@@ -94,14 +94,14 @@
 #pragma region case: package-include-follows-selected-root
 #pragma region offload-only
 #pragma region do: {package_fixture} {output}.packages
-#pragma region compile-fails: package include directory follows the selected library path
 #pragma region do: POLYFRONT_LIBRARY_PATH={output}.packages polycpp {polycpp_defaults} {polycpp_stdpar} -DPACKAGE_INCLUDE -fstdpar-library-path={output}.none -o {output} {input}
+#pragma region fails-with: 'foo/package_include.hpp' file not found
 
 #pragma region case: package-include-hidden-without-library-path
 #pragma region offload-only
 #pragma region do: {package_fixture} {output}.packages
-#pragma region compile-fails: package include directory is not searched without the library path
 #pragma region do: POLYFRONT_LIBRARY_PATH= polycpp {polycpp_defaults} {polycpp_stdpar} -DPACKAGE_INCLUDE -o {output} {input}
+#pragma region fails-with: 'foo/package_include.hpp' file not found
 
 #include <cstdio>
 #include <execution>

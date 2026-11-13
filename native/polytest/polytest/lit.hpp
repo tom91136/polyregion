@@ -31,6 +31,7 @@ struct TestCase {
     std::string command;
     std::vector<Expect> expect;
     std::vector<StderrCount> stderrCounts;
+    std::optional<std::string> failure = {};
   };
   using Variable = std::pair<std::string, std::vector<std::string>>;
   std::string name;
@@ -64,7 +65,7 @@ struct TestCase {
     };
 
     auto parseRight = [](const std::string &prefix, const std::string &line) -> std::optional<std::string> {
-      if (const auto pair = line ^ split_once(prefix)) return pair->second;
+      if (const auto body = line ^ trim(); body ^ starts_with(prefix)) return body.substr(prefix.size());
       return std::nullopt;
     };
 
@@ -88,13 +89,24 @@ struct TestCase {
       });
     };
 
+    auto parseFailure = [&]() -> std::optional<std::string> {
+      const auto failures = parseNormalised(file, [&](const std::string &line) -> std::optional<std::string> {
+        return parseRight("fails-with:", line) ^ map([](const auto &message) { return message ^ trim(); });
+      });
+      return failures.empty() ? std::nullopt : std::optional{failures.front()};
+    };
+
     auto parseRuns = [&] {
-      return parseNormalised(file, [&](const std::string &line) -> std::optional<Run> {
+      auto runs = parseNormalised(file, [&](const std::string &line) -> std::optional<Run> {
         return parseRight("do:", line) ^ map([&](const auto &runLine) {
                  auto expect = parseExpects();
-                 return Run{runLine ^ trim(), std::move(expect), parseStderrCounts()};
+                 auto stderrCounts = parseStderrCounts();
+                 return Run{runLine ^ trim(), std::move(expect), std::move(stderrCounts), parseFailure()};
                });
       });
+      if (!runs.empty() && runs.front().failure)
+        throw std::invalid_argument("`fails-with:` on the first step of `" + runs.front().command + "`; use `compile-fails:`");
+      return runs;
     };
 
     auto parseFlag = [&](const std::string &name) {
@@ -121,7 +133,7 @@ struct TestCase {
       });
     };
 
-    return parseNormalised(file, [&](std::string &line) -> std::optional<TestCase> {
+    auto cases = parseNormalised(file, [&](std::string &line) -> std::optional<TestCase> {
       return parseRight("case:", line) ^ map([&](const auto &c) {
                return TestCase{.name = c ^ trim(),
                                .matrices = (parseMatrices()         //
@@ -144,6 +156,13 @@ struct TestCase {
                                .runs = parseRuns()};
              });
     });
+    // XXX the grammar is positional, so a misplaced directive would otherwise end the file silently
+    for (std::string rawLine; std::getline(file, rawLine);) {
+      if (const auto line = rawLine ^ trim(); line ^ starts_with(directive))
+        throw std::invalid_argument("unexpected directive after case `" + (cases.empty() ? std::string{} : cases.back().name)
+                                    + "`: " + line);
+    }
+    return cases;
   }
 };
 

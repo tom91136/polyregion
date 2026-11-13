@@ -507,6 +507,12 @@ inline TaskOutcome runTask(const Task &task, const DriverConfig &cfg) {
     auto r = runStep(task, cfg, task.runs[i].command);
     const auto exit = r.exitCode;
     absorbStep(o, std::move(r));
+    if (const auto &failure = task.runs[i].failure) {
+      if (exit == 0) o.status = TaskStatus::Fail, o.failReason = fmt::format("run step {} unexpectedly succeeded", i);
+      else if (o.stderrCapture.find(*failure) == std::string::npos)
+        o.status = TaskStatus::Fail, o.failReason = fmt::format("run step {} failed without expected diagnostic '{}'", i, *failure);
+      break;
+    }
     if (exit == 77) {
       const auto verdict = skipVerdict(task, cfg, o.stderrCapture);
       o.status = verdict.justified ? TaskStatus::Skip : TaskStatus::Fail;
@@ -610,8 +616,9 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
              const auto dir = fmt::format("{}_{}", baseOutput, modeName(mode));
              const auto output = dir + "/" + OutputName;
              const auto store = mkArgStore(augmented ^ append(std::pair{std::string("output"), output}));
-             auto runs =
-                 tc.runs ^ map([&](const auto &r) { return TestCase::Run{fmt::vformat(r.command, store), r.expect, r.stderrCounts}; });
+             auto runs = tc.runs ^ map([&](const auto &r) {
+                           return TestCase::Run{fmt::vformat(r.command, store), r.expect, r.stderrCounts, r.failure};
+                         });
              return {mode,          file, tc.name, varsWithLabel, dir, output, tc.compileFailure, std::move(runs), std::move(variants),
                      tc.timeoutSecs};
            });

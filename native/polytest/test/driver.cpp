@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <stdexcept>
 #include <string>
 
 #include "llvm/Support/Process.h"
@@ -149,6 +150,47 @@ TEST_CASE("A source name limits enumeration to that file") {
   CHECK(tasks[0].caseName == "b");
   CHECK(tasks[0].timeoutSecs == 700U);
   CHECK(enumerateTasks(cfg, true, false, {}, "check_c.cpp").empty());
+}
+
+TEST_CASE("A directive the case grammar cannot place is rejected") {
+  using namespace polyregion::polytest;
+  TempDir dir;
+  polyregion::env::ScopedEnv targets(polyregion::env::PolyregionTestTargets, "host@native");
+  std::ofstream(dir.file("check_misplaced.cpp")) << "#pragma region case: a\n#pragma region do: echo {output}\n"
+                                                    "#pragma region compile-fails: late\n#pragma region do: echo again\n"
+                                                    "#pragma region case: b\n#pragma region do: echo {output}\n";
+  auto cfg = testConfig(dir.path);
+  cfg.testFiles = {dir.file("check_misplaced.cpp")};
+  CHECK_THROWS_AS(enumerateTasks(cfg, true, false, {}), std::invalid_argument);
+}
+
+TEST_CASE("A directive name inside a message stays part of that message") {
+  using namespace polyregion::polytest;
+  TempDir dir;
+  polyregion::env::ScopedEnv targets(polyregion::env::PolyregionTestTargets, "host@native");
+  std::ofstream(dir.file("check_names.cpp")) << "#pragma region case: a\n#pragma region compile-fails: requires do: x\n"
+                                                "#pragma region do: echo {output}\n"
+                                                "#pragma region case: b\n#pragma region do: echo {output}\n"
+                                                "#pragma region do: echo {output}\n#pragma region fails-with: requires stderr-count: 1\n";
+  auto cfg = testConfig(dir.path);
+  cfg.testFiles = {dir.file("check_names.cpp")};
+  const auto tasks = enumerateTasks(cfg, true, false, {});
+  REQUIRE(tasks.size() == 2);
+  CHECK(tasks[0].compileFailure == "requires do: x");
+  REQUIRE(tasks[1].runs.size() == 2);
+  CHECK(tasks[1].runs[1].expect.empty());
+  CHECK(tasks[1].runs[1].failure == "requires stderr-count: 1");
+}
+
+TEST_CASE("An expected failure on the first step is rejected") {
+  using namespace polyregion::polytest;
+  TempDir dir;
+  polyregion::env::ScopedEnv targets(polyregion::env::PolyregionTestTargets, "host@native");
+  std::ofstream(dir.file("check_first.cpp")) << "#pragma region case: a\n#pragma region do: echo {output}\n"
+                                                "#pragma region fails-with: nope\n";
+  auto cfg = testConfig(dir.path);
+  cfg.testFiles = {dir.file("check_first.cpp")};
+  CHECK_THROWS_AS(enumerateTasks(cfg, true, false, {}), std::invalid_argument);
 }
 
 TEST_CASE("Cache and library locations reach the child environment") {
@@ -352,5 +394,31 @@ TEST_CASE("A failing repro compile reports its own stderr") {
   CHECK(o.status == TaskStatus::Fail);
   CHECK(o.failReason.find("repro -c compile failed") != std::string::npos);
   CHECK(o.stderrCapture == "repro diagnostic\n");
+}
+
+TEST_CASE("A later step expected to fail passes only with its diagnostic") {
+  using namespace polyregion::polytest;
+  TempDir dir;
+  script(dir, "fails.sh", "echo 'include not found' >&2; exit 1");
+  script(dir, "passes.sh", "exit 0");
+  const auto task = [&](const std::string &step, const std::string &message) {
+    return Task{Mode::Offload,
+                "check_x.cpp",
+                "c",
+                {},
+                dir.path,
+                dir.file("out"),
+                std::nullopt,
+                {{"compile", {}, {}}, {dir.file(step), {}, {}, message}},
+                {},
+                std::nullopt};
+  };
+  CHECK(detail::runTask(task("fails.sh", "include not found"), testConfig(dir.path)).status == TaskStatus::Pass);
+  const auto wrong = detail::runTask(task("fails.sh", "other diagnostic"), testConfig(dir.path));
+  CHECK(wrong.status == TaskStatus::Fail);
+  CHECK(wrong.failReason.find("without expected diagnostic") != std::string::npos);
+  const auto succeeded = detail::runTask(task("passes.sh", "include not found"), testConfig(dir.path));
+  CHECK(succeeded.status == TaskStatus::Fail);
+  CHECK(succeeded.failReason.find("unexpectedly succeeded") != std::string::npos);
 }
 #endif
