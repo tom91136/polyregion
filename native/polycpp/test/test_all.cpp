@@ -50,10 +50,10 @@ int main(int argc, const char **argv) {
           .extraVars = {{"package_fixture", packageFixture}, {"polypackage_emit", polyc}, {"mini_app_iters", "2"}},
           .stdpar = {"polycpp_stdpar",
 #ifdef _WIN32
-                     "-fstdpar -fstdpar-verbose=debug -fstdpar-arch={polycpp_arch} -fstdpar-mem=reflect -fstdpar-rt=static -v"
+                     "-fstdpar -fstdpar-verbose=info -fstdpar-arch={polycpp_arch} -fstdpar-mem=reflect -fstdpar-rt=static -v"
 #else
                      POLYTEST_APPLE_TARGET_FLAG
-                     "-fstdpar -fstdpar-verbose=debug -fstdpar-arch={polycpp_arch} -fstdpar-mem=reflect -fstdpar-rt=dynamic -v"
+                     "-fstdpar -fstdpar-verbose=info -fstdpar-arch={polycpp_arch} -fstdpar-mem=reflect -fstdpar-rt=dynamic -v"
 #endif
           },
           .driverEnvVar = polyregion::env::PolycppDriver,
