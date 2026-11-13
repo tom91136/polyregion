@@ -945,8 +945,13 @@ static void foldConstantBranches(llvm::Function &F) {
 static void specialisePointersByBooleanPhi(llvm::Function &F) {
   llvm::DominatorTree DT(F);
   for (llvm::BasicBlock &BB : F) {
+#if LLVM_VERSION_MAJOR >= 23
+    const auto *branch = llvm::dyn_cast<llvm::CondBrInst>(BB.getTerminator());
+    auto *guard = branch ? llvm::dyn_cast<llvm::PHINode>(branch->getCondition()) : nullptr;
+#else
     const auto *branch = llvm::dyn_cast<llvm::BranchInst>(BB.getTerminator());
     auto *guard = branch && branch->isConditional() ? llvm::dyn_cast<llvm::PHINode>(branch->getCondition()) : nullptr;
+#endif
     if (!guard || guard->getParent() != &BB) continue;
     if (branch->getSuccessor(0) == branch->getSuccessor(1)) continue;
     if (!(guard->incoming_values() ^ forall([](const auto &value) { return llvm::isa<llvm::ConstantInt>(value); }))) continue;

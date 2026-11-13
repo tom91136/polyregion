@@ -755,9 +755,14 @@ TEST_CASE("Vulkan guards every 64-bit division behind a 32-bit fast path", "[bac
         if (op->getType()->isIntegerTy(32) && division) ++narrow;
         if (!op->getType()->isIntegerTy(64) || !(wide ^ contains(static_cast<unsigned>(op->getOpcode())))) continue;
         const auto *predecessor = op->getParent()->getSinglePredecessor();
+#if LLVM_VERSION_MAJOR >= 23
+        const auto *branch = predecessor ? llvm::dyn_cast<llvm::CondBrInst>(predecessor->getTerminator()) : nullptr;
+        REQUIRE(branch);
+#else
         const auto *branch = predecessor ? llvm::dyn_cast<llvm::BranchInst>(predecessor->getTerminator()) : nullptr;
         REQUIRE(branch);
         REQUIRE(branch->isConditional());
+#endif
         const auto *cmp = llvm::dyn_cast<llvm::ICmpInst>(branch->getCondition());
         REQUIRE(cmp);
         CHECK(cmp->getPredicate() == llvm::CmpInst::ICMP_EQ);
