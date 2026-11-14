@@ -345,7 +345,7 @@ TEST_CASE("Merged tasks list one run per device and emit one compile") {
   CHECK(count("--run-task") == 1);
   const auto slice = [&](const std::string &shard, const Task &t) { return sliceLabel(shard, bucketOf(sourceOf(t))); };
   const auto merged = tasks ^ find([&](const auto &t) { return detail::archFor(t, cfg) == "spirv_glcompute@"; });
-  const auto host = tasks ^ find([&](const auto &t) { return detail::archFor(t, cfg) == "host@native!host@*"; });
+  const auto host = tasks ^ find([&](const auto &t) { return detail::archFor(t, cfg) == "host@native"; });
   REQUIRE((merged && host));
   const auto glcompute = slice("spirv_glcompute_40", *merged);
   CHECK(count("LABELS \"codegen;spirv_glcompute_40;" + glcompute + "\"") == 2);
