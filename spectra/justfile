@@ -133,8 +133,8 @@ build-package extra='':
       -DCMAKE_PREFIX_PATH="$dist" {{ extra }}
     cmake --build "{{ root }}/target/package" --target spectra-package --parallel {{ jobs }}
 
-# Run the package-import matrix for the test profile's targets; $EMULATORS selects a Polyregion emulator bundle.
-test-package filter='' extra='' ctest='':
+# Run the package-import matrix for the test profile's targets; $EMULATORS selects a Polyregion emulator bundle. $POLYTEST_SLICE is a ctest -L regex (see list-slices); junit = result-xml path.
+test-package filter='' extra='' ctest='' junit='':
     #!/usr/bin/env bash
     set -euo pipefail
     dist="$(just dist)"
@@ -151,7 +151,27 @@ test-package filter='' extra='' ctest='':
       -DSPECTRA_TEST_PROFILE="${POLYREGION_TEST_PROFILE:-}" -DCMAKE_PREFIX_PATH="$dist" {{ extra }}
     cmake --build "{{ root }}/target/package" --parallel {{ jobs }}
     ctest --test-dir "{{ root }}/target/package" --parallel {{ jobs }} --timeout 3600 --output-on-failure \
-      {{ if filter == "" { "" } else { "-R '" + filter + "'" } }} {{ ctest }}
+      {{ if filter == "" { "" } else { "-R '" + filter + "'" } }} ${POLYTEST_SLICE:+-L "$POLYTEST_SLICE"} \
+      {{ if junit == "" { "" } else { "--output-junit '" + root + "/target/package/" + junit + "'" } }} {{ ctest }}
+
+# Print the package-import test slices for a profile, one per line: id, shard label, and the ctest -L regex selecting the slice (tab separated); CI builds the slice matrix from this. Every suite of the build tree sizes the slices together.
+list-slices extra='' profile='emulators':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dist="$(just dist)"
+    export POLYREGION_TEST_PROFILE="{{ profile }}"
+    cmake -S "{{ root }}" -B "{{ root }}/target/package" -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release -DSPECTRA_ENABLE_PACKAGE=ON -DSPECTRA_ENABLE_PACKAGE_TESTS=ON \
+      -DSPECTRA_TEST_PROFILE="$POLYREGION_TEST_PROFILE" -DCMAKE_PREFIX_PATH="$dist" {{ extra }} >&2
+    weights=$(mktemp)
+    trap 'rm -f "$weights"' EXIT
+    first=
+    while IFS= read -r suite || [ -n "$suite" ]; do
+      suite="${suite%$'\r'}"
+      if [ -z "$first" ]; then first="$suite"; continue; fi
+      POLYTEST_SUITE="$suite" "$dist/bin/polytest" --list-bucket-weights >> "$weights"
+    done < "{{ root }}/target/package/spectra-suites.txt"
+    POLYTEST_SUITE="$first" "$dist/bin/polytest" --list-shards --extra-weights "$weights"
 
 _vendor target extra='':
     cmake -S "{{ root }}" -B "{{ root }}/target/vendor" -DSPECTRA_VENDOR_ONLY=ON -DSPECTRA_CONTAINER_RUNTIME={{ container }} {{ extra }}
