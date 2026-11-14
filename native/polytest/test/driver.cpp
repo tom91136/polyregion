@@ -299,14 +299,20 @@ TEST_CASE("Targets that differ in device alone share one compile") {
     REQUIRE(v.runs.size() == 1);
     CHECK(v.runs[0].command == "run " + v.target + " " + merged[0].output);
   }
+  {
+    polyregion::env::ScopedEnv solo(polyregion::env::PolyregionTestTargets, "spirv_glcompute@!spirv_glcompute@*llvmpipe*");
+    const auto alone = enumerateTasks(cfg, true, false, {});
+    REQUIRE(alone.size() == 1);
+    CHECK(alone[0].id() == merged[0].id());
+  }
 
-  const auto host = named("host@native!host@*");
+  const auto host = named("host@native");
   REQUIRE(host.size() == 1);
   REQUIRE(host[0].variants.size() == 1);
-  CHECK(host[0].id() == host[0].variants[0].id);
+  CHECK(host[0].variants[0].target == "host@native!host@*");
   CHECK(host[0].runs[0].command == "build host@native " + host[0].output);
 
-  const auto cuda = named("cuda@sm_35!cuda@*");
+  const auto cuda = named("cuda@sm_35");
   REQUIRE(cuda.size() == 1);
   CHECK((cuda[0].variants ^ map([](const auto &v) { return v.suffix; })) == std::vector<std::string>{"", "runtime", "usm"});
   CHECK((cuda[0].variants ^ map([](const auto &v) { return v.id; }) ^ distinct()).size() == 1);

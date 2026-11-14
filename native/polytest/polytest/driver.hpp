@@ -547,8 +547,7 @@ inline TaskOutcome runTask(const Task &task, const DriverConfig &cfg, const RunV
 
 } // namespace detail
 
-// tasks with the same compile step and output directory differ in device alone: compile once, run on each device. A task
-// that stays single-device keeps its own target; a merged one is named by the compile target.
+// the name comes from the compile target alone, so it does not depend on how many devices are selected
 inline std::vector<Task> mergeByCompile(const std::vector<Task> &tasks, const DriverConfig &cfg) {
   std::vector<Task> merged;
   std::unordered_map<std::string, std::size_t> index;
@@ -558,9 +557,7 @@ inline std::vector<Task> mergeByCompile(const std::vector<Task> &tasks, const Dr
     else index.emplace(key, merged.size()), merged.push_back(t);
   }
   for (auto &t : merged)
-    if ((t.variants ^ map([](const auto &v) { return v.id; }) ^ distinct()).size() > 1)
-      t.variables =
-          t.variables ^ map([&](const auto &k, const auto &v) { return std::pair{k, k == cfg.archVar ? compileTargetOf(v) : v}; });
+    t.variables = t.variables ^ map([&](const auto &k, const auto &v) { return std::pair{k, k == cfg.archVar ? compileTargetOf(v) : v}; });
   return merged;
 }
 
