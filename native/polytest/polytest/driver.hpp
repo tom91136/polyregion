@@ -710,6 +710,8 @@ struct RunnerOptions {
   bool list = false;
   bool listIds = false;
   bool listShards = false;
+  bool listBucketWeights = false;
+  std::string extraWeights = {};
   bool listTargets = false;
   std::string emitFile = {};
   std::string emitEnv = {};
@@ -725,7 +727,7 @@ struct RunnerOptions {
 // a task hashes into one of ShardBuckets buckets; a slice is a set of buckets of one shard, so a compile group never splits
 inline constexpr unsigned ShardBuckets = 64;
 // one run entry is one compile or a tenth of one, so run entries track compile count
-inline constexpr std::size_t SliceRuns = 1000;
+inline constexpr std::size_t SliceRuns = 2000;
 
 inline unsigned bucketOf(std::string_view source) {
   std::uint64_t h = 0xcbf29ce484222325ULL;
@@ -772,14 +774,44 @@ inline Slice sliceOf(const std::string &shard, unsigned index, unsigned count, c
           fmt::format("^{}~({})$", shard, buckets ^ mk_string("|", [](unsigned b) { return fmt::format("{:02}", b); }))};
 }
 
-// one slice per SliceRuns run entries of a shard, in profile order; whole source files go to the lightest slice
-inline std::vector<Slice> listSlices(const std::vector<std::string> &targets, const std::vector<Task> &tasks, const DriverConfig &cfg) {
-  std::unordered_map<std::string, std::vector<std::size_t>> weights;
+using BucketWeights = std::unordered_map<std::string, std::vector<std::size_t>>;
+
+// run entries per bucket of each shard
+inline BucketWeights bucketWeights(const std::vector<Task> &tasks, const DriverConfig &cfg) {
+  BucketWeights weights;
   for (const auto &t : tasks) {
     if (detail::archFor(t, cfg).empty()) continue;
     auto &w = weights.try_emplace(ctestSafe(detail::compileTargetFor(t, cfg)), ShardBuckets, 0).first->second;
     w[bucketOf(sourceOf(t))] += t.variants.size();
   }
+  return weights;
+}
+
+// `shard<TAB>bucket<TAB>runs` per non-empty bucket
+inline std::string formatBucketWeights(const BucketWeights &weights) {
+  std::vector<std::string> shards;
+  for (const auto &[shard, w] : weights)
+    shards.push_back(shard);
+  std::sort(shards.begin(), shards.end());
+  std::string out;
+  for (const auto &shard : shards)
+    for (unsigned b = 0; b < ShardBuckets; ++b)
+      if (const auto runs = weights.at(shard)[b]; runs > 0) out += fmt::format("{}\t{}\t{}\n", shard, b, runs);
+  return out;
+}
+
+inline void addBucketWeights(BucketWeights &weights, const std::string &text) {
+  for (const auto &line : text ^ split('\n')) {
+    const auto fields = line ^ split('\t');
+    if (fields.size() != 3) continue;
+    const auto bucket = static_cast<unsigned>(std::stoul(fields[1]));
+    if (bucket >= ShardBuckets) throw std::runtime_error("polytest: bucket out of range in weights: " + line);
+    weights.try_emplace(fields[0], ShardBuckets, 0).first->second[bucket] += std::stoull(fields[2]);
+  }
+}
+
+// one slice per SliceRuns run entries of a shard, in profile order; whole source files go to the lightest slice
+inline std::vector<Slice> listSlices(const std::vector<std::string> &targets, const BucketWeights &weights) {
   return targets ^ map([](const auto &t) { return ctestSafe(compileTargetOf(t)); }) ^ distinct() ^ flat_map([&](const auto &shard) {
            const auto it = weights.find(shard);
            const auto w = it == weights.end() ? std::vector<std::size_t>(ShardBuckets, 0) : it->second;
@@ -858,9 +890,15 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
     loadTestTargets(cfg.profileDir) | for_each([](const auto &t) { std::fprintf(stdout, "%s\n", t.c_str()); });
     return 0;
   }
-  if (opts.listShards) {
+  if (opts.listShards || opts.listBucketWeights) {
     const auto tasks = enumerateTasks(cfg, opts.offload, opts.passthrough, opts.caseFilters, opts.source);
-    listSlices(loadTestTargets(cfg.profileDir), tasks, cfg)
+    auto weights = bucketWeights(tasks, cfg);
+    if (opts.listBucketWeights) {
+      std::fputs(formatBucketWeights(weights).c_str(), stdout);
+      return 0;
+    }
+    if (!opts.extraWeights.empty()) addBucketWeights(weights, polyregion::read_string(opts.extraWeights));
+    listSlices(loadTestTargets(cfg.profileDir), weights)
         | for_each([](const auto &s) { std::fprintf(stdout, "%s\t%s\t%s\n", s.id.c_str(), s.shard.c_str(), s.labels.c_str()); });
     return 0;
   }
@@ -1036,6 +1074,8 @@ inline int fired_main( //
     bool list = fire::arg({"-l", "--list", "Enumerate tasks (human-readable) and exit"}),
     bool listIds = fire::arg({"--list-ids", "Enumerate task ids (one per line) and exit"}),
     bool listShards = fire::arg({"--list-shards", "Enumerate slices (id, shard label, ctest -L regex; tab separated) and exit"}),
+    bool listBucketWeights = fire::arg({"--list-bucket-weights", "Enumerate run entries per shard and bucket (tab separated) and exit"}),
+    fire::optional<std::string> extraWeights = fire::arg({"--extra-weights", "Weights file of another suite to add (with --list-shards)"}),
     bool listTargets = fire::arg({"--list-targets", "Enumerate the profile's test targets (one per line) and exit"}),
     fire::optional<std::string> emitCtest = fire::arg({"--emit-ctest", "Write a CTestTestfile fragment to this path and exit"}),
     fire::optional<std::string> emitPrefix = fire::arg({"--emit-prefix", "ctest test-name prefix (with --emit-ctest)"}),
@@ -1052,6 +1092,7 @@ inline int fired_main( //
                      .list = list,
                      .listIds = listIds,
                      .listShards = listShards,
+                     .listBucketWeights = listBucketWeights,
                      .listTargets = listTargets};
   if (caseFilter) opts.caseFilters.push_back(caseFilter.value());
   if (runTask) opts.runTask = runTask.value();
@@ -1059,6 +1100,7 @@ inline int fired_main( //
   if (runOnlyTask) opts.runOnlyTask = runOnlyTask.value();
   if (cleanupTask) opts.cleanupTask = cleanupTask.value();
   if (source) opts.source = source.value();
+  if (extraWeights) opts.extraWeights = extraWeights.value();
   if (emitCtest) opts.emitFile = emitCtest.value();
   if (emitPrefix) opts.emitPrefix = emitPrefix.value();
   if (emitBinary) opts.emitBinary = emitBinary.value();

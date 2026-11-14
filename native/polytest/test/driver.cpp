@@ -446,12 +446,12 @@ TEST_CASE("A shard slices by its run entries and keeps profile order") {
   for (int f = 0; f < 40; ++f) {
     const auto file = dir.file("check_weight" + std::to_string(f) + ".cpp");
     std::ofstream src(file);
-    for (int i = 0; i < 10; ++i)
+    for (int i = 0; i < 20; ++i)
       src << "#pragma region case: c" << i << "\n#pragma region do: build {arch} {output}\n#pragma region do: run {arch} {output}\n";
     cfg.testFiles.push_back(file);
   }
   const auto tasks = enumerateTasks(cfg, true, false, {});
-  const auto slices = listSlices(loadTestTargets(cfg.profileDir), tasks, cfg);
+  const auto slices = listSlices(loadTestTargets(cfg.profileDir), bucketWeights(tasks, cfg));
   const auto idsOf = [&](const std::string &shard) {
     return slices ^ filter([&](const auto &s) { return s.shard == shard; }) ^ map([](const auto &s) { return s.id; });
   };
@@ -464,7 +464,7 @@ TEST_CASE("A shard slices by its run entries and keeps profile order") {
 
   const auto cuda = slices ^ filter([](const auto &s) { return s.shard == "cuda_40sm_35"; });
   REQUIRE(cuda.size() == 2);
-  const auto again = listSlices(loadTestTargets(cfg.profileDir), tasks, cfg);
+  const auto again = listSlices(loadTestTargets(cfg.profileDir), bucketWeights(tasks, cfg));
   REQUIRE(again.size() == slices.size());
   for (std::size_t i = 0; i < slices.size(); ++i)
     CHECK(again[i].labels == slices[i].labels);
@@ -477,6 +477,15 @@ TEST_CASE("A shard slices by its run entries and keeps profile order") {
   std::sort(both.begin(), both.end());
   CHECK(both.size() == ShardBuckets);
   CHECK((both ^ distinct()).size() == ShardBuckets);
+
+  const auto weights = bucketWeights(tasks, cfg);
+  BucketWeights summed;
+  addBucketWeights(summed, formatBucketWeights(weights));
+  CHECK(formatBucketWeights(summed) == formatBucketWeights(weights));
+  addBucketWeights(summed, formatBucketWeights(weights));
+  const auto doubled = listSlices(loadTestTargets(cfg.profileDir), summed);
+  CHECK((doubled ^ count([](const auto &s) { return s.shard == "cuda_40sm_35"; })) == 3);
+  CHECK((doubled ^ count([](const auto &s) { return s.shard == "host_40native"; })) == 1);
 }
 
 #ifndef _WIN32

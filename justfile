@@ -294,15 +294,23 @@ test-native *args='': build-pass-native
     [ "${skips:-0}" -gt 0 ] && echo "ctest: ${skips} skipped (listed under 'did not run'; junit $junit)" || true
     exit $rc
 
-# Print the test slices for a profile, one per line: id, shard label, and the ctest -L regex selecting the slice (tab separated); CI builds the slice matrix from this.
+# Print the test slices for a profile, one per line: id, shard label, and the ctest -L regex selecting the slice (tab separated); CI builds the slice matrix from this. polyfc-tests, when built, adds its run entries to the slice sizing.
 list-shards profile='':
     #!/usr/bin/env bash
     set -euo pipefail
     {{ msvc_reenter }}
     BUILD=$(just _native-build)
+    find_bin() { find "$BUILD" \( -name "$1" -o -name "$1.exe" \) -type f | head -1; }
     cmake --build "$BUILD" --target polycpp-tests >/dev/null
-    bin=$(find "$BUILD" \( -name polycpp-tests -o -name polycpp-tests.exe \) -type f | head -1)
-    POLYREGION_TEST_PROFILE="{{ profile }}" "$bin" --list-shards
+    extra=
+    targets=$(cmake --build "$BUILD" --target help 2>/dev/null || true)
+    if grep -q 'polyfc-tests' <<< "$targets"; then
+        cmake --build "$BUILD" --target polyfc-tests >/dev/null
+        extra=$(mktemp)
+        trap 'rm -f "$extra"' EXIT
+        POLYREGION_TEST_PROFILE="{{ profile }}" "$(find_bin polyfc-tests)" --list-bucket-weights > "$extra"
+    fi
+    POLYREGION_TEST_PROFILE="{{ profile }}" "$(find_bin polycpp-tests)" --list-shards ${extra:+--extra-weights "$extra"}
 
 # Build the software emulator bundle -> emulators/out. linux: container (CONTAINER=docker overrides podman); macos/windows: native on the host via macos.sh / windows.bat
 build-emulators:
