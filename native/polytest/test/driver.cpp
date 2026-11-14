@@ -183,6 +183,67 @@ TEST_CASE("A directive name inside a message stays part of that message") {
   CHECK(tasks[1].variants[0].runs[0].failure == "requires stderr-count: 1");
 }
 
+TEST_CASE("Requires and stderr counts interleave after a step") {
+  using namespace polyregion::polytest;
+  TempDir dir;
+  polyregion::env::ScopedEnv targets(polyregion::env::PolyregionTestTargets, "host@native");
+  std::ofstream(dir.file("check_interleave.cpp"))
+      << "#pragma region case: a\n#pragma region do: echo {output}\n#pragma region do: echo {output}\n"
+         "#pragma region stderr-count: 1 alpha\n#pragma region requires: one\n"
+         "#pragma region stderr-count: 0 beta\n#pragma region requires: two\n"
+         "#pragma region do: echo {output}\n#pragma region stderr-count: 2 gamma\n"
+         "#pragma region requires: three\n#pragma region fails-with: nope\n";
+  auto cfg = testConfig(dir.path);
+  cfg.testFiles = {dir.file("check_interleave.cpp")};
+  const auto tasks = enumerateTasks(cfg, true, false, {});
+  REQUIRE(tasks.size() == 1);
+  REQUIRE(tasks[0].variants.size() == 1);
+  const auto &runs = tasks[0].variants[0].runs;
+  REQUIRE(runs.size() == 2);
+  CHECK(runs[0].expect == std::vector<TestCase::Run::Expect>{{std::nullopt, "one"}, {std::nullopt, "two"}});
+  CHECK(runs[0].stderrCounts == std::vector<TestCase::Run::StderrCount>{{1, "alpha"}, {0, "beta"}});
+  CHECK(!runs[0].failure);
+  CHECK(runs[1].expect == std::vector<TestCase::Run::Expect>{{std::nullopt, "three"}});
+  CHECK(runs[1].stderrCounts == std::vector<TestCase::Run::StderrCount>{{2, "gamma"}});
+  CHECK(runs[1].failure == std::optional<std::string>{"nope"});
+}
+
+TEST_CASE("Requires before stderr counts after a step still parse") {
+  using namespace polyregion::polytest;
+  TempDir dir;
+  polyregion::env::ScopedEnv targets(polyregion::env::PolyregionTestTargets, "host@native");
+  std::ofstream(dir.file("check_order.cpp"))
+      << "#pragma region case: a\n#pragma region do: echo {output}\n#pragma region do: echo {output}\n"
+         "#pragma region requires: one\n#pragma region stderr-count: 1 alpha\n"
+         "#pragma region do: echo {output}\n#pragma region requires: two\n"
+         "#pragma region stderr-count: 0 beta\n#pragma region fails-with: nope\n";
+  auto cfg = testConfig(dir.path);
+  cfg.testFiles = {dir.file("check_order.cpp")};
+  const auto tasks = enumerateTasks(cfg, true, false, {});
+  REQUIRE(tasks.size() == 1);
+  REQUIRE(tasks[0].variants.size() == 1);
+  const auto &runs = tasks[0].variants[0].runs;
+  REQUIRE(runs.size() == 2);
+  CHECK(runs[0].expect == std::vector<TestCase::Run::Expect>{{std::nullopt, "one"}});
+  CHECK(runs[0].stderrCounts == std::vector<TestCase::Run::StderrCount>{{1, "alpha"}});
+  CHECK(!runs[0].failure);
+  CHECK(runs[1].expect == std::vector<TestCase::Run::Expect>{{std::nullopt, "two"}});
+  CHECK(runs[1].stderrCounts == std::vector<TestCase::Run::StderrCount>{{0, "beta"}});
+  CHECK(runs[1].failure == std::optional<std::string>{"nope"});
+}
+
+TEST_CASE("A requires after fails-with is rejected") {
+  using namespace polyregion::polytest;
+  TempDir dir;
+  polyregion::env::ScopedEnv targets(polyregion::env::PolyregionTestTargets, "host@native");
+  std::ofstream(dir.file("check_late.cpp")) << "#pragma region case: a\n#pragma region do: echo {output}\n"
+                                               "#pragma region do: echo {output}\n#pragma region fails-with: nope\n"
+                                               "#pragma region requires: late\n";
+  auto cfg = testConfig(dir.path);
+  cfg.testFiles = {dir.file("check_late.cpp")};
+  CHECK_THROWS_AS(enumerateTasks(cfg, true, false, {}), std::invalid_argument);
+}
+
 TEST_CASE("An expected failure on the first step is rejected") {
   using namespace polyregion::polytest;
   TempDir dir;
