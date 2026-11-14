@@ -91,6 +91,7 @@ jobs:
     uses: ./.github/workflows/spectra-surface.yaml
 
   spectra-test-linux:
+    name: spectra-test-linux
     needs: [linux-build, linux-emulators]
     if: ${{ !cancelled() && needs.linux-build.outputs.spectra-package != '' }}
     strategy:
@@ -106,6 +107,7 @@ jobs:
       runs_on: ${{ matrix.runs_on }}
 
   spectra-test-macos:
+    name: spectra-test-macos
     needs: [macos-build, macos-emulators, linux-build]
     if: ${{ !cancelled() && needs.linux-build.outputs.spectra-package != '' }}
     strategy:
@@ -121,6 +123,7 @@ jobs:
       runs_on: ${{ matrix.runs_on }}
 
   spectra-test-windows:
+    name: spectra-test-windows
     needs: [windows-build, windows-emulators, linux-build]
     if: ${{ !cancelled() && needs.linux-build.outputs.spectra-package != '' }}
     strategy:
