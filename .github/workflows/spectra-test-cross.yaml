@@ -14,6 +14,7 @@ env:
 jobs:
   # Proves the package imports and its cases run on the host under QEMU for every architecture Polyregion ships.
   test-cross:
+    name: test-cross (${{ matrix.arch }})
     strategy:
       fail-fast: false
       matrix:
