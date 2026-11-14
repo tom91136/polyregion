@@ -9,6 +9,7 @@
 #include <cstring>
 #include <fstream>
 #include <mutex>
+#include <numeric>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -726,12 +727,14 @@ inline constexpr unsigned ShardBuckets = 64;
 // one run entry is one compile or a tenth of one, so run entries track compile count
 inline constexpr std::size_t SliceRuns = 1000;
 
-inline unsigned bucketOf(std::string_view taskId) {
+inline unsigned bucketOf(std::string_view source) {
   std::uint64_t h = 0xcbf29ce484222325ULL;
-  for (const unsigned char c : taskId)
+  for (const unsigned char c : source)
     h = (h ^ c) * 0x100000001b3ULL;
   return static_cast<unsigned>((h ^ (h >> 32)) % ShardBuckets);
 }
+
+inline std::string sourceOf(const Task &t) { return std::string(llvm::sys::path::filename(t.testFile)); }
 
 inline std::string sliceLabel(const std::string &shard, unsigned bucket) { return fmt::format("{}~{:02}", shard, bucket); }
 
@@ -745,26 +748,46 @@ struct Slice {
   std::string labels; // ctest -L regex selecting exactly this slice
 };
 
-inline Slice sliceOf(const std::string &shard, unsigned index, unsigned count) {
-  if (count == 1) return {shard, shard, fmt::format("^{}$", shard)};
-  std::vector<std::string> buckets;
-  for (unsigned b = index; b < ShardBuckets; b += count)
-    buckets.push_back(fmt::format("{:02}", b));
-  return {fmt::format("{}.{}of{}", shard, index + 1, count), shard, fmt::format("^{}~({})$", shard, buckets ^ mk_string("|"))};
+// greedy longest-processing-time: heaviest bucket first into the lightest slice, ties to the lowest index
+inline std::vector<std::vector<unsigned>> assignBuckets(const std::vector<std::size_t> &weights, unsigned count) {
+  std::vector<unsigned> order(weights.size());
+  for (unsigned b = 0; b < order.size(); ++b)
+    order[b] = b;
+  std::stable_sort(order.begin(), order.end(), [&](unsigned l, unsigned r) { return weights[l] > weights[r]; });
+  std::vector<std::vector<unsigned>> slices(count);
+  std::vector<std::size_t> load(count, 0);
+  for (const auto b : order) {
+    const auto lightest = static_cast<std::size_t>(std::min_element(load.begin(), load.end()) - load.begin());
+    slices[lightest].push_back(b);
+    load[lightest] += weights[b];
+  }
+  for (auto &bs : slices)
+    std::sort(bs.begin(), bs.end());
+  return slices;
 }
 
-// one slice per SliceRuns run entries of a shard, in profile order
+inline Slice sliceOf(const std::string &shard, unsigned index, unsigned count, const std::vector<unsigned> &buckets) {
+  if (count == 1) return {shard, shard, fmt::format("^{}$", shard)};
+  return {fmt::format("{}.{}of{}", shard, index + 1, count), shard,
+          fmt::format("^{}~({})$", shard, buckets ^ mk_string("|", [](unsigned b) { return fmt::format("{:02}", b); }))};
+}
+
+// one slice per SliceRuns run entries of a shard, in profile order; whole source files go to the lightest slice
 inline std::vector<Slice> listSlices(const std::vector<std::string> &targets, const std::vector<Task> &tasks, const DriverConfig &cfg) {
-  const auto runs = tasks                                                                     //
-                    ^ filter([&](const auto &t) { return !detail::archFor(t, cfg).empty(); }) //
-                    ^ group_map_reduce([&](const auto &t) { return ctestSafe(detail::compileTargetFor(t, cfg)); },
-                                       [](const auto &t) { return t.variants.size(); }, [](auto a, auto b) { return a + b; });
+  std::unordered_map<std::string, std::vector<std::size_t>> weights;
+  for (const auto &t : tasks) {
+    if (detail::archFor(t, cfg).empty()) continue;
+    auto &w = weights.try_emplace(ctestSafe(detail::compileTargetFor(t, cfg)), ShardBuckets, 0).first->second;
+    w[bucketOf(sourceOf(t))] += t.variants.size();
+  }
   return targets ^ map([](const auto &t) { return ctestSafe(compileTargetOf(t)); }) ^ distinct() ^ flat_map([&](const auto &shard) {
-           const auto it = runs.find(shard);
-           const auto n = sliceCount(it == runs.end() ? 0 : it->second);
+           const auto it = weights.find(shard);
+           const auto w = it == weights.end() ? std::vector<std::size_t>(ShardBuckets, 0) : it->second;
+           const auto n = sliceCount(std::accumulate(w.begin(), w.end(), std::size_t{0}));
+           const auto assigned = assignBuckets(w, n);
            std::vector<Slice> slices;
            for (unsigned i = 0; i < n; ++i)
-             slices.push_back(sliceOf(shard, i, n));
+             slices.push_back(sliceOf(shard, i, n, assigned[i]));
            return slices;
          });
 }
@@ -784,7 +807,7 @@ inline void emitCtest(const std::vector<Task> &tasks, const DriverConfig &cfg, c
         const auto source = std::string(llvm::sys::path::filename(t.testFile));
         const auto timeout = t.timeoutSecs ? t.timeoutSecs : cfg.defaultTimeoutSecs;
         const auto target = detail::archFor(t, cfg);
-        const auto bucket = bucketOf(t.id());
+        const auto bucket = bucketOf(source);
         if (t.variants.size() == 1 && t.variants[0].suffix.empty())
           return CtestEntry{t.id(), target.empty() ? std::string{} : runLabels(t.variants[0], bucket), {}, source, timeout};
         const auto compile = ctestSafe(compileTargetOf(target));
