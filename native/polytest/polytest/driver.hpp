@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -10,6 +11,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -719,11 +721,60 @@ struct RunnerOptions {
 };
 // NOLINTEND(readability-redundant-member-init)
 
-inline std::string runLabels(const RunVariant &v) {
+// a task hashes into one of ShardBuckets buckets; a slice is a set of buckets of one shard, so a compile group never splits
+inline constexpr unsigned ShardBuckets = 64;
+// one run entry is one compile or a tenth of one, so run entries track compile count
+inline constexpr std::size_t SliceRuns = 1000;
+
+inline unsigned bucketOf(std::string_view taskId) {
+  std::uint64_t h = 0xcbf29ce484222325ULL;
+  for (const unsigned char c : taskId)
+    h = (h ^ c) * 0x100000001b3ULL;
+  return static_cast<unsigned>((h ^ (h >> 32)) % ShardBuckets);
+}
+
+inline std::string sliceLabel(const std::string &shard, unsigned bucket) { return fmt::format("{}~{:02}", shard, bucket); }
+
+inline unsigned sliceCount(std::size_t runs) {
+  return static_cast<unsigned>(std::clamp<std::size_t>((runs + SliceRuns - 1) / SliceRuns, 1, ShardBuckets));
+}
+
+struct Slice {
+  std::string id;
+  std::string shard;
+  std::string labels; // ctest -L regex selecting exactly this slice
+};
+
+inline Slice sliceOf(const std::string &shard, unsigned index, unsigned count) {
+  if (count == 1) return {shard, shard, fmt::format("^{}$", shard)};
+  std::vector<std::string> buckets;
+  for (unsigned b = index; b < ShardBuckets; b += count)
+    buckets.push_back(fmt::format("{:02}", b));
+  return {fmt::format("{}.{}of{}", shard, index + 1, count), shard, fmt::format("^{}~({})$", shard, buckets ^ mk_string("|"))};
+}
+
+// one slice per SliceRuns run entries of a shard, in profile order
+inline std::vector<Slice> listSlices(const std::vector<std::string> &targets, const std::vector<Task> &tasks, const DriverConfig &cfg) {
+  const auto runs = tasks                                                                     //
+                    ^ filter([&](const auto &t) { return !detail::archFor(t, cfg).empty(); }) //
+                    ^ group_map_reduce([&](const auto &t) { return ctestSafe(detail::compileTargetFor(t, cfg)); },
+                                       [](const auto &t) { return t.variants.size(); }, [](auto a, auto b) { return a + b; });
+  return targets ^ map([](const auto &t) { return ctestSafe(compileTargetOf(t)); }) ^ distinct() ^ flat_map([&](const auto &shard) {
+           const auto it = runs.find(shard);
+           const auto n = sliceCount(it == runs.end() ? 0 : it->second);
+           std::vector<Slice> slices;
+           for (unsigned i = 0; i < n; ++i)
+             slices.push_back(sliceOf(shard, i, n));
+           return slices;
+         });
+}
+
+inline std::string runLabels(const RunVariant &v, unsigned bucket) {
   if (v.target.empty()) return {};
   const auto device = ctestSafe(v.target);
   const auto compile = ctestSafe(compileTargetOf(v.target));
-  return device == compile ? "codegen;" + device : "codegen;" + device + ";" + compile;
+  const auto slice = sliceLabel(compile, bucket);
+  return device == compile ? fmt::format("codegen;{};{}", device, slice) : fmt::format("codegen;{};{};{}", device, compile, slice);
 }
 
 inline void emitCtest(const std::vector<Task> &tasks, const DriverConfig &cfg, const std::string &file, const std::string &prefix,
@@ -733,13 +784,15 @@ inline void emitCtest(const std::vector<Task> &tasks, const DriverConfig &cfg, c
         const auto source = std::string(llvm::sys::path::filename(t.testFile));
         const auto timeout = t.timeoutSecs ? t.timeoutSecs : cfg.defaultTimeoutSecs;
         const auto target = detail::archFor(t, cfg);
+        const auto bucket = bucketOf(t.id());
         if (t.variants.size() == 1 && t.variants[0].suffix.empty())
-          return CtestEntry{t.id(), target.empty() ? std::string{} : runLabels(t.variants[0]), {}, source, timeout};
-        const auto labels = target.empty() ? std::string{} : "codegen;" + ctestSafe(compileTargetOf(target));
+          return CtestEntry{t.id(), target.empty() ? std::string{} : runLabels(t.variants[0], bucket), {}, source, timeout};
+        const auto compile = ctestSafe(compileTargetOf(target));
+        const auto labels = target.empty() ? std::string{} : fmt::format("codegen;{};{}", compile, sliceLabel(compile, bucket));
         const auto vs =
-            t.variants ^ map([](const auto &v) {
+            t.variants ^ map([&](const auto &v) {
               return CtestVariant{v.suffix, v.env ^ mk_string(";", [](const auto &k, const auto &val) { return k + "=" + val; }), v.id,
-                                  runLabels(v)};
+                                  runLabels(v, bucket)};
             });
         return CtestEntry{t.id(), labels, vs, source, timeout};
       });
@@ -783,10 +836,9 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
     return 0;
   }
   if (opts.listShards) {
-    loadTestTargets(cfg.profileDir)                                            //
-            ^ map([](const auto &t) { return ctestSafe(compileTargetOf(t)); }) //
-            ^ distinct()                                                       //
-        | for_each([](const auto &s) { std::fprintf(stdout, "%s\n", s.c_str()); });
+    const auto tasks = enumerateTasks(cfg, opts.offload, opts.passthrough, opts.caseFilters, opts.source);
+    listSlices(loadTestTargets(cfg.profileDir), tasks, cfg)
+        | for_each([](const auto &s) { std::fprintf(stdout, "%s\t%s\t%s\n", s.id.c_str(), s.shard.c_str(), s.labels.c_str()); });
     return 0;
   }
   auto allTasks = enumerateTasks(cfg, opts.offload, opts.passthrough, opts.caseFilters, opts.source);
@@ -960,7 +1012,7 @@ inline int fired_main( //
     bool passthroughOnly = fire::arg({"--passthrough-only", "Skip offload mode"}),
     bool list = fire::arg({"-l", "--list", "Enumerate tasks (human-readable) and exit"}),
     bool listIds = fire::arg({"--list-ids", "Enumerate task ids (one per line) and exit"}),
-    bool listShards = fire::arg({"--list-shards", "Enumerate unique shard labels (one per line) and exit"}),
+    bool listShards = fire::arg({"--list-shards", "Enumerate slices (id, shard label, ctest -L regex; tab separated) and exit"}),
     bool listTargets = fire::arg({"--list-targets", "Enumerate the profile's test targets (one per line) and exit"}),
     fire::optional<std::string> emitCtest = fire::arg({"--emit-ctest", "Write a CTestTestfile fragment to this path and exit"}),
     fire::optional<std::string> emitPrefix = fire::arg({"--emit-prefix", "ctest test-name prefix (with --emit-ctest)"}),

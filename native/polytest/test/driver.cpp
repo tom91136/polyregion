@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <set>
 #include <stdexcept>
 #include <string>
 
@@ -342,10 +343,108 @@ TEST_CASE("Merged tasks list one run per device and emit one compile") {
   CHECK(count("--compile-task") == 1);
   CHECK(count("--run-only-task") == 2);
   CHECK(count("--run-task") == 1);
-  CHECK(count("LABELS \"codegen;spirv_glcompute_40\"") == 2);
-  CHECK(count("LABELS \"codegen;spirv_glcompute_40_21spirv_glcompute_40_2allvmpipe_2a;spirv_glcompute_40\"") == 1);
-  CHECK(count("LABELS \"codegen;spirv_glcompute_40_21spirv_glcompute_40_2aSwiftShader_2a;spirv_glcompute_40\"") == 1);
-  CHECK(count("LABELS \"codegen;host_40native_21host_40_2a;host_40native\"") == 1);
+  const auto slice = [&](const std::string &shard, const std::string &id) { return sliceLabel(shard, bucketOf(id)); };
+  const auto merged = tasks ^ find([&](const auto &t) { return detail::archFor(t, cfg) == "spirv_glcompute@"; });
+  const auto host = tasks ^ find([&](const auto &t) { return detail::archFor(t, cfg) == "host@native!host@*"; });
+  REQUIRE((merged && host));
+  const auto glcompute = slice("spirv_glcompute_40", merged->id());
+  CHECK(count("LABELS \"codegen;spirv_glcompute_40;" + glcompute + "\"") == 2);
+  CHECK(count("LABELS \"codegen;spirv_glcompute_40_21spirv_glcompute_40_2allvmpipe_2a;spirv_glcompute_40;" + glcompute + "\"") == 1);
+  CHECK(count("LABELS \"codegen;spirv_glcompute_40_21spirv_glcompute_40_2aSwiftShader_2a;spirv_glcompute_40;" + glcompute + "\"") == 1);
+  CHECK(count("LABELS \"codegen;host_40native_21host_40_2a;host_40native;" + slice("host_40native", host->id()) + "\"") == 1);
+}
+
+TEST_CASE("A bucket is stable and a task keeps one across its entries") {
+  using namespace polyregion::polytest;
+  using namespace aspartame;
+  CHECK(bucketOf("offload-check_a-a-polycpp_arch_host_40native_21host_40_2a-opt_O3") == 7);
+  CHECK(bucketOf("") == bucketOf(""));
+  CHECK(sliceLabel("host_40native", 7) == "host_40native~07");
+
+  TempDir dir;
+  polyregion::env::ScopedEnv targets(polyregion::env::PolyregionTestTargets,
+                                     "spirv_glcompute@!spirv_glcompute@*llvmpipe*;spirv_glcompute@!spirv_glcompute@*SwiftShader*;"
+                                     "cuda@sm_35!cuda@*");
+  std::ofstream src(dir.file("check_many.cpp"));
+  for (int i = 0; i < 40; ++i)
+    src << "#pragma region case: c" << i << "\n#pragma region do: build {arch} {output}\n#pragma region do: run {arch} {output}\n";
+  src.close();
+  auto cfg = testConfig(dir.path);
+  cfg.testFiles = {dir.file("check_many.cpp")};
+  const auto tasks = enumerateTasks(cfg, true, false, {});
+  const auto fragment = dir.file("fragment.cmake");
+  emitCtest(tasks, cfg, fragment, "p", "runner", {}, {});
+  const auto text = polyregion::read_string(fragment);
+
+  std::set<unsigned> used;
+  for (const auto &t : tasks) {
+    const auto shard = ctestSafe(compileTargetOf(detail::archFor(t, cfg)));
+    const auto label = sliceLabel(shard, bucketOf(t.id()));
+    const auto others = tasks ^ filter([&](const auto &o) { return ctestSafe(compileTargetOf(detail::archFor(o, cfg))) == shard; });
+    used.insert(bucketOf(t.id()));
+    std::size_t labelled = 0;
+    for (auto at = text.find(label + "\""); at != std::string::npos; at = text.find(label + "\"", at + 1))
+      ++labelled;
+    const auto sharing = others ^ count([&](const auto &o) { return bucketOf(o.id()) == bucketOf(t.id()); });
+    const auto entries = (t.variants.size() == 1 ? 1 : t.variants.size() + 2);
+    CHECK(labelled == sharing * entries);
+  }
+  CHECK(used.size() > 1);
+}
+
+TEST_CASE("Slices cover each bucket of a shard exactly once") {
+  using namespace polyregion::polytest;
+  using namespace aspartame;
+  CHECK(sliceCount(0) == 1);
+  CHECK(sliceCount(1) == 1);
+  CHECK(sliceCount(SliceRuns) == 1);
+  CHECK(sliceCount(SliceRuns + 1) == 2);
+  CHECK(sliceCount(1000 * SliceRuns) == ShardBuckets);
+
+  CHECK(sliceOf("host_40native", 0, 1).labels == "^host_40native$");
+  CHECK(sliceOf("host_40native", 0, 1).id == "host_40native");
+  CHECK(sliceOf("host_40native", 1, 3).id == "host_40native.2of3");
+  const auto selects = [](const std::string &labels, const std::string &label) {
+    const auto open = labels.find('(');
+    const auto prefix = labels.substr(1, open - 1);
+    const auto alternatives = labels.substr(open + 1, labels.size() - open - 3) ^ split('|');
+    return label.rfind(prefix, 0) == 0 && (alternatives ^ contains(label.substr(prefix.size())));
+  };
+  for (const unsigned n : {2U, 3U, 4U, 7U, 8U, 64U}) {
+    for (unsigned b = 0; b < ShardBuckets; ++b) {
+      const auto label = sliceLabel("opencl1_1_40", b);
+      unsigned selected = 0;
+      for (unsigned i = 0; i < n; ++i)
+        selected += selects(sliceOf("opencl1_1_40", i, n).labels, label) ? 1 : 0;
+      CHECK(selected == 1);
+    }
+  }
+}
+
+TEST_CASE("A shard slices by its run entries and keeps profile order") {
+  using namespace polyregion::polytest;
+  using namespace aspartame;
+  TempDir dir;
+  polyregion::env::ScopedEnv targets(polyregion::env::PolyregionTestTargets,
+                                     "host@native!host@*;cuda@sm_35!cuda@*;spirv_glcompute@!spirv_glcompute@*llvmpipe*;"
+                                     "spirv_glcompute@!spirv_glcompute@*SwiftShader*;c11@native!c11@*");
+  std::ofstream src(dir.file("check_weight.cpp"));
+  for (int i = 0; i < 400; ++i)
+    src << "#pragma region case: c" << i << "\n#pragma region do: build {arch} {output}\n#pragma region do: run {arch} {output}\n";
+  src.close();
+  auto cfg = testConfig(dir.path);
+  cfg.testFiles = {dir.file("check_weight.cpp")};
+  const auto tasks = enumerateTasks(cfg, true, false, {});
+  const auto slices = listSlices(loadTestTargets(cfg.profileDir), tasks, cfg);
+  const auto idsOf = [&](const std::string &shard) {
+    return slices ^ filter([&](const auto &s) { return s.shard == shard; }) ^ map([](const auto &s) { return s.id; });
+  };
+  CHECK((slices ^ map([](const auto &s) { return s.shard; }) ^ distinct())
+        == std::vector<std::string>{"host_40native", "cuda_40sm_35", "spirv_glcompute_40", "c11_40native"});
+  CHECK(idsOf("host_40native") == std::vector<std::string>{"host_40native"});
+  CHECK(idsOf("c11_40native") == std::vector<std::string>{"c11_40native"});
+  CHECK(idsOf("cuda_40sm_35") == std::vector<std::string>{"cuda_40sm_35.1of2", "cuda_40sm_35.2of2"});
+  CHECK(idsOf("spirv_glcompute_40") == std::vector<std::string>{"spirv_glcompute_40"});
 }
 
 #ifndef _WIN32
