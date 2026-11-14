@@ -904,18 +904,23 @@ class PartialEvalSuite extends munit.FunSuite {
   test("CSE invalidation stays linear on a long straight-line block") {
     val x   = named("x", p.Type.IntS32)
     val acc = named("acc", p.Type.IntS32)
-    val body = p.Stmt.Var(acc, Some(p.Expr.Alias(p.Term.IntS32Const(0))), true) ::
-      (0 until 32000).toList.flatMap { i =>
-        val t = named(s"t$i", p.Type.IntS32)
-        List(
-          p.Stmt.Var(t, Some(p.Expr.IntrOp(p.Intr.Mul(selectT(x), p.Term.IntS32Const(i + 1), p.Type.IntS32)))),
-          p.Stmt.Mut(selectT(acc), p.Expr.IntrOp(p.Intr.Add(selectT(acc), selectT(t), p.Type.IntS32)))
-        )
-      } ::: List(p.Stmt.Return(p.Expr.Alias(selectT(acc))))
-    val t0 = System.nanoTime()
-    assert(pe(body, p.Type.IntS32, List(i32("x"))).nonEmpty)
-    val elapsed = (System.nanoTime() - t0) / 1000000
-    assert(elapsed < 8000, s"${elapsed}ms for 32000 statements")
+    def millis(n: Int) = {
+      val body = p.Stmt.Var(acc, Some(p.Expr.Alias(p.Term.IntS32Const(0))), true) ::
+        (0 until n).toList.flatMap { i =>
+          val t = named(s"t$i", p.Type.IntS32)
+          List(
+            p.Stmt.Var(t, Some(p.Expr.IntrOp(p.Intr.Mul(selectT(x), p.Term.IntS32Const(i + 1), p.Type.IntS32)))),
+            p.Stmt.Mut(selectT(acc), p.Expr.IntrOp(p.Intr.Add(selectT(acc), selectT(t), p.Type.IntS32)))
+          )
+        } ::: List(p.Stmt.Return(p.Expr.Alias(selectT(acc))))
+      val t0 = System.nanoTime()
+      assert(pe(body, p.Type.IntS32, List(i32("x"))).nonEmpty)
+      (System.nanoTime() - t0) / 1000000
+    }
+    val small = (0 until 3).map(_ => millis(4000)).min
+    val large = millis(32000)
+    // 8x the statements: ~8x when linear, ~64x when quadratic
+    assert(large < small * 32, s"${large}ms for 32000 statements vs ${small}ms for 4000")
   }
 
   test("CSE reuses across a call when no operand address escapes") {
