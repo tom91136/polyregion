@@ -99,8 +99,15 @@ struct TestCase {
     auto parseRuns = [&] {
       auto runs = parseNormalised(file, [&](const std::string &line) -> std::optional<Run> {
         return parseRight("do:", line) ^ map([&](const auto &runLine) {
-                 auto expect = parseExpects();
-                 auto stderrCounts = parseStderrCounts();
+                 std::vector<Run::Expect> expect;
+                 std::vector<Run::StderrCount> stderrCounts;
+                 for (bool consumed = true; consumed;) {
+                   auto expects = parseExpects();
+                   auto counts = parseStderrCounts();
+                   consumed = !expects.empty() || !counts.empty();
+                   expect.insert(expect.end(), expects.begin(), expects.end());
+                   stderrCounts.insert(stderrCounts.end(), counts.begin(), counts.end());
+                 }
                  return Run{runLine ^ trim(), std::move(expect), std::move(stderrCounts), parseFailure()};
                });
       });
