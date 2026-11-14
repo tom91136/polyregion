@@ -113,5 +113,6 @@ int main(int argc, const char **argv) {
                      .cleanupOnSuccess = true,
                      .targetVar = suite.get("POLYTEST_TARGET_VAR"),
                      .targetValues = suite.pairs("POLYTEST_TARGET_VALUE"),
+                     .defaultTimeoutSecs = std::nullopt,
                  });
 }

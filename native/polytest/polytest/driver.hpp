@@ -75,6 +75,8 @@ struct DriverConfig {
   std::string targetVar = {};
   // NOLINTNEXTLINE(readability-redundant-member-init)
   std::vector<std::pair<std::string, std::string>> targetValues = {};
+  // per-entry ctest TIMEOUT for cases without a `timeout:` directive; none leaves it to `ctest --timeout`
+  std::optional<unsigned> defaultTimeoutSecs = DefaultTimeoutSecs;
 };
 
 inline constexpr const char *OutputName = "out";
@@ -733,7 +735,7 @@ inline void emitCtest(const std::vector<Task> &tasks, const DriverConfig &cfg, c
   const auto entries =
       tasks ^ map([&](const auto &t) {
         const auto source = std::string(llvm::sys::path::filename(t.testFile));
-        const auto timeout = t.timeoutSecs.value_or(DefaultTimeoutSecs);
+        const auto timeout = t.timeoutSecs ? t.timeoutSecs : cfg.defaultTimeoutSecs;
         const auto target = detail::archFor(t, cfg);
         if (t.variants.size() == 1 && t.variants[0].suffix.empty())
           return CtestEntry{t.id(), target.empty() ? std::string{} : runLabels(t.variants[0]), {}, source, timeout};

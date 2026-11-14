@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <optional>
 #include <random>
 #include <string>
 #include <utility>
@@ -43,7 +44,7 @@ struct CtestEntry {
   std::vector<CtestVariant> variants;
   // NOLINTNEXTLINE(readability-redundant-member-init)
   std::string source = {};
-  unsigned timeoutSecs = DefaultTimeoutSecs;
+  std::optional<unsigned> timeoutSecs = DefaultTimeoutSecs;
 };
 
 inline void emitCtestFragment(const std::string &file, const std::string &prefix, const std::string &binary,
@@ -60,9 +61,11 @@ inline void emitCtestFragment(const std::string &file, const std::string &prefix
     return e.empty() ? std::string{} : fmt::format(" ENVIRONMENT \"{}\"", e);
   };
 
-  const auto timeoutProp = [](unsigned secs) { return fmt::format(" TIMEOUT ${{polytest_timeout_{}}}", secs); };
+  const auto timeoutProp = [](std::optional<unsigned> secs) {
+    return secs ? fmt::format(" TIMEOUT ${{polytest_timeout_{}}}", *secs) : std::string{};
+  };
   const auto sourceArg = [](const std::string &source) { return source.empty() ? std::string{} : fmt::format(" --source \"{}\"", source); };
-  const auto timeouts = tasks ^ map([](const auto &t) { return t.timeoutSecs; }) ^ append(DefaultTimeoutSecs) ^ distinct() ^ sort();
+  const auto timeouts = tasks ^ collect([](const auto &t) { return t.timeoutSecs; }) ^ append(DefaultTimeoutSecs) ^ distinct() ^ sort();
   const auto prologue = fmt::format("if(\"$ENV{{{0}}}\" MATCHES \"^[1-9][0-9]*$\")\n  set(polytest_timeout_scale "
                                     "\"$ENV{{{0}}}\")\nelse()\n  set(polytest_timeout_scale 1)\nendif()\n",
                                     TimeoutScaleEnv)

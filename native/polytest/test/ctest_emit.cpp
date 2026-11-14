@@ -57,7 +57,8 @@ TEST_CASE("CTest entries name their source file and carry a scaled timeout") {
   } remove{path};
 
   const std::vector<CtestEntry> entries{{"plain", "", {}, "check_a.cpp", DefaultTimeoutSecs},
-                                        {"shared", "", {{"", {}}, {"usm", "MODE=off"}}, "check_b.cpp", 700}};
+                                        {"shared", "", {{"", {}}, {"usm", "MODE=off"}}, "check_b.cpp", 700},
+                                        {"unbounded", "", {}, "check_c.cpp", std::nullopt}};
   emitCtestFragment(path, "p", "runner", {}, {}, entries);
   const auto fragment = polyregion::read_string(path);
   CHECK(fragment.find("add_test(\"p-plain\" \"runner\" --run-task \"plain\" --source \"check_a.cpp\")") != std::string::npos);
@@ -66,6 +67,7 @@ TEST_CASE("CTest entries name their source file and carry a scaled timeout") {
   CHECK(fragment.find(fmt::format("math(EXPR polytest_timeout_{0} \"{0} * ${{polytest_timeout_scale}}\")", DefaultTimeoutSecs))
         != std::string::npos);
   CHECK(fragment.find("math(EXPR polytest_timeout_700 ") != std::string::npos);
+  CHECK(fragment.find("set_tests_properties(\"p-unbounded\" PROPERTIES SKIP_RETURN_CODE 77)\n") != std::string::npos);
   CHECK(fragment.find("set_tests_properties(\"p-shared-usm\" PROPERTIES SKIP_RETURN_CODE 77 FIXTURES_REQUIRED \"fix-p-shared\" "
                       "RESOURCE_LOCK \"fix-p-shared\" TIMEOUT ${polytest_timeout_700}")
         != std::string::npos);
