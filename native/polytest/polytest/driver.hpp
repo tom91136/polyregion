@@ -463,12 +463,7 @@ inline TaskOutcome compileTask(const Task &task, const DriverConfig &cfg) {
   const char *reproEnv = std::getenv(polyregion::env::PolytestReproCheck);
   const bool repro = !task.compileFailure && !out.empty() && !(reproEnv && reproEnv[0] == '0')
                      && toks ^ exists([](const auto &t) { return t == "-fstdpar"; });
-#ifdef __APPLE__
-  // XXX ld64.lld puts ThinLTO objects in a randomly named directory and records that path in the debug map
-  const auto cmd = task.runs[0].command + (repro ? " -Wl,-object_path_lto," + task.dir + "/lto" : "");
-#else
   const auto &cmd = task.runs[0].command;
-#endif
   auto r = runStep(task, cfg, cmd, target);
   const auto exit = r.exitCode;
   if (std::getenv(polyregion::env::PolyregionPassLog) && !r.stderrText.empty())
@@ -477,13 +472,17 @@ inline TaskOutcome compileTask(const Task &task, const DriverConfig &cfg) {
   std::string reproReason;
   std::optional<StepResult> reproFailure;
   if (exit == 0 && repro) {
-#ifdef _WIN32
-    // XXX PDBs record the driver's randomly named temporary objects, so compare two objects instead; Flang rejects this
-    // Clang-only flag and already emits reproducible objects
+#if defined(__APPLE__) || defined(_WIN32)
+    // XXX Mach-O debug maps and PDBs record the driver's randomly named temporary objects, so compare two objects instead
     const std::string sample = out + ".repro.o";
+  #ifdef _WIN32
+    // Flang rejects this Clang-only flag and already emits reproducible objects
     const bool isPolyfc = toks ^ exists([](const auto &t) { return t.ends_with("polyfc") || t.ends_with("polyfc.exe"); });
     const auto rebuild = (toks ^ mk_string(" ", [&](const auto &t) { return t == out ? sample : t; }))
                          + (isPolyfc ? " -c" : " -mno-incremental-linker-compatible -c");
+  #else
+    const auto rebuild = (toks ^ mk_string(" ", [&](const auto &t) { return t == out ? sample : t; })) + " -c";
+  #endif
     const auto firstBuild = runStep(task, cfg, rebuild, target);
 #else
     const auto &sample = out;
