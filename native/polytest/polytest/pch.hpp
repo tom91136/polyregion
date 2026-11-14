@@ -24,9 +24,6 @@ namespace polyregion::polytest::pch {
 
 using namespace aspartame;
 
-// a compile step can start from a PCH of what its command preloads plus `header`, the shared test header its source
-// includes (empty when it has none). `command` is the step minus input, output and the per-test macros, so equal
-// commands share one PCH; `macros` are the names of the macros that were left out
 struct Spec {
   std::string header;
   std::vector<std::string> command;

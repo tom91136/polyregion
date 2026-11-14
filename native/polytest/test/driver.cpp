@@ -822,7 +822,7 @@ TEST_CASE("A preamble spec drops macros, input and output, and refuses steps tha
   CHECK_FALSE(spec("check_x.cpp", "polycpp -O3 -o {output} {input}"));
 }
 
-TEST_CASE("The preamble PCH is built once per key, rebuilt when a dependency changes, and bypassed when rejected") {
+TEST_CASE("The preamble PCH is built once per key, rebuilt when a dependency changes, and fails when rejected") {
   using namespace polyregion::polytest;
   TempDir dir;
   struct Cwd {
@@ -890,10 +890,9 @@ echo bin > "$out")sh");
 
   dir.touch("reject");
   log = invocations();
-  CHECK(detail::compileTask(task, cfg).status == TaskStatus::Pass);
+  CHECK(detail::compileTask(task, cfg).status == TaskStatus::Fail);
   const auto after = invocations();
-  REQUIRE(after.size() > log.size());
-  CHECK_FALSE(usedPch(after.back()));
-  CHECK(std::any_of(after.begin() + static_cast<std::ptrdiff_t>(log.size()), after.end(), usedPch));
+  REQUIRE(after.size() == log.size() + 1);
+  CHECK(usedPch(after.back()));
 }
 #endif

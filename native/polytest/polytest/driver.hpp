@@ -459,6 +459,7 @@ inline bool checkStderrCounts(const TestCase::Run &run, TaskOutcome &o) {
 struct PchUse {
   std::optional<std::string> path;
   std::string state;
+  bool failed = false;
 };
 
 inline std::string firstDiagnostic(const std::string &text) {
@@ -482,8 +483,7 @@ inline std::vector<std::string> pchKey(const Task &task, const DriverConfig &cfg
   return identity ^ append(fmt::format("mode {}", modeName(task.mode))) ^ append("header " + spec.header) ^ concat(spec.command);
 }
 
-// the PCH is named by its dependencies' state so a changed header never matches an older file; the driver runs its full
-// flag set (--precompile instead of -MD, which would drop link-mode flags such as -pthread that change the LangOptions)
+// XXX not -MD: the driver then drops link-mode flags such as -pthread, which changes the LangOptions
 inline std::optional<std::string> buildPch(const Task &task, const DriverConfig &cfg, const pch::Spec &spec, const std::string &dir,
                                            const std::string &key, const std::vector<std::string> &keyLines) {
   const auto tmp = fmt::format("{}/{}.{}", dir, key, llvm::sys::Process::getProcessId());
@@ -548,12 +548,12 @@ inline PchUse acquirePch(const Task &task, const DriverConfig &cfg) {
     const std::scoped_lock inProcess(builders);
     const pch::FileLock lock(base + ".lock");
     if (!(manifest = lookup())) {
-      if (const auto failure = buildPch(task, cfg, spec, dir, key, keyLines)) return {{}, "build failed: " + *failure};
+      if (const auto failure = buildPch(task, cfg, spec, dir, key, keyLines)) return {{}, "build failed: " + *failure, true};
       manifest = lookup();
       state = "built";
     }
   }
-  if (!manifest) return {{}, "build failed: manifest unreadable after build"};
+  if (!manifest) return {{}, "build failed: manifest unreadable after build", true};
   if (!manifest->macroReads.empty()) return {{}, "off: macro " + manifest->macroReads.front() + " is read by the preamble"};
   return {fmt::format("{}/{}", dir, manifest->pch), state};
 }
@@ -576,13 +576,9 @@ inline TaskOutcome compileTask(const Task &task, const DriverConfig &cfg) {
   const auto &plain = task.runs[0].command;
   const auto pchUse = acquirePch(task, cfg);
   if (!pchUse.state.empty()) std::fprintf(stderr, "[polytest] pch %s: %s\n", pchUse.state.c_str(), task.display().c_str());
-  auto cmd = pchUse.path ? plain + " -include-pch " + *pchUse.path : plain;
+  if (pchUse.failed) return {.status = TaskStatus::Fail, .failReason = "pch " + pchUse.state};
+  const auto cmd = pchUse.path ? plain + " -include-pch " + *pchUse.path : plain;
   auto r = runStep(task, cfg, cmd, target);
-  if (pchUse.path && r.exitCode != 0) {
-    std::fprintf(stderr, "[polytest] pch fallback: %s: %s\n", firstDiagnostic(r.stderrText).c_str(), task.display().c_str());
-    cmd = plain;
-    r = runStep(task, cfg, cmd, target);
-  }
   const auto exit = r.exitCode;
   if (std::getenv(polyregion::env::PolyregionPassLog) && !r.stderrText.empty())
     std::fprintf(stderr, "[%s]\n%s\n", task.display().c_str(), r.stderrText.c_str());
