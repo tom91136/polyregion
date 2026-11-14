@@ -759,7 +759,7 @@ _native-build:
     caches=(native/out/build-*/CMakeCache.txt native/cmake-build-*/CMakeCache.txt)
     # variant trees (-fused, -asan) are only selected when the matching env asks for them
     kept=()
-    for c in "${caches[@]}"; do
+    for c in ${caches[@]+"${caches[@]}"}; do
         case "$c" in
             */build-dist-check-*/CMakeCache.txt) ;;
             */build-*-asan/CMakeCache.txt)  [ "${POLYREGION_ASAN:-}" = "ON" ] && kept+=("$c") ;;
