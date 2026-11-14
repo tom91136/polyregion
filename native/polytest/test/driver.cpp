@@ -880,6 +880,14 @@ echo bin > "$out")sh");
   CHECK(invocations().size() == log.size() + 3);
   CHECK(invocations()[log.size()].find("-x c++-header") != std::string::npos);
 
+  std::ofstream(dir.file("test_utils.h"), std::ios::app) << "#ifdef STRICT_MODE\n#endif\n";
+  auto strict = task;
+  strict.pchSpec->macros = {"STRICT_MODE"};
+  const auto guarded = detail::acquirePch(strict, cfg);
+  CHECK_FALSE(guarded.path);
+  CHECK(guarded.state.find("off: macro STRICT_MODE") == 0);
+  CHECK(detail::acquirePch(task, cfg).path);
+
   dir.touch("reject");
   log = invocations();
   CHECK(detail::compileTask(task, cfg).status == TaskStatus::Pass);
