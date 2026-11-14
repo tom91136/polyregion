@@ -76,9 +76,11 @@ jobs:
     uses: ./.github/workflows/cross-build.yaml
 
   cross-test:
-    needs: cross-build
+    needs: [cross-build, linux-build]
     if: ${{ !cancelled() }}
     uses: ./.github/workflows/cross-test.yaml
+    with:
+      shards: ${{ needs.linux-build.outputs.shards }}
 
   spectra-vendor:
     uses: ./.github/workflows/spectra-vendor.yaml

@@ -426,8 +426,8 @@ jobs:
           name: polyregion-shards-linux-x86_64
           path: .
       - id: gen
-        name: Build shard matrix
+        name: Build slice matrix
         run: |
-          if [ -f shards.txt ]; then shards=$(jq -R -s -c '[split("\n")[] | select(length > 0)]' shards.txt); else shards='[]'; fi
+          if [ -f shards.txt ]; then shards=$(jq -R -s -c '[split("\n")[] | select(length > 0) | split("\t") | {id: .[0], shard: .[1], labels: .[2]}]' shards.txt); else shards='[]'; fi
           echo "shards=$shards" >> "$GITHUB_OUTPUT"
           echo "shards: $shards"

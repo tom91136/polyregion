@@ -2,6 +2,10 @@ name: Linux cross test
 
 on:
   workflow_call:
+    inputs:
+      shards:
+        type: string
+        required: true
 
 defaults:
   run:
@@ -135,23 +139,41 @@ jobs:
           path: crash-reports/
           if-no-files-found: ignore
 
+  discover-slices:
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    outputs:
+      slices: ${{ steps.gen.outputs.slices }}
+    env:
+      SHARD: host_40native
+      SHARDS: ${{ inputs.shards }}
+    steps:
+      - id: gen
+        name: Select the pinned shard
+        run: |
+          slices=$(jq -c --arg shard "$SHARD" 'map(select(.shard == $shard))' <<< "$SHARDS")
+          echo "slices=$slices" >> "$GITHUB_OUTPUT"
+          echo "slices: $slices"
+
   test-native-shard:
+    needs: discover-slices
     if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
       matrix:
         arch: [riscv64, ppc64le, arm]
         frontend: [polyfc, other]
+        slice: ${{ fromJSON(needs.discover-slices.outputs.slices) }}
         exclude:
           - arch: arm
             frontend: polyfc # XXX upstream flang doesn't support 32-bit targets
         include: *cross-matrix
+    name: test-native-shard (${{ matrix.arch }}, ${{ matrix.frontend }}, ${{ matrix.slice.id }})
     runs-on: ${{ matrix.runs_on }}
     env:
       POLYREGION_ARCH: ${{ matrix.arch }}
       POLYC_JS_ENGINE: qjs
       POLYC_PASS_BUNDLE: js
-      SHARD: host_40native_21host_40_2a
     steps:
       - uses: *checkout
       - *setup-just
@@ -177,31 +199,32 @@ jobs:
       - *restore-exec
       - *enable-core-dumps
 
-      - name: Run codegen shard (${{ env.SHARD }}, ${{ matrix.frontend }})
+      - name: Run codegen shard (${{ matrix.slice.id }}, ${{ matrix.frontend }})
         env:
+          POLYTEST_SLICE: ${{ matrix.slice.labels }}
           POLYTEST_REPRO_CHECK: "0" # XXX otherwise it's too slow via QEMU
         run: |
           ulimit -c unlimited || true
           if [ "${{ matrix.frontend }}" = "polyfc" ]; then
-            just test-native-qemu "" "shard-test-results-${{ env.SHARD }}-${{ matrix.frontend }}" -L "^${{ env.SHARD }}$" -R '^polyfc-' --no-tests=error --repeat until-pass:3
+            just test-native-qemu "" "shard-test-results-${{ matrix.slice.id }}-${{ matrix.frontend }}" -R '^polyfc-' --no-tests=error --repeat until-pass:3
           else
-            just test-native-qemu "" "shard-test-results-${{ env.SHARD }}-${{ matrix.frontend }}" -L "^${{ env.SHARD }}$" -E '^polyfc-' --no-tests=error --repeat until-pass:3
+            just test-native-qemu "" "shard-test-results-${{ matrix.slice.id }}-${{ matrix.frontend }}" -E '^polyfc-' --no-tests=error --repeat until-pass:3
           fi
 
       - name: Annotate ctest results
         if: always()
         uses: ./.github/actions/annotate-junit
         with:
-          junit: native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/shard-test-results-${{ env.SHARD }}-${{ matrix.frontend }}.xml
-          label: ctest-shard-${{ matrix.arch }}-${{ env.SHARD }}-${{ matrix.frontend }}
+          junit: native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/shard-test-results-${{ matrix.slice.id }}-${{ matrix.frontend }}.xml
+          label: ctest-shard-${{ matrix.arch }}-${{ matrix.slice.id }}-${{ matrix.frontend }}
 
       - name: Upload test results
         continue-on-error: true
         if: ${{ always() && !env.ACT }}
         uses: *upload
         with:
-          name: shard-test-results-linux-${{ matrix.arch }}-${{ env.SHARD }}-${{ matrix.frontend }}-Release
-          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/shard-test-results-${{ env.SHARD }}-${{ matrix.frontend }}.xml
+          name: shard-test-results-linux-${{ matrix.arch }}-${{ matrix.slice.id }}-${{ matrix.frontend }}-Release
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/shard-test-results-${{ matrix.slice.id }}-${{ matrix.frontend }}.xml
           if-no-files-found: warn
 
       - *collect-cores
@@ -211,7 +234,7 @@ jobs:
         if: ${{ always() && !env.ACT }}
         uses: *upload
         with:
-          name: crash-reports-shard-linux-${{ matrix.arch }}-${{ env.SHARD }}-${{ matrix.frontend }}-Release
+          name: crash-reports-shard-linux-${{ matrix.arch }}-${{ matrix.slice.id }}-${{ matrix.frontend }}-Release
           path: crash-reports/
           if-no-files-found: ignore
 

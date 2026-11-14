@@ -268,8 +268,8 @@ jobs:
           name: polyregion-shards-darwin-arm64
           path: .
       - id: gen
-        name: Build shard matrix
+        name: Build slice matrix
         run: |
-          shards=$(jq -R -s -c '[split("\n")[] | select(length > 0)]' shards.txt)
+          shards=$(jq -R -s -c '[split("\n")[] | select(length > 0) | split("\t") | {id: .[0], shard: .[1], labels: .[2]}]' shards.txt)
           echo "shards=$shards" >> "$GITHUB_OUTPUT"
           echo "shards: $shards"

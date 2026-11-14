@@ -294,7 +294,7 @@ test-native *args='': build-pass-native
     [ "${skips:-0}" -gt 0 ] && echo "ctest: ${skips} skipped (listed under 'did not run'; junit $junit)" || true
     exit $rc
 
-# Print the unique shard labels (ctest -L keys) for a profile, one per line; CI builds the shard matrix from this.
+# Print the test slices for a profile, one per line: id, shard label, and the ctest -L regex selecting the slice (tab separated); CI builds the slice matrix from this.
 list-shards profile='':
     #!/usr/bin/env bash
     set -euo pipefail
@@ -356,7 +356,7 @@ test-native-qemu profile='' junit='qemu-test-results' *args='':
     export POLYREGION_SYSROOT="$SYSROOT" QEMU_LD_PREFIX="$SYSROOT"
     just test-native-dist "{{ profile }}" "{{ junit }}" {{ args }}
 
-# Run ctest against a relocated dist (CI download-artifact shape); profile ''|emulators|asan, junit = result-xml basename.
+# Run ctest against a relocated dist (CI download-artifact shape); profile ''|emulators|asan, junit = result-xml basename. POLYTEST_SLICE is a ctest -L regex (see list-shards).
 test-native-dist profile='' junit='native-test-results' *args='':
     #!/usr/bin/env bash
     set -euo pipefail
@@ -407,7 +407,7 @@ test-native-dist profile='' junit='native-test-results' *args='':
     [ -n "${QEMU_LD_PREFIX:-}" ] && export POLYTEST_TIMEOUT_SCALE="${POLYTEST_TIMEOUT_SCALE:-2}"
     {{ core_guard }}
     junit="$TESTS/{{ junit }}.xml"; rm -f "$junit"
-    rc=0; CLICOLOR_FORCE=$([ -t 1 ] && echo 1 || echo 0) ctest --test-dir "$TESTS" -j "$j" --timeout "$to" --output-on-failure --output-junit "$junit" {{ args }} || rc=$?
+    rc=0; CLICOLOR_FORCE=$([ -t 1 ] && echo 1 || echo 0) ctest --test-dir "$TESTS" -j "$j" --timeout "$to" --output-on-failure --output-junit "$junit" ${POLYTEST_SLICE:+-L "$POLYTEST_SLICE"} {{ args }} || rc=$?
     skips=$(grep -m1 -o 'skipped="[0-9]*"' "$junit" 2>/dev/null | tr -dc 0-9 || true)
     [ "${skips:-0}" -gt 0 ] && echo "ctest: ${skips} skipped (listed under 'did not run'; junit $junit)" || true
     exit $rc

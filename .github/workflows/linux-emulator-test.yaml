@@ -120,7 +120,8 @@ jobs:
       fail-fast: false
       matrix:
         arch: [x86_64, aarch64]
-        shard: ${{ fromJSON(inputs.shards) }}
+        slice: ${{ fromJSON(inputs.shards) }}
+    name: test-native-with-emulators (${{ matrix.arch }}, ${{ matrix.slice.id }})
     runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     env:
       POLYREGION_ARCH: ${{ matrix.arch }}
@@ -161,27 +162,28 @@ jobs:
           sudo mkdir -p /var/lib/polyregion-cores && sudo chmod 1777 /var/lib/polyregion-cores || true
           echo '/var/lib/polyregion-cores/core.%E.%p' | sudo tee /proc/sys/kernel/core_pattern || true
 
-      - name: Run emulator tests (${{ matrix.shard }})
+      - name: Run emulator tests (${{ matrix.slice.id }})
         env:
-          POLYTEST_REPRO_CHECK: ${{ matrix.arch == 'x86_64' && (startsWith(matrix.shard, 'host_') || startsWith(matrix.shard, 'cuda_')) && '1' || '0' }}
+          POLYTEST_SLICE: ${{ matrix.slice.labels }}
+          POLYTEST_REPRO_CHECK: ${{ matrix.arch == 'x86_64' && (startsWith(matrix.slice.shard, 'host_') || startsWith(matrix.slice.shard, 'cuda_')) && '1' || '0' }}
         run: |
           ulimit -c unlimited || true
-          just test-native-dist emulators emulator-test-results-${{ matrix.shard }} -L "^${{ matrix.shard }}$" --no-tests=error
+          just test-native-dist emulators emulator-test-results-${{ matrix.slice.id }} --no-tests=error
 
       - name: Annotate ctest results
         if: always()
         uses: ./.github/actions/annotate-junit
         with:
-          junit: native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/emulator-test-results-${{ matrix.shard }}.xml
-          label: ctest-emulators-${{ matrix.shard }}
+          junit: native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/emulator-test-results-${{ matrix.slice.id }}.xml
+          label: ctest-emulators-${{ matrix.slice.id }}
 
       - name: Upload test results
         continue-on-error: true
         if: ${{ always() && !env.ACT }}
         uses: *upload
         with:
-          name: emulator-test-results-linux-${{ matrix.arch }}-${{ matrix.shard }}-Release
-          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/emulator-test-results-${{ matrix.shard }}.xml
+          name: emulator-test-results-linux-${{ matrix.arch }}-${{ matrix.slice.id }}-Release
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/emulator-test-results-${{ matrix.slice.id }}.xml
           if-no-files-found: warn
 
       - name: Collect crash backtraces
@@ -193,7 +195,7 @@ jobs:
         if: ${{ failure() && !env.ACT }}
         uses: *upload
         with:
-          name: crash-reports-linux-${{ matrix.arch }}-${{ matrix.shard }}-Release
+          name: crash-reports-linux-${{ matrix.arch }}-${{ matrix.slice.id }}-Release
           path: crash-reports/
           if-no-files-found: ignore
 
