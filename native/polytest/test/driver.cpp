@@ -799,4 +799,93 @@ TEST_CASE("A skip is judged against the device the run selected") {
   task.variants[0].target = "spirv_glcompute@";
   CHECK(detail::runTask(task, cfg, task.variants[0]).status == TaskStatus::Fail);
 }
+TEST_CASE("A preamble spec drops macros, input and output, and refuses steps that are not plain stdpar compiles") {
+  using namespace polyregion::polytest;
+  TempDir dir;
+  std::ofstream(dir.file("check_x.cpp")) << "#include <cstdio>\n#include \"test_utils.h\"\n";
+  std::ofstream(dir.file("check_y.cpp")) << "#include <cstdio>\n";
+  const auto expand = [](const std::string &t) {
+    return t == "{flags}" ? std::string("-O3 -fstdpar") : t == "{libm}" ? std::string("-lm") : t;
+  };
+  const auto spec = [&](const std::string &file, const std::string &tmpl) {
+    return pch::specFor("test_utils.h", dir.file(file), tmpl, expand);
+  };
+  const auto x = spec("check_x.cpp", "A=1 polycpp {flags} -DSIZE=2 -USTRICT -o {output} {input} {libm}");
+  REQUIRE(x);
+  CHECK(x->header == dir.file("test_utils.h"));
+  CHECK(x->command == std::vector<std::string>{"A=1", "polycpp", "-O3", "-fstdpar"});
+  CHECK(x->macros == std::vector<std::string>{"SIZE", "STRICT"});
+  CHECK(spec("check_y.cpp", "polycpp {flags} -o {output} {input}")->header.empty());
+  CHECK_FALSE(spec("check_x.cpp", "polycpp {flags} -x cuda -o {output} {input}"));
+  CHECK_FALSE(spec("check_x.cpp", "polycpp {flags} -c -o {output}.o {input}"));
+  CHECK_FALSE(spec("check_x.cpp", "polycpp {flags} -fstdpar-library-path={output}.packages -o {output} {input}"));
+  CHECK_FALSE(spec("check_x.cpp", "polycpp -O3 -o {output} {input}"));
+}
+
+TEST_CASE("The preamble PCH is built once per key, rebuilt when a dependency changes, and bypassed when rejected") {
+  using namespace polyregion::polytest;
+  TempDir dir;
+  struct Cwd {
+    llvm::SmallString<256> previous;
+    explicit Cwd(const std::string &to) {
+      llvm::sys::fs::current_path(previous);
+      llvm::sys::fs::set_current_path(to);
+    }
+    ~Cwd() { llvm::sys::fs::set_current_path(previous); }
+  } cwd(dir.path);
+  dir.touch("test_utils.h");
+  script(dir, "polycpp",
+         "echo \"$@\" >> " + dir.file("log") + R"sh(
+precompile=0; include=
+while [ $# -gt 0 ]; do
+  case "$1" in -x) precompile=1;; -o) out=$2; shift;; -dependency-file) dep=$3; shift 2;; -include-pch) include=$2; shift;; esac
+  shift
+done
+if [ $precompile = 1 ]; then echo pch > "$out"; echo "$out: $(dirname "$out")/../test_utils.h" > "$dep"; exit 0; fi
+if [ -n "$include" ] && [ -e )sh"
+             + dir.file("reject") + R"sh( ]; then echo "error: PCH was rejected" >&2; exit 1; fi
+echo bin > "$out")sh");
+  auto task = Task{Mode::Offload,
+                   "check_x.cpp",
+                   "c",
+                   {},
+                   dir.file("task"),
+                   dir.file("task/out"),
+                   std::nullopt,
+                   {{dir.file("polycpp") + " -fstdpar -o " + dir.file("task/out") + " check_x.cpp", {}, {}}},
+                   {},
+                   std::nullopt};
+  task.pchSpec = pch::Spec{dir.file("test_utils.h"), {dir.file("polycpp"), "-fstdpar"}, {}};
+  const auto cfg = testConfig(dir.path);
+  const auto invocations = [&] {
+    return polyregion::read_string(dir.file("log")) ^ split('\n') ^ filter([](const auto &l) { return !l.empty(); });
+  };
+  const auto usedPch = [&](const std::string &line) { return line.find("-include-pch") != std::string::npos; };
+
+  CHECK(detail::compileTask(task, cfg).status == TaskStatus::Pass);
+  auto log = invocations();
+  REQUIRE(log.size() == 3);
+  CHECK(log[0].find("-x c++-header") != std::string::npos);
+  CHECK(usedPch(log[1]));
+  CHECK(log[1] == log[2]);
+
+  log = invocations();
+  CHECK(detail::compileTask(task, cfg).status == TaskStatus::Pass);
+  CHECK(invocations().size() == log.size() + 2);
+  CHECK(usedPch(invocations().back()));
+
+  std::ofstream(dir.file("test_utils.h"), std::ios::app) << "// edited\n";
+  log = invocations();
+  CHECK(detail::compileTask(task, cfg).status == TaskStatus::Pass);
+  CHECK(invocations().size() == log.size() + 3);
+  CHECK(invocations()[log.size()].find("-x c++-header") != std::string::npos);
+
+  dir.touch("reject");
+  log = invocations();
+  CHECK(detail::compileTask(task, cfg).status == TaskStatus::Pass);
+  const auto after = invocations();
+  REQUIRE(after.size() > log.size());
+  CHECK_FALSE(usedPch(after.back()));
+  CHECK(std::any_of(after.begin() + static_cast<std::ptrdiff_t>(log.size()), after.end(), usedPch));
+}
 #endif

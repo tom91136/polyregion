@@ -61,5 +61,6 @@ int main(int argc, const char **argv) {
           .outputPrefix = "polycpp_test_",
           .directive = "#pragma region",
           .cleanupOnSuccess = true,
+          .preamble = "test_utils.h",
       });
 }

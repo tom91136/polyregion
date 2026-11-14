@@ -37,6 +37,7 @@
 #include "fire.hpp"
 #include "polytest/ctest_emit.hpp"
 #include "polytest/lit.hpp"
+#include "polytest/pch.hpp"
 #include "polytest/profile.hpp"
 #include "polytest/skip_proof.hpp"
 
@@ -73,6 +74,9 @@ struct DriverConfig {
   std::string outputPrefix;
   std::string directive;
   bool cleanupOnSuccess;
+  // compile steps of sources including this header compile against a PCH of it, built lazily in the work dir
+  // NOLINTNEXTLINE(readability-redundant-member-init)
+  std::string preamble = {};
   // binds targetVar to the value keyed by the compile target's canonical backend; unmapped targets are not tested
   // NOLINTNEXTLINE(readability-redundant-member-init)
   std::string targetVar = {};
@@ -118,6 +122,7 @@ struct Task {
   std::vector<TestCase::Run> runs; // the compile step, expanded against the compile target only
   std::vector<RunVariant> variants;
   std::optional<unsigned> timeoutSecs;
+  std::optional<pch::Spec> pchSpec = std::nullopt;
 
   [[nodiscard]] std::string display() const {
     return fmt::format("[{}] {}/{} {}", modeName(mode), extractTestName(testFile), caseName,
@@ -451,6 +456,108 @@ inline bool checkStderrCounts(const TestCase::Run &run, TaskOutcome &o) {
   return true;
 }
 
+struct PchUse {
+  std::optional<std::string> path;
+  std::string state;
+};
+
+inline std::string firstDiagnostic(const std::string &text) {
+  return text ^ split('\n') ^ find([](const auto &line) { return line ^ contains_slice("error:"); })
+         ^ get_or_else(std::string("no diagnostic"));
+}
+
+inline std::vector<std::string> pchKey(const Task &task, const DriverConfig &cfg, const pch::Spec &spec) {
+  const auto exe = resolveBin(
+      spec.command ^ drop_while([](const auto &t) { return pch::isEnvBit(t); }) ^ head_maybe() ^ get_or_else(std::string{}), cfg);
+  llvm::SmallString<256> libs(llvm::sys::path::parent_path(exe));
+  llvm::sys::path::append(libs, "..", "lib", llvm::sys::path::stem(exe), "lib");
+  std::vector<std::string> binaries{exe, cfg.driverPath};
+  std::error_code ec;
+  for (llvm::sys::fs::directory_iterator it(libs, ec), end; !ec && it != end; it.increment(ec))
+    binaries.push_back(it->path());
+  const auto identity = binaries ^ sort() ^ map([](const auto &path) {
+                          const auto dep = pch::statDep(path);
+                          return dep ? fmt::format("binary {} {} {}", dep->path, dep->size, dep->mtime) : "binary " + path;
+                        });
+  return identity ^ append(fmt::format("mode {}", modeName(task.mode))) ^ append("header " + spec.header) ^ concat(spec.command);
+}
+
+// the PCH is named by its dependencies' state so a changed header never matches an older file; the driver runs its full
+// flag set (--precompile instead of -MD, which would drop link-mode flags such as -pthread that change the LangOptions)
+inline std::optional<std::string> buildPch(const Task &task, const DriverConfig &cfg, const pch::Spec &spec, const std::string &dir,
+                                           const std::string &key, const std::vector<std::string> &keyLines) {
+  const auto tmp = fmt::format("{}/{}.{}", dir, key, llvm::sys::Process::getProcessId());
+  const llvm::FileRemover depRemover(tmp + ".d"), pchRemover(tmp + ".pch"), imagesRemover(tmp + ".images");
+  Task buildTask = task;
+  buildTask.output = tmp;
+  const auto header = spec.header.empty() ? fmt::format("{}/empty.h", dir) : spec.header;
+  if (spec.header.empty()) std::ofstream(header, std::ios::app);
+  const auto command =
+      spec.command
+      ^ concat(std::vector<std::string>{"-Wno-unused-command-line-argument", "-Xclang", "-dependency-file", "-Xclang", tmp + ".d",
+                                        "-Xclang", "-MT", "-Xclang", tmp + ".pch", "-Xclang", "-sys-header-deps", "--precompile", "-x",
+                                        "c++-header", header, "-x", "none", "-o", tmp + ".pch"})
+      ^ mk_string(" ");
+  const auto built = runStep(buildTask, cfg, command, compileTargetFor(task, cfg));
+  const auto failed = [&](const std::string &reason) {
+    std::ofstream(fmt::format("{}/{}.failed", dir, key)) << command << "\n" << built.stderrText;
+    return std::optional{reason};
+  };
+  if (built.exitCode != 0 || !llvm::sys::fs::exists(tmp + ".pch"))
+    return failed(fmt::format("build exited {}: {}", built.exitCode, firstDiagnostic(built.stderrText)));
+  const auto paths = pch::parseDepfile(polyregion::read_string(tmp + ".d")) ^ map([](const auto &p) {
+                       llvm::SmallString<256> absolute(p);
+                       llvm::sys::fs::make_absolute(absolute);
+                       return std::string(absolute);
+                     });
+  const auto deps = paths ^ collect([](const auto &p) { return pch::statDep(p); });
+  if (deps.empty() || deps.size() != paths.size()) return failed("dependency list is empty or names a missing file");
+  const auto name =
+      fmt::format("{}-{}.pch", key,
+                  pch::digest(deps ^ mk_string("\n", [](const auto &d) { return fmt::format("{} {} {}", d.path, d.size, d.mtime); })));
+  const auto target = fmt::format("{}/{}", dir, name);
+  if (llvm::sys::fs::rename(tmp + ".pch", target) && !llvm::sys::fs::exists(target)) return failed("cannot publish " + name);
+  pch::writeManifest(fmt::format("{}/{}.manifest", dir, key), {keyLines, name, deps, {}}, pch::identifiersOf(paths));
+  llvm::sys::fs::remove(fmt::format("{}/{}.failed", dir, key));
+  return std::nullopt;
+}
+
+inline PchUse acquirePch(const Task &task, const DriverConfig &cfg) {
+  const char *const toggle = std::getenv(polyregion::env::PolytestPch);
+  if (!task.pchSpec || (toggle && toggle[0] == '0')) return {};
+  const auto &spec = *task.pchSpec;
+  llvm::SmallString<256> cwd;
+  llvm::sys::fs::current_path(cwd);
+  llvm::sys::path::append(cwd, cfg.outputPrefix + "pch");
+  const std::string dir(cwd);
+  if (dir ^ exists([](char c) { return std::isspace(static_cast<unsigned char>(c)) != 0; }))
+    return {{}, "off: work dir path has whitespace"};
+  llvm::sys::fs::create_directories(dir);
+  const auto keyLines = pchKey(task, cfg, spec);
+  const auto key = pch::digest(keyLines ^ mk_string("\n"));
+  const auto base = fmt::format("{}/{}", dir, key);
+  const auto lookup = [&]() -> std::optional<pch::Manifest> {
+    auto manifest = pch::readManifest(base + ".manifest", spec.macros);
+    if (manifest && pch::fresh(*manifest, keyLines) && llvm::sys::fs::exists(fmt::format("{}/{}", dir, manifest->pch))) return manifest;
+    return std::nullopt;
+  };
+  auto manifest = lookup();
+  std::string state = "hit";
+  if (!manifest) {
+    static std::mutex builders;
+    const std::scoped_lock inProcess(builders);
+    const pch::FileLock lock(base + ".lock");
+    if (!(manifest = lookup())) {
+      if (const auto failure = buildPch(task, cfg, spec, dir, key, keyLines)) return {{}, "build failed: " + *failure};
+      manifest = lookup();
+      state = "built";
+    }
+  }
+  if (!manifest) return {{}, "build failed: manifest unreadable after build"};
+  if (!manifest->macroReads.empty()) return {{}, "off: macro " + manifest->macroReads.front() + " is read by the preamble"};
+  return {fmt::format("{}/{}", dir, manifest->pch), state};
+}
+
 inline TaskOutcome compileTask(const Task &task, const DriverConfig &cfg) {
   if (task.runs.empty()) return {};
   removeArtifacts(task.dir);
@@ -466,8 +573,16 @@ inline TaskOutcome compileTask(const Task &task, const DriverConfig &cfg) {
   const char *reproEnv = std::getenv(polyregion::env::PolytestReproCheck);
   const bool repro = !task.compileFailure && !out.empty() && !(reproEnv && reproEnv[0] == '0')
                      && toks ^ exists([](const auto &t) { return t == "-fstdpar"; });
-  const auto &cmd = task.runs[0].command;
+  const auto &plain = task.runs[0].command;
+  const auto pchUse = acquirePch(task, cfg);
+  if (!pchUse.state.empty()) std::fprintf(stderr, "[polytest] pch %s: %s\n", pchUse.state.c_str(), task.display().c_str());
+  auto cmd = pchUse.path ? plain + " -include-pch " + *pchUse.path : plain;
   auto r = runStep(task, cfg, cmd, target);
+  if (pchUse.path && r.exitCode != 0) {
+    std::fprintf(stderr, "[polytest] pch fallback: %s: %s\n", firstDiagnostic(r.stderrText).c_str(), task.display().c_str());
+    cmd = plain;
+    r = runStep(task, cfg, cmd, target);
+  }
   const auto exit = r.exitCode;
   if (std::getenv(polyregion::env::PolyregionPassLog) && !r.stderrText.empty())
     std::fprintf(stderr, "[%s]\n%s\n", task.display().c_str(), r.stderrText.c_str());
@@ -642,6 +757,10 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
     const bool physical = (arch ^ starts_with("cuda")) || (arch ^ starts_with("hsa")) || (arch ^ starts_with("hip"));
     const auto baseOutput =
         fmt::format("{}{}_{:08x}", cfg.outputPrefix, shortName.empty() ? "anon" : shortName, static_cast<std::uint32_t>(runsHash));
+    const auto pchSpec =
+        tc.runs.empty() || tc.compileFailure || cfg.preamble.empty()
+            ? std::optional<pch::Spec>{}
+            : pch::specFor(cfg.preamble, file, tc.runs[0].command, [&](const std::string &t) { return fmt::vformat(t, unevalStore); });
     const auto caseModes = tc.offloadOnly ? (modes ^ filter([](const auto &m) { return m == Mode::Offload; })) : modes;
     return caseModes ^ map([&](const auto &mode) -> Task {
              const auto dir = fmt::format("{}_{}", baseOutput, modeName(mode));
@@ -655,6 +774,7 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
                  mode, file,          tc.name,           varsWithLabel,
                  dir,  output,        tc.compileFailure, tc.runs ^ take(1) ^ map([&](const auto &r) { return expand(r, compileStore); }),
                  {},   tc.timeoutSecs};
+             task.pchSpec = pchSpec;
              const auto steps = tc.runs ^ drop(1) ^ map([&](const auto &r) { return expand(r, store); });
              using Mirror = std::pair<std::string, std::vector<std::pair<std::string, std::string>>>;
              const auto mirrors = mode == Mode::Offload && physical
