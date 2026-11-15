@@ -107,7 +107,7 @@ jobs:
       - name: Run misc tests (non-codegen)
         run: |
           ulimit -c unlimited || true
-          just test-native-qemu "" misc-test-results -LE codegen --repeat until-pass:3
+          just test-native-qemu "" misc-test-results -LE codegen
 
       - name: Annotate ctest results
         if: always()
@@ -206,9 +206,9 @@ jobs:
         run: |
           ulimit -c unlimited || true
           if [ "${{ matrix.frontend }}" = "polyfc" ]; then
-            just test-native-qemu "" "shard-test-results-${{ matrix.slice.id }}-${{ matrix.frontend }}" -R '^polyfc-' --no-tests=error --repeat until-pass:3
+            just test-native-qemu "" "shard-test-results-${{ matrix.slice.id }}-${{ matrix.frontend }}" -R '^polyfc-' --no-tests=error
           else
-            just test-native-qemu "" "shard-test-results-${{ matrix.slice.id }}-${{ matrix.frontend }}" -E '^polyfc-' --no-tests=error --repeat until-pass:3
+            just test-native-qemu "" "shard-test-results-${{ matrix.slice.id }}-${{ matrix.frontend }}" -E '^polyfc-' --no-tests=error
           fi
 
       - name: Annotate ctest results

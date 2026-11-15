@@ -81,7 +81,7 @@ jobs:
             New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\crashdumps" | Out-Null
           } catch { Write-Host "WER setup skipped: $_" }
       - name: Run misc tests (non-codegen)
-        run: just test-native-dist emulators misc-test-results -LE codegen --repeat until-pass:3
+        run: just test-native-dist emulators misc-test-results -LE codegen
 
       - name: Annotate ctest results
         if: always()
@@ -100,7 +100,6 @@ jobs:
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist/misc-test-results.xml
           if-no-files-found: warn
 
-      # always() not failure(): --repeat until-pass recovers transient crashes, but WER still dumped them
       - name: Collect crash dumps
         if: always()
         shell: pwsh

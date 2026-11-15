@@ -67,7 +67,7 @@ jobs:
         run: just restore-exec-bits native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist
 
       - name: Run misc tests (non-codegen)
-        run: just test-native-dist emulators misc-test-results -LE codegen --repeat until-pass:3
+        run: just test-native-dist emulators misc-test-results -LE codegen
 
       - name: Annotate ctest results
         if: always()
@@ -86,7 +86,6 @@ jobs:
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/misc-test-results.xml
           if-no-files-found: warn
 
-      # always() not failure(): --repeat until-pass recovers transient crashes, but the OS still logged them
       - name: Collect crash reports
         if: always()
         run: |
@@ -149,12 +148,7 @@ jobs:
         env:
           POLYTEST_SLICE: ${{ matrix.slice.labels }}
           POLYTEST_REPRO_CHECK: "0"
-        run: |
-          repeat=()
-          if [[ "${{ matrix.arch }}" == "x86_64" ]]; then
-            repeat=(--repeat until-pass:5)
-          fi
-          just test-native-dist emulators emulator-test-results-${{ matrix.slice.id }} --no-tests=error "${repeat[@]}"
+        run: just test-native-dist emulators emulator-test-results-${{ matrix.slice.id }} --no-tests=error
 
       - name: Annotate ctest results
         if: always()

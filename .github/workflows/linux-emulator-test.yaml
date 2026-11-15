@@ -82,7 +82,7 @@ jobs:
       - name: Run misc tests (non-codegen)
         run: |
           ulimit -c unlimited || true
-          just test-native-dist emulators misc-test-results -LE codegen --repeat until-pass:3
+          just test-native-dist emulators misc-test-results -LE codegen
 
       - name: Annotate ctest results
         if: always()
@@ -101,7 +101,6 @@ jobs:
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/misc-test-results.xml
           if-no-files-found: warn
 
-      # always() not failure(): --repeat until-pass recovers transient crashes, but the core is still on disk
       - name: Collect crash backtraces
         if: always()
         run: bash ci/collect_cores.sh
