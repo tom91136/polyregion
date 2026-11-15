@@ -47,13 +47,11 @@ if /i "%~1"=="--check"   set "MODE=check"
 if "%MODE%"=="build" (set "OUT=%~1") else (set "OUT=%~2")
 if "%OUT%"=="" set "OUT=%DIR%out"
 
-rem pin the VS2022 (17.x) toolset: v14.5x miscompiles gpuocelot's math, fall back to latest if absent
-"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -products * -requires %VCREQ% -version "[17.0,18.0)" -latest -property installationPath > "%TEMP%\polyemu_vs.txt" 2>nul
+rem pin the v14.44 toolset (VS2022 default, VS2026 side-by-side): v14.5x miscompiles gpuocelot's math and ICEs on clang for arm64
 set "VS="
-set /p VS=<"%TEMP%\polyemu_vs.txt"
-if not defined VS for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires %VCREQ% -property installationPath`) do set "VS=%%i"
+for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires %VCREQ% -property installationPath`) do set "VS=%%i"
 if not defined VS (echo no VC-capable Visual Studio found & exit /b 1)
-call "%VS%\VC\Auxiliary\Build\vcvars%VCARCH%.bat" >nul || (echo VCVARS-FAIL & exit /b 1)
+call "%VS%\VC\Auxiliary\Build\vcvars%VCARCH%.bat" -vcvars_ver=14.44 >nul || (echo VCVARS-FAIL: no v14.44 toolset & exit /b 1)
 for /f "delims=" %%p in ('where python 2^>nul') do if not defined PY set "PY=%%p"
 rem keep llvm\bin OFF PATH here: on arm64 cmake otherwise grabs the from-source clang/llvm-ar by name for the
 rem pure-MSVC components (glslang/vk-loader/swiftshader); it's added only around mesa/pocl which need llvm-config
