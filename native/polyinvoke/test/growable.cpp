@@ -48,7 +48,7 @@ void runGrowable(Context &ctx, Backend backend, Platform &, Device &device, cons
     POLYTEST_CHECK_S(ctx, storageAlignBytes(device.features()) == limits->alignment,
                      "storage_align:{} does not match the heap alignment {}", storageAlignBytes(device.features()), limits->alignment);
   }
-  const size_t maxBytes = limits ? std::min<size_t>(limits->maxBytes, size_t{1} << 32) : size_t{1} << 30;
+  const size_t maxBytes = limits ? static_cast<size_t>(std::min<uint64_t>(limits->maxBytes, uint64_t{1} << 32)) : size_t{1} << 30;
   constexpr size_t initial = 4096, grown = 3 << 20, final = (3 << 20) + 12345;
 
   auto queue = device.createQueue(std::chrono::seconds(30));
