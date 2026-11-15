@@ -43,11 +43,14 @@ runs:
         $inst    = & $vswhere -latest -products * -property instanceId      | Select-Object -First 1
         $install = & $vswhere -latest -products * -property installationPath | Select-Object -First 1
         if (-not $inst) { throw 'vswhere: no Visual Studio installation found' }
+        $pin = (Get-Content -Raw (Join-Path $env:GITHUB_WORKSPACE 'native\msvc-toolset')).Trim()
+        if (-not $pin) { throw 'native/msvc-toolset is empty' }
         Import-Module (Join-Path $install 'Common7\Tools\Microsoft.VisualStudio.DevShell.dll')
         $before = @{}
         Get-ChildItem env: | ForEach-Object { $before[$_.Name] = $_.Value }
-        Enter-VsDevShell -VsInstanceId $inst -SkipAutomaticLocation -DevCmdArguments '-arch=${{ inputs.arch }} -no_logo' | Out-Null
+        Enter-VsDevShell -VsInstanceId $inst -SkipAutomaticLocation -DevCmdArguments "-arch=${{ inputs.arch }} -no_logo -vcvars_ver=$pin" | Out-Null
         if (-not $env:VSCMD_ARG_TGT_ARCH) { throw 'VsDevShell did not initialise (no VSCMD_ARG_TGT_ARCH)' }
+        if ($env:VCToolsVersion -notlike "$pin.*") { throw "VsDevShell toolset '$env:VCToolsVersion' is not the pinned $pin" }
         Get-ChildItem env: | Where-Object { $before[$_.Name] -ne $_.Value } | ForEach-Object {
           "$($_.Name)=$($_.Value)" | Out-File -FilePath $env:GITHUB_ENV -Append
         }

@@ -69,11 +69,14 @@ jobs:
           $inst    = & $vswhere -latest -products * -property instanceId      | Select-Object -First 1
           $install = & $vswhere -latest -products * -property installationPath | Select-Object -First 1
           if (-not $inst) { throw 'vswhere: no Visual Studio installation found' }
+          $pin = (Get-Content -Raw (Join-Path $env:GITHUB_WORKSPACE 'native\msvc-toolset')).Trim()
+          if (-not $pin) { throw 'native/msvc-toolset is empty' }
           Import-Module (Join-Path $install 'Common7\Tools\Microsoft.VisualStudio.DevShell.dll')
           $before = @{}
           Get-ChildItem env: | ForEach-Object { $before[$_.Name] = $_.Value }
-          Enter-VsDevShell -VsInstanceId $inst -SkipAutomaticLocation -DevCmdArguments '-arch=${{ matrix.arch }} -no_logo' | Out-Null
+          Enter-VsDevShell -VsInstanceId $inst -SkipAutomaticLocation -DevCmdArguments "-arch=${{ matrix.arch }} -no_logo -vcvars_ver=$pin" | Out-Null
           if (-not $env:VSCMD_ARG_TGT_ARCH) { throw 'VsDevShell did not initialise (no VSCMD_ARG_TGT_ARCH)' }
+          if ($env:VCToolsVersion -notlike "$pin.*") { throw "VsDevShell toolset '$env:VCToolsVersion' is not the pinned $pin" }
           Get-ChildItem env: | Where-Object { $before[$_.Name] -ne $_.Value } | ForEach-Object {
             "$($_.Name)=$($_.Value)" | Out-File -FilePath $env:GITHUB_ENV -Append
           }
@@ -89,7 +92,7 @@ jobs:
         with:
           path: &llvm-path native/out/polyregion-Release-${{ matrix.arch }}-static-dist
           archive: &llvm-archive native/out/llvm-${{ matrix.arch }}-dist.tar.zst
-          key: &llvm-key llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/build.cmake', './native/toolchains/windows-*.cmake', './native/toolchains/*-windows-static.cmake', './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
+          key: &llvm-key llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/msvc-toolset', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/build.cmake', './native/toolchains/windows-*.cmake', './native/toolchains/*-windows-static.cmake', './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
 
       - name: Build LLVM
         id: build-llvm
@@ -191,7 +194,7 @@ jobs:
         uses: &cache-restore actions/cache/restore@v5
         with:
           path: &devlibs-path ./native/thirdparty/device_libs
-          key: &devlibs-key device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/build.cmake', './native/toolchains/windows-*.cmake', './native/toolchains/*-windows-static.cmake', './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
+          key: &devlibs-key device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/msvc-toolset', './native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/build.cmake', './native/toolchains/windows-*.cmake', './native/toolchains/*-windows-static.cmake', './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
 
       - name: Build device libs
         id: build-device-libs
@@ -211,7 +214,7 @@ jobs:
         uses: *cache-restore
         with:
           path: &vcpkg-path ./native/.vcpkg/vcpkg_installed
-          key: &vcpkg-key vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/vcpkg.json', './native/vcpkg-configuration.json', './native/toolchains/windows-*.cmake', './native/toolchains/*-windows-static.cmake', './native/.env', './native/ports/**') }}
+          key: &vcpkg-key vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/msvc-toolset', './native/vcpkg.json', './native/vcpkg-configuration.json', './native/toolchains/windows-*.cmake', './native/toolchains/*-windows-static.cmake', './native/.env', './native/ports/**') }}
 
       - name: Install vcpkg dependencies
         id: build-vcpkg
