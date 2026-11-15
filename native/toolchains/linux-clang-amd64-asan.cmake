@@ -74,7 +74,7 @@ if (DEFINED ENV{CMAKE_SYSROOT})
 endif ()
 
 set(_SAN_BASE "-fsanitize=address,undefined -fno-sanitize=vptr")
-set(_SAN_FLAGS "${_SAN_BASE} -fno-omit-frame-pointer -g")
+set(_SAN_FLAGS "${_SAN_BASE} -fno-omit-frame-pointer -g -Wno-deprecated-declarations")
 set(_SAN_LINK_FLAGS "${_SAN_BASE} -shared-libsan -frtlib-add-rpath")
 set(CMAKE_C_FLAGS_INIT "${CMAKE_C_FLAGS_INIT} ${_SAN_FLAGS}")
 set(CMAKE_CXX_FLAGS_INIT "${CMAKE_CXX_FLAGS_INIT} ${_SAN_FLAGS}")
