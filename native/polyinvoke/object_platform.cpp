@@ -282,7 +282,7 @@ static void groupAbiLaunch(const size_t groups, const size_t lanes, const size_t
                            std::function<void(size_t)> task) {
   if (lanes == 0 || lanes > polyregion::program_meta::HostWorkgroupMaxLanes)
     POLYINVOKE_FATAL(RELOBJ_PREFIX, "work-group size %zu is outside [1, %zu] lanes", lanes,
-                     polyregion::program_meta::HostWorkgroupMaxLanes);
+                     static_cast<size_t>(polyregion::program_meta::HostWorkgroupMaxLanes));
   if (groups == 0) {
     if (cb) (*cb)();
     return;
