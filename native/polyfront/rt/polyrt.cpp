@@ -1017,10 +1017,7 @@ static void remoteLaunchMarshalled(void *context, const char *moduleName, const 
         source = reinterpret_cast<uintptr_t>(argPtrs[i]);
       }
       mirrors[i] = {.remote = remoteMalloc(context, mirrorSizes[i]), .source = source};
-      {
-        const std::scoped_lock lock(execution.transaction);
-        execution.remoteAllocations.at(mirrors[i].remote).cleanupPending = true;
-      }
+      execution.remoteAllocations.at(mirrors[i].remote).cleanupPending = true;
       enqueueRemoteMemcpy(context, mirrors[i].remote, source, mirrorSizes[i], 0);
       launchArgPtrs[i] = &mirrors[i].remote;
     }
