@@ -20,6 +20,7 @@ jobs:
           - arch: arm64
             runs_on: windows-11-arm
     runs-on: ${{ matrix.runs_on }}
+    timeout-minutes: 6
     env: &arch-env
       POLYREGION_ARCH: ${{ matrix.arch }}
     steps:
@@ -73,6 +74,7 @@ jobs:
       matrix:
         include: *simple-matrix
     runs-on: ${{ matrix.runs_on }}
+    timeout-minutes: 17
     env: *arch-env
     defaults:
       run:

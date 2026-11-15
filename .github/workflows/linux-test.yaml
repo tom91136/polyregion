@@ -32,6 +32,7 @@ jobs:
           - arch: aarch64
             runs_on: ubuntu-24.04-arm
     runs-on: ${{ matrix.runs_on }}
+    timeout-minutes: 14
     container: ${{ matrix.distro.image }}
     env: &arch-env
       POLYREGION_ARCH: ${{ matrix.arch }}
@@ -89,6 +90,7 @@ jobs:
       matrix:
         include: *simple-matrix
     runs-on: ${{ matrix.runs_on }}
+    timeout-minutes: 16
     env: *arch-env
     steps:
       - uses: *checkout
@@ -284,6 +286,7 @@ jobs:
       matrix:
         include: *san-matrix
     runs-on: ${{ matrix.runs_on }}
+    timeout-minutes: 107
     env: *arch-env
     steps:
       - uses: *checkout

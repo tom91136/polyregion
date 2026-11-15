@@ -23,6 +23,7 @@ jobs:
           - arch: arm64
             runs_on: windows-11-arm
     runs-on: ${{ matrix.runs_on }}
+    timeout-minutes: 7
     env:
       POLYREGION_ARCH: ${{ matrix.arch }}
     steps:
@@ -125,6 +126,7 @@ jobs:
         slice: ${{ fromJSON(inputs.shards) }}
     name: test-native-with-emulators (${{ matrix.arch }}, ${{ matrix.slice.id }})
     runs-on: ${{ matrix.arch == 'arm64' && 'windows-11-arm' || 'windows-2025-vs2026' }}
+    timeout-minutes: 83
     env:
       POLYREGION_ARCH: ${{ matrix.arch }}
     steps:

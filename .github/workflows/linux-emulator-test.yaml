@@ -26,6 +26,7 @@ jobs:
           - arch: aarch64
             runs_on: ubuntu-24.04-arm
     runs-on: ${{ matrix.runs_on }}
+    timeout-minutes: 8
     env: &arch-env
       POLYREGION_ARCH: ${{ matrix.arch }}
     steps:
@@ -122,6 +123,7 @@ jobs:
         slice: ${{ fromJSON(inputs.shards) }}
     name: test-native-with-emulators (${{ matrix.arch }}, ${{ matrix.slice.id }})
     runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    timeout-minutes: 28
     env:
       POLYREGION_ARCH: ${{ matrix.arch }}
     steps:
@@ -205,6 +207,7 @@ jobs:
       matrix:
         include: *simple-matrix
     runs-on: ${{ matrix.runs_on }}
+    timeout-minutes: 18
     env: *arch-env
     steps:
       - uses: *checkout

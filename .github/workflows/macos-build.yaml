@@ -259,6 +259,7 @@ jobs:
   discover-shards:
     needs: build
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     outputs:
       shards: ${{ steps.gen.outputs.shards }}
     steps:
