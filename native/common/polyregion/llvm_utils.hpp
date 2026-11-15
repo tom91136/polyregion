@@ -117,11 +117,16 @@ static void collectCPUFeatures(const std::string &CPU,             //
       if (!PPC::isValidCPU(CPU)) break;
       Triple T;
       T.setArch(arch);
-      if (auto features = PPC::getPPCDefaultTargetFeatures(T, CPU)) {
-        *features                                              //
-            | filter([](const auto &kv) { return kv.second; }) //
-            | for_each([&](const auto &kv) { drain.emplace_back(kv.first().str()); });
-      }
+      const auto collect = [&](StringRef cpu) {
+        if (auto features = PPC::getPPCDefaultTargetFeatures(T, cpu)) {
+          *features                                              //
+              | filter([](const auto &kv) { return kv.second; }) //
+              | for_each([&](const auto &kv) { drain.emplace_back(kv.first().str()); });
+        }
+      };
+      // generic host names report no ISA features, the little-endian baseline is pwr8
+      if (arch == Triple::ppc64le) collect("pwr8");
+      collect(CPU);
       break;
     }
     default: throw std::logic_error("Unexpected arch from triple:" + Triple::getArchTypeName(arch).str());
