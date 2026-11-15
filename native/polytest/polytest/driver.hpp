@@ -576,7 +576,12 @@ inline TaskOutcome compileTask(const Task &task, const DriverConfig &cfg) {
   const auto &plain = task.runs[0].command;
   const auto pchUse = acquirePch(task, cfg);
   if (!pchUse.state.empty()) std::fprintf(stderr, "[polytest] pch %s: %s\n", pchUse.state.c_str(), task.display().c_str());
-  if (pchUse.failed) return {.status = TaskStatus::Fail, .failReason = "pch " + pchUse.state};
+  if (pchUse.failed) {
+    TaskOutcome o;
+    o.status = TaskStatus::Fail;
+    o.failReason = "pch " + pchUse.state;
+    return o;
+  }
   const auto cmd = pchUse.path ? plain + " -include-pch " + *pchUse.path : plain;
   auto r = runStep(task, cfg, cmd, target);
   const auto exit = r.exitCode;
