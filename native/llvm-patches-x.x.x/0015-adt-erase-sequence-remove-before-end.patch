@@ -1,0 +1,30 @@
+Subject: [ADT] sequence remove before end() in erase and erase_if
+
+C.erase(std::remove(...), C.end()) leaves the evaluation order of the two
+arguments unspecified. MSVC evaluates C.end() first. std::remove may
+overwrite the removed tail, and the MSVC STL's SVE remove does, so for a
+TinyPtrVector holding one removed element the value is cleared, end() moves
+back to begin(), and the stale end trips "Trying to erase past the end".
+
+--- a/llvm/include/llvm/ADT/STLExtras.h
++++ b/llvm/include/llvm/ADT/STLExtras.h
+@@ -2190,7 +2190,8 @@
+ /// two iterators.
+ template <typename Container, typename UnaryPredicate>
+ void erase_if(Container &C, UnaryPredicate P) {
+-  C.erase(remove_if(C, P), C.end());
++  auto It = remove_if(C, P);
++  C.erase(It, C.end());
+ }
+ 
+ /// Wrapper function to remove a value from a container:
+@@ -2198,7 +2199,8 @@
+ /// C.erase(remove(C.begin(), C.end(), V), C.end());
+ template <typename Container, typename ValueType>
+ void erase(Container &C, ValueType V) {
+-  C.erase(std::remove(C.begin(), C.end(), V), C.end());
++  auto It = std::remove(C.begin(), C.end(), V);
++  C.erase(It, C.end());
+ }
+ 
+ /// Wrapper function to append range `R` to container `C`.
