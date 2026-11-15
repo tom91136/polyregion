@@ -31,4 +31,8 @@ select=()
 if [ -n "$EMU" ]; then select+=("-DMINIAPP_EMULATORS=$EMU"); else select+=("-UMINIAPP_EMULATORS"); fi
 if [ -n "${MINIAPP_BACKENDS:-}" ]; then select+=("-DMINIAPP_BACKENDS=$MINIAPP_BACKENDS"); else select+=("-UMINIAPP_BACKENDS"); fi
 cmake -S "$SRC" -B "$BUILD" -DPOLYCPP_DIST="$DIST" -DMINIAPP_TARGET_ARCH="$ARCH" "${select[@]}"
-ctest --test-dir "$BUILD" --output-on-failure -j "$MINIAPP_JOBS"
+junit="$BUILD/miniapps-results.xml"; rm -f "$junit"
+rc=0
+ctest --test-dir "$BUILD" --output-on-failure --output-junit "$junit" -j "$MINIAPP_JOBS" || rc=$?
+[ -f "$junit" ] && { "$DIST/bin/polytest" --skip-report "$junit" || [ "$rc" -ne 0 ] || rc=1; }
+exit "$rc"

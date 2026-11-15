@@ -9,6 +9,7 @@ target_sources(polytest
         polytest/lit.hpp
         polytest/pch.hpp
         polytest/skip_proof.hpp
+        polytest/skip_report.hpp
         polytest/driver.hpp
         polytest/test_case.hpp
         polytest/test_runner.hpp)
@@ -17,7 +18,7 @@ target_include_directories(polytest INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/../pol
 target_include_directories(polytest INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(polytest SYSTEM INTERFACE ${LLVM_INCLUDE_DIRS})
 
-add_executable(polytest-tests test/ctest_emit.cpp test/driver.cpp test/profile.cpp)
+add_executable(polytest-tests test/ctest_emit.cpp test/driver.cpp test/profile.cpp test/skip_report.cpp)
 target_include_directories(polytest-tests PRIVATE ${fire_SOURCE_DIR})
 target_link_libraries(polytest-tests PRIVATE polytest Catch2::Catch2WithMain)
 polyregion_apply_common_options(polytest-tests)

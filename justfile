@@ -416,8 +416,9 @@ test-native-dist profile='' junit='native-test-results' *args='':
     {{ core_guard }}
     junit="$TESTS/{{ junit }}.xml"; rm -f "$junit"
     rc=0; CLICOLOR_FORCE=$([ -t 1 ] && echo 1 || echo 0) ctest --test-dir "$TESTS" -j "$j" --timeout "$to" --output-on-failure --output-junit "$junit" ${POLYTEST_SLICE:+-L "$POLYTEST_SLICE"} {{ args }} || rc=$?
-    skips=$(grep -m1 -o 'skipped="[0-9]*"' "$junit" 2>/dev/null | tr -dc 0-9 || true)
-    [ "${skips:-0}" -gt 0 ] && echo "ctest: ${skips} skipped (listed under 'did not run'; junit $junit)" || true
+    if [ -f "$junit" ]; then
+      "$DIST/bin/polytest${exe}" --skip-report "$junit" || [ "$rc" -ne 0 ] || rc=1
+    fi
     exit $rc
 
 # Smoke test of the emulator bundle (Vulkan on lavapipe, OpenCL on pocl[+rusticl], CUDA on gpuocelot/linux).

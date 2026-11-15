@@ -150,9 +150,14 @@ test-package filter='' extra='' ctest='' junit='':
       -DCMAKE_BUILD_TYPE=Release -DSPECTRA_ENABLE_PACKAGE=ON -DSPECTRA_ENABLE_PACKAGE_TESTS=ON \
       -DSPECTRA_TEST_PROFILE="${POLYREGION_TEST_PROFILE:-}" -DCMAKE_PREFIX_PATH="$dist" {{ extra }}
     cmake --build "{{ root }}/target/package" --parallel {{ jobs }}
+    junit="{{ root }}/target/package/{{ if junit == "" { "test-package-results.xml" } else { junit } }}"; rm -f "$junit"
+    rc=0
     ctest --test-dir "{{ root }}/target/package" --parallel {{ jobs }} --timeout 3600 --output-on-failure \
       {{ if filter == "" { "" } else { "-R '" + filter + "'" } }} ${POLYTEST_SLICE:+-L "$POLYTEST_SLICE"} \
-      {{ if junit == "" { "" } else { "--output-junit '" + root + "/target/package/" + junit + "'" } }} {{ ctest }}
+      --output-junit "$junit" {{ ctest }} || rc=$?
+    exe=""; [ "{{ os() }}" = windows ] && exe=.exe
+    [ -f "$junit" ] && { "$dist/bin/polytest$exe" --skip-report "$junit" || [ "$rc" -ne 0 ] || rc=1; }
+    exit "$rc"
 
 # Print the package-import test slices for a profile, one per line: id, shard label, and the ctest -L regex selecting the slice (tab separated); CI builds the slice matrix from this. Every suite of the build tree sizes the slices together.
 list-slices extra='' profile='emulators':

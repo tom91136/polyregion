@@ -11,8 +11,10 @@
 
 #include "polyregion/env.h"
 #include "polyregion/env_keys.h"
+#include "polyregion/io.hpp"
 
 #include "polytest/driver.hpp"
+#include "polytest/skip_report.hpp"
 
 using namespace polyregion::polytest;
 
@@ -54,6 +56,15 @@ void prependEnv(const char *name, const std::string &value, char separator) {
 } // namespace
 
 int main(int argc, const char **argv) {
+  if (argc == 3 && std::string_view(argv[1]) == "--skip-report") {
+    if (!llvm::sys::fs::exists(argv[2])) {
+      std::fprintf(stderr, "polytest: junit file does not exist: %s\n", argv[2]);
+      return 2;
+    }
+    const auto summary = summariseSkips(skippedTests(polyregion::read_string(argv[2])));
+    std::fputs(summary.text.c_str(), stdout);
+    return summary.unexplained == 0 ? 0 : 1;
+  }
   const char *suitePath = std::getenv(polyregion::env::PolytestSuite);
   if (!suitePath || !*suitePath) {
     std::fprintf(stderr, "polytest: %s must name a suite file\n", polyregion::env::PolytestSuite);

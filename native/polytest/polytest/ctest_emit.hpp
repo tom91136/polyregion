@@ -15,13 +15,11 @@
 
 #include "polyregion/env_keys.h"
 
+#include "polytest/skip_report.hpp"
+
 namespace polyregion::polytest {
 
 using namespace aspartame;
-
-inline void reportSkip(const std::string &id, const std::string &reason) {
-  fmt::print(stderr, "[SKIP] {}{}{}\n", id, reason.empty() ? "" : ": ", reason);
-}
 
 inline constexpr unsigned DefaultTimeoutSecs = 150;
 inline constexpr auto TimeoutScaleEnv = "POLYTEST_TIMEOUT_SCALE";
