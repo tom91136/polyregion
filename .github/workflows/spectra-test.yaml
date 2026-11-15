@@ -61,8 +61,6 @@ jobs:
       POLYREGION_DIST: ${{ github.workspace }}/dist
       EMULATORS: ${{ github.workspace }}/emulators/out
       SPECTRA_PACKAGE: ${{ github.workspace }}/package/spectra/lib.polyast
-      # macOS runners may or may not expose a paravirtualised Metal device
-      POLYRT_STRICT_SELECT: ${{ inputs.os == 'darwin' && '0' || '' }}
     steps:
       - uses: actions/checkout@v6
 

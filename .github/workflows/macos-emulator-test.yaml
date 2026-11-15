@@ -22,8 +22,6 @@ jobs:
     timeout-minutes: 12
     env:
       POLYREGION_ARCH: ${{ matrix.arch }}
-      # we may or may not get a paravirtualised Metal device
-      POLYRT_STRICT_SELECT: "0"
     steps:
       - uses: &checkout actions/checkout@v6
       - &setup-just
@@ -114,7 +112,6 @@ jobs:
     timeout-minutes: 63
     env:
       POLYREGION_ARCH: ${{ matrix.arch }}
-      POLYRT_STRICT_SELECT: "0"
     steps:
       - uses: *checkout
       - *setup-just
@@ -148,7 +145,7 @@ jobs:
       - name: Run emulator tests (${{ matrix.slice.id }})
         env:
           POLYTEST_SLICE: ${{ matrix.slice.labels }}
-          POLYTEST_REPRO_CHECK: "0"
+          POLYTEST_REPRO_CHECK: ${{ matrix.arch == 'arm64' && startsWith(matrix.slice.shard, 'host_') && '1' || '0' }}
         run: just test-native-dist emulators emulator-test-results-${{ matrix.slice.id }} --no-tests=error
 
       - name: Annotate ctest results

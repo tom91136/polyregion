@@ -19,8 +19,6 @@ jobs:
     timeout-minutes: 7
     env: &arch-env
       POLYREGION_ARCH: ${{ matrix.arch }}
-      # we may or may not get a paravirtualised Metal device
-      POLYRT_STRICT_SELECT: "0"
     steps:
       - uses: &checkout actions/checkout@v6
 
