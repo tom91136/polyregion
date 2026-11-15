@@ -11,9 +11,6 @@ defaults:
   run:
     shell: bash
 
-env:
-  APT_OPTIONS: -o Acquire::Retries=10 -o Acquire::Retries::Delay::Maximum=60 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
-
 jobs:
   test-native-misc:
     if: ${{ !cancelled() }}
@@ -38,6 +35,8 @@ jobs:
 
       - &apt-cmake
         name: Install dependencies
+        env:
+          APT_OPTIONS: &apt-options -qq -o Acquire::Retries=10 -o Acquire::Retries::Delay::Maximum=60 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
         run: |
           command -v cmake >/dev/null || {
             sudo apt-get ${{ env.APT_OPTIONS }} update
@@ -213,6 +212,8 @@ jobs:
       - uses: *checkout
       - *setup-just
       - name: Install dependencies
+        env:
+          APT_OPTIONS: *apt-options
         run: |
           sudo apt-get ${{ env.APT_OPTIONS }} update
           sudo apt-get ${{ env.APT_OPTIONS }} install -y cmake git g++ libtbb-dev

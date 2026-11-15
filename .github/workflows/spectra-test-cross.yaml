@@ -8,9 +8,6 @@ defaults:
     shell: bash
     working-directory: spectra
 
-env:
-  APT_OPTIONS: -o Acquire::Retries=10 -o Acquire::Retries::Delay::Maximum=60 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
-
 jobs:
   # Proves the package imports and its cases run on the host under QEMU for every architecture Polyregion ships.
   test-cross:
@@ -35,6 +32,8 @@ jobs:
         uses: ./.github/actions/setup-just
 
       - name: Install dependencies
+        env:
+          APT_OPTIONS: -qq -o Acquire::Retries=10 -o Acquire::Retries::Delay::Maximum=60 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
         run: |
           sudo apt-get ${{ env.APT_OPTIONS }} update
           sudo apt-get ${{ env.APT_OPTIONS }} install -y cmake ninja-build qemu-user-static binfmt-support

@@ -11,9 +11,6 @@ defaults:
   run:
     shell: bash
 
-env:
-  APT_OPTIONS: -o Acquire::Retries=10 -o Acquire::Retries::Delay::Maximum=60 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
-
 jobs:
   test-native-misc:
     if: ${{ !cancelled() }}
@@ -53,6 +50,8 @@ jobs:
 
       - &apt-qemu
         name: Install dependencies
+        env:
+          APT_OPTIONS: -qq -o Acquire::Retries=10 -o Acquire::Retries::Delay::Maximum=60 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
         run: |
           sudo apt-get ${{ env.APT_OPTIONS }} update
           sudo apt-get ${{ env.APT_OPTIONS }} install -y cmake qemu-user-static binfmt-support

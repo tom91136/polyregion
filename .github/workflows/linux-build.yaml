@@ -16,7 +16,6 @@ env:
   # AL8 = glibc 2.28, gcc-toolset-12 libstdc++. Cross-only archs (riscv64, arm) live in cross-build.yaml.
   SYSROOT_VARIANT: al8
   POLYREGION_LLVM_PGO_BOLT: "ON"
-  APT_OPTIONS: -o Acquire::Retries=10 -o Acquire::Retries::Delay::Maximum=60 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
 
 jobs:
   build-llvm:
@@ -64,6 +63,8 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Install dependencies
+        env:
+          APT_OPTIONS: &apt-options -qq -o Acquire::Retries=10 -o Acquire::Retries::Delay::Maximum=60 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
         run: |
           sudo apt-get ${{ env.APT_OPTIONS }} update
           sudo apt-get ${{ env.APT_OPTIONS }} install -y cmake ninja-build clang clang-tools lld llvm g++ gfortran libcrypt-dev libltdl-dev zlib1g-dev python3-requests
@@ -180,6 +181,8 @@ jobs:
 
       - name: Install dependencies
         # clang-tools provides clang-scan-deps (cmake >= 3.28 uses it for C++20 module deps).
+        env:
+          APT_OPTIONS: *apt-options
         run: |
           sudo apt-get ${{ env.APT_OPTIONS }} update
           sudo apt-get ${{ env.APT_OPTIONS }} install -y cmake ninja-build clang clang-tools lld llvm g++ gfortran libcrypt-dev libltdl-dev zlib1g-dev python3-requests

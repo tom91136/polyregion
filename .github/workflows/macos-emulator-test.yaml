@@ -7,9 +7,6 @@ on:
         type: string
         required: true
 
-env:
-  HOMEBREW_CURL_RETRIES: 5
-
 jobs:
   test-native-misc:
     if: ${{ !cancelled() }}
@@ -34,6 +31,8 @@ jobs:
         uses: ./.github/actions/setup-just
       - &brew-cmake
         name: Install dependencies
+        env:
+          HOMEBREW_CURL_RETRIES: 5
         run: |
           if brew tap | grep -qx 'aws/tap'; then brew untap aws/tap; fi
           command -v cmake >/dev/null || brew install --quiet cmake

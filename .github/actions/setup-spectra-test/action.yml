@@ -21,9 +21,11 @@ runs:
     - name: Setup Ninja
       if: ${{ inputs.os != 'windows' }}
       shell: bash
+      env:
+        HOMEBREW_CURL_RETRIES: 5
       run: |
         if [ "$RUNNER_OS" = Linux ]; then
-          sudo apt-get -o Acquire::Retries=10 -o Acquire::Retries::Delay::Maximum=60 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y ninja-build
+          sudo apt-get -qq -o Acquire::Retries=10 -o Acquire::Retries::Delay::Maximum=60 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y ninja-build
         else
           brew install --quiet ninja
         fi

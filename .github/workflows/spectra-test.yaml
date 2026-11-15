@@ -18,10 +18,6 @@ defaults:
     shell: bash
     working-directory: spectra
 
-env:
-  APT_OPTIONS: -o Acquire::Retries=10 -o Acquire::Retries::Delay::Maximum=60 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
-  HOMEBREW_CURL_RETRIES: 5
-
 jobs:
   slices:
     name: slices (${{ inputs.arch }})

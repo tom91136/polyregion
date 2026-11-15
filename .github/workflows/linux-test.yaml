@@ -10,7 +10,6 @@ defaults:
 env:
   # AL8 = glibc 2.28, gcc-toolset-12 libstdc++. Cross-only archs (riscv64, arm) live in cross-build.yaml.
   SYSROOT_VARIANT: al8
-  APT_OPTIONS: -o Acquire::Retries=10 -o Acquire::Retries::Delay::Maximum=60 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
 
 jobs:
   check-dist:
@@ -39,6 +38,8 @@ jobs:
     steps:
       - name: Install container dependencies
         # XXX runs before checkout (no git yet), so it cannot use ci/dnf_retry.sh
+        env:
+          APT_OPTIONS: &apt-options -qq -o Acquire::Retries=10 -o Acquire::Retries::Delay::Maximum=60 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
         run: |
           for attempt in 1 2 3; do
             ${{ matrix.distro.pkg }} && exit 0
@@ -180,6 +181,8 @@ jobs:
       - uses: *checkout
 
       - name: Install dependencies
+        env:
+          APT_OPTIONS: *apt-options
         run: |
           sudo apt-get ${{ env.APT_OPTIONS }} update
           sudo apt-get ${{ env.APT_OPTIONS }} install -y cmake ninja-build clang clang-tools lld llvm g++ libcrypt-dev libltdl-dev zlib1g-dev python3-requests ccache
@@ -301,6 +304,8 @@ jobs:
       - uses: *checkout
       - *setup-just
       - name: Install dependencies
+        env:
+          APT_OPTIONS: *apt-options
         run: |
           command -v cmake >/dev/null || {
             sudo apt-get ${{ env.APT_OPTIONS }} update
