@@ -46,6 +46,12 @@ struct Record {
   std::vector<Attempt> attempts;
 };
 
+struct Need {
+  std::string feature;
+  bool present;
+  std::string why = {};
+};
+
 struct Verdict {
   bool justified = false;
   std::string reason;
@@ -230,6 +236,19 @@ inline Verdict judge(const std::string &selector, const std::optional<Inventory>
   return {.justified = true,
           .reason = fmt::format("polyrt: no compatible target: {} lacks a feature its image or run requires ({})", device.name,
                                 notes ^ distinct() ^ mk_string("; "))};
+}
+
+inline Verdict judgeNeeds(const std::vector<Device> &candidates, const std::vector<Need> &needs) {
+  if (needs.empty()) return reject("the test names no device need");
+  if (candidates.empty()) return reject("no device matches the target");
+  std::vector<std::string> notes;
+  for (const auto &device : candidates) {
+    const auto violated = needs ^ find([&](const Need &n) { return detail::hasFeature(device, n.feature) != n.present; });
+    if (!violated) return reject(fmt::format("device '{}' satisfies every need, so the test should have run", device.name));
+    notes.push_back(fmt::format("{} {} {}{}", device.name, violated->present ? "lacks" : "has", violated->feature,
+                                violated->why.empty() ? "" : " (" + violated->why + ")"));
+  }
+  return {.justified = true, .reason = fmt::format("no device satisfies the test's needs: {}", notes ^ mk_string("; "))};
 }
 
 } // namespace polyregion::polytest::skip

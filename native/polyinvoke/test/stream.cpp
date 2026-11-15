@@ -81,14 +81,12 @@ DeviceRunner streamRunner(Type tpe, std::string suffix, T relTolerance, std::vec
   };
 }
 
-const DeviceSkip skipHasSpirvOrNoFp64 = [](Backend b, Device &d) { return skipHasSpirv(b, d) || skipNoFp64(b, d); };
-const DeviceSkip skipNoSpirvOrNoFp64 = [](Backend b, Device &d) { return skipNoSpirv(b, d) || skipNoFp64(b, d); };
+const DeviceSkip skipHasSpirvOrNoFp64 = skipHasSpirv + skipNoFp64;
+const DeviceSkip skipNoSpirvOrNoFp64 = skipNoSpirv + skipNoFp64;
 // XXX NVIDIA (libnvidia-glcore) + PowerVR (libVK_IMG) SEGFAULT reusing shader module across pipelines with differing spec-constants
-const DeviceSkip skipBuggySpecReuseVulkan = [](Backend, Device &d) {
-  const auto &fs = d.features();
-  return (fs | contains("nvidia")) || (fs | contains("powervr"));
-};
-const DeviceSkip skipBuggySpecReuseVulkanOrNoFp64 = [](Backend b, Device &d) { return skipBuggySpecReuseVulkan(b, d) || skipNoFp64(b, d); };
+const DeviceSkip skipBuggySpecReuseVulkan{{"nvidia", false, "driver crashes reusing a shader module across spec-constant pipelines"},
+                                          {"powervr", false, "driver crashes reusing a shader module across spec-constant pipelines"}};
+const DeviceSkip skipBuggySpecReuseVulkanOrNoFp64 = skipBuggySpecReuseVulkan + skipNoFp64;
 
 const std::vector<size_t> gpuGroups = {32, 64, 128, 256};
 const std::vector<size_t> cpuGroups = {1, 2, 3, 4, 5, 6, 7, 8};

@@ -27,6 +27,7 @@
 #include "polyregion/types.h"
 
 #include "polytest/profile.hpp"
+#include "polytest/skip_report.hpp"
 
 #ifndef POLYREGION_TEST_PROFILE_DIR
   #define POLYREGION_TEST_PROFILE_DIR ""
@@ -35,14 +36,9 @@
 using namespace aspartame;
 using polyregion::polytest::cases::Context;
 using polyregion::polytest::cases::RequireFailed;
-using polyregion::polytest::cases::SkipRequested;
 using polyregion::polytest::cases::Task;
 
 namespace polyregion::test_utils {
-
-const DeviceSkip skipHasSpirv = [](invoke::Backend, invoke::Device &d) { return d.features() | contains("spirv_kernel"); };
-const DeviceSkip skipNoSpirv = [](invoke::Backend, invoke::Device &d) { return !(d.features() | contains("spirv_kernel")); };
-const DeviceSkip skipNoFp64 = [](invoke::Backend, invoke::Device &d) { return !(d.features() | contains("fp64")); };
 
 ImageGroup findTestImage(const ImageGroups &archToImage, const invoke::Backend &backend, const std::vector<std::string> &features) {
   const auto sortedFeatures = features ^ sort();
@@ -158,14 +154,16 @@ int runOnTarget(invoke::Backend backend, std::string_view arch, const std::vecto
     std::vector<std::pair<invoke::PhysicalDevice, std::unique_ptr<invoke::DeviceLock>>> locks;
   };
   static auto *processDeviceLocks = new ProcessDeviceLocks();
+  const auto unjustified = [](const std::string &reason) {
+    fmt::print(stderr, "[FAIL] unjustified skip: {}\n", reason);
+    return 1;
+  };
   try {
     auto platform = invoke::Platform::maybe(backend);
-    if (!platform) {
-      fmt::print(stderr, "polyinvoke: no compatible target: no device: {} platform unavailable\n", magic_enum::enum_name(backend));
-      return 77;
-    }
+    if (!platform) return unjustified(fmt::format("{} platform unavailable", magic_enum::enum_name(backend)));
     const bool archAsFeature = backend != invoke::Backend::RelocatableObject && backend != invoke::Backend::SharedObject;
     std::unique_ptr<invoke::Device> device;
+    std::vector<polytest::skip::Device> rejected;
     for (auto &d : platform->enumerate()) {
       const auto features = d->features();
       const auto hasFeature = [&](const std::string_view f) { return features ^ exists([&](const auto &x) { return x == f; }); };
@@ -174,13 +172,20 @@ int runOnTarget(invoke::Backend backend, std::string_view arch, const std::vecto
       if (archAsFeature && !arch.empty() && arch != "*" && !hasFeature(arch)
           && !((d->name() ^ to_lower()) ^ contains_slice(std::string(arch) ^ to_lower())))
         continue;
-      if (skip(backend, *d)) continue;
+      if (skip ^ exists([&](const auto &need) { return hasFeature(need.feature) != need.present; })) {
+        rejected.push_back({.name = d->name(), .format = {}, .features = features});
+        continue;
+      }
       device = std::move(d);
       break;
     }
     if (!device) {
-      fmt::print(stderr, "polyinvoke: no compatible target: no device: no {} device matches '{}' with [{}]\n",
-                 magic_enum::enum_name(backend), arch, requiredFeatures ^ mk_string(", "));
+      if (rejected.empty())
+        return unjustified(
+            fmt::format("no {} device matches '{}' with [{}]", magic_enum::enum_name(backend), arch, requiredFeatures ^ mk_string(", ")));
+      const auto verdict = polytest::skip::judgeNeeds(rejected, skip);
+      if (!verdict.justified) return unjustified(verdict.reason);
+      polytest::reportSkip("polyinvoke", verdict.reason);
       return 77;
     }
     if (serialise) {
@@ -190,13 +195,11 @@ int runOnTarget(invoke::Backend backend, std::string_view arch, const std::vecto
         processDeviceLocks->locks.emplace_back(physical, std::make_unique<invoke::DeviceLock>(physical));
     }
     auto imageGroup = findTestImage(images, backend, device->features());
-    if (imageGroup.empty()) {
-      fmt::print(stderr, "polyinvoke: no compatible target: {} lacks a test image for its features\n", device->name());
-      return 77;
-    }
+    if (imageGroup.empty())
+      return unjustified(fmt::format("{} has no test image for its features [{}]; images: [{}]", device->name(),
+                                     device->features() ^ mk_string(", "),
+                                     images ^ mk_string(", ", [](const auto &kv) { return kv.first; })));
     runner(ctx, backend, *platform, *device, imageGroup);
-  } catch (const SkipRequested &) {
-    return 77;
   } catch (const RequireFailed &) {
     return 1;
   }

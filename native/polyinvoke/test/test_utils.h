@@ -10,6 +10,7 @@
 #include "polyinvoke/device_lock.h"
 #include "polyinvoke/runtime.h"
 
+#include "polytest/skip_proof.hpp"
 #include "polytest/test_case.hpp"
 
 namespace polyregion::test_utils {
@@ -19,7 +20,13 @@ using ImageGroup = std::vector<std::pair<std::string, std::string>>;
 
 ImageGroup findTestImage(const ImageGroups &images, const invoke::Backend &backend, const std::vector<std::string> &features);
 
-using DeviceSkip = std::function<bool(invoke::Backend, invoke::Device &)>;
+// a device that violates any need is skipped; the audit recomputes the violation from the device's features
+using DeviceSkip = std::vector<polytest::skip::Need>;
+
+inline DeviceSkip operator+(DeviceSkip lhs, const DeviceSkip &rhs) {
+  lhs.insert(lhs.end(), rhs.begin(), rhs.end());
+  return lhs;
+}
 
 inline void prependTidArg(invoke::Platform &platform, invoke::ArgBuffer &buffer) {
   if (platform.kind() == invoke::PlatformKind::HostThreaded) buffer.append(invoke::Type::IntS64, nullptr);
@@ -30,9 +37,9 @@ void checkHostCapabilities(polytest::cases::Context &ctx, invoke::Platform &plat
 using DeviceRunner =
     std::function<void(polytest::cases::Context &, invoke::Backend, invoke::Platform &, invoke::Device &, const ImageGroup &)>;
 
-extern const DeviceSkip skipHasSpirv;
-extern const DeviceSkip skipNoSpirv;
-extern const DeviceSkip skipNoFp64;
+inline const DeviceSkip skipHasSpirv{{"spirv_kernel", false, "the source variant targets devices without SPIR-V kernels"}};
+inline const DeviceSkip skipNoSpirv{{"spirv_kernel", true, "the SPIR-V variant targets devices with SPIR-V kernels"}};
+inline const DeviceSkip skipNoFp64{{"fp64", true}};
 
 struct Suite {
   std::string name;
@@ -41,9 +48,7 @@ struct Suite {
   DeviceRunner runner;
   DeviceSkip skip;
 
-  Suite(
-      std::string name, const ImageGroups &images, std::vector<invoke::Backend> backends, DeviceRunner runner,
-      DeviceSkip skip = [](invoke::Backend, invoke::Device &) { return false; })
+  Suite(std::string name, const ImageGroups &images, std::vector<invoke::Backend> backends, DeviceRunner runner, DeviceSkip skip = {})
       : name(std::move(name)), images(std::make_shared<ImageGroups>(images)), backends(std::move(backends)), runner(std::move(runner)),
         skip(std::move(skip)) {}
 };

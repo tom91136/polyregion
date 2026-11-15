@@ -79,9 +79,6 @@ inline int runMain(int argc, char **argv) {
     int rc;
     try {
       rc = t.run();
-    } catch (const SkipRequested &) {
-      fmt::print(stderr, "[DONE] {} -> skip\n", t.id);
-      return 77;
     } catch (const RequireFailed &) {
       fmt::print(stderr, "[DONE] {} -> fail (REQUIRE)\n", t.id);
       return 1;

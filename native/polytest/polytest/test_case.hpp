@@ -48,9 +48,6 @@ inline void registerDiscoverer(Discoverer d) { discoverers().push_back(std::move
 struct RequireFailed : std::runtime_error {
   using std::runtime_error::runtime_error;
 };
-struct SkipRequested : std::runtime_error {
-  using std::runtime_error::runtime_error;
-};
 
 class Context {
 public:
@@ -67,10 +64,6 @@ public:
     fmt::print(stderr, "[FATAL] {}:{}: REQUIRE({}){}{}\n", loc.file_name(), loc.line(), expr, detail.empty() ? "" : " - ", detail);
     throw RequireFailed{std::string{expr}};
   }
-  [[noreturn]] void skip(std::string_view reason, std::source_location loc = std::source_location::current()) {
-    fmt::print(stderr, "[SKIP] {}:{}: {}\n", loc.file_name(), loc.line(), reason);
-    throw SkipRequested{std::string{reason}};
-  }
   [[noreturn]] void fail(std::string_view reason, std::source_location loc = std::source_location::current()) {
     failed = true;
     fmt::print(stderr, "[FAIL] {}:{}: {}\n", loc.file_name(), loc.line(), reason);
@@ -86,7 +79,6 @@ public:
 #define POLYTEST_CHECK_S(ctx, cond, ...) (ctx).check((cond), #cond, ::fmt::format(__VA_ARGS__))
 #define POLYTEST_REQUIRE(ctx, cond) (ctx).require((cond), #cond)
 #define POLYTEST_REQUIRE_S(ctx, cond, ...) (ctx).require((cond), #cond, ::fmt::format(__VA_ARGS__))
-#define POLYTEST_SKIP(ctx, ...) (ctx).skip(::fmt::format(__VA_ARGS__))
 #define POLYTEST_FAIL(ctx, ...) (ctx).fail(::fmt::format(__VA_ARGS__))
 #define POLYTEST_WARN(ctx, ...) (ctx).warn(::fmt::format(__VA_ARGS__))
 #define POLYTEST_INFO(ctx, ...) (ctx).info(::fmt::format(__VA_ARGS__))
