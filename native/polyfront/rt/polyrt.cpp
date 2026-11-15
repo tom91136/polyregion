@@ -217,6 +217,7 @@ static void selectDevice(Platform &p, const std::vector<std::string_view> &requi
       std::fflush(stderr);
       std::abort();
     }
+    log(DebugLevel::Debug, "Selector '%s' matched no eligible device", pattern.c_str());
     return;
   }
   if (matched.size() > 1) {
