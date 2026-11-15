@@ -8,6 +8,7 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/Program.h"
 
 #include "polyregion/env.h"
 #include "polyregion/env_keys.h"
@@ -56,6 +57,11 @@ void prependEnv(const char *name, const std::string &value, char separator) {
 } // namespace
 
 int main(int argc, const char **argv) {
+  if (argc > 5 && std::string_view(argv[1]) == "--audit-skip" && std::string_view(argv[4]) == "--") {
+    const auto self = llvm::sys::fs::getMainExecutable(argv[0], reinterpret_cast<void *>(&distPath));
+    const auto polyinfo = llvm::sys::findProgramByName("polyinfo", {llvm::sys::path::parent_path(self)});
+    return runAudited(argv[2], argv[3], polyinfo ? *polyinfo : "polyinfo", std::vector<std::string>(argv + 5, argv + argc));
+  }
   if (argc == 3 && std::string_view(argv[1]) == "--skip-report") {
     if (!llvm::sys::fs::exists(argv[2])) {
       std::fprintf(stderr, "polytest: junit file does not exist: %s\n", argv[2]);

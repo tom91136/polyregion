@@ -400,24 +400,60 @@ inline StepResult runStep(const Task &task, const DriverConfig &cfg, const std::
   return {.exitCode = code, .stdoutText = std::move(stdoutText), .stderrText = std::move(stderrText), .cmdline = std::move(cmdline)};
 }
 
-inline skip::Verdict skipVerdict(const Task &task, const DriverConfig &cfg, const std::string &selector, const std::string &stderrText) {
-  std::optional<skip::Inventory> inventory;
-  if (compiletime::TargetSpec::parse(selector)) {
-    const std::vector<std::string> args{resolveBin("polyinfo", cfg), "--json", "--select", selector};
-    const auto envs = baseEnvs(task, cfg, false, selector);
-    const std::vector<llvm::StringRef> envRefs = envs ^ map([](const auto &x) -> llvm::StringRef { return x; });
-    const std::vector<llvm::StringRef> argRefs = args ^ map([](const auto &x) -> llvm::StringRef { return x; });
-    const auto outPath = task.output + ".inventory";
-    const llvm::FileRemover outRemover(outPath);
-    std::string execErr;
-    if (llvm::sys::ExecuteAndWait(args[0], argRefs, envRefs, {std::nullopt, outPath, llvm::StringRef()}, 120, 0, &execErr) == 0)
-      inventory = skip::parseInventory(polyregion::read_string(outPath));
+inline std::optional<skip::Inventory> queryInventory(const std::string &selector, const std::string &polyinfo,
+                                                     const std::optional<std::vector<std::string>> &envs, const std::string &scratch) {
+  if (!compiletime::TargetSpec::parse(selector)) return std::nullopt;
+  const std::vector<std::string> args{polyinfo, "--json", "--select", selector};
+  const std::vector<llvm::StringRef> argRefs = args ^ map([](const auto &x) -> llvm::StringRef { return x; });
+  std::vector<llvm::StringRef> envRefs;
+  std::optional<llvm::ArrayRef<llvm::StringRef>> envArg;
+  if (envs) {
+    envRefs = *envs ^ map([](const auto &x) -> llvm::StringRef { return x; });
+    envArg = envRefs;
   }
+  const llvm::FileRemover outRemover(scratch);
+  std::string execErr;
+  if (llvm::sys::ExecuteAndWait(args[0], argRefs, envArg, {std::nullopt, scratch, llvm::StringRef()}, 120, 0, &execErr) != 0)
+    return std::nullopt;
+  return skip::parseInventory(polyregion::read_string(scratch));
+}
+
+inline std::vector<std::string> runFeaturesFromEnv() {
   std::vector<std::string> runFeatures;
   if (const char *const mirror = std::getenv(polyregion::env::PolyrtMirror); mirror && std::string_view(mirror) == "off")
     runFeatures.emplace_back(runtime::SystemPagingFeature);
+  return runFeatures;
+}
+
+inline skip::Verdict skipVerdict(const Task &task, const DriverConfig &cfg, const std::string &selector, const std::string &stderrText) {
+  const auto inventory =
+      queryInventory(selector, resolveBin("polyinfo", cfg), baseEnvs(task, cfg, false, selector), task.output + ".inventory");
   const auto manifest = skip::parseManifest(polyregion::read_string(task.output + ".images"));
-  return skip::judge(selector, inventory, manifest, stderrText, runFeatures);
+  return skip::judge(selector, inventory, manifest, stderrText, runFeaturesFromEnv());
+}
+
+// runs an external command, whose exit 77 must hold the runtime's skip record and survive the same proof as a polytest run
+inline int runAudited(const std::string &selector, const std::string &imagesPath, const std::string &polyinfo,
+                      const std::vector<std::string> &command) {
+  if (command.empty()) return fmt::print(stderr, "polytest: no command to run\n"), 2;
+  const auto program = llvm::sys::findProgramByName(command[0]);
+  if (!program) return fmt::print(stderr, "polytest: cannot find {}\n", command[0]), 2;
+  llvm::SmallString<256> errPath;
+  if (llvm::sys::fs::createTemporaryFile("polytest-audit", "stderr", errPath)) return fmt::print(stderr, "polytest: no scratch file\n"), 2;
+  const llvm::FileRemover errRemover(errPath);
+  const std::vector<llvm::StringRef> argRefs = command ^ map([](const auto &x) -> llvm::StringRef { return x; });
+  std::string execErr;
+  const auto code =
+      llvm::sys::ExecuteAndWait(*program, argRefs, std::nullopt, {std::nullopt, std::nullopt, llvm::StringRef(errPath)}, 0, 0, &execErr);
+  const auto stderrText = polyregion::read_string(std::string(errPath));
+  std::fputs(stderrText.c_str(), stderr);
+  if (code != 77) return code < 0 ? 1 : code;
+  const auto inventory = queryInventory(selector, polyinfo, std::nullopt, std::string(errPath) + ".inventory");
+  const auto manifest = skip::parseManifest(polyregion::read_string(imagesPath));
+  const auto verdict = skip::judge(selector, inventory, manifest, stderrText, runFeaturesFromEnv());
+  if (!verdict.justified) return fmt::print(stderr, "[FAIL] unjustified skip (exit 77): {}\n", verdict.reason), 1;
+  reportSkip(llvm::sys::path::filename(command[0]).str(), verdict.reason);
+  return 77;
 }
 
 inline void absorbStep(TaskOutcome &o, StepResult &&r) {
@@ -664,6 +700,8 @@ inline TaskOutcome runTask(const Task &task, const DriverConfig &cfg, const RunV
 }
 
 } // namespace detail
+
+using detail::runAudited;
 
 // the name comes from the compile target alone, so it does not depend on how many devices are selected
 inline std::vector<Task> mergeByCompile(const std::vector<Task> &tasks, const DriverConfig &cfg) {

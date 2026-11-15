@@ -675,6 +675,40 @@ TEST_CASE("A skip with no manifest from the compile step fails") {
   CHECK(outcome.failReason.find("no compile-time image manifest") != std::string::npos);
 }
 
+namespace {
+
+int runAuditedScript(const TempDir &dir, const std::string &body, const std::string &manifest) {
+  script(dir, "polyinfo", std::string("cat <<'EOF'\n") + SwiftShaderInventory + "\nEOF");
+  script(dir, "cmd.sh", body);
+  std::ofstream(dir.file("out.images")) << manifest;
+  return polyregion::polytest::runAudited(Selector, dir.file("out.images"), dir.file("polyinfo"), {dir.file("cmd.sh")});
+}
+
+} // namespace
+
+TEST_CASE("An external command exiting 77 with a justified record stays a skip") {
+  TempDir dir;
+  const auto rec = record("SwiftShader Device", "Managed", "SPIRV_GLCompute", "\"fp64\"", "lacks", "\"fp64\"");
+  CHECK(runAuditedScript(dir, "cat <<'EOF' >&2\n" + rec + "\nEOF\nexit 77", Fp64Manifest) == 77);
+}
+
+TEST_CASE("An external command exiting 77 without a skip record fails") {
+  TempDir dir;
+  CHECK(runAuditedScript(dir, "echo no record >&2\nexit 77", Fp64Manifest) == 1);
+}
+
+TEST_CASE("An external command exiting 77 with no manifest fails") {
+  TempDir dir;
+  const auto rec = record("SwiftShader Device", "Managed", "SPIRV_GLCompute", "\"fp64\"", "lacks", "\"fp64\"");
+  CHECK(runAuditedScript(dir, "cat <<'EOF' >&2\n" + rec + "\nEOF\nexit 77", "") == 1);
+}
+
+TEST_CASE("An external command that does not skip keeps its exit code") {
+  TempDir dir;
+  CHECK(runAuditedScript(dir, "exit 0", Fp64Manifest) == 0);
+  CHECK(runAuditedScript(dir, "exit 3", Fp64Manifest) == 3);
+}
+
 TEST_CASE("A module with no image for the device does not mask a justified module") {
   using namespace polyregion::polytest;
   const auto manifest =

@@ -69,6 +69,12 @@ set(ENV_cl-llvmpipe "POLYRT_PLATFORM=opencl1_1@!opencl1_1@*llvmpipe*source*;POLY
 set(ENV_cl-pocl     "POLYRT_PLATFORM=opencl1_1@!opencl1_1@*Portable*source*;POLYRT_HOST_FALLBACK=0")
 set(ENV_cpu         "POLYRT_PLATFORM=host")
 set(ENV_cpu-tbb     "")                                    # the reference runs natively, no polyrt
+# the selector an exit 77 is audited against (polytest --audit-skip); `-` = the run is not audited
+set(AUDIT_vk-lavapipe "spirv_glcompute@*llvmpipe*")
+set(AUDIT_cl-llvmpipe "opencl1_1@*llvmpipe*")
+set(AUDIT_cl-pocl     "opencl1_1@*Portable*")
+set(AUDIT_cpu         "host@native")
+set(AUDIT_cpu-tbb     -)
 # bundle for run.sh to source per backend (`-` = none); only the emulator backends need it
 set(BUNDLE_vk-lavapipe "${MINIAPP_EMULATORS}")
 set(BUNDLE_cl-llvmpipe "${MINIAPP_EMULATORS}")
@@ -180,13 +186,14 @@ foreach (app miniBUDE CloverLeaf TeaLeaf BabelStream)
     endif ()
     execute_process(COMMAND ${CMAKE_COMMAND} -S "${src}" -B "${bdir}" -C "${init}")
     add_test(NAME ${app}-${backend}-build COMMAND ${CMAKE_COMMAND} --build "${bdir}" --parallel)
+    set_tests_properties(${app}-${backend}-build PROPERTIES ENVIRONMENT "POLYFRONT_IMAGE_MANIFEST=${bdir}/images.manifest")
 
     set(run ${RUN_${app}})                                 # per-backend run-arg override (e.g. smaller emulator size)
     if (DEFINED RUN_${app}_${backend})
       set(run ${RUN_${app}_${backend}})
     endif ()
     add_test(NAME ${app}-${backend}-run COMMAND ${BASH_PROGRAM} ${RUN_WRAPPER} "${BUNDLE_${backend}}"
-             "${bdir}/${EXE_${app}}" ${run})
+             "${POLYCPP_DIST}/bin/polytest" "${AUDIT_${backend}}" "${bdir}/images.manifest" "${bdir}/${EXE_${app}}" ${run})
 
     set_tests_properties(${app}-${backend}-run PROPERTIES
       DEPENDS "${app}-${backend}-build"
