@@ -142,3 +142,33 @@ jobs:
     needs: [cross-build, linux-build]
     if: ${{ !cancelled() && needs.linux-build.outputs.spectra-package != '' }}
     uses: ./.github/workflows/spectra-test-cross.yaml
+
+  test-report:
+    if: always()
+    needs:
+      - linux-test
+      - linux-emulator-test
+      - macos-test
+      - macos-emulator-test
+      - windows-test
+      - windows-emulator-test
+      - cross-test
+      - spectra-test-linux
+      - spectra-test-macos
+      - spectra-test-windows
+      - spectra-test-cross
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github/scripts
+      - name: Download test results
+        uses: actions/download-artifact@v8
+        with:
+          pattern: '*-test-results-*'
+          path: test-results
+      - name: Write test summary
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: python3 -I .github/scripts/junit_summary.py summary test-results >> "$GITHUB_STEP_SUMMARY"

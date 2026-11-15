@@ -67,6 +67,15 @@ jobs:
           junit: native/out/build-dist-check-${{ matrix.arch }}-static/dist-check-results.xml
           label: dist-check
 
+      - name: Upload dist-check results
+        continue-on-error: true
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist-check-test-results-windows-${{ matrix.arch }}-Release
+          path: native/out/build-dist-check-${{ matrix.arch }}-static/dist-check-results.xml
+          if-no-files-found: warn
+
   test-scala:
     if: ${{ !cancelled() }}
     strategy:
