@@ -81,5 +81,8 @@ jobs:
           cmake -S . -B target/cross -G Ninja -DCMAKE_BUILD_TYPE=Release -DSPECTRA_ENABLE_PACKAGE=ON \
             -DSPECTRA_PREBUILT_PACKAGE="$GITHUB_WORKSPACE/package/spectra/lib.polyast" -DCMAKE_PREFIX_PATH="$POLYREGION_DIST"
           cmake --build target/cross --target spectra-test-discover
+          rc=0
           ctest --test-dir target/cross --timeout 3600 --output-on-failure --no-tests=error --parallel 2 \
-            -R '^spectra-offload-(equal|none_of)-'
+            --output-junit results.xml -R '^spectra-offload-(equal|none_of)-' || rc=$?
+          "$POLYREGION_DIST/bin/polytest" --skip-report target/cross/results.xml || [ "$rc" -ne 0 ] || rc=1
+          exit "$rc"
