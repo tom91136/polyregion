@@ -28,7 +28,14 @@ if not "%VCPKG_ROOT%"=="" (
 
 set "PATH=%VC%\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja;%PATH%"
 :: See https://docs.microsoft.com/en-us/cpp/build/building-on-the-command-line?view=msvc-170
-call "%VC%\VC\Auxiliary\Build\vcvarsall.bat" %1
+set "MSVC_PIN="
+for /f "usebackq delims=" %%v in ("%~dp0msvc-toolset") do set "MSVC_PIN=%%v"
+if not defined MSVC_PIN (
+  echo ERROR: native\msvc-toolset missing or empty
+  exit /b 1
+)
+call "%VC%\VC\Auxiliary\Build\vcvarsall.bat" %1 -vcvars_ver=%MSVC_PIN%
+echo %VCToolsVersion%| findstr /b /c:"%MSVC_PIN%." >nul || (echo ERROR: VCToolsVersion %VCToolsVersion% is not %MSVC_PIN% & exit /b 1)
 :: X86 | AMD64
 
 if not "%VCPKG_ROOT_%"=="" (

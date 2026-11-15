@@ -20,6 +20,7 @@ dist_dir := justfile_directory() / "native" / "out" / "polyregion-" + build_type
 
 # Repo root with forward slashes - justfile_directory() yields backslashes on Windows that bash recipes mangle.
 repo := replace(justfile_directory(), "\\", "/")
+msvc_pin := trim(read(repo + "/native/msvc-toolset"))
 
 local_vcpkg := justfile_directory() / "vcpkg"
 export VCPKG_ROOT := if path_exists(local_vcpkg) == "true" { local_vcpkg } else { env_var_or_default('RUNVCPKG_VCPKG_ROOT', env_var_or_default('VCPKG_ROOT', local_vcpkg)) }
@@ -30,9 +31,10 @@ if [ "${OS:-}" = "Windows_NT" ] && [ -z "${VSCMD_VER:-}" ] && [ -z "${POLYREGION
     _inst=$([ -x "$_vsw" ] && "$_vsw" -latest -products '*' -property installationPath | tr -d '\r' || true)
     if [ -n "$_inst" ] && [ -f "$_inst/Common7/Tools/VsDevCmd.bat" ]; then
         _arch=amd64; case "$(uname -m)" in aarch64|arm64) _arch=arm64;; esac
+        _pin=''' + msvc_pin + '''
         _bat=$(mktemp --suffix=.bat)
-        printf '@echo off\r\ncall "%s" -arch=%s -host_arch=%s -no_logo >nul\r\n"%s" "%s"\r\nexit /b %%errorlevel%%\r\n' \
-            "$(cygpath -w "$_inst/Common7/Tools/VsDevCmd.bat")" "$_arch" "$_arch" "$(cygpath -w "$(command -v bash)")" "$(cygpath -w "$0")" > "$_bat"
+        printf '@echo off\r\ncall "%s" -arch=%s -host_arch=%s -no_logo -vcvars_ver=%s >nul\r\necho %%VCToolsVersion%%| findstr /b /c:"%s." >nul || (echo VCToolsVersion %%VCToolsVersion%% is not %s & exit /b 1)\r\n"%s" "%s"\r\nexit /b %%errorlevel%%\r\n' \
+            "$(cygpath -w "$_inst/Common7/Tools/VsDevCmd.bat")" "$_arch" "$_arch" "$_pin" "$_pin" "$_pin" "$(cygpath -w "$(command -v bash)")" "$(cygpath -w "$0")" > "$_bat"
         _rc=0; cmd //c "$(cygpath -w "$_bat")" || _rc=$?
         rm -f "$_bat"; exit $_rc
     fi

@@ -47,11 +47,15 @@ if /i "%~1"=="--check"   set "MODE=check"
 if "%MODE%"=="build" (set "OUT=%~1") else (set "OUT=%~2")
 if "%OUT%"=="" set "OUT=%DIR%out"
 
-rem pin the v14.44 toolset (VS2022 default, VS2026 side-by-side): v14.5x miscompiles gpuocelot's math and ICEs on clang for arm64
+rem toolset pin in native/msvc-toolset: v14.5x miscompiles gpuocelot's math and ICEs clang on arm64
+set "MSVC_PIN="
+for /f "usebackq delims=" %%v in ("%DIR%..\native\msvc-toolset") do set "MSVC_PIN=%%v"
+if not defined MSVC_PIN (echo no toolset pin in native\msvc-toolset & exit /b 1)
 set "VS="
 for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires %VCREQ% -property installationPath`) do set "VS=%%i"
 if not defined VS (echo no VC-capable Visual Studio found & exit /b 1)
-call "%VS%\VC\Auxiliary\Build\vcvars%VCARCH%.bat" -vcvars_ver=14.44 >nul || (echo VCVARS-FAIL: no v14.44 toolset & exit /b 1)
+call "%VS%\VC\Auxiliary\Build\vcvars%VCARCH%.bat" -vcvars_ver=%MSVC_PIN% >nul || (echo VCVARS-FAIL: no v%MSVC_PIN% toolset & exit /b 1)
+echo %VCToolsVersion%| findstr /b /c:"%MSVC_PIN%." >nul || (echo VCToolsVersion %VCToolsVersion% is not %MSVC_PIN% & exit /b 1)
 for /f "delims=" %%p in ('where python 2^>nul') do if not defined PY set "PY=%%p"
 rem keep llvm\bin OFF PATH here: on arm64 cmake otherwise grabs the from-source clang/llvm-ar by name for the
 rem pure-MSVC components (glslang/vk-loader/swiftshader); it's added only around mesa/pocl which need llvm-config
