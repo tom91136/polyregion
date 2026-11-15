@@ -286,12 +286,14 @@ test-native *args='': build-pass-native
     done
     rm -f "$BUILD/Testing/Temporary/CTestCostData.txt"
     cmake --build "$BUILD" --target polyinvoke-tests-discover polycpp-tests-discover polyfc-tests-discover \
-        polycommon-tests polyc-tests polyrt-tests polyreflect-rt-tests polytest-tests
+        polycommon-tests polyc-tests polyrt-tests polyreflect-rt-tests polytest-tests polytest-bin
     # force ctest colour on a terminal; auto (off) when piped to a log so it stays greppable
     junit="$BUILD/Testing/test-native.xml"; rm -f "$junit"
     rc=0; CLICOLOR_FORCE=$([ -t 1 ] && echo 1 || echo 0) ctest --test-dir "$BUILD" --timeout 600 --output-junit Testing/test-native.xml {{ args }} || rc=$?
-    skips=$(grep -m1 -o 'skipped="[0-9]*"' "$junit" 2>/dev/null | tr -dc 0-9 || true)
-    [ "${skips:-0}" -gt 0 ] && echo "ctest: ${skips} skipped (listed under 'did not run'; junit $junit)" || true
+    pt="$BUILD/polytest/polytest"; [ -x "$pt" ] || pt="$pt.exe"
+    if [ -f "$junit" ]; then
+      "$pt" --skip-report "$junit" || [ "$rc" -ne 0 ] || rc=1
+    fi
     exit $rc
 
 # Print the test slices for a profile, one per line: id, shard label, and the ctest -L regex selecting the slice (tab separated); CI builds the slice matrix from this. polyfc-tests, when built, adds its run entries to the slice sizing.
