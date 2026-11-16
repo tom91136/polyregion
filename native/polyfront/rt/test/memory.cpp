@@ -2414,8 +2414,8 @@ TEST_CASE("a straddling arena pointee reads back only the host bytes") {
   f.allocation.genArenaReset();
   f.allocation.genArenaMirror(reinterpret_cast<const char *>(capture), 1, 1, *captureMeta, sizeof(uintptr_t), sizeof(Capture));
   auto *base = reinterpret_cast<char *>(f.allocation.genArenaFinish());
-  auto *wide = reinterpret_cast<Wide *>(base + *reinterpret_cast<const uint64_t *>(base + offsetof(Capture, wide)));
-  wide->value = 42;
+  const int64_t value = 42;
+  std::memcpy(base + *reinterpret_cast<const uint64_t *>(base + offsetof(Capture, wide)), &value, sizeof(value));
   f.allocation.genArenaReadback();
   CHECK(*reinterpret_cast<const int32_t *>(block + 4) == 42);
 }
