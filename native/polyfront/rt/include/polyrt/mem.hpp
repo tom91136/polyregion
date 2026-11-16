@@ -938,8 +938,9 @@ public:
 
   public:
     explicit TableLock(SynchronisedMemAllocation &self) : TableLock(self, std::unique_lock(self.tableMutex)) {}
-    TableLock(SynchronisedMemAllocation &self, std::unique_lock<std::recursive_mutex> held) : self(self), held(std::move(held)) {
-      if (self.tableDepth++ == 0) self.drainReleased();
+    TableLock(SynchronisedMemAllocation &self, std::unique_lock<std::recursive_mutex> held, const bool hook = false)
+        : self(self), held(std::move(held)) {
+      if (self.tableDepth++ == 0) self.drainReleased(/*device*/ !hook);
     }
     TableLock(const TableLock &) = delete;
     TableLock &operator=(const TableLock &) = delete;
@@ -961,7 +962,7 @@ public:
       }
       return;
     }
-    const TableLock lock(*this, std::move(held));
+    const TableLock lock(*this, std::move(held), /*hook*/ true);
     forgetTables(begin, end, releaseRemote);
   }
 
@@ -974,12 +975,13 @@ public:
       disassociateExact(reinterpret_cast<const void *>(local), releaseRemote, /*defer*/ true);
   }
 
-  void drainReleased() {
+  void drainReleased(const bool device) {
     for (auto *node = released.load(std::memory_order_relaxed) ? released.exchange(nullptr, std::memory_order_acquire) : nullptr; node;) {
       forgetTables(node->begin, node->end, node->releaseRemote);
       const auto *done = std::exchange(node, node->next);
       delete done;
     }
+    if (!device) return;
     const auto garbage = std::move(remoteGarbage);
     remoteGarbage.clear();
     for (const auto remote : garbage)
