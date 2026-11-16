@@ -257,8 +257,7 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT CaptureMarshal *captureMarshal();
   struct ReleaseHookRegistrar {                                                                                                            \
     ReleaseHookRegistrar() {                                                                                                               \
       ::polyregion::polyrt::sma::registerCaptureMarshal(&captureMarshalOf);                                                                \
-      ::polyregion::rt_reflect::_rt_set_release_cb(                                                                                        \
-          +[](void *p, const size_t n) { (allocations).forget(p, n, ::polyregion::polyrt::currentDevice != nullptr); });                   \
+      ::polyregion::rt_reflect::_rt_set_release_cb(+[](void *p, const size_t n) { (allocations).forget(p, n); });                          \
       ::polyregion::rt_reflect::_rt_set_reclaim_cb(                                                                                        \
           +[](const void *p, const size_t n, const bool forWrite) { (allocations).reclaimRange(p, n, forWrite); });                        \
     }                                                                                                                                      \

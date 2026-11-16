@@ -20,6 +20,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "polyregion/env_keys.h"
@@ -552,12 +553,12 @@ private:
   struct Released {
     uintptr_t begin, end;
     bool releaseRemote;
+    Released *next;
   };
   std::recursive_mutex tableMutex;
   size_t tableDepth = 0;
-  std::mutex releasedMutex;
-  std::vector<Released> released;
-  std::atomic<bool> hasReleased{false};
+  std::atomic<Released *> released{nullptr};
+  std::vector<uintptr_t> remoteGarbage;
   std::map<uintptr_t, Guard> guards{};
   std::recursive_mutex guardMutex;
   static inline std::atomic<SynchronisedMemAllocation *> guardOwner{nullptr};
@@ -946,16 +947,18 @@ public:
   };
   TableLock exclusive() { return TableLock(*this); }
 
-  // the host block [p, p + sizeInBytes) is going away: drop whatever mirrors it, interior keys included
+  // the host block [p, p + sizeInBytes) is going away: drop whatever mirrors it, interior keys included.
+  // XXX a free can arrive on any thread, so this never waits and never calls the device: the queue is a lock-free stack and
+  // the remote handles go to remoteGarbage, released by the next entry point.
   void forget(const void *p, const size_t sizeInBytes, const bool releaseRemote = true) {
     if (tableMutations) return;
     const auto begin = reinterpret_cast<uintptr_t>(p), end = begin + std::max<size_t>(sizeInBytes, 1);
     unguard(begin);
     std::unique_lock held(tableMutex, std::try_to_lock);
     if (!held) {
-      const std::scoped_lock pending(releasedMutex);
-      released.push_back(Released{begin, end, releaseRemote});
-      hasReleased.store(true, std::memory_order_release);
+      auto *node = new Released{begin, end, releaseRemote, released.load(std::memory_order_relaxed)};
+      while (!released.compare_exchange_weak(node->next, node, std::memory_order_release, std::memory_order_relaxed)) {
+      }
       return;
     }
     const TableLock lock(*this, std::move(held));
@@ -968,29 +971,29 @@ public:
     for (auto it = localToRemoteAlloc.lower_bound(begin); it != localToRemoteAlloc.end() && it->first < end; ++it)
       mirrored.push_back(it->first);
     for (const auto local : mirrored)
-      disassociateExact(reinterpret_cast<const void *>(local), releaseRemote);
+      disassociateExact(reinterpret_cast<const void *>(local), releaseRemote, /*defer*/ true);
   }
 
   void drainReleased() {
-    if (!hasReleased.load(std::memory_order_acquire)) return;
-    std::vector<Released> batch;
-    {
-      const std::scoped_lock pending(releasedMutex);
-      batch.swap(released);
-      hasReleased.store(false, std::memory_order_relaxed);
+    for (auto *node = released.load(std::memory_order_relaxed) ? released.exchange(nullptr, std::memory_order_acquire) : nullptr; node;) {
+      forgetTables(node->begin, node->end, node->releaseRemote);
+      const auto *done = std::exchange(node, node->next);
+      delete done;
     }
-    for (const auto &r : batch)
-      forgetTables(r.begin, r.end, r.releaseRemote);
+    const auto garbage = std::move(remoteGarbage);
+    remoteGarbage.clear();
+    for (const auto remote : garbage)
+      remoteRelease(remote);
   }
 
-  void disassociateExact(const void *p, const bool releaseRemote = true) {
+  void disassociateExact(const void *p, const bool releaseRemote = true, const bool defer = false) {
     const auto it = localToRemoteAlloc.find(reinterpret_cast<uintptr_t>(p));
     if (it == localToRemoteAlloc.end()) return;
     if (debug)
       std::fprintf(stderr, "[SMA] disassociateExact(host=0x%" PRIxPTR ", remote=%" PRIxPTR ", size=%zu)\n", it->first,
                    it->second.remote.ptr, it->second.remote.sizeInBytes);
     unguard(it->first);
-    if (releaseRemote) remoteRelease(it->second.remote.ptr);
+    if (releaseRemote) defer ? remoteGarbage.push_back(it->second.remote.ptr) : remoteRelease(it->second.remote.ptr);
     remoteToLocalPtr.erase(it->second.remote.ptr);
     localToRemoteAlloc.erase(it);
   }
