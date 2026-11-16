@@ -1464,6 +1464,31 @@ TEST_CASE("release hook tolerates frees on other threads while the tables mutate
   active = nullptr;
 }
 
+TEST_CASE("forgets queue without waiting or touching the device while another thread holds the tables", "[sma-race]") {
+  Fixture fixture;
+  constexpr size_t blocks = 20000;
+  std::vector<void *> mirrored;
+  for (size_t i = 0; i < blocks; ++i) {
+    auto p = fixture.mallocLocal<char>(16);
+    fixture.allocation.mirrorAlloc(p, 16, false);
+    mirrored.push_back(p);
+  }
+  {
+    const auto table = fixture.allocation.exclusive();
+    auto forgotten = std::async(std::launch::async, [&] {
+      for (auto p : mirrored)
+        fixture.allocation.forget(p, 16, true);
+    });
+    REQUIRE(forgotten.wait_for(std::chrono::seconds(30)) == std::future_status::ready);
+    CHECK(fixture.releasedRemote.empty());
+    CHECK(fixture.allocation.localToRemoteAlloc.size() == blocks);
+  }
+  const auto table = fixture.allocation.exclusive();
+  CHECK(fixture.allocation.localToRemoteAlloc.empty());
+  CHECK(fixture.allocation.remoteToLocalPtr.empty());
+  CHECK(fixture.releasedRemote.size() == blocks);
+}
+
 TEST_CASE("release hook calls that outlive the hook clear find live tables", "[sma-race]") {
   static std::atomic<Fixture *> hooked{nullptr};
   FreeStorm storm(6);
