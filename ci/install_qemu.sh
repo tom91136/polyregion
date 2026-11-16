@@ -24,5 +24,7 @@ sudo cp -a "$tmp/root/usr/libexec/qemu-binfmt/$arch-binfmt-P" /usr/libexec/qemu-
 [ -e /proc/sys/fs/binfmt_misc/register ] || sudo mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc
 [ ! -e "/proc/sys/fs/binfmt_misc/qemu-$arch" ] || echo -1 | sudo tee "/proc/sys/fs/binfmt_misc/qemu-$arch" > /dev/null
 sudo tee /proc/sys/fs/binfmt_misc/register < "$tmp/root/usr/share/qemu/binfmt.d/qemu-$arch.conf" > /dev/null
+# XXX the max cpu enables Ztso, which fences every guest load and store
+[ "$arch" != riscv64 ] || echo "QEMU_CPU=rv64" >> "${GITHUB_ENV:-/dev/null}"
 "/usr/bin/qemu-$arch" --version | head -1
 cat "/proc/sys/fs/binfmt_misc/qemu-$arch"

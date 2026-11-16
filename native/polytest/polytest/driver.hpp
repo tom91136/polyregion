@@ -224,6 +224,7 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
                            "XDG_CACHE_HOME",
                            "POCL_CACHE_DIR",
                            "QEMU_LD_PREFIX",
+                           "QEMU_CPU",
                            "CUEW_LIB_PATH",
                            "HIPEW_LIB_PATH",
                            "HSAEW_LIB_PATH"})
