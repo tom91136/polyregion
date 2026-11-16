@@ -344,6 +344,12 @@ struct TypeLayout {
   size_t memberCount;
   const AggregateMember *members;
 
+  POLYREGION_RT_PROTECT bool pointerFree() const {
+    for (size_t i = 0; i < memberCount; ++i)
+      if (members[i].ptrIndirection > 0 || (members[i].type && !members[i].type->pointerFree())) return false;
+    return true;
+  }
+
   // a union's pointer-bearing arms are live when `(load(tagWidthInBytes) & tagMask) <tagTest> tagValue`, the others otherwise
   size_t tagWidthInBytes;
   size_t tagOffsetInBytes;
@@ -360,7 +366,7 @@ struct TypeLayout {
                               : tagTest == TagTest::Ne ? tag != tagValue
                               : tagTest == TagTest::Lt ? tag < tagValue
                                                        : tag >= tagValue;
-    const bool holdsPointers = arm.ptrIndirection > 0 || (arm.type && !isSet(arm.type->attrs, LayoutAttrs::Opaque));
+    const bool holdsPointers = arm.ptrIndirection > 0 || (arm.type && !arm.type->pointerFree());
     return pointersLive == holdsPointers;
   }
 
@@ -388,7 +394,11 @@ struct TypeLayout {
     if (isSet(attrs, LayoutAttrs::Opaque)) std::fprintf(fd, "Opaque ");
     if (isSet(attrs, LayoutAttrs::SelfOpaque)) std::fprintf(fd, "SelfOpaque ");
     if (isSet(attrs, LayoutAttrs::Primitive)) std::fprintf(fd, "Primitive ");
-    std::fprintf(fd, "}) ──\n");
+    std::fprintf(fd, "}");
+    if (tagWidthInBytes != 0)
+      std::fprintf(fd, ", tag=[%zu]@%zu & 0x%zx %s %zu", tagWidthInBytes, tagOffsetInBytes, tagMask,
+                   std::array{"==", "!=", "<", ">="}[static_cast<size_t>(tagTest)], tagValue);
+    std::fprintf(fd, ") ──\n");
 
     for (size_t i = 0; i < memberCount; ++i) {
       const auto &m = members[i];

@@ -4,6 +4,7 @@
 #pragma region requires: pass
 
 #include <algorithm>
+#include <climits>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -14,36 +15,61 @@
 
 namespace {
 
-struct DefaultString {
-  union {
-    struct {
+struct Padding0 {};
+
+struct StandardLayout {};
+struct AlternateLayout {};
+
+template <typename Layout> struct basic_string;
+
+template <> struct basic_string<StandardLayout> {
+  struct __long {
+    struct __attribute__((__packed__)) {
       std::size_t __is_long_ : 1;
-      std::size_t __cap_ : 63;
-      std::size_t __size_;
-      char *__data_;
-    } __l;
-    struct {
+      std::size_t __cap_ : sizeof(std::size_t) * CHAR_BIT - 1;
+    };
+    std::size_t __size_;
+    char *__data_;
+  };
+
+  enum { __min_cap = (sizeof(__long) - 1) / sizeof(char) > 2 ? (sizeof(__long) - 1) / sizeof(char) : 2 };
+
+  struct __short {
+    struct __attribute__((__packed__)) {
       unsigned char __is_long_ : 1;
       unsigned char __size_ : 7;
-      char __data_[23];
-    } __s;
-  } __rep;
+    };
+    [[no_unique_address]] Padding0 __padding_;
+    char __data_[__min_cap];
+  };
+
+  union __rep {
+    __short __s;
+    __long __l;
+  } __rep_;
 };
 
-struct AlternateString {
-  union {
-    struct {
-      char *__data_;
-      std::size_t __size_;
-      std::size_t __cap_ : 63;
-      std::size_t __is_long_ : 1;
-    } __l;
-    struct {
-      char __data_[23];
-      unsigned char __size_ : 7;
-      unsigned char __is_long_ : 1;
-    } __s;
-  } __rep;
+template <> struct basic_string<AlternateLayout> {
+  struct __long {
+    char *__data_;
+    std::size_t __size_;
+    std::size_t __cap_ : sizeof(std::size_t) * CHAR_BIT - 1;
+    std::size_t __is_long_ : 1;
+  };
+
+  enum { __min_cap = (sizeof(__long) - 1) / sizeof(char) > 2 ? (sizeof(__long) - 1) / sizeof(char) : 2 };
+
+  struct __short {
+    char __data_[__min_cap];
+    [[no_unique_address]] Padding0 __padding_;
+    unsigned char __size_ : 7;
+    unsigned char __is_long_ : 1;
+  };
+
+  union __rep {
+    __short __s;
+    __long __l;
+  } __rep_;
 };
 
 struct MsvcString {
@@ -63,16 +89,16 @@ long weigh(const char *data, const std::size_t size) {
   return sum;
 }
 
-long checksum(const DefaultString &s) {
+long checksum(const basic_string<StandardLayout> &s) {
   const auto *raw = reinterpret_cast<const unsigned char *>(&s);
   const bool isLong = raw[0] & 1;
-  return weigh(isLong ? s.__rep.__l.__data_ : s.__rep.__s.__data_, isLong ? s.__rep.__l.__size_ : raw[0] >> 1);
+  return weigh(isLong ? s.__rep_.__l.__data_ : s.__rep_.__s.__data_, isLong ? s.__rep_.__l.__size_ : raw[0] >> 1);
 }
 
-long checksum(const AlternateString &s) {
+long checksum(const basic_string<AlternateLayout> &s) {
   const auto *raw = reinterpret_cast<const unsigned char *>(&s);
   const bool isLong = raw[23] >> 7;
-  return weigh(isLong ? s.__rep.__l.__data_ : s.__rep.__s.__data_, isLong ? s.__rep.__l.__size_ : raw[23] & 0x7f);
+  return weigh(isLong ? s.__rep_.__l.__data_ : s.__rep_.__s.__data_, isLong ? s.__rep_.__l.__size_ : raw[23] & 0x7f);
 }
 
 long checksum(const MsvcString &s) { return weigh(s._Myres >= 16 ? s._Bx._Ptr : s._Bx._Buf, s._Mysize); }
@@ -87,23 +113,23 @@ int main() {
     text[i] = static_cast<char>('a' + (i % 26));
   const auto address = reinterpret_cast<std::uintptr_t>(target.data());
 
-  DefaultString defaultShort{}, defaultLong{};
-  defaultShort.__rep.__s.__size_ = 22;
+  basic_string<StandardLayout> defaultShort{}, defaultLong{};
+  defaultShort.__rep_.__s.__size_ = 22;
   for (int i = 0; i < 15; ++i)
-    defaultShort.__rep.__s.__data_[i] = static_cast<char>('A' + i);
-  std::memcpy(defaultShort.__rep.__s.__data_ + 15, &address, sizeof(address));
-  defaultLong.__rep.__l.__is_long_ = 1;
-  defaultLong.__rep.__l.__cap_ = text.size();
-  defaultLong.__rep.__l.__size_ = text.size();
-  defaultLong.__rep.__l.__data_ = text.data();
+    defaultShort.__rep_.__s.__data_[i] = static_cast<char>('A' + i);
+  std::memcpy(defaultShort.__rep_.__s.__data_ + 15, &address, sizeof(address));
+  defaultLong.__rep_.__l.__is_long_ = 1;
+  defaultLong.__rep_.__l.__cap_ = text.size();
+  defaultLong.__rep_.__l.__size_ = text.size();
+  defaultLong.__rep_.__l.__data_ = text.data();
 
-  AlternateString alternateShort{}, alternateLong{};
-  alternateShort.__rep.__s.__size_ = 8;
-  std::memcpy(alternateShort.__rep.__s.__data_, &address, sizeof(address));
-  alternateLong.__rep.__l.__is_long_ = 1;
-  alternateLong.__rep.__l.__cap_ = text.size();
-  alternateLong.__rep.__l.__size_ = text.size();
-  alternateLong.__rep.__l.__data_ = text.data();
+  basic_string<AlternateLayout> alternateShort{}, alternateLong{};
+  alternateShort.__rep_.__s.__size_ = 8;
+  std::memcpy(alternateShort.__rep_.__s.__data_, &address, sizeof(address));
+  alternateLong.__rep_.__l.__is_long_ = 1;
+  alternateLong.__rep_.__l.__cap_ = text.size();
+  alternateLong.__rep_.__l.__size_ = text.size();
+  alternateLong.__rep_.__l.__data_ = text.data();
 
   MsvcString msvcShort{}, msvcLong{};
   std::memcpy(msvcShort._Bx._Buf, &address, sizeof(address));
@@ -113,8 +139,8 @@ int main() {
   msvcLong._Mysize = text.size();
   msvcLong._Myres = text.size();
 
-  const DefaultString defaultShortBefore = defaultShort, defaultLongBefore = defaultLong;
-  const AlternateString alternateShortBefore = alternateShort, alternateLongBefore = alternateLong;
+  const basic_string<StandardLayout> defaultShortBefore = defaultShort, defaultLongBefore = defaultLong;
+  const basic_string<AlternateLayout> alternateShortBefore = alternateShort, alternateLongBefore = alternateLong;
   const MsvcString msvcShortBefore = msvcShort, msvcLongBefore = msvcLong;
 
   std::vector<long> out(N, -1);
@@ -133,10 +159,10 @@ int main() {
   long bad = 0;
   for (int i = 0; i < N; ++i)
     bad += o[i] != want + i;
-  const bool intact = std::memcmp(&defaultShort, &defaultShortBefore, sizeof(DefaultString)) == 0
-                      && std::memcmp(&defaultLong, &defaultLongBefore, sizeof(DefaultString)) == 0
-                      && std::memcmp(&alternateShort, &alternateShortBefore, sizeof(AlternateString)) == 0
-                      && std::memcmp(&alternateLong, &alternateLongBefore, sizeof(AlternateString)) == 0
+  const bool intact = std::memcmp(&defaultShort, &defaultShortBefore, sizeof(basic_string<StandardLayout>)) == 0
+                      && std::memcmp(&defaultLong, &defaultLongBefore, sizeof(basic_string<StandardLayout>)) == 0
+                      && std::memcmp(&alternateShort, &alternateShortBefore, sizeof(basic_string<AlternateLayout>)) == 0
+                      && std::memcmp(&alternateLong, &alternateLongBefore, sizeof(basic_string<AlternateLayout>)) == 0
                       && std::memcmp(&msvcShort, &msvcShortBefore, sizeof(MsvcString)) == 0
                       && std::memcmp(&msvcLong, &msvcLongBefore, sizeof(MsvcString)) == 0;
   const bool ok = bad == 0 && intact;

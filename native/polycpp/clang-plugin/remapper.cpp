@@ -460,41 +460,45 @@ static void copyUnionStorage(Remapper::RemapContext &r, const Named &dst, const 
   else r.push(Stmt::Mut(lhs, Expr::Alias(rhs)));
 }
 
+[[nodiscard]] static const clang::FieldDecl *fieldOf(const clang::ValueDecl *member) {
+  if (const auto *indirect = llvm::dyn_cast_or_null<clang::IndirectFieldDecl>(member)) return indirect->getAnonField();
+  return llvm::dyn_cast_or_null<clang::FieldDecl>(member);
+}
+
+// a member by name, through anonymous struct and union members (an IndirectFieldDecl)
+[[nodiscard]] static const clang::ValueDecl *memberNamed(clang::ASTContext &context, const clang::RecordDecl *record,
+                                                         const llvm::StringRef name) {
+  for (const auto *found : record->lookup(&context.Idents.get(name)))
+    if (const auto *member = llvm::dyn_cast<clang::ValueDecl>(found); fieldOf(member)) return member;
+  return nullptr;
+}
+
 // std string unions keep their discriminant in library fields: libc++ `__is_long_`, MSVC `_Myres` beside `_Bx`
-[[nodiscard]] static Opt<UnionTag> unionTag(const clang::ASTContext &context, const clang::RecordDecl *decl) {
+[[nodiscard]] static Opt<UnionTag> unionTag(clang::ASTContext &context, const clang::RecordDecl *decl) {
   if (!decl->isUnion()) return {};
   const auto bits = decl->fields() //
                     | to_vector()  //
                     | collect([&](const clang::FieldDecl *arm) -> Opt<uint64_t> {
                         const auto *const record = arm->getType()->getAsRecordDecl();
-                        if (!record) return {};
-                        for (const auto *field : record->fields())
-                          if (field->isBitField() && field->getBitWidthValue() == 1 && field->getName() == "__is_long_")
-                            return context.getFieldOffset(arm) + context.getFieldOffset(field);
-                        return {};
+                        const auto *const flag = record ? memberNamed(context, record, "__is_long_") : nullptr;
+                        const auto *const bitField = fieldOf(flag);
+                        if (!bitField || !bitField->isBitField() || bitField->getBitWidthValue() != 1) return {};
+                        return context.getFieldOffset(arm) + context.getFieldOffset(flag);
                       }) //
                     | to_vector();
   if (!bits.empty() && (bits | forall([&](const auto &bit) { return bit == bits.front(); })))
     return UnionTag(static_cast<int32_t>(bits.front() / 8), 1, static_cast<int64_t>(1U << (bits.front() % 8)), 0, UnionTagTest::Ne());
   const auto *const owner = llvm::dyn_cast<clang::RecordDecl>(decl->getDeclContext());
   if (!owner || decl->getName() != "_Bxty") return {};
-  const auto field = [&](const llvm::StringRef name) -> const clang::FieldDecl * {
-    for (const auto *f : owner->fields())
-      if (f->getName() == name) return f;
-    return nullptr;
-  };
-  const auto *const buffer = field("_Bx");
-  const auto *const capacity = field("_Myres");
-  const auto *const small = [&]() -> const clang::ConstantArrayType * {
-    for (const auto *f : decl->fields())
-      if (f->getName() == "_Buf") return context.getAsConstantArrayType(f->getType());
-    return nullptr;
-  }();
-  if (!buffer || !capacity || !small || buffer->getType()->getAsRecordDecl() != decl) return {};
+  const auto *const buffer = memberNamed(context, owner, "_Bx");
+  const auto *const capacity = memberNamed(context, owner, "_Myres");
+  const auto *const small = memberNamed(context, decl, "_Buf");
+  const auto *const smallType = small ? context.getAsConstantArrayType(small->getType()) : nullptr;
+  if (!buffer || !capacity || !smallType || buffer->getType()->getAsRecordDecl() != decl) return {};
   const auto width = context.getTypeSizeInChars(capacity->getType()).getQuantity();
   return UnionTag(static_cast<int32_t>((context.getFieldOffset(capacity) - context.getFieldOffset(buffer)) / 8),
                   static_cast<int32_t>(width), width >= 8 ? int64_t{-1} : (int64_t{1} << (width * 8)) - 1,
-                  static_cast<int64_t>(small->getZExtSize()), UnionTagTest::Ge());
+                  static_cast<int64_t>(smallType->getZExtSize()), UnionTagTest::Ge());
 }
 
 [[nodiscard]] static bool scalarType(const Type::Any &type) {
