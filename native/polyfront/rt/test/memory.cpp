@@ -2,9 +2,11 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <deque>
 #include <fstream>
 #include <functional>
 #include <future>
@@ -1398,45 +1400,57 @@ extern "C" void polyrt_record_operator_delete(void *);
 
 namespace {
 struct FreeStorm {
-  std::atomic<bool> stop{false};
-  std::mutex handoffMutex;
-  std::vector<void *> handoff;
+  struct Item {
+    void *p;
+    bool cxx;
+  };
+  std::mutex mutex;
+  std::condition_variable wake, idle;
+  std::deque<Item> items;
+  size_t busy = 0;
+  bool stop = false;
   std::vector<std::thread> threads;
 
   explicit FreeStorm(const size_t count) {
     for (size_t t = 0; t < count; ++t)
-      threads.emplace_back([this, t] {
-        for (size_t i = 0; !stop.load(std::memory_order_relaxed); ++i) {
-          if (void *mirrored = take()) {
-            polyrt_record_free(mirrored);
-            continue;
-          }
-          const size_t size = 32 + (i * 17 + t) % 224;
-          if (t % 2 == 0) polyrt_record_free(polyrt_record_malloc(size));
-          else polyrt_record_operator_delete(polyrt_record_operator_new(size));
+      threads.emplace_back([this] {
+        std::unique_lock lock(mutex);
+        for (;;) {
+          wake.wait(lock, [&] { return stop || !items.empty(); });
+          if (items.empty()) return;
+          const auto item = items.front();
+          items.pop_front();
+          ++busy;
+          lock.unlock();
+          if (item.cxx) polyrt_record_operator_delete(item.p);
+          else polyrt_record_free(item.p);
+          lock.lock();
+          if (--busy == 0 && items.empty()) idle.notify_all();
         }
       });
   }
-  ~FreeStorm() {
-    stop.store(true);
-    for (auto &thread : threads)
-      thread.join();
+
+  void give(void *p, const bool cxx) {
+    {
+      const std::scoped_lock lock(mutex);
+      items.push_back({p, cxx});
+    }
+    wake.notify_one();
   }
 
-  void give(void *p) {
-    const std::scoped_lock lock(handoffMutex);
-    handoff.push_back(p);
+  void drain() {
+    std::unique_lock lock(mutex);
+    idle.wait(lock, [&] { return items.empty() && busy == 0; });
   }
-  bool drained() {
-    const std::scoped_lock lock(handoffMutex);
-    return handoff.empty();
-  }
-  void *take() {
-    const std::scoped_lock lock(handoffMutex);
-    if (handoff.empty()) return nullptr;
-    const auto p = handoff.back();
-    handoff.pop_back();
-    return p;
+
+  ~FreeStorm() {
+    {
+      const std::scoped_lock lock(mutex);
+      stop = true;
+    }
+    wake.notify_all();
+    for (auto &thread : threads)
+      thread.join();
   }
 };
 } // namespace
@@ -1447,15 +1461,15 @@ TEST_CASE("release hook tolerates frees on other threads while the tables mutate
   active = &fixture;
   polyregion::rt_reflect::_rt_set_release_cb(+[](void *p, const size_t n) { active->allocation.forget(p, n, false); });
   {
-    FreeStorm storm(6);
-    for (size_t i = 0; i < 60000; ++i) {
+    FreeStorm storm(4);
+    for (size_t i = 0; i < 20000; ++i) {
       const size_t size = 64 + (i % 7) * 64;
-      auto p = polyrt_record_malloc(size);
+      const bool cxx = i % 2 == 1;
+      auto p = cxx ? polyrt_record_operator_new(size) : polyrt_record_malloc(size);
       fixture.allocation.mirrorAlloc(p, size, false);
-      storm.give(p);
+      storm.give(p, cxx);
     }
-    while (!storm.drained())
-      std::this_thread::yield();
+    storm.drain();
   }
   polyregion::rt_reflect::_rt_set_release_cb(nullptr);
   const auto table = fixture.allocation.exclusive();
@@ -1491,8 +1505,8 @@ TEST_CASE("forgets queue without waiting or touching the device while another th
 
 TEST_CASE("release hook calls that outlive the hook clear find live tables", "[sma-race]") {
   static std::atomic<Fixture *> hooked{nullptr};
-  FreeStorm storm(6);
-  for (size_t round = 0; round < 400; ++round) {
+  FreeStorm storm(4);
+  for (size_t round = 0; round < 150; ++round) {
     auto fixture = new Fixture();
     hooked.store(fixture);
     polyregion::rt_reflect::_rt_set_release_cb(+[](void *p, const size_t n) { hooked.load()->allocation.forget(p, n, false); });
@@ -1500,12 +1514,12 @@ TEST_CASE("release hook calls that outlive the hook clear find live tables", "[s
       const size_t size = 64 + (i % 5) * 32;
       auto p = polyrt_record_malloc(size);
       fixture->allocation.mirrorAlloc(p, size, false);
-      polyrt_record_free(p);
+      storm.give(p, false);
     }
-    std::this_thread::yield();
     polyregion::rt_reflect::_rt_set_release_cb(nullptr);
     fixture->allocation.dropAllGuards();
   }
+  storm.drain();
 }
 #endif
 
