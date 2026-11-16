@@ -103,7 +103,7 @@ jobs:
           APT_OPTIONS: &apt-options -qq -o Acquire::Retries=10 -o Acquire::Retries::Delay::Maximum=60 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
         run: |
           sudo apt-get ${{ env.APT_OPTIONS }} update
-          sudo apt-get ${{ env.APT_OPTIONS }} install -y cmake ninja-build qemu-user-static binfmt-support wget lsb-release software-properties-common gnupg
+          sudo apt-get ${{ env.APT_OPTIONS }} install -y cmake ninja-build wget lsb-release software-properties-common gnupg
           # XXX libc++ 23 needs clang 21+ (compiler.h); --set overrides the runner's alternatives
           curl -fsSL --retry 5 --retry-delay 30 --connect-timeout 30 --retry-all-errors -o llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
@@ -118,8 +118,7 @@ jobs:
           clang++ --version
 
       - name: Register binfmt-misc for ${{ matrix.qemu_arch }}
-        # tonistiigi/binfmt sets F flag; kernel-preloaded QEMU spans containers/mnt ns
-        run: docker run --privileged --rm tonistiigi/binfmt --install ${{ matrix.qemu_arch }}
+        run: bash ci/install_qemu.sh ${{ matrix.qemu_arch }}
 
       - *setup-just
 
@@ -222,7 +221,7 @@ jobs:
           APT_OPTIONS: *apt-options
         run: |
           sudo apt-get ${{ env.APT_OPTIONS }} update
-          sudo apt-get ${{ env.APT_OPTIONS }} install -y cmake ninja-build qemu-user-static binfmt-support wget lsb-release software-properties-common gnupg
+          sudo apt-get ${{ env.APT_OPTIONS }} install -y cmake ninja-build wget lsb-release software-properties-common gnupg
           # XXX see build-llvm's Install dependencies step
           curl -fsSL --retry 5 --retry-delay 30 --connect-timeout 30 --retry-all-errors -o llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
@@ -235,7 +234,7 @@ jobs:
           sudo update-alternatives --set ld.lld /usr/bin/ld.lld-22
 
       - name: Register binfmt-misc for ${{ matrix.qemu_arch }}
-        run: docker run --privileged --rm tonistiigi/binfmt --install ${{ matrix.qemu_arch }}
+        run: bash ci/install_qemu.sh ${{ matrix.qemu_arch }}
 
       - *setup-just
 
