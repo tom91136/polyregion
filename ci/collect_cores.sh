@@ -41,14 +41,14 @@ else
     case "${exe##*/}" in qemu-*) qemu=1 ;; esac
     (
       [ -z "$qemu" ] || export DEBUGINFOD_URLS="${DEBUGINFOD_URLS:-https://debuginfod.ubuntu.com}" DEBUGINFOD_TIMEOUT=60
-      timeout 600 gdb -batch \
+      timeout 600 gdb -batch -iex 'set debuginfod enabled on' \
         -ex 'set pagination off' \
-        -ex 'set debuginfod enabled on' \
         -ex 'info threads' \
         -ex 'p $_siginfo' \
         -ex 'bt full' \
         -ex 'info registers' \
         -ex 'x/8i $pc' \
+        ${qemu:+-ex 'p/x save_ctr_el0'} \
         -ex 'thread apply all bt full' \
         ${exe:+"$exe"} -c "$cores_dir/$c"
     ) > "$out_dir/$name.txt" 2>&1 || true
