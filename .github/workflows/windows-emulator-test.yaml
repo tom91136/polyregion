@@ -163,6 +163,16 @@ jobs:
             New-ItemProperty -Path $key -Name DumpType -Value 1 -PropertyType DWord -Force | Out-Null
             New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\crashdumps" | Out-Null
           } catch { Write-Host "WER setup skipped: $_" }
+      - name: Wrap link.exe to record failed links
+        if: matrix.arch == 'arm64'
+        shell: pwsh
+        run: |
+          $bin = Join-Path $env:VCToolsInstallDir 'bin\HostARM64\ARM64'
+          cl /nologo /O1 /W3 /DUNICODE /D_UNICODE "/Fe:$env:RUNNER_TEMP\link-shim.exe" "/Fo:$env:RUNNER_TEMP\link-shim.obj" ci\link_shim.c shell32.lib
+          if ($LASTEXITCODE) { throw 'link shim build failed' }
+          Move-Item "$bin\link.exe" "$bin\link-real.exe"
+          Copy-Item "$env:RUNNER_TEMP\link-shim.exe" "$bin\link.exe"
+          "LINK_SHIM_DIR=$bin" | Out-File -FilePath $env:GITHUB_ENV -Append
       - name: Run emulator tests (${{ matrix.slice.id }})
         shell: bash
         env:
@@ -190,6 +200,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path crash-reports | Out-Null
           Copy-Item "$env:RUNNER_TEMP\crashdumps\*.dmp" crash-reports\ -ErrorAction SilentlyContinue
+          if ($env:LINK_SHIM_DIR) { Copy-Item "$env:LINK_SHIM_DIR\link-shim*" crash-reports\ -ErrorAction SilentlyContinue }
           Get-ChildItem crash-reports -ErrorAction SilentlyContinue
       - name: Upload crash reports
         continue-on-error: true
