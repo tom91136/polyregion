@@ -501,8 +501,6 @@ public:
     std::vector<char> endBytes{};
     bool endsKnown = false;
   };
-  static constexpr size_t MinGuardPages = 16;
-
   static bool residencyEnabled() {
     static const bool enabled = [] {
       const char *value = std::getenv(env::PolyrtResident);
@@ -642,7 +640,7 @@ private:
     const size_t size = std::min(sizeInBytes, meta.sizeInBytes);
     // the allocator writes its own links into the first bytes on free, so the first page is never guarded
     const uintptr_t begin = (base + page) / page * page, end = (base + size) / page * page;
-    if (!meta.heap || meta.offsetInBytes != 0 || end <= begin || end - begin < MinGuardPages * page) return nullptr;
+    if (!meta.heap || meta.offsetInBytes != 0 || end <= begin || end - begin < guard::MinGuardPages * page) return nullptr;
     SynchronisedMemAllocation *expected = nullptr;
     if (!guardOwner.compare_exchange_strong(expected, this, std::memory_order_acq_rel) && expected != this) return nullptr;
     const auto slot = guard::track(begin, end);
@@ -699,7 +697,7 @@ private:
   }
 
   static bool shadowable(const RemoteAllocation &alloc) {
-    return !alloc.hasDevicePtrs && pointerFree(alloc.layout) && alloc.remote.sizeInBytes <= MinGuardPages * guard::pageSize();
+    return !alloc.hasDevicePtrs && pointerFree(alloc.layout) && alloc.remote.sizeInBytes <= guard::MinGuardPages * guard::pageSize();
   }
 
   // where a pointer-free block would copy back after a launch: leave the device copy authoritative instead
@@ -1510,7 +1508,7 @@ public:
     const size_t page = guard::pageSize();
     const auto base = reinterpret_cast<uintptr_t>(host);
     const uintptr_t begin = (base + page) / page * page, end = (base + std::min(sizeInBytes, meta.sizeInBytes)) / page * page;
-    return meta.heap && meta.offsetInBytes == 0 && end > begin && end - begin >= MinGuardPages * page;
+    return meta.heap && meta.offsetInBytes == 0 && end > begin && end - begin >= guard::MinGuardPages * page;
   }
 
   // a leaf this launch reaches; a resident one (heap, so never read-only pages) is writable if any path to it is,

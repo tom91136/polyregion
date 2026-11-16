@@ -41,6 +41,8 @@ enum class Resolution : uint8_t { Resolved, Gone, Declined };
 
 using FaultHandler = Resolution (*)(void *address);
 
+inline constexpr size_t MinGuardPages = 16;
+
 inline size_t pageSize() {
 #ifdef _WIN32
   static const size_t size = [] {

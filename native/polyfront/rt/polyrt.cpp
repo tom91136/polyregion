@@ -1536,6 +1536,17 @@ POLYREGION_EXPORT extern "C" void polyrt_record_free(void *ptr) {
 }
 
 POLYREGION_EXPORT extern "C" void *polyrt_record_realloc(void *ptr, const size_t size) {
+  // XXX qemu target_mremap unmaps the old range even when the host mremap fails (reserved_va), breaking glibc realloc of guarded blocks
+  // TODO realloc in place again once qemu's linux-user/mmap.c checks `reserved_va && host_addr != MAP_FAILED` before unmapping
+  if (const auto old = ptr && size ? polyregion::rt_reflect::_rt_reflect_p(ptr) : polyregion::rt_reflect::PtrMeta{};
+      old.offset == 0 && old.size >= polyregion::polyrt::guard::MinGuardPages * polyregion::polyrt::guard::pageSize()) {
+    void *p = polyrt_record_malloc(size);
+    if (!p) return nullptr;
+    polyregion::rt_reflect::_rt_reclaim(ptr, old.size, /*forWrite*/ false);
+    std::memcpy(p, ptr, std::min(old.size, size));
+    polyrt_record_free(ptr);
+    return p;
+  }
   if (ptr) {
     polyregion::rt_reflect::_rt_reclaim(ptr, 1, /*forWrite*/ true);
     polyregion::rt_reflect::_rt_release(ptr, polyregion::rt_reflect::Type::HeapFree);
