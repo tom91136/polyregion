@@ -4492,9 +4492,91 @@ POLYREGION_EXPORT bool Function::operator==(const Function &rhs) const {
          && (requiredCapabilities == rhs.requiredCapabilities);
 }
 
-StructDef::StructDef(Sym name, std::vector<Type::Var> tpeVars, std::vector<Named> members, std::vector<Type::Struct> parents,
-                     bool isUnion) noexcept
-    : name(std::move(name)), tpeVars(std::move(tpeVars)), members(std::move(members)), parents(std::move(parents)), isUnion(isUnion) {}
+UnionTagTest::Base::Base() = default;
+uint32_t UnionTagTest::Any::id() const { return _v->id(); }
+size_t UnionTagTest::Any::hash_code() const { return _v->hash_code(); }
+bool UnionTagTest::Any::operator==(const Any &rhs) const { return _v->operator==(*rhs._v); }
+bool UnionTagTest::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v); }
+bool UnionTagTest::Any::operator<(const Any &rhs) const { return _v->operator<(*rhs._v); };
+
+UnionTagTest::Eq::Eq() = default;
+uint32_t UnionTagTest::Eq::id() const { return variant_id; };
+size_t UnionTagTest::Eq::hash_code() const { return variant_id; }
+POLYREGION_EXPORT bool UnionTagTest::Eq::operator==(const UnionTagTest::Eq &rhs) const { return true; }
+POLYREGION_EXPORT bool UnionTagTest::Eq::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return true;
+}
+POLYREGION_EXPORT bool UnionTagTest::Eq::operator<(const UnionTagTest::Eq &rhs) const { return false; }
+POLYREGION_EXPORT bool UnionTagTest::Eq::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+UnionTagTest::Eq::operator UnionTagTest::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Eq>(*this)); }
+UnionTagTest::Any UnionTagTest::Eq::widen() const { return Any(*this); };
+
+UnionTagTest::Ne::Ne() = default;
+uint32_t UnionTagTest::Ne::id() const { return variant_id; };
+size_t UnionTagTest::Ne::hash_code() const { return variant_id; }
+POLYREGION_EXPORT bool UnionTagTest::Ne::operator==(const UnionTagTest::Ne &rhs) const { return true; }
+POLYREGION_EXPORT bool UnionTagTest::Ne::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return true;
+}
+POLYREGION_EXPORT bool UnionTagTest::Ne::operator<(const UnionTagTest::Ne &rhs) const { return false; }
+POLYREGION_EXPORT bool UnionTagTest::Ne::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+UnionTagTest::Ne::operator UnionTagTest::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Ne>(*this)); }
+UnionTagTest::Any UnionTagTest::Ne::widen() const { return Any(*this); };
+
+UnionTagTest::Lt::Lt() = default;
+uint32_t UnionTagTest::Lt::id() const { return variant_id; };
+size_t UnionTagTest::Lt::hash_code() const { return variant_id; }
+POLYREGION_EXPORT bool UnionTagTest::Lt::operator==(const UnionTagTest::Lt &rhs) const { return true; }
+POLYREGION_EXPORT bool UnionTagTest::Lt::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return true;
+}
+POLYREGION_EXPORT bool UnionTagTest::Lt::operator<(const UnionTagTest::Lt &rhs) const { return false; }
+POLYREGION_EXPORT bool UnionTagTest::Lt::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+UnionTagTest::Lt::operator UnionTagTest::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Lt>(*this)); }
+UnionTagTest::Any UnionTagTest::Lt::widen() const { return Any(*this); };
+
+UnionTagTest::Ge::Ge() = default;
+uint32_t UnionTagTest::Ge::id() const { return variant_id; };
+size_t UnionTagTest::Ge::hash_code() const { return variant_id; }
+POLYREGION_EXPORT bool UnionTagTest::Ge::operator==(const UnionTagTest::Ge &rhs) const { return true; }
+POLYREGION_EXPORT bool UnionTagTest::Ge::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return true;
+}
+POLYREGION_EXPORT bool UnionTagTest::Ge::operator<(const UnionTagTest::Ge &rhs) const { return false; }
+POLYREGION_EXPORT bool UnionTagTest::Ge::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+UnionTagTest::Ge::operator UnionTagTest::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Ge>(*this)); }
+UnionTagTest::Any UnionTagTest::Ge::widen() const { return Any(*this); };
+
+UnionTag::UnionTag(int32_t offsetInBytes, int32_t widthInBytes, int64_t mask, int64_t value, UnionTagTest::Any test) noexcept
+    : offsetInBytes(offsetInBytes), widthInBytes(widthInBytes), mask(mask), value(value), test(std::move(test)) {}
+size_t UnionTag::hash_code() const {
+  size_t seed = 0;
+  seed ^= std::hash<decltype(offsetInBytes)>()(offsetInBytes) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(widthInBytes)>()(widthInBytes) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(mask)>()(mask) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(test)>()(test) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  return seed;
+}
+UnionTag UnionTag::withOffsetInBytes(const int32_t &v_) const { return UnionTag(v_, widthInBytes, mask, value, test); }
+UnionTag UnionTag::withWidthInBytes(const int32_t &v_) const { return UnionTag(offsetInBytes, v_, mask, value, test); }
+UnionTag UnionTag::withMask(const int64_t &v_) const { return UnionTag(offsetInBytes, widthInBytes, v_, value, test); }
+UnionTag UnionTag::withValue(const int64_t &v_) const { return UnionTag(offsetInBytes, widthInBytes, mask, v_, test); }
+UnionTag UnionTag::withTest(const UnionTagTest::Any &v_) const { return UnionTag(offsetInBytes, widthInBytes, mask, value, v_); }
+POLYREGION_EXPORT bool UnionTag::operator!=(const UnionTag &rhs) const { return !(*this == rhs); }
+POLYREGION_EXPORT bool UnionTag::operator==(const UnionTag &rhs) const {
+  return (offsetInBytes == rhs.offsetInBytes) && (widthInBytes == rhs.widthInBytes) && (mask == rhs.mask) && (value == rhs.value)
+         && (test == rhs.test);
+}
+
+StructDef::StructDef(Sym name, std::vector<Type::Var> tpeVars, std::vector<Named> members, std::vector<Type::Struct> parents, bool isUnion,
+                     std::optional<UnionTag> unionTag) noexcept
+    : name(std::move(name)), tpeVars(std::move(tpeVars)), members(std::move(members)), parents(std::move(parents)), isUnion(isUnion),
+      unionTag(std::move(unionTag)) {}
 size_t StructDef::hash_code() const {
   size_t seed = 0;
   seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
@@ -4502,16 +4584,25 @@ size_t StructDef::hash_code() const {
   seed ^= std::hash<decltype(members)>()(members) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   seed ^= std::hash<decltype(parents)>()(parents) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   seed ^= std::hash<decltype(isUnion)>()(isUnion) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(unionTag)>()(unionTag) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
-StructDef StructDef::withName(const Sym &v_) const { return StructDef(v_, tpeVars, members, parents, isUnion); }
-StructDef StructDef::withTpeVars(const std::vector<Type::Var> &v_) const { return StructDef(name, v_, members, parents, isUnion); }
-StructDef StructDef::withMembers(const std::vector<Named> &v_) const { return StructDef(name, tpeVars, v_, parents, isUnion); }
-StructDef StructDef::withParents(const std::vector<Type::Struct> &v_) const { return StructDef(name, tpeVars, members, v_, isUnion); }
-StructDef StructDef::withIsUnion(const bool &v_) const { return StructDef(name, tpeVars, members, parents, v_); }
+StructDef StructDef::withName(const Sym &v_) const { return StructDef(v_, tpeVars, members, parents, isUnion, unionTag); }
+StructDef StructDef::withTpeVars(const std::vector<Type::Var> &v_) const {
+  return StructDef(name, v_, members, parents, isUnion, unionTag);
+}
+StructDef StructDef::withMembers(const std::vector<Named> &v_) const { return StructDef(name, tpeVars, v_, parents, isUnion, unionTag); }
+StructDef StructDef::withParents(const std::vector<Type::Struct> &v_) const {
+  return StructDef(name, tpeVars, members, v_, isUnion, unionTag);
+}
+StructDef StructDef::withIsUnion(const bool &v_) const { return StructDef(name, tpeVars, members, parents, v_, unionTag); }
+StructDef StructDef::withUnionTag(const std::optional<UnionTag> &v_) const {
+  return StructDef(name, tpeVars, members, parents, isUnion, v_);
+}
 POLYREGION_EXPORT bool StructDef::operator!=(const StructDef &rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool StructDef::operator==(const StructDef &rhs) const {
-  return (name == rhs.name) && (tpeVars == rhs.tpeVars) && (members == rhs.members) && (parents == rhs.parents) && (isUnion == rhs.isUnion);
+  return (name == rhs.name) && (tpeVars == rhs.tpeVars) && (members == rhs.members) && (parents == rhs.parents) && (isUnion == rhs.isUnion)
+         && (unionTag == rhs.unionTag);
 }
 
 Mirror::Mirror(Sym source, std::vector<Sym> sourceParents, StructDef structDef, std::vector<Function> functions,
@@ -5729,6 +5820,24 @@ std::size_t std::hash<polyregion::polyast::CallConvention::OffloadEntry>::operat
   return x.hash_code();
 }
 std::size_t std::hash<polyregion::polyast::Function>::operator()(const polyregion::polyast::Function &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::UnionTagTest::Any>::operator()(const polyregion::polyast::UnionTagTest::Any &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::UnionTagTest::Eq>::operator()(const polyregion::polyast::UnionTagTest::Eq &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::UnionTagTest::Ne>::operator()(const polyregion::polyast::UnionTagTest::Ne &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::UnionTagTest::Lt>::operator()(const polyregion::polyast::UnionTagTest::Lt &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::UnionTagTest::Ge>::operator()(const polyregion::polyast::UnionTagTest::Ge &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::UnionTag>::operator()(const polyregion::polyast::UnionTag &x) const noexcept {
   return x.hash_code();
 }
 std::size_t std::hash<polyregion::polyast::StructDef>::operator()(const polyregion::polyast::StructDef &x) const noexcept {

@@ -240,7 +240,7 @@ class SynchronisedMemAllocation {
         const auto member = tl.members[m];
 
         const auto memberOffsetInBytes = offsetInBytes + ((idx * tl.sizeInBytes) + member.offsetInBytes);
-        if (member.sizeInBytes == 0) continue;
+        if (member.sizeInBytes == 0 || !tl.armLive(member, hostData + offsetInBytes + (idx * tl.sizeInBytes))) continue;
         const bool memberReadOnly = readOnly || member.readOnly != 0;
         if (member.ptrIndirection > 0) {
           const size_t componentSize = member.ptrIndirection == 1 ? member.componentSize : member.sizeInBytes;
@@ -375,7 +375,7 @@ class SynchronisedMemAllocation {
       std::fprintf(stderr, "[SMA] readStruct(p=%p, offsetInBytes=%zu, t=@%s)\n", static_cast<const void *>(p), offsetInBytes, tl->name);
     for (size_t m = 0; m < tl->memberCount; ++m) {
       const auto member = tl->members[m];
-      if (member.sizeInBytes == 0) continue;
+      if (member.sizeInBytes == 0 || !tl->armLive(member, p + offsetInBytes)) continue;
       if (member.ptrIndirection > 0) readSubObject(p, offsetInBytes + member.offsetInBytes, orig, origLen);
       else if (member.type && member.type->memberCount > 0) readStruct(p, offsetInBytes + member.offsetInBytes, member.type, orig, origLen);
     }
@@ -386,7 +386,7 @@ class SynchronisedMemAllocation {
   void collectHostPtrs(const char *base, const size_t offsetInBytes, const runtime::TypeLayout *tl, std::vector<void *> &out) {
     for (size_t m = 0; m < tl->memberCount; ++m) {
       const auto member = tl->members[m];
-      if (member.sizeInBytes == 0) continue;
+      if (member.sizeInBytes == 0 || !tl->armLive(member, base + offsetInBytes)) continue;
       if (member.ptrIndirection > 0) {
         if (auto *const ptr = readPtrValue(base + offsetInBytes + member.offsetInBytes)) out.push_back(const_cast<char *>(ptr));
       } else if (member.type && member.type->memberCount > 0) collectHostPtrs(base, offsetInBytes + member.offsetInBytes, member.type, out);
@@ -1343,7 +1343,7 @@ public:
     for (size_t idx = 0; idx < count; ++idx)
       for (size_t m = 0; m < l.memberCount; ++m) {
         const auto member = l.members[m];
-        if (member.sizeInBytes == 0) continue;
+        if (member.sizeInBytes == 0 || !l.armLive(member, hostBase + hostOff + (idx * l.sizeInBytes))) continue;
         const size_t hOff = hostOff + (idx * l.sizeInBytes) + member.offsetInBytes;
         const uint64_t aOff = arenaOff + (idx * l.sizeInBytes) + member.offsetInBytes;
         const bool memberRO = readOnly || member.readOnly != 0;
@@ -1599,7 +1599,7 @@ public:
     for (size_t idx = 0; idx < count; ++idx)
       for (size_t m = 0; m < l.memberCount; ++m) {
         const auto member = l.members[m];
-        if (member.sizeInBytes == 0 || member.readOnly) continue;
+        if (member.sizeInBytes == 0 || member.readOnly || !l.armLive(member, buf.at(arenaOff + (idx * l.sizeInBytes)))) continue;
         const size_t hOff = hostOff + (idx * l.sizeInBytes) + member.offsetInBytes;
         const uint64_t aOff = arenaOff + (idx * l.sizeInBytes) + member.offsetInBytes;
         if (member.ptrIndirection > 0) genArenaReadbackPtr(buf, hostBase + hOff, aOff, member.sizeInBytes);

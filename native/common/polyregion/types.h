@@ -321,6 +321,8 @@ POLYREGION_RT_PROTECT constexpr bool isSet(const LayoutAttrs value, const Layout
   return (to_underlying(value) & to_underlying(flag)) != 0;
 }
 
+enum class TagTest : size_t { Eq, Ne, Lt, Ge };
+
 struct TypeLayout;
 struct AggregateMember {
   using ResolvePtrSize = size_t (*)(const void *ptr);
@@ -341,6 +343,26 @@ struct TypeLayout {
   LayoutAttrs attrs;
   size_t memberCount;
   const AggregateMember *members;
+
+  // a union's pointer-bearing arms are live when `(load(tagWidthInBytes) & tagMask) <tagTest> tagValue`, the others otherwise
+  size_t tagWidthInBytes;
+  size_t tagOffsetInBytes;
+  size_t tagMask;
+  size_t tagValue;
+  TagTest tagTest;
+
+  POLYREGION_RT_PROTECT bool armLive(const AggregateMember &arm, const char *self) const {
+    if (tagWidthInBytes == 0) return true;
+    size_t word = 0;
+    std::memcpy(&word, self + tagOffsetInBytes, tagWidthInBytes);
+    const size_t tag = word & tagMask;
+    const bool pointersLive = tagTest == TagTest::Eq   ? tag == tagValue
+                              : tagTest == TagTest::Ne ? tag != tagValue
+                              : tagTest == TagTest::Lt ? tag < tagValue
+                                                       : tag >= tagValue;
+    const bool holdsPointers = arm.ptrIndirection > 0 || (arm.type && !isSet(arm.type->attrs, LayoutAttrs::Opaque));
+    return pointersLive == holdsPointers;
+  }
 
   template <typename T> POLYREGION_RT_PROTECT static TypeLayout named(const char *name) {
     return {

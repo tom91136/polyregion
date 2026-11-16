@@ -458,7 +458,12 @@ public:
                                                                                                    runtime::LayoutAttrs::SelfOpaque | //
                                                                                                    runtime::LayoutAttrs::Primitive)),
                                                                             intConst(B0, i64Ty(B0), 0), //
-                                                                            nullConst(B0)}};
+                                                                            nullConst(B0),              //
+                                                                            intConst(B0, i64Ty(B0), 0), //
+                                                                            intConst(B0, i64Ty(B0), 0), //
+                                                                            intConst(B0, i64Ty(B0), 0), //
+                                                                            intConst(B0, i64Ty(B0), 0), //
+                                                                            intConst(B0, i64Ty(B0), 0)}};
                                                            })};
                                         }); //
                                })           //
@@ -616,12 +621,18 @@ public:
                auto attrs = runtime::LayoutAttrs::None;
                if (isSelfOpaque(l)) attrs |= runtime::LayoutAttrs::SelfOpaque;
                if (isOpaque(l, table)) attrs |= runtime::LayoutAttrs::Opaque;
+               const auto tag = unionTagWords(bundle.unionTags ^ get_maybe(l.name));
                return std::array{strConst(B0, M, l.name),                //
                                  intConst(B0, i64Ty(B0), l.sizeInBytes), //
                                  intConst(B0, i64Ty(B0), l.alignment),   //
                                  intConst(B0, i64Ty(B0), to_underlying(attrs)),
                                  intConst(B0, i64Ty(B0), l.members.size()), //
-                                 nullConst(B0)};
+                                 nullConst(B0),                             //
+                                 intConst(B0, i64Ty(B0), tag[0]),           //
+                                 intConst(B0, i64Ty(B0), tag[1]),           //
+                                 intConst(B0, i64Ty(B0), tag[2]),           //
+                                 intConst(B0, i64Ty(B0), tag[3]),           //
+                                 intConst(B0, i64Ty(B0), tag[4])};
              });
     });
 

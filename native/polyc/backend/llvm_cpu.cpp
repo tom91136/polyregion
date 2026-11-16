@@ -77,7 +77,7 @@ class CaptureLayouts {
                        | polyregion::runtime::LayoutAttrs::Primitive;
     variable->setInitializer(
         llvm::ConstantStruct::get(layoutTy, {string(name), size(bytes), size(bytes), size(polyregion::runtime::to_underlying(attrs)),
-                                             size(0), llvm::ConstantPointerNull::get(ptrTy)}));
+                                             size(0), llvm::ConstantPointerNull::get(ptrTy), size(0), size(0), size(0), size(0), size(0)}));
     pointerFree[variable] = true;
     return variable;
   }
@@ -90,7 +90,9 @@ class CaptureLayouts {
 
 public:
   CaptureLayouts(CodeGen &cg, llvm::Type *sizeTy, llvm::PointerType *ptrTy)
-      : cg(cg), sizeTy(sizeTy), ptrTy(ptrTy), layoutTy(llvm::StructType::get(cg.C.actual, {ptrTy, sizeTy, sizeTy, sizeTy, sizeTy, ptrTy})),
+      : cg(cg), sizeTy(sizeTy), ptrTy(ptrTy),
+        layoutTy(
+            llvm::StructType::get(cg.C.actual, {ptrTy, sizeTy, sizeTy, sizeTy, sizeTy, ptrTy, sizeTy, sizeTy, sizeTy, sizeTy, sizeTy})),
         memberTy(llvm::StructType::get(cg.C.actual, {ptrTy, sizeTy, sizeTy, sizeTy, sizeTy, ptrTy, sizeTy, ptrTy})),
         table(cg.structTypes | values() | map([](const auto &info) { return std::pair{Type::Struct(info.def.name, {}), info.layout}; })
               | to<Map>()) {}
@@ -132,9 +134,11 @@ public:
     auto attrs = polyregion::runtime::LayoutAttrs::None;
     if (selfOpaque) attrs |= polyregion::runtime::LayoutAttrs::SelfOpaque;
     if (allOpaque) attrs |= polyregion::runtime::LayoutAttrs::Opaque;
+    const auto tag = unionTagWords(info->def.unionTag);
     variable->setInitializer(
         llvm::ConstantStruct::get(layoutTy, {string(name), size(info->layout.sizeInBytes), size(info->layout.alignment),
-                                             size(polyregion::runtime::to_underlying(attrs)), size(members.size()), storage}));
+                                             size(polyregion::runtime::to_underlying(attrs)), size(members.size()), storage, size(tag[0]),
+                                             size(tag[1]), size(tag[2]), size(tag[3]), size(tag[4])}));
     pointerFree[variable] = allOpaque;
     return variable;
   }

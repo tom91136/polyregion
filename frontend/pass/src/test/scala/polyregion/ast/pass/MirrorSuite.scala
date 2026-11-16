@@ -96,4 +96,37 @@ class MirrorSuite extends munit.FunSuite {
     val deep = m.filter(_._1 == RuntimeAbi.SmaEnsureDeep).map(_._2).sorted
     assertEquals(deep, List(1L, 2L))
   }
+
+  test("walks a tagged union's pointer arm only while its discriminant selects it") {
+    val g       = p.Type.Space.Global
+    val i32p    = p.Type.Ptr(p.Type.IntS32, g)
+    val thisN   = named(p.Conventions.ThisReceiver, p.Type.Ptr(p.Type.Struct(sym("Capture"), Nil), g))
+    val members = List(named("data", i32p), named("inl", p.Type.Arr(p.Type.IntS8, 24, g)))
+
+    def prelude(tag: Option[p.UnionTag]): p.Function = {
+      val rep = p.StructDef(sym("Rep"), Nil, members, Nil, isUnion = true, unionTag = tag)
+      val cap = p.StructDef(sym("Capture"), Nil, List(named("rep", p.Type.Struct(sym("Rep"), Nil))), Nil)
+      val in  = program(entry(args = List(p.Arg(thisN))), defs = List(cap, rep))
+      Mirror()(in, PassTest.NoopLog).functions.find(_.name.fqn.last == Mirror.PreludeName).get
+    }
+    def ensures(ss: List[p.Stmt]): Int = ss.map {
+      case p.Stmt.Var(_, Some(p.Expr.ForeignCall(n, _, _)), _) if n.startsWith(RuntimeAbi.SmaEnsure) => 1
+      case p.Stmt.Cond(_, t, e) => ensures(t) + ensures(e)
+      case _                    => 0
+    }.sum
+    def guarded(ss: List[p.Stmt]): Int = ss.map {
+      case p.Stmt.Cond(p.Term.Select(n, _, _), t, _) if n.symbol.endsWith("#tag_live") => ensures(t)
+      case _                                                                           => 0
+    }.sum
+
+    val untagged = prelude(None)
+    assertEquals(ensures(untagged.body), 1)
+    assertEquals(guarded(untagged.body), 0)
+
+    for (test <- List(p.UnionTag.Test.Eq, p.UnionTag.Test.Ne, p.UnionTag.Test.Lt, p.UnionTag.Test.Ge)) {
+      val tagged = prelude(Some(p.UnionTag(24, 8, -1L, 16L, test)))
+      assertEquals(ensures(tagged.body), 1)
+      assertEquals(guarded(tagged.body), 1)
+    }
+  }
 }

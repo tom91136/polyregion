@@ -120,6 +120,69 @@ final class MirrorWalk(program: p.Program) {
     case _                   => 0
   }
 
+  private def holdsPointers(t: p.Type): Boolean = t match {
+    case p.Type.Ptr(_, _) => true
+    case s: p.Type.Struct => hasPointers(s.name, Set.empty)
+    case _                => false
+  }
+
+  // a tagged union's pointer arms are only walked while its discriminant, read from the host bytes, selects them
+  private def armGuarded(hostRoot: p.Named, hostSteps: List[p.PathStep], sdef: p.StructDef, prefix: String)(
+      f: p.Named => List[p.Stmt]
+  ): List[p.Stmt] = sdef.unionTag match {
+    case None => sdef.members.flatMap(f)
+    case Some(tag) =>
+      val structTpe = p.Type.Struct(sdef.name, Nil)
+      val tagName   = s"${prefix}_#tag"
+      val base: (List[p.Stmt], p.Term) = hostSteps match {
+        case Nil => Nil -> sel(hostRoot)
+        case _ =>
+          val (ref, refDecl) = vlet(
+            s"${tagName}_ref",
+            p.Type.Ptr(structTpe, p.Type.Space.Global),
+            p.Expr.RefTo(
+              p.Term.Select(hostRoot, hostSteps, structTpe),
+              None,
+              structTpe,
+              p.Type.Space.Global,
+              p.Region.Opaque
+            )
+          )
+          List(refDecl) -> sel(ref)
+      }
+      val (bytes, bytesDecl) = vlet(s"${tagName}_bytes", BytePtr, p.Expr.Cast(base._2, BytePtr))
+      val loads = (0 until tag.widthInBytes).toList.map { i =>
+        val (b, bDecl) =
+          vlet(
+            s"${tagName}_b$i",
+            p.Type.IntU8,
+            p.Expr.Index(sel(bytes), p.Term.IntU64Const((tag.offsetInBytes + i).toLong), p.Type.IntU8)
+          )
+        val (w, wDecl)   = u64v(s"${tagName}_w$i", p.Expr.Cast(sel(b), U64))
+        val (sh, shDecl) = u64v(s"${tagName}_s$i", p.Expr.IntrOp(p.Intr.BSL(sel(w), p.Term.IntU64Const(8L * i), U64)))
+        (List(bDecl, wDecl, shDecl), sel(sh))
+      }
+      val (word, wordDecls) = loads.tail.foldLeft((loads.head._2: p.Term, loads.head._1)) {
+        case ((acc, decls), (more, term)) =>
+          val (or, orDecl) = u64v(s"${tagName}_or${decls.size}", p.Expr.IntrOp(p.Intr.BOr(acc, term, U64)))
+          (sel(or), decls ::: more ::: List(orDecl))
+      }
+      val (masked, maskedDecl) =
+        u64v(s"${tagName}_m", p.Expr.IntrOp(p.Intr.BAnd(word, p.Term.IntU64Const(tag.mask), U64)))
+      val value = p.Term.IntU64Const(tag.value)
+      val test = tag.test match {
+        case p.UnionTag.Test.Eq => p.Intr.LogicEq(sel(masked), value)
+        case p.UnionTag.Test.Ne => p.Intr.LogicNeq(sel(masked), value)
+        case p.UnionTag.Test.Lt => p.Intr.LogicLt(sel(masked), value)
+        case p.UnionTag.Test.Ge => p.Intr.LogicGte(sel(masked), value)
+      }
+      val (live, liveDecl) = vlet(s"${tagName}_live", p.Type.Bool1, p.Expr.IntrOp(test))
+      base._1 ::: bytesDecl :: wordDecls ::: List(maskedDecl, liveDecl) ::: sdef.members.flatMap { m =>
+        val stmts = f(m)
+        if (stmts.isEmpty || !holdsPointers(m.tpe)) stmts else List(p.Stmt.Cond(sel(live), stmts, Nil))
+      }
+  }
+
   @SuppressWarnings(Array("bonsai:complexity"))
   def mirror(
       target: MirrorTarget,
@@ -129,7 +192,7 @@ final class MirrorWalk(program: p.Program) {
       structTpe: p.Type,
       prefix: String,
       seen: Set[p.Sym]
-  ): List[p.Stmt] = sdef.members.flatMap { m =>
+  ): List[p.Stmt] = armGuarded(hostRoot, hostSteps, sdef, prefix) { m =>
     val mn  = m.symbol
     val tag = s"${prefix}_$mn"
     m.tpe match {
@@ -245,7 +308,7 @@ final class MirrorWalk(program: p.Program) {
       prefix: String,
       seen: Set[p.Sym]
   ): List[p.Stmt] =
-    sdef.members.flatMap { m =>
+    armGuarded(hostRoot, hostSteps, sdef, prefix) { m =>
       val mn  = m.symbol
       val tag = s"${prefix}_$mn"
       m.tpe match {

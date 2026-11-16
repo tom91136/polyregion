@@ -138,6 +138,7 @@ struct KernelBundle {
   bool asserts = false;
   // NOLINTNEXTLINE(readability-redundant-member-init)
   std::string program{};
+  std::unordered_map<std::string, polyast::UnionTag> unionTags{};
 };
 
 inline KernelBundle recorded(KernelBundle bundle) {

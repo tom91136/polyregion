@@ -130,6 +130,12 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
                        | map([&](const auto &x) { return std::pair{exportedStructNames ^ contains(x->name), *x}; }) //
                        | to_vector();
 
+  const auto unionTags =
+      r.structs                                                                                                                        //
+      | values()                                                                                                                       //
+      | collect([](const auto &def) { return def->unionTag ^ map([&](const auto &tag) { return std::pair{fqcn(def->name), tag}; }); }) //
+      | to<std::unordered_map>();
+
   if (opts.verbose) {
     emit(diag, loc, clang::DiagnosticsEngine::Level::Remark, POLYREGION_DIAG_POLYSTL "Remapped program [%0, sizeof capture=%1]\n%2",
          moduleId, C.getTypeSize(C.getCanonicalTagType(parent)), repr(program));
@@ -176,7 +182,8 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
                                                        .hostMirrorBitcode = {},
                                                        .mirrorId = {},
                                                        .asserts = jitAsserts,
-                                                       .program = std::string(packed.begin(), packed.end())});
+                                                       .program = std::string(packed.begin(), packed.end()),
+                                                       .unionTags = unionTags});
   }
 
   const auto compiled =
@@ -264,7 +271,8 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
                                                      .metadata = program_to_json(program).dump(),
                                                      .hostMirrorBitcode = mir.bitcode,
                                                      .mirrorId = mir.mirrorId,
-                                                     .asserts = asserts});
+                                                     .asserts = asserts,
+                                                     .unionTags = unionTags});
 }
 
 void polystl::compilePackageProgram(const polyfront::Options &opts,                                //

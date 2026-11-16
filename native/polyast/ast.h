@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <functional>
 #include <variant>
 
@@ -54,6 +55,9 @@ Opt<Sym> calleeSym(const Expr::Invoke &ivk);
 Sym calleeName(const Expr::Invoke &ivk);
 
 std::pair<size_t, Opt<size_t>> countIndirectionsAndComponentSize(const Type::Any &t, const Map<Type::Struct, StructLayout> &table);
+
+// TypeLayout's trailing tag words: width, offset, mask, value, test (zero width = untagged)
+std::array<size_t, 5> unionTagWords(const Opt<UnionTag> &tag);
 
 bool isSelfOpaque(const Type::Any &tpe);
 

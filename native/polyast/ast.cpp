@@ -385,3 +385,12 @@ dsl::AssignmentBuilder::AssignmentBuilder(string name, bool isMutable) : name(st
 Stmt::Any dsl::AssignmentBuilder::operator=(Term::Any t) const { return Stmt::Var(Named(name, t.tpe()), Expr::Alias(t), isMutable); }
 Stmt::Any dsl::AssignmentBuilder::operator=(Type::Any tpe) const { return Stmt::Var(Named(name, tpe), {}, isMutable); }
 Stmt::Any dsl::AssignmentBuilder::operator=(const Expr::Any &e) const { return Stmt::Var(Named(name, e.tpe()), e, isMutable); }
+
+std::array<size_t, 5> polyregion::polyast::unionTagWords(const Opt<UnionTag> &tag) {
+  if (!tag) return {};
+  const auto test =
+      tag->test.match_total([](const UnionTagTest::Eq &) { return size_t{0}; }, [](const UnionTagTest::Ne &) { return size_t{1}; },
+                            [](const UnionTagTest::Lt &) { return size_t{2}; }, [](const UnionTagTest::Ge &) { return size_t{3}; });
+  return {static_cast<size_t>(tag->widthInBytes), static_cast<size_t>(tag->offsetInBytes), static_cast<size_t>(tag->mask),
+          static_cast<size_t>(tag->value), test};
+}

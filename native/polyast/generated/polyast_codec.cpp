@@ -3,10 +3,10 @@
 #include "msgpack.hpp"
 
 namespace polyregion::polyast {
-constexpr auto AdtHash = "2ed29ea38d8b2713f746993b52e0949c";
-constexpr auto ProgramHash = "f62204b887e77b014700a7b3a718f079";
-constexpr auto PackageHash = "cea6ab38193bdb45ffe1d89f3bb37215";
-constexpr auto PackageWireHash = "51add37508362a9652dd5fee3f607e4e";
+constexpr auto AdtHash = "7cdb7c998db4bf008849b2a931130126";
+constexpr auto ProgramHash = "1948e5152fa5a509dd2e489b7b215ba2";
+constexpr auto PackageHash = "d9a4e0da0bed9419f721e7522f189132";
+constexpr auto PackageWireHash = "309ae338542b73ae2be6b62f410780d6";
 constexpr auto CompileWireHash = "761bad2d8b6004abf355f5063d0116a9";
 using msgpack::decodeMaybeInterned;
 using msgpack::encodeInterned;
@@ -3055,6 +3055,59 @@ json function_to_json(const Function &x_) {
   return json::array({decl, body, visibility, fpMode, convention, implements, requiredCapabilities});
 }
 
+UnionTagTest::Eq UnionTagTest::eq_from_json(const json &j_) { return {}; }
+
+json UnionTagTest::eq_to_json(const UnionTagTest::Eq &x_) { return json::array({}); }
+
+UnionTagTest::Ne UnionTagTest::ne_from_json(const json &j_) { return {}; }
+
+json UnionTagTest::ne_to_json(const UnionTagTest::Ne &x_) { return json::array({}); }
+
+UnionTagTest::Lt UnionTagTest::lt_from_json(const json &j_) { return {}; }
+
+json UnionTagTest::lt_to_json(const UnionTagTest::Lt &x_) { return json::array({}); }
+
+UnionTagTest::Ge UnionTagTest::ge_from_json(const json &j_) { return {}; }
+
+json UnionTagTest::ge_to_json(const UnionTagTest::Ge &x_) { return json::array({}); }
+
+UnionTagTest::Any UnionTagTest::any_from_json(const json &j_) {
+  const auto ord_ = j_.at(0).get<size_t>();
+  const auto &t_ = j_.at(1);
+  switch (ord_) {
+    case 0: return UnionTagTest::eq_from_json(t_);
+    case 1: return UnionTagTest::ne_from_json(t_);
+    case 2: return UnionTagTest::lt_from_json(t_);
+    case 3: return UnionTagTest::ge_from_json(t_);
+    default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+  }
+}
+
+json UnionTagTest::any_to_json(const UnionTagTest::Any &x_) {
+  return x_.match_total([](const UnionTagTest::Eq &y_) -> json { return {0, UnionTagTest::eq_to_json(y_)}; },
+                        [](const UnionTagTest::Ne &y_) -> json { return {1, UnionTagTest::ne_to_json(y_)}; },
+                        [](const UnionTagTest::Lt &y_) -> json { return {2, UnionTagTest::lt_to_json(y_)}; },
+                        [](const UnionTagTest::Ge &y_) -> json { return {3, UnionTagTest::ge_to_json(y_)}; });
+}
+
+UnionTag uniontag_from_json(const json &j_) {
+  const auto offsetInBytes = j_.at(0).get<int32_t>();
+  const auto widthInBytes = j_.at(1).get<int32_t>();
+  const auto mask = j_.at(2).get<int64_t>();
+  const auto value = j_.at(3).get<int64_t>();
+  auto test = UnionTagTest::any_from_json(j_.at(4));
+  return {offsetInBytes, widthInBytes, mask, value, std::move(test)};
+}
+
+json uniontag_to_json(const UnionTag &x_) {
+  const auto offsetInBytes = x_.offsetInBytes;
+  const auto widthInBytes = x_.widthInBytes;
+  const auto mask = x_.mask;
+  const auto value = x_.value;
+  const auto test = UnionTagTest::any_to_json(x_.test);
+  return json::array({offsetInBytes, widthInBytes, mask, value, test});
+}
+
 StructDef structdef_from_json(const json &j_) {
   auto name = sym_from_json(j_.at(0));
   std::vector<Type::Var> tpeVars;
@@ -3073,7 +3126,8 @@ StructDef structdef_from_json(const json &j_) {
     parents.emplace_back(Type::struct_from_json(v_));
   }
   const auto isUnion = j_.at(4).get<bool>();
-  return {std::move(name), std::move(tpeVars), std::move(members), std::move(parents), isUnion};
+  auto unionTag = j_.at(5).is_null() ? std::nullopt : std::make_optional(uniontag_from_json(j_.at(5)));
+  return {std::move(name), std::move(tpeVars), std::move(members), std::move(parents), isUnion, std::move(unionTag)};
 }
 
 json structdef_to_json(const StructDef &x_) {
@@ -3094,7 +3148,8 @@ json structdef_to_json(const StructDef &x_) {
     parents.emplace_back(Type::struct_to_json(v_));
   }
   const auto isUnion = x_.isUnion;
-  return json::array({name, tpeVars, members, parents, isUnion});
+  const auto unionTag = x_.unionTag ? uniontag_to_json(*x_.unionTag) : json();
+  return json::array({name, tpeVars, members, parents, isUnion, unionTag});
 }
 
 Mirror mirror_from_json(const json &j_) {
@@ -3662,60 +3717,6 @@ Stmt::Rethrow rethrow_fields_from_msgpack(MsgpackReader &, size_t);
 Stmt::Any any_from_msgpack(MsgpackReader &);
 void any_to_msgpack(MsgpackWriter &, const Stmt::Any &);
 }} // namespace Stmt
-namespace Math { namespace {
-Math::Abs abs_fields_from_msgpack(MsgpackReader &, size_t);
-void abs_fields_to_msgpack(MsgpackWriter &, const Math::Abs &);
-Math::Sin sin_fields_from_msgpack(MsgpackReader &, size_t);
-void sin_fields_to_msgpack(MsgpackWriter &, const Math::Sin &);
-Math::Cos cos_fields_from_msgpack(MsgpackReader &, size_t);
-void cos_fields_to_msgpack(MsgpackWriter &, const Math::Cos &);
-Math::Tan tan_fields_from_msgpack(MsgpackReader &, size_t);
-void tan_fields_to_msgpack(MsgpackWriter &, const Math::Tan &);
-Math::Asin asin_fields_from_msgpack(MsgpackReader &, size_t);
-void asin_fields_to_msgpack(MsgpackWriter &, const Math::Asin &);
-Math::Acos acos_fields_from_msgpack(MsgpackReader &, size_t);
-void acos_fields_to_msgpack(MsgpackWriter &, const Math::Acos &);
-Math::Atan atan_fields_from_msgpack(MsgpackReader &, size_t);
-void atan_fields_to_msgpack(MsgpackWriter &, const Math::Atan &);
-Math::Sinh sinh_fields_from_msgpack(MsgpackReader &, size_t);
-void sinh_fields_to_msgpack(MsgpackWriter &, const Math::Sinh &);
-Math::Cosh cosh_fields_from_msgpack(MsgpackReader &, size_t);
-void cosh_fields_to_msgpack(MsgpackWriter &, const Math::Cosh &);
-Math::Tanh tanh_fields_from_msgpack(MsgpackReader &, size_t);
-void tanh_fields_to_msgpack(MsgpackWriter &, const Math::Tanh &);
-Math::Signum signum_fields_from_msgpack(MsgpackReader &, size_t);
-void signum_fields_to_msgpack(MsgpackWriter &, const Math::Signum &);
-Math::Round round_fields_from_msgpack(MsgpackReader &, size_t);
-void round_fields_to_msgpack(MsgpackWriter &, const Math::Round &);
-Math::Ceil ceil_fields_from_msgpack(MsgpackReader &, size_t);
-void ceil_fields_to_msgpack(MsgpackWriter &, const Math::Ceil &);
-Math::Floor floor_fields_from_msgpack(MsgpackReader &, size_t);
-void floor_fields_to_msgpack(MsgpackWriter &, const Math::Floor &);
-Math::Rint rint_fields_from_msgpack(MsgpackReader &, size_t);
-void rint_fields_to_msgpack(MsgpackWriter &, const Math::Rint &);
-Math::Sqrt sqrt_fields_from_msgpack(MsgpackReader &, size_t);
-void sqrt_fields_to_msgpack(MsgpackWriter &, const Math::Sqrt &);
-Math::Cbrt cbrt_fields_from_msgpack(MsgpackReader &, size_t);
-void cbrt_fields_to_msgpack(MsgpackWriter &, const Math::Cbrt &);
-Math::Exp exp_fields_from_msgpack(MsgpackReader &, size_t);
-void exp_fields_to_msgpack(MsgpackWriter &, const Math::Exp &);
-Math::Expm1 expm1_fields_from_msgpack(MsgpackReader &, size_t);
-void expm1_fields_to_msgpack(MsgpackWriter &, const Math::Expm1 &);
-Math::Log log_fields_from_msgpack(MsgpackReader &, size_t);
-void log_fields_to_msgpack(MsgpackWriter &, const Math::Log &);
-Math::Log1p log1p_fields_from_msgpack(MsgpackReader &, size_t);
-void log1p_fields_to_msgpack(MsgpackWriter &, const Math::Log1p &);
-Math::Log10 log10_fields_from_msgpack(MsgpackReader &, size_t);
-void log10_fields_to_msgpack(MsgpackWriter &, const Math::Log10 &);
-Math::Pow pow_fields_from_msgpack(MsgpackReader &, size_t);
-void pow_fields_to_msgpack(MsgpackWriter &, const Math::Pow &);
-Math::Atan2 atan2_fields_from_msgpack(MsgpackReader &, size_t);
-void atan2_fields_to_msgpack(MsgpackWriter &, const Math::Atan2 &);
-Math::Hypot hypot_fields_from_msgpack(MsgpackReader &, size_t);
-void hypot_fields_to_msgpack(MsgpackWriter &, const Math::Hypot &);
-Math::Any any_from_msgpack(MsgpackReader &);
-void any_to_msgpack(MsgpackWriter &, const Math::Any &);
-}} // namespace Math
 namespace CallConvention { namespace {
 CallConvention::RegularCall regularcall_fields_from_msgpack(MsgpackReader &, size_t);
 CallConvention::OffloadEntry offloadentry_fields_from_msgpack(MsgpackReader &, size_t);
@@ -3901,6 +3902,10 @@ Function function_fields_from_msgpack(MsgpackReader &, size_t);
 void function_fields_to_msgpack(MsgpackWriter &, const Function &);
 Function function_from_msgpack(MsgpackReader &);
 void function_to_msgpack(MsgpackWriter &, const Function &);
+UnionTag uniontag_fields_from_msgpack(MsgpackReader &, size_t);
+void uniontag_fields_to_msgpack(MsgpackWriter &, const UnionTag &);
+UnionTag uniontag_from_msgpack(MsgpackReader &);
+void uniontag_to_msgpack(MsgpackWriter &, const UnionTag &);
 StructDef structdef_fields_from_msgpack(MsgpackReader &, size_t);
 void structdef_fields_to_msgpack(MsgpackWriter &, const StructDef &);
 StructDef structdef_from_msgpack(MsgpackReader &);
@@ -4086,6 +4091,68 @@ void indexdyn_fields_to_msgpack(MsgpackWriter &, const PathStep::IndexDyn &);
 PathStep::Any any_from_msgpack(MsgpackReader &);
 void any_to_msgpack(MsgpackWriter &, const PathStep::Any &);
 }} // namespace PathStep
+namespace Math { namespace {
+Math::Abs abs_fields_from_msgpack(MsgpackReader &, size_t);
+void abs_fields_to_msgpack(MsgpackWriter &, const Math::Abs &);
+Math::Sin sin_fields_from_msgpack(MsgpackReader &, size_t);
+void sin_fields_to_msgpack(MsgpackWriter &, const Math::Sin &);
+Math::Cos cos_fields_from_msgpack(MsgpackReader &, size_t);
+void cos_fields_to_msgpack(MsgpackWriter &, const Math::Cos &);
+Math::Tan tan_fields_from_msgpack(MsgpackReader &, size_t);
+void tan_fields_to_msgpack(MsgpackWriter &, const Math::Tan &);
+Math::Asin asin_fields_from_msgpack(MsgpackReader &, size_t);
+void asin_fields_to_msgpack(MsgpackWriter &, const Math::Asin &);
+Math::Acos acos_fields_from_msgpack(MsgpackReader &, size_t);
+void acos_fields_to_msgpack(MsgpackWriter &, const Math::Acos &);
+Math::Atan atan_fields_from_msgpack(MsgpackReader &, size_t);
+void atan_fields_to_msgpack(MsgpackWriter &, const Math::Atan &);
+Math::Sinh sinh_fields_from_msgpack(MsgpackReader &, size_t);
+void sinh_fields_to_msgpack(MsgpackWriter &, const Math::Sinh &);
+Math::Cosh cosh_fields_from_msgpack(MsgpackReader &, size_t);
+void cosh_fields_to_msgpack(MsgpackWriter &, const Math::Cosh &);
+Math::Tanh tanh_fields_from_msgpack(MsgpackReader &, size_t);
+void tanh_fields_to_msgpack(MsgpackWriter &, const Math::Tanh &);
+Math::Signum signum_fields_from_msgpack(MsgpackReader &, size_t);
+void signum_fields_to_msgpack(MsgpackWriter &, const Math::Signum &);
+Math::Round round_fields_from_msgpack(MsgpackReader &, size_t);
+void round_fields_to_msgpack(MsgpackWriter &, const Math::Round &);
+Math::Ceil ceil_fields_from_msgpack(MsgpackReader &, size_t);
+void ceil_fields_to_msgpack(MsgpackWriter &, const Math::Ceil &);
+Math::Floor floor_fields_from_msgpack(MsgpackReader &, size_t);
+void floor_fields_to_msgpack(MsgpackWriter &, const Math::Floor &);
+Math::Rint rint_fields_from_msgpack(MsgpackReader &, size_t);
+void rint_fields_to_msgpack(MsgpackWriter &, const Math::Rint &);
+Math::Sqrt sqrt_fields_from_msgpack(MsgpackReader &, size_t);
+void sqrt_fields_to_msgpack(MsgpackWriter &, const Math::Sqrt &);
+Math::Cbrt cbrt_fields_from_msgpack(MsgpackReader &, size_t);
+void cbrt_fields_to_msgpack(MsgpackWriter &, const Math::Cbrt &);
+Math::Exp exp_fields_from_msgpack(MsgpackReader &, size_t);
+void exp_fields_to_msgpack(MsgpackWriter &, const Math::Exp &);
+Math::Expm1 expm1_fields_from_msgpack(MsgpackReader &, size_t);
+void expm1_fields_to_msgpack(MsgpackWriter &, const Math::Expm1 &);
+Math::Log log_fields_from_msgpack(MsgpackReader &, size_t);
+void log_fields_to_msgpack(MsgpackWriter &, const Math::Log &);
+Math::Log1p log1p_fields_from_msgpack(MsgpackReader &, size_t);
+void log1p_fields_to_msgpack(MsgpackWriter &, const Math::Log1p &);
+Math::Log10 log10_fields_from_msgpack(MsgpackReader &, size_t);
+void log10_fields_to_msgpack(MsgpackWriter &, const Math::Log10 &);
+Math::Pow pow_fields_from_msgpack(MsgpackReader &, size_t);
+void pow_fields_to_msgpack(MsgpackWriter &, const Math::Pow &);
+Math::Atan2 atan2_fields_from_msgpack(MsgpackReader &, size_t);
+void atan2_fields_to_msgpack(MsgpackWriter &, const Math::Atan2 &);
+Math::Hypot hypot_fields_from_msgpack(MsgpackReader &, size_t);
+void hypot_fields_to_msgpack(MsgpackWriter &, const Math::Hypot &);
+Math::Any any_from_msgpack(MsgpackReader &);
+void any_to_msgpack(MsgpackWriter &, const Math::Any &);
+}} // namespace Math
+namespace UnionTagTest { namespace {
+UnionTagTest::Eq eq_fields_from_msgpack(MsgpackReader &, size_t);
+UnionTagTest::Ne ne_fields_from_msgpack(MsgpackReader &, size_t);
+UnionTagTest::Lt lt_fields_from_msgpack(MsgpackReader &, size_t);
+UnionTagTest::Ge ge_fields_from_msgpack(MsgpackReader &, size_t);
+UnionTagTest::Any any_from_msgpack(MsgpackReader &);
+void any_to_msgpack(MsgpackWriter &, const UnionTagTest::Any &);
+}} // namespace UnionTagTest
 namespace TypeKind { namespace {
 }} // namespace TypeKind
 namespace FunctionVisibility { namespace {
@@ -4911,509 +4978,6 @@ void any_to_msgpack(MsgpackWriter &w_, const Stmt::Any &x_) {
       [&](const Stmt::Rethrow &y_) -> void { w_.writeInt32(12); });
 }
 }} // namespace Stmt
-namespace Math { namespace {
-
-Math::Abs abs_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 2) throw std::runtime_error("Expected Math::Abs with 2 field(s)");
-  auto x = Term::any_from_msgpack(r_);
-  auto rtn = Type::any_from_msgpack(r_);
-  return {std::move(x), std::move(rtn)};
-}
-
-void abs_fields_to_msgpack(MsgpackWriter &w_, const Math::Abs &x_) {
-  Term::any_to_msgpack(w_, x_.x);
-  Type::any_to_msgpack(w_, x_.rtn);
-}
-
-Math::Sin sin_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 2) throw std::runtime_error("Expected Math::Sin with 2 field(s)");
-  auto x = Term::any_from_msgpack(r_);
-  auto rtn = Type::any_from_msgpack(r_);
-  return {std::move(x), std::move(rtn)};
-}
-
-void sin_fields_to_msgpack(MsgpackWriter &w_, const Math::Sin &x_) {
-  Term::any_to_msgpack(w_, x_.x);
-  Type::any_to_msgpack(w_, x_.rtn);
-}
-
-Math::Cos cos_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 2) throw std::runtime_error("Expected Math::Cos with 2 field(s)");
-  auto x = Term::any_from_msgpack(r_);
-  auto rtn = Type::any_from_msgpack(r_);
-  return {std::move(x), std::move(rtn)};
-}
-
-void cos_fields_to_msgpack(MsgpackWriter &w_, const Math::Cos &x_) {
-  Term::any_to_msgpack(w_, x_.x);
-  Type::any_to_msgpack(w_, x_.rtn);
-}
-
-Math::Tan tan_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 2) throw std::runtime_error("Expected Math::Tan with 2 field(s)");
-  auto x = Term::any_from_msgpack(r_);
-  auto rtn = Type::any_from_msgpack(r_);
-  return {std::move(x), std::move(rtn)};
-}
-
-void tan_fields_to_msgpack(MsgpackWriter &w_, const Math::Tan &x_) {
-  Term::any_to_msgpack(w_, x_.x);
-  Type::any_to_msgpack(w_, x_.rtn);
-}
-
-Math::Asin asin_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 2) throw std::runtime_error("Expected Math::Asin with 2 field(s)");
-  auto x = Term::any_from_msgpack(r_);
-  auto rtn = Type::any_from_msgpack(r_);
-  return {std::move(x), std::move(rtn)};
-}
-
-void asin_fields_to_msgpack(MsgpackWriter &w_, const Math::Asin &x_) {
-  Term::any_to_msgpack(w_, x_.x);
-  Type::any_to_msgpack(w_, x_.rtn);
-}
-
-Math::Acos acos_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 2) throw std::runtime_error("Expected Math::Acos with 2 field(s)");
-  auto x = Term::any_from_msgpack(r_);
-  auto rtn = Type::any_from_msgpack(r_);
-  return {std::move(x), std::move(rtn)};
-}
-
-void acos_fields_to_msgpack(MsgpackWriter &w_, const Math::Acos &x_) {
-  Term::any_to_msgpack(w_, x_.x);
-  Type::any_to_msgpack(w_, x_.rtn);
-}
-
-Math::Atan atan_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 2) throw std::runtime_error("Expected Math::Atan with 2 field(s)");
-  auto x = Term::any_from_msgpack(r_);
-  auto rtn = Type::any_from_msgpack(r_);
-  return {std::move(x), std::move(rtn)};
-}
-
-void atan_fields_to_msgpack(MsgpackWriter &w_, const Math::Atan &x_) {
-  Term::any_to_msgpack(w_, x_.x);
-  Type::any_to_msgpack(w_, x_.rtn);
-}
-
-Math::Sinh sinh_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 2) throw std::runtime_error("Expected Math::Sinh with 2 field(s)");
-  auto x = Term::any_from_msgpack(r_);
-  auto rtn = Type::any_from_msgpack(r_);
-  return {std::move(x), std::move(rtn)};
-}
-
-void sinh_fields_to_msgpack(MsgpackWriter &w_, const Math::Sinh &x_) {
-  Term::any_to_msgpack(w_, x_.x);
-  Type::any_to_msgpack(w_, x_.rtn);
-}
-
-Math::Cosh cosh_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 2) throw std::runtime_error("Expected Math::Cosh with 2 field(s)");
-  auto x = Term::any_from_msgpack(r_);
-  auto rtn = Type::any_from_msgpack(r_);
-  return {std::move(x), std::move(rtn)};
-}
-
-void cosh_fields_to_msgpack(MsgpackWriter &w_, const Math::Cosh &x_) {
-  Term::any_to_msgpack(w_, x_.x);
-  Type::any_to_msgpack(w_, x_.rtn);
-}
-
-Math::Tanh tanh_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 2) throw std::runtime_error("Expected Math::Tanh with 2 field(s)");
-  auto x = Term::any_from_msgpack(r_);
-  auto rtn = Type::any_from_msgpack(r_);
-  return {std::move(x), std::move(rtn)};
-}
-
-void tanh_fields_to_msgpack(MsgpackWriter &w_, const Math::Tanh &x_) {
-  Term::any_to_msgpack(w_, x_.x);
-  Type::any_to_msgpack(w_, x_.rtn);
-}
-
-Math::Signum signum_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 2) throw std::runtime_error("Expected Math::Signum with 2 field(s)");
-  auto x = Term::any_from_msgpack(r_);
-  auto rtn = Type::any_from_msgpack(r_);
-  return {std::move(x), std::move(rtn)};
-}
-
-void signum_fields_to_msgpack(MsgpackWriter &w_, const Math::Signum &x_) {
-  Term::any_to_msgpack(w_, x_.x);
-  Type::any_to_msgpack(w_, x_.rtn);
-}
-
-Math::Round round_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 2) throw std::runtime_error("Expected Math::Round with 2 field(s)");
-  auto x = Term::any_from_msgpack(r_);
-  auto rtn = Type::any_from_msgpack(r_);
-  return {std::move(x), std::move(rtn)};
-}
-
-void round_fields_to_msgpack(MsgpackWriter &w_, const Math::Round &x_) {
-  Term::any_to_msgpack(w_, x_.x);
-  Type::any_to_msgpack(w_, x_.rtn);
-}
-
-Math::Ceil ceil_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 2) throw std::runtime_error("Expected Math::Ceil with 2 field(s)");
-  auto x = Term::any_from_msgpack(r_);
-  auto rtn = Type::any_from_msgpack(r_);
-  return {std::move(x), std::move(rtn)};
-}
-
-void ceil_fields_to_msgpack(MsgpackWriter &w_, const Math::Ceil &x_) {
-  Term::any_to_msgpack(w_, x_.x);
-  Type::any_to_msgpack(w_, x_.rtn);
-}
-
-Math::Floor floor_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 2) throw std::runtime_error("Expected Math::Floor with 2 field(s)");
-  auto x = Term::any_from_msgpack(r_);
-  auto rtn = Type::any_from_msgpack(r_);
-  return {std::move(x), std::move(rtn)};
-}
-
-void floor_fields_to_msgpack(MsgpackWriter &w_, const Math::Floor &x_) {
-  Term::any_to_msgpack(w_, x_.x);
-  Type::any_to_msgpack(w_, x_.rtn);
-}
-
-Math::Rint rint_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 2) throw std::runtime_error("Expected Math::Rint with 2 field(s)");
-  auto x = Term::any_from_msgpack(r_);
-  auto rtn = Type::any_from_msgpack(r_);
-  return {std::move(x), std::move(rtn)};
-}
-
-void rint_fields_to_msgpack(MsgpackWriter &w_, const Math::Rint &x_) {
-  Term::any_to_msgpack(w_, x_.x);
-  Type::any_to_msgpack(w_, x_.rtn);
-}
-
-Math::Sqrt sqrt_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 2) throw std::runtime_error("Expected Math::Sqrt with 2 field(s)");
-  auto x = Term::any_from_msgpack(r_);
-  auto rtn = Type::any_from_msgpack(r_);
-  return {std::move(x), std::move(rtn)};
-}
-
-void sqrt_fields_to_msgpack(MsgpackWriter &w_, const Math::Sqrt &x_) {
-  Term::any_to_msgpack(w_, x_.x);
-  Type::any_to_msgpack(w_, x_.rtn);
-}
-
-Math::Cbrt cbrt_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 2) throw std::runtime_error("Expected Math::Cbrt with 2 field(s)");
-  auto x = Term::any_from_msgpack(r_);
-  auto rtn = Type::any_from_msgpack(r_);
-  return {std::move(x), std::move(rtn)};
-}
-
-void cbrt_fields_to_msgpack(MsgpackWriter &w_, const Math::Cbrt &x_) {
-  Term::any_to_msgpack(w_, x_.x);
-  Type::any_to_msgpack(w_, x_.rtn);
-}
-
-Math::Exp exp_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 2) throw std::runtime_error("Expected Math::Exp with 2 field(s)");
-  auto x = Term::any_from_msgpack(r_);
-  auto rtn = Type::any_from_msgpack(r_);
-  return {std::move(x), std::move(rtn)};
-}
-
-void exp_fields_to_msgpack(MsgpackWriter &w_, const Math::Exp &x_) {
-  Term::any_to_msgpack(w_, x_.x);
-  Type::any_to_msgpack(w_, x_.rtn);
-}
-
-Math::Expm1 expm1_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 2) throw std::runtime_error("Expected Math::Expm1 with 2 field(s)");
-  auto x = Term::any_from_msgpack(r_);
-  auto rtn = Type::any_from_msgpack(r_);
-  return {std::move(x), std::move(rtn)};
-}
-
-void expm1_fields_to_msgpack(MsgpackWriter &w_, const Math::Expm1 &x_) {
-  Term::any_to_msgpack(w_, x_.x);
-  Type::any_to_msgpack(w_, x_.rtn);
-}
-
-Math::Log log_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 2) throw std::runtime_error("Expected Math::Log with 2 field(s)");
-  auto x = Term::any_from_msgpack(r_);
-  auto rtn = Type::any_from_msgpack(r_);
-  return {std::move(x), std::move(rtn)};
-}
-
-void log_fields_to_msgpack(MsgpackWriter &w_, const Math::Log &x_) {
-  Term::any_to_msgpack(w_, x_.x);
-  Type::any_to_msgpack(w_, x_.rtn);
-}
-
-Math::Log1p log1p_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 2) throw std::runtime_error("Expected Math::Log1p with 2 field(s)");
-  auto x = Term::any_from_msgpack(r_);
-  auto rtn = Type::any_from_msgpack(r_);
-  return {std::move(x), std::move(rtn)};
-}
-
-void log1p_fields_to_msgpack(MsgpackWriter &w_, const Math::Log1p &x_) {
-  Term::any_to_msgpack(w_, x_.x);
-  Type::any_to_msgpack(w_, x_.rtn);
-}
-
-Math::Log10 log10_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 2) throw std::runtime_error("Expected Math::Log10 with 2 field(s)");
-  auto x = Term::any_from_msgpack(r_);
-  auto rtn = Type::any_from_msgpack(r_);
-  return {std::move(x), std::move(rtn)};
-}
-
-void log10_fields_to_msgpack(MsgpackWriter &w_, const Math::Log10 &x_) {
-  Term::any_to_msgpack(w_, x_.x);
-  Type::any_to_msgpack(w_, x_.rtn);
-}
-
-Math::Pow pow_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 3) throw std::runtime_error("Expected Math::Pow with 3 field(s)");
-  auto x = Term::any_from_msgpack(r_);
-  auto y = Term::any_from_msgpack(r_);
-  auto rtn = Type::any_from_msgpack(r_);
-  return {std::move(x), std::move(y), std::move(rtn)};
-}
-
-void pow_fields_to_msgpack(MsgpackWriter &w_, const Math::Pow &x_) {
-  Term::any_to_msgpack(w_, x_.x);
-  Term::any_to_msgpack(w_, x_.y);
-  Type::any_to_msgpack(w_, x_.rtn);
-}
-
-Math::Atan2 atan2_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 3) throw std::runtime_error("Expected Math::Atan2 with 3 field(s)");
-  auto x = Term::any_from_msgpack(r_);
-  auto y = Term::any_from_msgpack(r_);
-  auto rtn = Type::any_from_msgpack(r_);
-  return {std::move(x), std::move(y), std::move(rtn)};
-}
-
-void atan2_fields_to_msgpack(MsgpackWriter &w_, const Math::Atan2 &x_) {
-  Term::any_to_msgpack(w_, x_.x);
-  Term::any_to_msgpack(w_, x_.y);
-  Type::any_to_msgpack(w_, x_.rtn);
-}
-
-Math::Hypot hypot_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 3) throw std::runtime_error("Expected Math::Hypot with 3 field(s)");
-  auto x = Term::any_from_msgpack(r_);
-  auto y = Term::any_from_msgpack(r_);
-  auto rtn = Type::any_from_msgpack(r_);
-  return {std::move(x), std::move(y), std::move(rtn)};
-}
-
-void hypot_fields_to_msgpack(MsgpackWriter &w_, const Math::Hypot &x_) {
-  Term::any_to_msgpack(w_, x_.x);
-  Term::any_to_msgpack(w_, x_.y);
-  Type::any_to_msgpack(w_, x_.rtn);
-}
-
-Math::Any any_from_msgpack(MsgpackReader &r_) {
-  if (r_.nextIsArray()) {
-    const auto n_ = r_.readArrayHeader();
-    if (n_ == 0) throw std::runtime_error("Expected non-empty sum payload");
-    const auto ord_ = r_.readInt32();
-    switch (ord_) {
-      case 0: return Math::abs_fields_from_msgpack(r_, n_ - 1);
-      case 1: return Math::sin_fields_from_msgpack(r_, n_ - 1);
-      case 2: return Math::cos_fields_from_msgpack(r_, n_ - 1);
-      case 3: return Math::tan_fields_from_msgpack(r_, n_ - 1);
-      case 4: return Math::asin_fields_from_msgpack(r_, n_ - 1);
-      case 5: return Math::acos_fields_from_msgpack(r_, n_ - 1);
-      case 6: return Math::atan_fields_from_msgpack(r_, n_ - 1);
-      case 7: return Math::sinh_fields_from_msgpack(r_, n_ - 1);
-      case 8: return Math::cosh_fields_from_msgpack(r_, n_ - 1);
-      case 9: return Math::tanh_fields_from_msgpack(r_, n_ - 1);
-      case 10: return Math::signum_fields_from_msgpack(r_, n_ - 1);
-      case 11: return Math::round_fields_from_msgpack(r_, n_ - 1);
-      case 12: return Math::ceil_fields_from_msgpack(r_, n_ - 1);
-      case 13: return Math::floor_fields_from_msgpack(r_, n_ - 1);
-      case 14: return Math::rint_fields_from_msgpack(r_, n_ - 1);
-      case 15: return Math::sqrt_fields_from_msgpack(r_, n_ - 1);
-      case 16: return Math::cbrt_fields_from_msgpack(r_, n_ - 1);
-      case 17: return Math::exp_fields_from_msgpack(r_, n_ - 1);
-      case 18: return Math::expm1_fields_from_msgpack(r_, n_ - 1);
-      case 19: return Math::log_fields_from_msgpack(r_, n_ - 1);
-      case 20: return Math::log1p_fields_from_msgpack(r_, n_ - 1);
-      case 21: return Math::log10_fields_from_msgpack(r_, n_ - 1);
-      case 22: return Math::pow_fields_from_msgpack(r_, n_ - 1);
-      case 23: return Math::atan2_fields_from_msgpack(r_, n_ - 1);
-      case 24: return Math::hypot_fields_from_msgpack(r_, n_ - 1);
-      default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
-    }
-  } else {
-    const auto ord_ = r_.readInt32();
-    switch (ord_) {
-      case 0:
-      case 1:
-      case 2:
-      case 3:
-      case 4:
-      case 5:
-      case 6:
-      case 7:
-      case 8:
-      case 9:
-      case 10:
-      case 11:
-      case 12:
-      case 13:
-      case 14:
-      case 15:
-      case 16:
-      case 17:
-      case 18:
-      case 19:
-      case 20:
-      case 21:
-      case 22:
-      case 23:
-      case 24: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
-      default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
-    }
-  }
-}
-
-void any_to_msgpack(MsgpackWriter &w_, const Math::Any &x_) {
-  x_.match_total(
-      [&](const Math::Abs &y_) -> void {
-        w_.writeArrayHeader(3);
-        w_.writeInt32(0);
-        Math::abs_fields_to_msgpack(w_, y_);
-      },
-      [&](const Math::Sin &y_) -> void {
-        w_.writeArrayHeader(3);
-        w_.writeInt32(1);
-        Math::sin_fields_to_msgpack(w_, y_);
-      },
-      [&](const Math::Cos &y_) -> void {
-        w_.writeArrayHeader(3);
-        w_.writeInt32(2);
-        Math::cos_fields_to_msgpack(w_, y_);
-      },
-      [&](const Math::Tan &y_) -> void {
-        w_.writeArrayHeader(3);
-        w_.writeInt32(3);
-        Math::tan_fields_to_msgpack(w_, y_);
-      },
-      [&](const Math::Asin &y_) -> void {
-        w_.writeArrayHeader(3);
-        w_.writeInt32(4);
-        Math::asin_fields_to_msgpack(w_, y_);
-      },
-      [&](const Math::Acos &y_) -> void {
-        w_.writeArrayHeader(3);
-        w_.writeInt32(5);
-        Math::acos_fields_to_msgpack(w_, y_);
-      },
-      [&](const Math::Atan &y_) -> void {
-        w_.writeArrayHeader(3);
-        w_.writeInt32(6);
-        Math::atan_fields_to_msgpack(w_, y_);
-      },
-      [&](const Math::Sinh &y_) -> void {
-        w_.writeArrayHeader(3);
-        w_.writeInt32(7);
-        Math::sinh_fields_to_msgpack(w_, y_);
-      },
-      [&](const Math::Cosh &y_) -> void {
-        w_.writeArrayHeader(3);
-        w_.writeInt32(8);
-        Math::cosh_fields_to_msgpack(w_, y_);
-      },
-      [&](const Math::Tanh &y_) -> void {
-        w_.writeArrayHeader(3);
-        w_.writeInt32(9);
-        Math::tanh_fields_to_msgpack(w_, y_);
-      },
-      [&](const Math::Signum &y_) -> void {
-        w_.writeArrayHeader(3);
-        w_.writeInt32(10);
-        Math::signum_fields_to_msgpack(w_, y_);
-      },
-      [&](const Math::Round &y_) -> void {
-        w_.writeArrayHeader(3);
-        w_.writeInt32(11);
-        Math::round_fields_to_msgpack(w_, y_);
-      },
-      [&](const Math::Ceil &y_) -> void {
-        w_.writeArrayHeader(3);
-        w_.writeInt32(12);
-        Math::ceil_fields_to_msgpack(w_, y_);
-      },
-      [&](const Math::Floor &y_) -> void {
-        w_.writeArrayHeader(3);
-        w_.writeInt32(13);
-        Math::floor_fields_to_msgpack(w_, y_);
-      },
-      [&](const Math::Rint &y_) -> void {
-        w_.writeArrayHeader(3);
-        w_.writeInt32(14);
-        Math::rint_fields_to_msgpack(w_, y_);
-      },
-      [&](const Math::Sqrt &y_) -> void {
-        w_.writeArrayHeader(3);
-        w_.writeInt32(15);
-        Math::sqrt_fields_to_msgpack(w_, y_);
-      },
-      [&](const Math::Cbrt &y_) -> void {
-        w_.writeArrayHeader(3);
-        w_.writeInt32(16);
-        Math::cbrt_fields_to_msgpack(w_, y_);
-      },
-      [&](const Math::Exp &y_) -> void {
-        w_.writeArrayHeader(3);
-        w_.writeInt32(17);
-        Math::exp_fields_to_msgpack(w_, y_);
-      },
-      [&](const Math::Expm1 &y_) -> void {
-        w_.writeArrayHeader(3);
-        w_.writeInt32(18);
-        Math::expm1_fields_to_msgpack(w_, y_);
-      },
-      [&](const Math::Log &y_) -> void {
-        w_.writeArrayHeader(3);
-        w_.writeInt32(19);
-        Math::log_fields_to_msgpack(w_, y_);
-      },
-      [&](const Math::Log1p &y_) -> void {
-        w_.writeArrayHeader(3);
-        w_.writeInt32(20);
-        Math::log1p_fields_to_msgpack(w_, y_);
-      },
-      [&](const Math::Log10 &y_) -> void {
-        w_.writeArrayHeader(3);
-        w_.writeInt32(21);
-        Math::log10_fields_to_msgpack(w_, y_);
-      },
-      [&](const Math::Pow &y_) -> void {
-        w_.writeArrayHeader(4);
-        w_.writeInt32(22);
-        Math::pow_fields_to_msgpack(w_, y_);
-      },
-      [&](const Math::Atan2 &y_) -> void {
-        w_.writeArrayHeader(4);
-        w_.writeInt32(23);
-        Math::atan2_fields_to_msgpack(w_, y_);
-      },
-      [&](const Math::Hypot &y_) -> void {
-        w_.writeArrayHeader(4);
-        w_.writeInt32(24);
-        Math::hypot_fields_to_msgpack(w_, y_);
-      });
-}
-}} // namespace Math
 namespace CallConvention { namespace {
 
 CallConvention::RegularCall regularcall_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
@@ -7053,8 +6617,36 @@ void function_to_msgpack(MsgpackWriter &w_, const Function &x_) {
   function_fields_to_msgpack(w_, x_);
 }
 
+UnionTag uniontag_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 5) throw std::runtime_error("Expected UnionTag with 5 field(s)");
+  const auto offsetInBytes = r_.readInt32();
+  const auto widthInBytes = r_.readInt32();
+  const auto mask = r_.readInt64();
+  const auto value = r_.readInt64();
+  auto test = UnionTagTest::any_from_msgpack(r_);
+  return {offsetInBytes, widthInBytes, mask, value, std::move(test)};
+}
+
+void uniontag_fields_to_msgpack(MsgpackWriter &w_, const UnionTag &x_) {
+  w_.writeInt32(x_.offsetInBytes);
+  w_.writeInt32(x_.widthInBytes);
+  w_.writeInt64(x_.mask);
+  w_.writeInt64(x_.value);
+  UnionTagTest::any_to_msgpack(w_, x_.test);
+}
+
+UnionTag uniontag_from_msgpack(MsgpackReader &r_) {
+  const auto n_ = r_.readArrayHeader();
+  return uniontag_fields_from_msgpack(r_, n_);
+}
+
+void uniontag_to_msgpack(MsgpackWriter &w_, const UnionTag &x_) {
+  w_.writeArrayHeader(5);
+  uniontag_fields_to_msgpack(w_, x_);
+}
+
 StructDef structdef_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 5) throw std::runtime_error("Expected StructDef with 5 field(s)");
+  if (n_ != 6) throw std::runtime_error("Expected StructDef with 6 field(s)");
   auto name = sym_from_msgpack(r_);
   std::vector<Type::Var> tpeVars;
   {
@@ -7084,7 +6676,12 @@ StructDef structdef_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
     }
   }
   const auto isUnion = r_.readBoolean();
-  return {std::move(name), std::move(tpeVars), std::move(members), std::move(parents), isUnion};
+  std::optional<UnionTag> unionTag;
+  if (!r_.tryReadNil()) {
+    auto unionTag_value = uniontag_from_msgpack(r_);
+    unionTag = std::move(unionTag_value);
+  }
+  return {std::move(name), std::move(tpeVars), std::move(members), std::move(parents), isUnion, std::move(unionTag)};
 }
 
 void structdef_fields_to_msgpack(MsgpackWriter &w_, const StructDef &x_) {
@@ -7102,6 +6699,11 @@ void structdef_fields_to_msgpack(MsgpackWriter &w_, const StructDef &x_) {
     Type::struct_to_msgpack(w_, v0_);
   }
   w_.writeBoolean(x_.isUnion);
+  if (x_.unionTag) {
+    uniontag_to_msgpack(w_, (*x_.unionTag));
+  } else {
+    w_.writeNil();
+  }
 }
 
 StructDef structdef_from_msgpack(MsgpackReader &r_) {
@@ -7110,7 +6712,7 @@ StructDef structdef_from_msgpack(MsgpackReader &r_) {
 }
 
 void structdef_to_msgpack(MsgpackWriter &w_, const StructDef &x_) {
-  w_.writeArrayHeader(5);
+  w_.writeArrayHeader(6);
   structdef_fields_to_msgpack(w_, x_);
 }
 
@@ -8795,6 +8397,561 @@ void any_to_msgpack(MsgpackWriter &w_, const PathStep::Any &x_) {
       });
 }
 }} // namespace PathStep
+namespace Math { namespace {
+
+Math::Abs abs_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected Math::Abs with 2 field(s)");
+  auto x = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {std::move(x), std::move(rtn)};
+}
+
+void abs_fields_to_msgpack(MsgpackWriter &w_, const Math::Abs &x_) {
+  Term::any_to_msgpack(w_, x_.x);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Math::Sin sin_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected Math::Sin with 2 field(s)");
+  auto x = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {std::move(x), std::move(rtn)};
+}
+
+void sin_fields_to_msgpack(MsgpackWriter &w_, const Math::Sin &x_) {
+  Term::any_to_msgpack(w_, x_.x);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Math::Cos cos_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected Math::Cos with 2 field(s)");
+  auto x = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {std::move(x), std::move(rtn)};
+}
+
+void cos_fields_to_msgpack(MsgpackWriter &w_, const Math::Cos &x_) {
+  Term::any_to_msgpack(w_, x_.x);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Math::Tan tan_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected Math::Tan with 2 field(s)");
+  auto x = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {std::move(x), std::move(rtn)};
+}
+
+void tan_fields_to_msgpack(MsgpackWriter &w_, const Math::Tan &x_) {
+  Term::any_to_msgpack(w_, x_.x);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Math::Asin asin_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected Math::Asin with 2 field(s)");
+  auto x = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {std::move(x), std::move(rtn)};
+}
+
+void asin_fields_to_msgpack(MsgpackWriter &w_, const Math::Asin &x_) {
+  Term::any_to_msgpack(w_, x_.x);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Math::Acos acos_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected Math::Acos with 2 field(s)");
+  auto x = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {std::move(x), std::move(rtn)};
+}
+
+void acos_fields_to_msgpack(MsgpackWriter &w_, const Math::Acos &x_) {
+  Term::any_to_msgpack(w_, x_.x);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Math::Atan atan_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected Math::Atan with 2 field(s)");
+  auto x = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {std::move(x), std::move(rtn)};
+}
+
+void atan_fields_to_msgpack(MsgpackWriter &w_, const Math::Atan &x_) {
+  Term::any_to_msgpack(w_, x_.x);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Math::Sinh sinh_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected Math::Sinh with 2 field(s)");
+  auto x = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {std::move(x), std::move(rtn)};
+}
+
+void sinh_fields_to_msgpack(MsgpackWriter &w_, const Math::Sinh &x_) {
+  Term::any_to_msgpack(w_, x_.x);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Math::Cosh cosh_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected Math::Cosh with 2 field(s)");
+  auto x = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {std::move(x), std::move(rtn)};
+}
+
+void cosh_fields_to_msgpack(MsgpackWriter &w_, const Math::Cosh &x_) {
+  Term::any_to_msgpack(w_, x_.x);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Math::Tanh tanh_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected Math::Tanh with 2 field(s)");
+  auto x = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {std::move(x), std::move(rtn)};
+}
+
+void tanh_fields_to_msgpack(MsgpackWriter &w_, const Math::Tanh &x_) {
+  Term::any_to_msgpack(w_, x_.x);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Math::Signum signum_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected Math::Signum with 2 field(s)");
+  auto x = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {std::move(x), std::move(rtn)};
+}
+
+void signum_fields_to_msgpack(MsgpackWriter &w_, const Math::Signum &x_) {
+  Term::any_to_msgpack(w_, x_.x);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Math::Round round_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected Math::Round with 2 field(s)");
+  auto x = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {std::move(x), std::move(rtn)};
+}
+
+void round_fields_to_msgpack(MsgpackWriter &w_, const Math::Round &x_) {
+  Term::any_to_msgpack(w_, x_.x);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Math::Ceil ceil_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected Math::Ceil with 2 field(s)");
+  auto x = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {std::move(x), std::move(rtn)};
+}
+
+void ceil_fields_to_msgpack(MsgpackWriter &w_, const Math::Ceil &x_) {
+  Term::any_to_msgpack(w_, x_.x);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Math::Floor floor_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected Math::Floor with 2 field(s)");
+  auto x = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {std::move(x), std::move(rtn)};
+}
+
+void floor_fields_to_msgpack(MsgpackWriter &w_, const Math::Floor &x_) {
+  Term::any_to_msgpack(w_, x_.x);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Math::Rint rint_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected Math::Rint with 2 field(s)");
+  auto x = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {std::move(x), std::move(rtn)};
+}
+
+void rint_fields_to_msgpack(MsgpackWriter &w_, const Math::Rint &x_) {
+  Term::any_to_msgpack(w_, x_.x);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Math::Sqrt sqrt_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected Math::Sqrt with 2 field(s)");
+  auto x = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {std::move(x), std::move(rtn)};
+}
+
+void sqrt_fields_to_msgpack(MsgpackWriter &w_, const Math::Sqrt &x_) {
+  Term::any_to_msgpack(w_, x_.x);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Math::Cbrt cbrt_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected Math::Cbrt with 2 field(s)");
+  auto x = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {std::move(x), std::move(rtn)};
+}
+
+void cbrt_fields_to_msgpack(MsgpackWriter &w_, const Math::Cbrt &x_) {
+  Term::any_to_msgpack(w_, x_.x);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Math::Exp exp_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected Math::Exp with 2 field(s)");
+  auto x = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {std::move(x), std::move(rtn)};
+}
+
+void exp_fields_to_msgpack(MsgpackWriter &w_, const Math::Exp &x_) {
+  Term::any_to_msgpack(w_, x_.x);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Math::Expm1 expm1_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected Math::Expm1 with 2 field(s)");
+  auto x = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {std::move(x), std::move(rtn)};
+}
+
+void expm1_fields_to_msgpack(MsgpackWriter &w_, const Math::Expm1 &x_) {
+  Term::any_to_msgpack(w_, x_.x);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Math::Log log_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected Math::Log with 2 field(s)");
+  auto x = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {std::move(x), std::move(rtn)};
+}
+
+void log_fields_to_msgpack(MsgpackWriter &w_, const Math::Log &x_) {
+  Term::any_to_msgpack(w_, x_.x);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Math::Log1p log1p_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected Math::Log1p with 2 field(s)");
+  auto x = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {std::move(x), std::move(rtn)};
+}
+
+void log1p_fields_to_msgpack(MsgpackWriter &w_, const Math::Log1p &x_) {
+  Term::any_to_msgpack(w_, x_.x);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Math::Log10 log10_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected Math::Log10 with 2 field(s)");
+  auto x = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {std::move(x), std::move(rtn)};
+}
+
+void log10_fields_to_msgpack(MsgpackWriter &w_, const Math::Log10 &x_) {
+  Term::any_to_msgpack(w_, x_.x);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Math::Pow pow_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 3) throw std::runtime_error("Expected Math::Pow with 3 field(s)");
+  auto x = Term::any_from_msgpack(r_);
+  auto y = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {std::move(x), std::move(y), std::move(rtn)};
+}
+
+void pow_fields_to_msgpack(MsgpackWriter &w_, const Math::Pow &x_) {
+  Term::any_to_msgpack(w_, x_.x);
+  Term::any_to_msgpack(w_, x_.y);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Math::Atan2 atan2_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 3) throw std::runtime_error("Expected Math::Atan2 with 3 field(s)");
+  auto x = Term::any_from_msgpack(r_);
+  auto y = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {std::move(x), std::move(y), std::move(rtn)};
+}
+
+void atan2_fields_to_msgpack(MsgpackWriter &w_, const Math::Atan2 &x_) {
+  Term::any_to_msgpack(w_, x_.x);
+  Term::any_to_msgpack(w_, x_.y);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Math::Hypot hypot_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 3) throw std::runtime_error("Expected Math::Hypot with 3 field(s)");
+  auto x = Term::any_from_msgpack(r_);
+  auto y = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {std::move(x), std::move(y), std::move(rtn)};
+}
+
+void hypot_fields_to_msgpack(MsgpackWriter &w_, const Math::Hypot &x_) {
+  Term::any_to_msgpack(w_, x_.x);
+  Term::any_to_msgpack(w_, x_.y);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Math::Any any_from_msgpack(MsgpackReader &r_) {
+  if (r_.nextIsArray()) {
+    const auto n_ = r_.readArrayHeader();
+    if (n_ == 0) throw std::runtime_error("Expected non-empty sum payload");
+    const auto ord_ = r_.readInt32();
+    switch (ord_) {
+      case 0: return Math::abs_fields_from_msgpack(r_, n_ - 1);
+      case 1: return Math::sin_fields_from_msgpack(r_, n_ - 1);
+      case 2: return Math::cos_fields_from_msgpack(r_, n_ - 1);
+      case 3: return Math::tan_fields_from_msgpack(r_, n_ - 1);
+      case 4: return Math::asin_fields_from_msgpack(r_, n_ - 1);
+      case 5: return Math::acos_fields_from_msgpack(r_, n_ - 1);
+      case 6: return Math::atan_fields_from_msgpack(r_, n_ - 1);
+      case 7: return Math::sinh_fields_from_msgpack(r_, n_ - 1);
+      case 8: return Math::cosh_fields_from_msgpack(r_, n_ - 1);
+      case 9: return Math::tanh_fields_from_msgpack(r_, n_ - 1);
+      case 10: return Math::signum_fields_from_msgpack(r_, n_ - 1);
+      case 11: return Math::round_fields_from_msgpack(r_, n_ - 1);
+      case 12: return Math::ceil_fields_from_msgpack(r_, n_ - 1);
+      case 13: return Math::floor_fields_from_msgpack(r_, n_ - 1);
+      case 14: return Math::rint_fields_from_msgpack(r_, n_ - 1);
+      case 15: return Math::sqrt_fields_from_msgpack(r_, n_ - 1);
+      case 16: return Math::cbrt_fields_from_msgpack(r_, n_ - 1);
+      case 17: return Math::exp_fields_from_msgpack(r_, n_ - 1);
+      case 18: return Math::expm1_fields_from_msgpack(r_, n_ - 1);
+      case 19: return Math::log_fields_from_msgpack(r_, n_ - 1);
+      case 20: return Math::log1p_fields_from_msgpack(r_, n_ - 1);
+      case 21: return Math::log10_fields_from_msgpack(r_, n_ - 1);
+      case 22: return Math::pow_fields_from_msgpack(r_, n_ - 1);
+      case 23: return Math::atan2_fields_from_msgpack(r_, n_ - 1);
+      case 24: return Math::hypot_fields_from_msgpack(r_, n_ - 1);
+      default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+    }
+  } else {
+    const auto ord_ = r_.readInt32();
+    switch (ord_) {
+      case 0:
+      case 1:
+      case 2:
+      case 3:
+      case 4:
+      case 5:
+      case 6:
+      case 7:
+      case 8:
+      case 9:
+      case 10:
+      case 11:
+      case 12:
+      case 13:
+      case 14:
+      case 15:
+      case 16:
+      case 17:
+      case 18:
+      case 19:
+      case 20:
+      case 21:
+      case 22:
+      case 23:
+      case 24: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+    }
+  }
+}
+
+void any_to_msgpack(MsgpackWriter &w_, const Math::Any &x_) {
+  x_.match_total(
+      [&](const Math::Abs &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(0);
+        Math::abs_fields_to_msgpack(w_, y_);
+      },
+      [&](const Math::Sin &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(1);
+        Math::sin_fields_to_msgpack(w_, y_);
+      },
+      [&](const Math::Cos &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(2);
+        Math::cos_fields_to_msgpack(w_, y_);
+      },
+      [&](const Math::Tan &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(3);
+        Math::tan_fields_to_msgpack(w_, y_);
+      },
+      [&](const Math::Asin &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(4);
+        Math::asin_fields_to_msgpack(w_, y_);
+      },
+      [&](const Math::Acos &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(5);
+        Math::acos_fields_to_msgpack(w_, y_);
+      },
+      [&](const Math::Atan &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(6);
+        Math::atan_fields_to_msgpack(w_, y_);
+      },
+      [&](const Math::Sinh &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(7);
+        Math::sinh_fields_to_msgpack(w_, y_);
+      },
+      [&](const Math::Cosh &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(8);
+        Math::cosh_fields_to_msgpack(w_, y_);
+      },
+      [&](const Math::Tanh &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(9);
+        Math::tanh_fields_to_msgpack(w_, y_);
+      },
+      [&](const Math::Signum &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(10);
+        Math::signum_fields_to_msgpack(w_, y_);
+      },
+      [&](const Math::Round &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(11);
+        Math::round_fields_to_msgpack(w_, y_);
+      },
+      [&](const Math::Ceil &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(12);
+        Math::ceil_fields_to_msgpack(w_, y_);
+      },
+      [&](const Math::Floor &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(13);
+        Math::floor_fields_to_msgpack(w_, y_);
+      },
+      [&](const Math::Rint &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(14);
+        Math::rint_fields_to_msgpack(w_, y_);
+      },
+      [&](const Math::Sqrt &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(15);
+        Math::sqrt_fields_to_msgpack(w_, y_);
+      },
+      [&](const Math::Cbrt &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(16);
+        Math::cbrt_fields_to_msgpack(w_, y_);
+      },
+      [&](const Math::Exp &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(17);
+        Math::exp_fields_to_msgpack(w_, y_);
+      },
+      [&](const Math::Expm1 &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(18);
+        Math::expm1_fields_to_msgpack(w_, y_);
+      },
+      [&](const Math::Log &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(19);
+        Math::log_fields_to_msgpack(w_, y_);
+      },
+      [&](const Math::Log1p &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(20);
+        Math::log1p_fields_to_msgpack(w_, y_);
+      },
+      [&](const Math::Log10 &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(21);
+        Math::log10_fields_to_msgpack(w_, y_);
+      },
+      [&](const Math::Pow &y_) -> void {
+        w_.writeArrayHeader(4);
+        w_.writeInt32(22);
+        Math::pow_fields_to_msgpack(w_, y_);
+      },
+      [&](const Math::Atan2 &y_) -> void {
+        w_.writeArrayHeader(4);
+        w_.writeInt32(23);
+        Math::atan2_fields_to_msgpack(w_, y_);
+      },
+      [&](const Math::Hypot &y_) -> void {
+        w_.writeArrayHeader(4);
+        w_.writeInt32(24);
+        Math::hypot_fields_to_msgpack(w_, y_);
+      });
+}
+}} // namespace Math
+namespace UnionTagTest { namespace {
+
+UnionTagTest::Eq eq_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected UnionTagTest::Eq with 0 field(s)");
+  return {};
+}
+
+UnionTagTest::Ne ne_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected UnionTagTest::Ne with 0 field(s)");
+  return {};
+}
+
+UnionTagTest::Lt lt_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected UnionTagTest::Lt with 0 field(s)");
+  return {};
+}
+
+UnionTagTest::Ge ge_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected UnionTagTest::Ge with 0 field(s)");
+  return {};
+}
+
+UnionTagTest::Any any_from_msgpack(MsgpackReader &r_) {
+  if (r_.nextIsArray()) {
+    const auto n_ = r_.readArrayHeader();
+    if (n_ == 0) throw std::runtime_error("Expected non-empty sum payload");
+    const auto ord_ = r_.readInt32();
+    switch (ord_) {
+      case 0: return UnionTagTest::eq_fields_from_msgpack(r_, n_ - 1);
+      case 1: return UnionTagTest::ne_fields_from_msgpack(r_, n_ - 1);
+      case 2: return UnionTagTest::lt_fields_from_msgpack(r_, n_ - 1);
+      case 3: return UnionTagTest::ge_fields_from_msgpack(r_, n_ - 1);
+      default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+    }
+  } else {
+    const auto ord_ = r_.readInt32();
+    switch (ord_) {
+      case 0: return UnionTagTest::eq_fields_from_msgpack(r_, 0);
+      case 1: return UnionTagTest::ne_fields_from_msgpack(r_, 0);
+      case 2: return UnionTagTest::lt_fields_from_msgpack(r_, 0);
+      case 3: return UnionTagTest::ge_fields_from_msgpack(r_, 0);
+      default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+    }
+  }
+}
+
+void any_to_msgpack(MsgpackWriter &w_, const UnionTagTest::Any &x_) {
+  x_.match_total(
+      [&](const UnionTagTest::Eq &y_) -> void { w_.writeInt32(0); }, [&](const UnionTagTest::Ne &y_) -> void { w_.writeInt32(1); },
+      [&](const UnionTagTest::Lt &y_) -> void { w_.writeInt32(2); }, [&](const UnionTagTest::Ge &y_) -> void { w_.writeInt32(3); });
+}
+}} // namespace UnionTagTest
 namespace TypeKind { namespace {
 }} // namespace TypeKind
 namespace FunctionVisibility { namespace {

@@ -477,12 +477,18 @@ object PolyAST {
   }
   case class Arg(named: Named, pos: Option[SourcePosition] = None, boundary: Option[Arg.Boundary] = None)
       derives MsgPack.Codec
+  object UnionTag {
+    enum Test derives MsgPack.Codec { case Eq, Ne, Lt, Ge }
+  }
+  case class UnionTag(offsetInBytes: Int, widthInBytes: Int, mask: Long, value: Long, test: UnionTag.Test)
+      derives MsgPack.Codec
   case class StructDef(
       name: Sym,
       tpeVars: List[Type.Var],
       members: List[Named],
       parents: List[Type.Struct],
-      isUnion: Boolean = false
+      isUnion: Boolean = false,
+      unionTag: Option[UnionTag] = None
   ) derives MsgPack.Codec
 
   case class Mirror(

@@ -45,7 +45,8 @@ object MonoStruct extends BoundaryPass[Map[p.Sym, p.Sym]] {
         tpeVars = Nil,
         members = sdef.members.map(member => member.copy(tpe = subst(member.tpe))),
         parents = sdef.parents.map(substStruct),
-        isUnion = sdef.isUnion
+        isUnion = sdef.isUnion,
+        unionTag = sdef.unionTag
       )
     }
 

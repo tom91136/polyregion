@@ -836,6 +836,43 @@ public:
 } // namespace CallConvention
 
 struct Function;
+
+namespace UnionTagTest {
+
+struct POLYREGION_EXPORT Base;
+class Any {
+  std::shared_ptr<Base> _v;
+
+public:
+  Any(std::shared_ptr<Base> _v) : _v(std::move(_v)) {}
+  Any(const Any &other) : _v(other._v) {}
+  Any(Any &&other) noexcept : _v(std::move(other._v)) {}
+  Any &operator=(const Any &other) { return *this = Any(other); }
+  Any &operator=(Any &&other) noexcept {
+    std::swap(_v, other._v);
+    return *this;
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Any &rhs) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator!=(const Any &rhs) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Any &rhs) const;
+  [[nodiscard]] POLYREGION_EXPORT uint32_t id() const;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
+
+  template <typename T> [[nodiscard]] constexpr POLYREGION_EXPORT bool is() const;
+  template <typename T> [[nodiscard]] constexpr POLYREGION_EXPORT std::optional<T> get() const;
+  template <typename... F> constexpr POLYREGION_EXPORT auto match_total(F &&...fs) const;
+
+  template <typename T, typename U>
+  POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const;
+  template <typename T, typename U>
+  [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const;
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const;
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT Any modify_all(const std::function<T(const T &)> &f) const;
+};
+
+} // namespace UnionTagTest
+
+struct UnionTag;
 struct StructDef;
 struct Mirror;
 
@@ -9883,18 +9920,218 @@ struct POLYREGION_EXPORT Function {
            CallConvention::Any convention, std::optional<Sym> implements = {}, std::vector<std::string> requiredCapabilities = {}) noexcept;
 };
 
+namespace UnionTagTest {
+
+struct POLYREGION_EXPORT Base {
+  [[nodiscard]] POLYREGION_EXPORT virtual uint32_t id() const = 0;
+  [[nodiscard]] POLYREGION_EXPORT virtual size_t hash_code() const = 0;
+  [[nodiscard]] POLYREGION_EXPORT virtual bool operator==(const UnionTagTest::Base &) const = 0;
+  [[nodiscard]] POLYREGION_EXPORT virtual bool operator<(const UnionTagTest::Base &) const = 0;
+
+protected:
+  Base();
+};
+
+struct POLYREGION_EXPORT Eq : UnionTagTest::Base {
+  constexpr static uint32_t variant_id = 0;
+  [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
+  template <typename T, typename U>
+  POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, Eq>) {
+      if (auto x_ = f(*this)) {
+        results_.emplace_back(*x_);
+      }
+    }
+  }
+  template <typename T, typename U>
+  [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT Eq modify_all(const std::function<T(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, Eq>) {
+      return f(*this);
+    }
+    return UnionTagTest::Eq();
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const UnionTagTest::Eq &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const UnionTagTest::Eq &) const;
+  Eq();
+  POLYREGION_EXPORT operator Any() const;
+  [[nodiscard]] POLYREGION_EXPORT Any widen() const;
+};
+
+struct POLYREGION_EXPORT Ne : UnionTagTest::Base {
+  constexpr static uint32_t variant_id = 1;
+  [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
+  template <typename T, typename U>
+  POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, Ne>) {
+      if (auto x_ = f(*this)) {
+        results_.emplace_back(*x_);
+      }
+    }
+  }
+  template <typename T, typename U>
+  [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT Ne modify_all(const std::function<T(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, Ne>) {
+      return f(*this);
+    }
+    return UnionTagTest::Ne();
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const UnionTagTest::Ne &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const UnionTagTest::Ne &) const;
+  Ne();
+  POLYREGION_EXPORT operator Any() const;
+  [[nodiscard]] POLYREGION_EXPORT Any widen() const;
+};
+
+struct POLYREGION_EXPORT Lt : UnionTagTest::Base {
+  constexpr static uint32_t variant_id = 2;
+  [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
+  template <typename T, typename U>
+  POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, Lt>) {
+      if (auto x_ = f(*this)) {
+        results_.emplace_back(*x_);
+      }
+    }
+  }
+  template <typename T, typename U>
+  [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT Lt modify_all(const std::function<T(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, Lt>) {
+      return f(*this);
+    }
+    return UnionTagTest::Lt();
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const UnionTagTest::Lt &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const UnionTagTest::Lt &) const;
+  Lt();
+  POLYREGION_EXPORT operator Any() const;
+  [[nodiscard]] POLYREGION_EXPORT Any widen() const;
+};
+
+struct POLYREGION_EXPORT Ge : UnionTagTest::Base {
+  constexpr static uint32_t variant_id = 3;
+  [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
+  template <typename T, typename U>
+  POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, Ge>) {
+      if (auto x_ = f(*this)) {
+        results_.emplace_back(*x_);
+      }
+    }
+  }
+  template <typename T, typename U>
+  [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT Ge modify_all(const std::function<T(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, Ge>) {
+      return f(*this);
+    }
+    return UnionTagTest::Ge();
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const UnionTagTest::Ge &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const UnionTagTest::Ge &) const;
+  Ge();
+  POLYREGION_EXPORT operator Any() const;
+  [[nodiscard]] POLYREGION_EXPORT Any widen() const;
+};
+} // namespace UnionTagTest
+
+struct POLYREGION_EXPORT UnionTag {
+  int32_t offsetInBytes;
+  int32_t widthInBytes;
+  int64_t mask;
+  int64_t value;
+  UnionTagTest::Any test;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
+  [[nodiscard]] POLYREGION_EXPORT UnionTag withOffsetInBytes(const int32_t &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT UnionTag withWidthInBytes(const int32_t &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT UnionTag withMask(const int64_t &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT UnionTag withValue(const int64_t &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT UnionTag withTest(const UnionTagTest::Any &v_) const;
+  template <typename T, typename U>
+  POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, UnionTag>) {
+      if (auto x_ = f(*this)) {
+        results_.emplace_back(*x_);
+      }
+    }
+    test.collect_where<T, U>(results_, f);
+  }
+  template <typename T, typename U>
+  [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT UnionTag modify_all(const std::function<T(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, UnionTag>) {
+      return f(*this);
+    }
+    return UnionTag(offsetInBytes, widthInBytes, mask, value, test.modify_all<T>(f));
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator!=(const UnionTag &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const UnionTag &) const;
+  UnionTag(int32_t offsetInBytes, int32_t widthInBytes, int64_t mask, int64_t value, UnionTagTest::Any test) noexcept;
+};
+
 struct POLYREGION_EXPORT StructDef {
   Sym name;
   std::vector<Type::Var> tpeVars;
   std::vector<Named> members;
   std::vector<Type::Struct> parents;
   bool isUnion;
+  std::optional<UnionTag> unionTag;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
   [[nodiscard]] POLYREGION_EXPORT StructDef withName(const Sym &v_) const;
   [[nodiscard]] POLYREGION_EXPORT StructDef withTpeVars(const std::vector<Type::Var> &v_) const;
   [[nodiscard]] POLYREGION_EXPORT StructDef withMembers(const std::vector<Named> &v_) const;
   [[nodiscard]] POLYREGION_EXPORT StructDef withParents(const std::vector<Type::Struct> &v_) const;
   [[nodiscard]] POLYREGION_EXPORT StructDef withIsUnion(const bool &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT StructDef withUnionTag(const std::optional<UnionTag> &v_) const;
   template <typename T, typename U>
   POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
     if constexpr (std::is_same_v<T, StructDef>) {
@@ -9911,6 +10148,9 @@ struct POLYREGION_EXPORT StructDef {
     }
     for (auto it = parents.begin(); it != parents.end(); ++it) {
       (*it).collect_where<T, U>(results_, f);
+    }
+    if (unionTag) {
+      (*unionTag).collect_where<T, U>(results_, f);
     }
   }
   template <typename T, typename U>
@@ -9938,11 +10178,16 @@ struct POLYREGION_EXPORT StructDef {
     for (auto it = parents.begin(); it != parents.end(); ++it) {
       parents__.emplace_back((*it).modify_all<T>(f));
     }
-    return StructDef(name.modify_all<T>(f), tpeVars__, members__, parents__, isUnion);
+    std::optional<UnionTag> unionTag__;
+    if (unionTag) {
+      unionTag__ = (*unionTag).modify_all<T>(f);
+    }
+    return StructDef(name.modify_all<T>(f), tpeVars__, members__, parents__, isUnion, unionTag__);
   }
   [[nodiscard]] POLYREGION_EXPORT bool operator!=(const StructDef &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const StructDef &) const;
-  StructDef(Sym name, std::vector<Type::Var> tpeVars, std::vector<Named> members, std::vector<Type::Struct> parents, bool isUnion) noexcept;
+  StructDef(Sym name, std::vector<Type::Var> tpeVars, std::vector<Named> members, std::vector<Type::Struct> parents, bool isUnion,
+            std::optional<UnionTag> unionTag = {}) noexcept;
 };
 
 struct POLYREGION_EXPORT Mirror {
@@ -12876,6 +13121,94 @@ polyregion::polyast::CallConvention::Any::modify_all(const std::function<T(const
   }
   return *result_;
 }
+namespace polyregion::polyast::UnionTagTest {
+using All = alternatives<Eq, Ne, Lt, Ge>;
+}
+template <typename T> constexpr POLYREGION_EXPORT bool polyregion::polyast::UnionTagTest::Any::is() const {
+  static_assert((polyregion::polyast::UnionTagTest::All::contains<T>), "type not part of the variant");
+  return T::variant_id == _v->id();
+}
+template <typename T> constexpr POLYREGION_EXPORT std::optional<T> polyregion::polyast::UnionTagTest::Any::get() const {
+  static_assert((polyregion::polyast::UnionTagTest::All::contains<T>), "type not part of the variant");
+  if (T::variant_id == _v->id()) return {*std::static_pointer_cast<T>(_v)};
+  else return {};
+}
+template <typename... Fs> constexpr POLYREGION_EXPORT auto polyregion::polyast::UnionTagTest::Any::match_total(Fs &&...fs) const {
+  using Ts = alternatives<std::decay_t<arg1_t<Fs>>...>;
+  using Rs = alternatives<std::invoke_result_t<Fs, std::decay_t<arg1_t<Fs>>>...>;
+  using R0 = typename Rs::template at<0>;
+  static_assert(All::size == sizeof...(Fs), "match is not total as case count is not equal to variant's size");
+  static_assert((All::contains<std::decay_t<arg1_t<Fs>>> && ...), "one or more cases not part of the variant");
+  static_assert((Rs::template all<R0>), "all cases must return the same type");
+  static_assert(Ts::all_unique, "one or more cases overlap");
+  uint32_t id = _v->id();
+  if constexpr (std::is_void_v<R0>) {
+    ([&]() -> bool {
+      using T = std::decay_t<arg1_t<Fs>>;
+      if (T::variant_id == id) {
+        fs(*std::static_pointer_cast<T>(_v));
+        return true;
+      }
+      return false;
+    }() || ...);
+    return;
+  } else {
+    std::optional<R0> r;
+    ([&]() -> bool {
+      using T = std::decay_t<arg1_t<Fs>>;
+      if (T::variant_id == id) {
+        r = fs(*std::static_pointer_cast<T>(_v));
+        return true;
+      }
+      return false;
+    }() || ...);
+    return *r;
+  }
+}
+template <typename T, typename U>
+POLYREGION_EXPORT void polyregion::polyast::UnionTagTest::Any::collect_where(std::vector<U> &results_,
+                                                                             const std::function<std::optional<U>(const T &)> &f) const {
+  if constexpr (std::is_same_v<T, polyregion::polyast::UnionTagTest::Any>) {
+    if (auto x_ = f(_v)) {
+      results_.emplace_back(*x_);
+    }
+    return;
+  }
+  All::applyOr([&, id = _v->id()]<typename V>() -> bool {
+    if (V::variant_id != id) return false;
+    auto _x = std::static_pointer_cast<V>(_v);
+    _x->template collect_where<T, U>(results_, f);
+    return true;
+  });
+}
+template <typename T, typename U>
+POLYREGION_EXPORT std::vector<U>
+polyregion::polyast::UnionTagTest::Any::collect_where(const std::function<std::optional<U>(const T &)> &f) const {
+  std::vector<U> results_;
+  collect_where<T, U>(results_, f);
+  return results_;
+}
+template <typename T> POLYREGION_EXPORT std::vector<T> polyregion::polyast::UnionTagTest::Any::collect_all() const {
+  return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+}
+template <typename T>
+POLYREGION_EXPORT polyregion::polyast::UnionTagTest::Any
+polyregion::polyast::UnionTagTest::Any::modify_all(const std::function<T(const T &)> &f) const {
+  if constexpr (std::is_same_v<T, polyregion::polyast::UnionTagTest::Any>) {
+    return f(*this);
+  }
+  std::optional<polyregion::polyast::UnionTagTest::Any> result_;
+  All::applyOr([&, id = _v->id()]<typename V>() -> bool {
+    if (V::variant_id != id) return false;
+    auto _x = std::static_pointer_cast<V>(_v);
+    result_ = _x->template modify_all<T>(f).widen();
+    return true;
+  });
+  if (!result_) {
+    std::abort();
+  }
+  return *result_;
+}
 namespace polyregion::polyast::PassPhase {
 using All = alternatives<Initial, PostMono>;
 }
@@ -13699,6 +14032,24 @@ template <> struct hash<polyregion::polyast::CallConvention::OffloadEntry> {
 };
 template <> struct hash<polyregion::polyast::Function> {
   std::size_t operator()(const polyregion::polyast::Function &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::UnionTagTest::Any> {
+  std::size_t operator()(const polyregion::polyast::UnionTagTest::Any &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::UnionTagTest::Eq> {
+  std::size_t operator()(const polyregion::polyast::UnionTagTest::Eq &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::UnionTagTest::Ne> {
+  std::size_t operator()(const polyregion::polyast::UnionTagTest::Ne &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::UnionTagTest::Lt> {
+  std::size_t operator()(const polyregion::polyast::UnionTagTest::Lt &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::UnionTagTest::Ge> {
+  std::size_t operator()(const polyregion::polyast::UnionTagTest::Ge &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::UnionTag> {
+  std::size_t operator()(const polyregion::polyast::UnionTag &) const noexcept;
 };
 template <> struct hash<polyregion::polyast::StructDef> {
   std::size_t operator()(const polyregion::polyast::StructDef &) const noexcept;

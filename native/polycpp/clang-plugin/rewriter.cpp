@@ -962,6 +962,11 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
                                                                      polyregion::runtime::LayoutAttrs::Primitive)),
                                               /*memberCount */ mkIntLit(C, C.getSizeType(), 0),
                                               /*member      */ mkNullPtrLit(C, *TypeLayoutTy),
+                                              /*tag         */ mkIntLit(C, C.getSizeType(), 0),
+                                              mkIntLit(C, C.getSizeType(), 0),
+                                              mkIntLit(C, C.getSizeType(), 0),
+                                              mkIntLit(C, C.getSizeType(), 0),
+                                              mkIntLit(C, C.getSizeType(), 0),
                                           })};
                  });
         }) //
@@ -974,6 +979,7 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
                         auto attrs = polyregion::runtime::LayoutAttrs::None;
                         if (isSelfOpaque(sl)) attrs |= polyregion::runtime::LayoutAttrs::SelfOpaque;
                         if (isOpaque(sl, table)) attrs |= polyregion::runtime::LayoutAttrs::Opaque;
+                        const auto tag = unionTagWords(bundle.unionTags ^ get_maybe(sl.name));
                         return mkInitList(C, TypeLayoutTyNoConst,
                                           {
                                               /*name        */ mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, sl.name)), //
@@ -982,6 +988,11 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
                                               /*attrs       */ mkIntLit(C, C.getSizeType(), to_underlying(attrs)),             //
                                               /*memberCount */ mkIntLit(C, C.getSizeType(), sl.members.size()),                //
                                               /*member      */ mkNullPtrLit(C, *AggregateMemberTy), // XXX assigned later
+                                              /*tag         */ mkIntLit(C, C.getSizeType(), tag[0]),
+                                              mkIntLit(C, C.getSizeType(), tag[1]),
+                                              mkIntLit(C, C.getSizeType(), tag[2]),
+                                              mkIntLit(C, C.getSizeType(), tag[3]),
+                                              mkIntLit(C, C.getSizeType(), tag[4]),
                                           });
                       }) | to_vector());
 

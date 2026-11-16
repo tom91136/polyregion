@@ -206,7 +206,9 @@ private[polyregion] object CodeGen {
       :: Nil
 
   private def astModuleStructs: List[StructNode] =
-    deriveStruct[StructDef]()
+    deriveStruct[UnionTag.Test]()
+      :: deriveStruct[UnionTag]()
+      :: deriveStruct[StructDef]()
       :: deriveStruct[Mirror]()
       :: deriveStruct[Pass.Phase]()
       :: deriveStruct[MetaEntry]()

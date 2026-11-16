@@ -460,6 +460,43 @@ static void copyUnionStorage(Remapper::RemapContext &r, const Named &dst, const 
   else r.push(Stmt::Mut(lhs, Expr::Alias(rhs)));
 }
 
+// std string unions keep their discriminant in library fields: libc++ `__is_long_`, MSVC `_Myres` beside `_Bx`
+[[nodiscard]] static Opt<UnionTag> unionTag(const clang::ASTContext &context, const clang::RecordDecl *decl) {
+  if (!decl->isUnion()) return {};
+  const auto bits = decl->fields() //
+                    | to_vector()  //
+                    | collect([&](const clang::FieldDecl *arm) -> Opt<uint64_t> {
+                        const auto *const record = arm->getType()->getAsRecordDecl();
+                        if (!record) return {};
+                        for (const auto *field : record->fields())
+                          if (field->isBitField() && field->getBitWidthValue() == 1 && field->getName() == "__is_long_")
+                            return context.getFieldOffset(arm) + context.getFieldOffset(field);
+                        return {};
+                      }) //
+                    | to_vector();
+  if (!bits.empty() && (bits | forall([&](const auto &bit) { return bit == bits.front(); })))
+    return UnionTag(static_cast<int32_t>(bits.front() / 8), 1, static_cast<int64_t>(1U << (bits.front() % 8)), 0, UnionTagTest::Ne());
+  const auto *const owner = llvm::dyn_cast<clang::RecordDecl>(decl->getDeclContext());
+  if (!owner || decl->getName() != "_Bxty") return {};
+  const auto field = [&](const llvm::StringRef name) -> const clang::FieldDecl * {
+    for (const auto *f : owner->fields())
+      if (f->getName() == name) return f;
+    return nullptr;
+  };
+  const auto *const buffer = field("_Bx");
+  const auto *const capacity = field("_Myres");
+  const auto *const small = [&]() -> const clang::ConstantArrayType * {
+    for (const auto *f : decl->fields())
+      if (f->getName() == "_Buf") return context.getAsConstantArrayType(f->getType());
+    return nullptr;
+  }();
+  if (!buffer || !capacity || !small || buffer->getType()->getAsRecordDecl() != decl) return {};
+  const auto width = context.getTypeSizeInChars(capacity->getType()).getQuantity();
+  return UnionTag(static_cast<int32_t>((context.getFieldOffset(capacity) - context.getFieldOffset(buffer)) / 8),
+                  static_cast<int32_t>(width), width >= 8 ? int64_t{-1} : (int64_t{1} << (width * 8)) - 1,
+                  static_cast<int64_t>(small->getZExtSize()), UnionTagTest::Ge());
+}
+
 [[nodiscard]] static bool scalarType(const Type::Any &type) {
   const auto kind = type.kind();
   return kind.is<TypeKind::Integral>() || kind.is<TypeKind::Fractional>();
@@ -1547,7 +1584,7 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
         emptyStruct ? std::vector{EmptyStructMarker}
                     : inherited | keys() | concat(members | map([](const auto &m) { return m.name; })) | to_vector(),
         catchableParents ^ map([](const auto &p) { return Type::Struct(p->name, std::vector<Type::Any>{}); }),
-        /*isUnion*/ decl->isUnion());
+        /*isUnion*/ decl->isUnion(), unionTag(context, decl));
     const auto layout = std::make_shared<StructLayout>(                               //
         name,                                                                         //
         sizeInBytes,                                                                  //

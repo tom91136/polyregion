@@ -33,17 +33,23 @@ std::array<Type, 8> AggregateMemberMirror::types() const {
 }
 TypeLayoutMirror::TypeLayoutMirror(ModuleOp &M)
     : AggregateMirror(M), //
-      name(M), sizeInBytes(M, 64), alignmentInBytes(M, 64), attrs(M, 64), memberCount(M, 64), members(M) {
+      name(M), sizeInBytes(M, 64), alignmentInBytes(M, 64), attrs(M, 64), memberCount(M, 64), members(M), tagWidthInBytes(M, 64),
+      tagOffsetInBytes(M, 64), tagMask(M, 64), tagValue(M, 64), tagTest(M, 64) {
   validateMirrorSize<runtime::TypeLayout>();
 }
 const char *TypeLayoutMirror::typeName() const { return "TypeLayout"; }
-std::array<Type, 6> TypeLayoutMirror::types() const {
+std::array<Type, 11> TypeLayoutMirror::types() const {
   return {name.widen(),             //
           sizeInBytes.widen(),      //
           alignmentInBytes.widen(), //
           attrs.widen(),            //
           memberCount.widen(),      //
-          members.widen()};
+          members.widen(),          //
+          tagWidthInBytes.widen(),  //
+          tagOffsetInBytes.widen(), //
+          tagMask.widen(),          //
+          tagValue.widen(),         //
+          tagTest.widen()};
 }
 KernelObjectMirror::KernelObjectMirror(ModuleOp &M)
     : AggregateMirror(M), kind(M, 8), format(M, 8), featureCount(M, 64), features(M), imageLength(M, 64), image(M), target(M, 8), arch(M),

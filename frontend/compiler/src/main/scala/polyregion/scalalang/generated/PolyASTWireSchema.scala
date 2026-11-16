@@ -4,6 +4,6 @@ import javax.annotation.processing.Generated
 
 @Generated(Array("polyregion.ast.CodeGen"))
 private[scalalang] object PolyASTWireSchema {
-  inline val ProgramHash = "f62204b887e77b014700a7b3a718f079"
-  inline val PackageHash = "cea6ab38193bdb45ffe1d89f3bb37215"
+  inline val ProgramHash = "1948e5152fa5a509dd2e489b7b215ba2"
+  inline val PackageHash = "d9a4e0da0bed9419f721e7522f189132"
 }
