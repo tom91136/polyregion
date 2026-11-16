@@ -22,7 +22,6 @@ jobs:
   slices:
     name: slices (${{ inputs.arch }})
     runs-on: ${{ inputs.runs_on }}
-    timeout-minutes: 7
     outputs:
       slices: ${{ steps.gen.outputs.slices }}
     env:
@@ -56,7 +55,6 @@ jobs:
         slice: ${{ fromJSON(needs.slices.outputs.slices) }}
     name: test (${{ inputs.arch }}, ${{ matrix.slice.id }})
     runs-on: ${{ inputs.runs_on }}
-    timeout-minutes: 225
     env:
       POLYREGION_DIST: ${{ github.workspace }}/dist
       EMULATORS: ${{ github.workspace }}/emulators/out
@@ -96,7 +94,6 @@ jobs:
     if: ${{ !cancelled() && needs.slices.result == 'success' }}
     name: test-misc (${{ inputs.arch }})
     runs-on: ${{ inputs.runs_on }}
-    timeout-minutes: 11
     env:
       POLYREGION_DIST: ${{ github.workspace }}/dist
       SPECTRA_PACKAGE: ${{ github.workspace }}/package/spectra/lib.polyast

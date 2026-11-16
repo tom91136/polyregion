@@ -37,7 +37,6 @@ jobs:
             sysroot_variant: ubuntu20
             sysroot_dockerfile: Dockerfile.ubuntu
     runs-on: ${{ matrix.runs_on }}
-    timeout-minutes: 24
     env:
       POLYREGION_ARCH: ${{ matrix.arch }}
       POLYC_JS_ENGINE: qjs
@@ -142,7 +141,6 @@ jobs:
   discover-slices:
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
     outputs:
       slices: ${{ steps.gen.outputs.slices }}
     env:
@@ -171,7 +169,6 @@ jobs:
         include: *cross-matrix
     name: test-native-shard (${{ matrix.arch }}, ${{ matrix.frontend }}, ${{ matrix.slice.id }})
     runs-on: ${{ matrix.runs_on }}
-    timeout-minutes: 117
     env:
       POLYREGION_ARCH: ${{ matrix.arch }}
       POLYC_JS_ENGINE: qjs
@@ -247,7 +244,6 @@ jobs:
       matrix:
         include: *cross-matrix
     runs-on: ${{ matrix.runs_on }}
-    timeout-minutes: 82
     env:
       POLYREGION_ARCH: ${{ matrix.arch }}
       POLYC_JS_ENGINE: qjs

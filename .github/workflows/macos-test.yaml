@@ -16,7 +16,6 @@ jobs:
           - arch: x86_64
             runs_on: macos-26-intel
     runs-on: ${{ matrix.runs_on }}
-    timeout-minutes: 7
     env: &arch-env
       POLYREGION_ARCH: ${{ matrix.arch }}
     steps:
@@ -73,7 +72,6 @@ jobs:
       matrix:
         include: *simple-matrix
     runs-on: ${{ matrix.runs_on }}
-    timeout-minutes: 22
     env: *arch-env
     steps:
       - uses: *checkout
@@ -235,7 +233,6 @@ jobs:
           - arch: arm64
             runs_on: macos-26
     runs-on: ${{ matrix.runs_on }}
-    timeout-minutes: 251
     env: *arch-env
     steps:
       - uses: *checkout

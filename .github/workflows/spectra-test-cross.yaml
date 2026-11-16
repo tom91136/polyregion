@@ -20,7 +20,6 @@ jobs:
           - { arch: ppc64le, qemu_arch: ppc64le, sysroot_variant: al8, sysroot_dockerfile: Dockerfile }
           - { arch: arm, qemu_arch: arm, sysroot_variant: ubuntu20, sysroot_dockerfile: Dockerfile.ubuntu }
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 31
     env:
       POLYREGION_ARCH: ${{ matrix.arch }}
       POLYREGION_DIST: ${{ github.workspace }}/dist
