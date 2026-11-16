@@ -39,7 +39,7 @@ jobs:
           sudo apt-get ${{ env.APT_OPTIONS }} install -y cmake ninja-build
 
       - name: Register binfmt-misc for ${{ matrix.qemu_arch }}
-        run: bash ci/install_qemu.sh ${{ matrix.qemu_arch }}
+        run: bash ../ci/install_qemu.sh ${{ matrix.qemu_arch }}
 
       - name: Restore sysroot cache
         uses: actions/cache/restore@v5
