@@ -339,14 +339,18 @@ __RT_ODR inline std::atomic<void (*)(const void *, size_t, bool)> &_rt_reclaim_c
 
 } // namespace details
 
-extern "C" __RT_ODR __RT_EXPORTED void _rt_set_release_cb(void (*cb)(void *, size_t)) { details::_rt_release_cb().store(cb); }
+extern "C" __RT_ODR __RT_EXPORTED void _rt_set_release_cb(void (*cb)(void *, size_t)) {
+  details::_rt_release_cb().store(cb, std::memory_order_release);
+}
 
-extern "C" __RT_ODR __RT_EXPORTED void _rt_set_reclaim_cb(void (*cb)(const void *, size_t, bool)) { details::_rt_reclaim_cb().store(cb); }
+extern "C" __RT_ODR __RT_EXPORTED void _rt_set_reclaim_cb(void (*cb)(const void *, size_t, bool)) {
+  details::_rt_reclaim_cb().store(cb, std::memory_order_release);
+}
 
 // host code outside the fault path (syscalls, realloc) is about to access [ptr, ptr + size)
 extern "C" __RT_ODR __RT_EXPORTED void _rt_reclaim(const void *ptr, const size_t size, const bool forWrite) {
   if (!ptr || size == 0) return;
-  if (const auto cb = details::_rt_reclaim_cb().load(std::memory_order_relaxed)) cb(ptr, size, forWrite);
+  if (const auto cb = details::_rt_reclaim_cb().load(std::memory_order_acquire)) cb(ptr, size, forWrite);
 }
 
 extern "C" __RT_ODR __RT_EXPORTED void _rt_record(const void *ptr, const size_t size, const Type type) {
@@ -362,7 +366,7 @@ extern "C" __RT_ODR __RT_EXPORTED void _rt_release(void *ptr, const Type type) {
   const details::_rt_service_guard guard;
   const auto released = details::_rt_get()->blockingRelease(reinterpret_cast<uintptr_t>(ptr), type);
   if (type == Type::HeapFree || type == Type::HeapCXXDelete || (type == Type::HeapSanitizer && released))
-    if (const auto cb = details::_rt_release_cb().load(std::memory_order_relaxed)) cb(ptr, released ? released->size : 0);
+    if (const auto cb = details::_rt_release_cb().load(std::memory_order_acquire)) cb(ptr, released ? released->size : 0);
 }
 
 extern "C" __RT_ODR __RT_EXPORTED PtrMeta _rt_reflect_p(const void *ptr) {
