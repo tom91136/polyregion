@@ -68,8 +68,12 @@ int main() {
                 [&](int i) { scoresPtr[i] = score(needle, db[static_cast<std::size_t>(i)]); });
 
   double err = 0;
-  for (int i = 0; i < N; ++i)
-    err += std::fabs(scores[static_cast<std::size_t>(i)] - score(needle, db[static_cast<std::size_t>(i)]));
+  for (int i = 0; i < N; ++i) {
+    const auto k = static_cast<std::size_t>(i);
+    const double want = score(needle, db[k]);
+    err += std::fabs(scores[k] - want);
+    if (scores[k] != want) std::fprintf(stderr, "scores[%d] = %g, want %g (len %zu, '%c')\n", i, scores[k], want, db[k].size(), db[k][0]);
+  }
   const bool ok = err <= 1e-9;
   std::printf(ok ? "pass" : "fail (err=%g)", err);
   return ok ? 0 : 1;
