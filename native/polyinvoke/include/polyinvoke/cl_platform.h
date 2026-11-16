@@ -7,6 +7,7 @@
 #include <optional>
 #include <set>
 #include <unordered_map>
+#include <vector>
 
 #include "polyregion/compat.h"
 
@@ -143,8 +144,12 @@ class POLYREGION_EXPORT ClDeviceQueue final : public DeviceQueue {
   void *nullArgStub = nullptr;
   cl_mem nullArgBuffer = {};
   std::atomic<bool> pending = false;
+  std::atomic<cl_int> failure = CL_SUCCESS;
+  std::vector<cl_event> events;
 
   void enqueueCallback(const MaybeCallback &cb, cl_event event);
+  void settleEvent(cl_event event);
+  void drainEvents();
   void *ensureNullArgStub();
   cl_mem ensureNullArgBuffer();
   bool mapSvmForHost(void *ptr);

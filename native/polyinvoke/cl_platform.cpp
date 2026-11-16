@@ -763,6 +763,7 @@ ClDeviceQueue::~ClDeviceQueue() {
   // teardown safe when the caller drops a queue immediately after an asynchronous launch.
   CHECKED(clFinish(queue));
   (void)latch.waitAll();
+  drainEvents();
   if (nullArgStub) clSVMFree(context, nullArgStub);
   if (nullArgBuffer) CHECKED(clReleaseMemObject(nullArgBuffer));
   CHECKED(clReleaseCommandQueue(queue));
@@ -787,24 +788,34 @@ void ClDeviceQueue::mapAllSvmForHost() {
 }
 void ClDeviceQueue::enqueueCallback(const MaybeCallback &cb, cl_event event) {
   POLYINVOKE_TRACE();
-  if (!cb) return;
   // SVM paths use blocking memcpy with no event (already complete); invoke cb directly, clSetEventCallback
   // would return CL_INVALID_EVENT on a null event
   if (!event) {
-    (*cb)();
+    if (cb) (*cb)();
+    return;
+  }
+  if (!cb) {
+    events.push_back(event);
     return;
   }
   CHECKED(clSetEventCallback(
-      event, CL_COMPLETE,
-      [](cl_event e, cl_int status, void *data) {
-        CHECKED(clReleaseEvent(e));
-        CHECKED(status);
-        detail::CountedCallbackHandler::instance().consume(data);
-      },
-      detail::CountedCallbackHandler::instance().createHandle([cb, token = latch.acquire()]() {
-        if (cb) (*cb)();
+      event, CL_COMPLETE, [](cl_event, cl_int, void *data) { detail::CountedCallbackHandler::instance().consume(data); },
+      detail::CountedCallbackHandler::instance().createHandle([this, event, cb, token = latch.acquire()]() {
+        settleEvent(event);
+        (*cb)();
       })));
   CHECKED(clFlush(queue));
+}
+void ClDeviceQueue::settleEvent(cl_event event) {
+  cl_int status = CL_SUCCESS;
+  CHECKED(clGetEventInfo(event, CL_EVENT_COMMAND_EXECUTION_STATUS, sizeof(status), &status, nullptr));
+  CHECKED(clReleaseEvent(event));
+  if (cl_int none = CL_SUCCESS; status < 0) failure.compare_exchange_strong(none, status);
+}
+void ClDeviceQueue::drainEvents() {
+  for (auto *const event : std::exchange(events, {}))
+    settleEvent(event);
+  CHECKED(failure.exchange(CL_SUCCESS));
 }
 void ClDeviceQueue::enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, uintptr_t dst, size_t dstOffset, size_t size,
                                                const MaybeCallback &cb) {
@@ -831,8 +842,7 @@ void ClDeviceQueue::enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, 
     const auto dstMem = detail::MemoryObjects<cl_mem>::subrange(queryMemObject(dst), dstOffset, size);
     if (!srcMem) POLYINVOKE_FATAL(PREFIX, "Source range exceeds memory object: %" PRIuPTR "+%zu (%zu bytes)", src, srcOffset, size);
     if (!dstMem) POLYINVOKE_FATAL(PREFIX, "Destination range exceeds memory object: %" PRIuPTR "+%zu (%zu bytes)", dst, dstOffset, size);
-    CHECKED(
-        clEnqueueCopyBuffer(queue, srcMem->value, dstMem->value, srcMem->offset, dstMem->offset, size, 0, nullptr, cb ? &event : nullptr));
+    CHECKED(clEnqueueCopyBuffer(queue, srcMem->value, dstMem->value, srcMem->offset, dstMem->offset, size, 0, nullptr, &event));
     pending = true;
   }
   enqueueCallback(cb, event);
@@ -1028,7 +1038,7 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
                                   nullptr,                          //
                                   dimensions.global.sizes().data(), //
                                   dimensions.local.sizes().data(),  //
-                                  0, nullptr, cb ? &event : nullptr);
+                                  0, nullptr, &event);
   };
   const auto dimensions = cl_details::launchDimensions(policy.global, local);
   cl_int result = enqueue(dimensions);
@@ -1051,6 +1061,7 @@ void ClDeviceQueue::enqueueWaitBlocking() {
   POLYINVOKE_TRACE();
   CHECKED(clFinish(queue));
   pending = false;
+  drainEvents();
   mapAllSvmForHost();
 }
 bool ClDeviceQueue::quiescent() { return !pending && !(svm && *svm == 0 && svmTracker && svmTracker->anyDeviceOwned()); }
