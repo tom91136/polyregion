@@ -94,6 +94,7 @@ POLYREGION_RT_PROTECT inline void dumpMemoryWithLayout(const runtime::TypeLayout
 
 template <typename SMA> POLYREGION_RT_PROTECT inline void dumpAllocationTable(SMA &sma) {
   if (debugLevel() < DebugLevel::Debug) return;
+  const auto table = sma.exclusive();
   log(DebugLevel::Debug, "[Allocations (%zu)]", sma.localToRemoteAlloc.size());
   for (auto [k, v] : sma.localToRemoteAlloc) {
     const auto &l = sma.remoteToLocalPtr[v.remote.ptr];
@@ -104,6 +105,7 @@ template <typename SMA> POLYREGION_RT_PROTECT inline void dumpAllocationTable(SM
 
 template <typename SMA> POLYREGION_RT_PROTECT inline void dumpAllocations(SMA &sma) {
   if (debugLevel() < DebugLevel::Debug) return;
+  const auto table = sma.exclusive();
   for (auto [k, v] : sma.localToRemoteAlloc) {
     if (!v.layout || v.layout->memberCount == 0) continue;
     dumpMemoryWithLayout(v.layout, reinterpret_cast<const char *>(k));
@@ -163,6 +165,7 @@ struct ArenaImage {
 template <typename SMA>
 POLYREGION_RT_PROTECT inline ArenaImage arenaMarshal(SMA &sma, const void *capture, const runtime::TypeLayout &layout,
                                                      ArenaPlacement placement) {
+  const auto table = sma.exclusive();
   sma.genArenaAdopt(std::move(placement));
   sma.genArenaReset();
   sma.genArenaObjectSlack = invoke::overReadPadBytes(currentDevice->features());
@@ -249,7 +252,7 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT CaptureMarshal *captureMarshal();
     return (allocations).mirrorGraph(root, poolPtrOffsets.data(), poolPtrOffsets.size());                                                  \
   }                                                                                                                                        \
   POLYREGION_EXPORT extern "C" void polyrt_sma_read_graph(const void *root) { (allocations).unmirrorReadGraph(root); }                     \
-  namespace { /* XXX clears the SMA free-hook before `allocations` is destroyed (declared after it) */                                     \
+  namespace { /* XXX `allocations` is immortal, so a callback that outlives the hook clear still finds live tables */                      \
   ::polyregion::polyrt::sma::CaptureMarshalOf<std::remove_reference_t<decltype(allocations)>> captureMarshalOf{allocations};               \
   struct ReleaseHookRegistrar {                                                                                                            \
     ReleaseHookRegistrar() {                                                                                                               \
@@ -263,6 +266,7 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT CaptureMarshal *captureMarshal();
       ::polyregion::polyrt::sma::registerCaptureMarshal(nullptr);                                                                          \
       ::polyregion::rt_reflect::_rt_set_release_cb(nullptr);                                                                               \
       ::polyregion::rt_reflect::_rt_set_reclaim_cb(nullptr);                                                                               \
+      (allocations).dropAllGuards();                                                                                                       \
     }                                                                                                                                      \
   } releaseHookRegistrar;                                                                                                                  \
   }                                                                                                                                        \

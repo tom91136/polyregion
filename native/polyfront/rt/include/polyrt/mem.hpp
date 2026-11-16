@@ -549,6 +549,15 @@ public:
   }
 
 private:
+  struct Released {
+    uintptr_t begin, end;
+    bool releaseRemote;
+  };
+  std::recursive_mutex tableMutex;
+  size_t tableDepth = 0;
+  std::mutex releasedMutex;
+  std::vector<Released> released;
+  std::atomic<bool> hasReleased{false};
   std::map<uintptr_t, Guard> guards{};
   std::recursive_mutex guardMutex;
   static inline std::atomic<SynchronisedMemAllocation *> guardOwner{nullptr};
@@ -756,13 +765,15 @@ public:
         reclaim(reinterpret_cast<const void *>(it->second.local), forWrite);
   }
 
-  ~SynchronisedMemAllocation() {
+  void dropAllGuards() {
     if (guardOwner.load(std::memory_order_acquire) != this) return;
     const std::scoped_lock lock(guardMutex);
     for (auto it = guards.begin(); it != guards.end();)
       it = dropGuard(it);
     guardOwner.store(nullptr, std::memory_order_release);
   }
+
+  ~SynchronisedMemAllocation() { dropAllGuards(); }
 
   SynchronisedMemAllocation(LocalReflect localReflect, //
                             RemoteAlloc remoteAlloc,   //
@@ -777,11 +788,13 @@ public:
         debug(debug) {}
 
   [[nodiscard]] uintptr_t syncLocalToRemote(const void *p, const runtime::TypeLayout &s) {
+    const auto table = exclusive();
     beginSync();
     return mirrorToRemote(static_cast<const char *>(p), 1, 1, s);
   }
 
   std::optional<uintptr_t> syncLocalToRemote(const void *p) {
+    const auto table = exclusive();
     if (debug) std::fprintf(stderr, "[SMA] syncLocalToRemote(p=%p)\n", p);
     if (const auto query = queryLocal(p)) {
       const auto [alloc, offsetInBytes] = *query;
@@ -799,6 +812,7 @@ public:
   }
 
   std::optional<uintptr_t> invalidateLocal(const void *p) {
+    const auto table = exclusive();
     if (debug) std::fprintf(stderr, "[SMA] invalidateLocal(p=%p)\n", p);
     if (const auto query = queryLocal(p)) {
       const auto [alloc, offsetInBytes] = *query;
@@ -812,12 +826,14 @@ public:
   std::unordered_set<uintptr_t> syncVisited;
 
   void syncRemoteToLocalAfterLaunch(void *p) {
+    const auto table = exclusive();
     afterLaunch = true;
     syncRemoteToLocal(p);
     afterLaunch = false;
   }
 
   std::optional<uintptr_t> syncRemoteToLocal(void *p, const std::optional<size_t> &sizeInByte = {}) {
+    const auto table = exclusive();
     if (const auto query = queryLocal(p)) {
       const auto [alloc, offsetInBytes] = *query;
       // A mapped host write is authoritative until the next upload. Do not restore the older remote snapshot.
@@ -901,6 +917,7 @@ public:
   }
 
   void disassociate(const void *p, bool releaseRemote = true) {
+    const auto table = exclusive();
     if (const auto query = queryLocalIt(p)) {
       const auto [it, offsetInBytes] = *query;
       if (debug)
@@ -913,17 +930,57 @@ public:
     }
   }
 
+  // XXX lock order: tableMutex before guardMutex; hooks on foreign threads only try-lock, so a free never waits on a launch
+  class [[nodiscard]] TableLock {
+    SynchronisedMemAllocation &self;
+    std::unique_lock<std::recursive_mutex> held;
+
+  public:
+    explicit TableLock(SynchronisedMemAllocation &self) : TableLock(self, std::unique_lock(self.tableMutex)) {}
+    TableLock(SynchronisedMemAllocation &self, std::unique_lock<std::recursive_mutex> held) : self(self), held(std::move(held)) {
+      if (self.tableDepth++ == 0) self.drainReleased();
+    }
+    TableLock(const TableLock &) = delete;
+    TableLock &operator=(const TableLock &) = delete;
+    ~TableLock() { --self.tableDepth; }
+  };
+  TableLock exclusive() { return TableLock(*this); }
+
   // the host block [p, p + sizeInBytes) is going away: drop whatever mirrors it, interior keys included
   void forget(const void *p, const size_t sizeInBytes, const bool releaseRemote = true) {
     if (tableMutations) return;
     const auto begin = reinterpret_cast<uintptr_t>(p), end = begin + std::max<size_t>(sizeInBytes, 1);
     unguard(begin);
+    std::unique_lock held(tableMutex, std::try_to_lock);
+    if (!held) {
+      const std::scoped_lock pending(releasedMutex);
+      released.push_back(Released{begin, end, releaseRemote});
+      hasReleased.store(true, std::memory_order_release);
+      return;
+    }
+    const TableLock lock(*this, std::move(held));
+    forgetTables(begin, end, releaseRemote);
+  }
+
+  void forgetTables(const uintptr_t begin, const uintptr_t end, const bool releaseRemote) {
     genArenaForget(begin, end);
     std::vector<uintptr_t> mirrored;
     for (auto it = localToRemoteAlloc.lower_bound(begin); it != localToRemoteAlloc.end() && it->first < end; ++it)
       mirrored.push_back(it->first);
     for (const auto local : mirrored)
       disassociateExact(reinterpret_cast<const void *>(local), releaseRemote);
+  }
+
+  void drainReleased() {
+    if (!hasReleased.load(std::memory_order_acquire)) return;
+    std::vector<Released> batch;
+    {
+      const std::scoped_lock pending(releasedMutex);
+      batch.swap(released);
+      hasReleased.store(false, std::memory_order_relaxed);
+    }
+    for (const auto &r : batch)
+      forgetTables(r.begin, r.end, r.releaseRemote);
   }
 
   void disassociateExact(const void *p, const bool releaseRemote = true) {
@@ -939,6 +996,7 @@ public:
   }
 
   uintptr_t mirrorAlloc(const void *local, const size_t sizeInBytes, const bool hostReadOnly) {
+    const auto table = exclusive();
     beginSync();
     const uintptr_t remote = createDeviceAllocation(static_cast<const char *>(local), sizeInBytes, nullptr, hostReadOnly);
     localSyncVisited.insert(remote);
@@ -953,6 +1011,7 @@ public:
   }
 
   void mirrorPatch(uintptr_t remote, const size_t offsetInBytes, const uintptr_t value) {
+    const auto table = exclusive();
     // value==0 is a foreign pointee already at a valid device address; leave the copied original
     if (value == 0) return;
     remote = successor(remote, 0);
@@ -1004,17 +1063,20 @@ public:
   }
 
   uintptr_t mirrorEnsure(const void *local, size_t minSize = 0, const bool scalarPointee = false) {
+    const auto table = exclusive();
     const auto r = ensureMirroredBase(local, minSize, scalarPointee);
     return r ? r->first + r->second : 0;
   }
 
   size_t mirrorPointeeSize(const void *local) {
+    const auto table = exclusive();
     if (!local) return 0;
     const PtrQuery meta = localReflect(local);
     return meta.sizeInBytes > meta.offsetInBytes ? meta.sizeInBytes - meta.offsetInBytes : meta.sizeInBytes;
   }
 
   uintptr_t mirrorEnsureDeep(const void *local, const size_t depth) {
+    const auto table = exclusive();
     if (debug) std::fprintf(stderr, "[SMA] mirrorEnsureDeep(local=%p, depth=%zu)\n", local, depth);
     const uintptr_t devBlock = mirrorEnsure(local);
     if (devBlock == 0 || depth == 0) return devBlock;
@@ -1041,6 +1103,7 @@ public:
   }
 
   void unmirrorReadAlloc(const void *local) {
+    const auto table = exclusive();
     if (const auto query = queryLocal(local, /*allowPastEnd*/ true)) {
       const auto [alloc, offset] = *query;
       if (alloc->hostReadOnly) return;
@@ -1058,6 +1121,7 @@ public:
   // dual of mirrorEnsureDeep: at each level translate a pointer slot the kernel changed back to its host
   // address (like readSubObject), then follow it to read deeper; a slot the kernel left alone is not rewritten
   void unmirrorReadDeep(const void *local, const size_t depth) {
+    const auto table = exclusive();
     if (debug) std::fprintf(stderr, "[SMA] unmirrorReadDeep(local=%p, depth=%zu)\n", local, depth);
     if (depth == 0) {
       unmirrorReadAlloc(local);
@@ -1096,6 +1160,7 @@ public:
   }
 
   void unmirrorVisitClear() {
+    const auto table = exclusive();
     syncVisited.clear();
     beginSync();
   }
@@ -1157,6 +1222,7 @@ public:
   std::vector<uint64_t> genArenaTouched; // leaf offsets this kernel reached
 
   void genArenaAdopt(ArenaPlacement placement) {
+    const auto table = exclusive();
     if (genArenaActive && placement.heap() != genArenaPlacement.heap())
       throw std::logic_error("the arena window lives in a different kind of device memory than this launch places it in");
     if (genArenaActive && placement.heap() && placement.handle() != genArenaDevBase)
@@ -1166,6 +1232,7 @@ public:
   }
 
   void genArenaReset() {
+    const auto table = exclusive();
     genArenaSlots.clear();
     genArenaUploads.clear();
     genArenaHostUploads.clear();
@@ -1398,6 +1465,7 @@ public:
   }
 
   uintptr_t genArenaFinish() {
+    const auto table = exclusive();
     const size_t need = genArenaStaging.size() + 1;
     if (!genArenaActive || need > genArenaDevCapacity) genArenaPlaceWindow(std::max(need, genArenaDevCapacity * 2));
     if (genArenaWindow)
@@ -1467,6 +1535,7 @@ public:
 
   // the arena is about to be re-laid from host copies: bring every stale resident leaf home and drop its guard
   void releaseArenaGuards() {
+    const auto table = exclusive();
     const std::scoped_lock lock(guardMutex);
     for (auto it = guards.begin(); it != guards.end();) {
       if (!it->second.arena) {
@@ -1570,6 +1639,7 @@ public:
   }
 
   void genArenaReadback() {
+    const auto table = exclusive();
     if (!genArenaActive || genArenaRecs.empty()) return;
     if (genArenaPersist) {
       // resident leaves stay on-device and fault home on the next host access; the rest copy back now
@@ -1618,6 +1688,7 @@ public:
   void genArenaMapWrite(const void *p) { reclaim(p, /*forWrite*/ true); }
 
   uintptr_t mirrorGraph(const void *root, const size_t *ptrOffsets, const size_t nPtr) {
+    const auto table = exclusive();
     if (!root || localReflect(root).deviceAccessible) return 0;
     std::vector<size_t> offs(ptrOffsets, ptrOffsets + nPtr);
     std::sort(offs.begin(), offs.end()); // read-back aligns origPtrs with this order
@@ -1663,6 +1734,7 @@ public:
   }
 
   void unmirrorReadGraph(const void *root) {
+    const auto table = exclusive();
     const auto it = mirroredGraphs.find(root);
     if (it == mirroredGraphs.end()) return;
     const MirroredGraph &g = it->second;

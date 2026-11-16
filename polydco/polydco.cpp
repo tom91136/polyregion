@@ -51,7 +51,7 @@ POLYREGION_EXPORT extern "C" void __polyregion_fc_assert_msg(const char *message
 POLYREGION_EXPORT extern "C" void __polyregion_builtin_assert(uint32_t code, const char *message) { g_assert.record(code, message); }
 POLYREGION_EXPORT extern "C" int __polyregion_fc_assert_raised() { return g_assert.raised() ? 1 : 0; }
 
-static polyrt::SynchronisedMemAllocation allocations(
+static auto &allocations = *new polyrt::SynchronisedMemAllocation(
     [](const void *ptr) -> polyrt::PtrQuery {
       if (const auto it = ptrRecords.find(reinterpret_cast<uintptr_t>(ptr)); it != ptrRecords.end()) {
         const auto meta = rt_reflect::_rt_reflect_p(ptr);

@@ -28,7 +28,7 @@
 using namespace polyregion;
 using polyrt::DebugLevel;
 
-POLYREGION_RT_PROTECT static polyrt::SynchronisedMemAllocation allocations(
+POLYREGION_RT_PROTECT static auto &allocations = *new polyrt::SynchronisedMemAllocation(
     [](const void *ptr) -> polyrt::PtrQuery {
       if (const auto meta = rt_reflect::_rt_reflect_p(ptr); meta.type != rt_reflect::Type::Unknown) {
         return polyrt::PtrQuery{.sizeInBytes = meta.size,
