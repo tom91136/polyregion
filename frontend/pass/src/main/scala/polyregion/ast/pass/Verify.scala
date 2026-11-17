@@ -225,10 +225,11 @@ object Verify {
         val c0                   = validateTerm(c, from)
         def isNumeric(t: p.Type) = t.kind == p.Type.Kind.Integral || t.kind == p.Type.Kind.Fractional
         (from.tpe, as) match {
-          case (a, b) if a == b                           => c0
-          case (p.Type.Struct(_, _), p.Type.Struct(_, _)) => c0
-          case (p.Type.Ptr(_, _), p.Type.Ptr(_, _))       => c0
-          case (a, b) if isNumeric(a) && isNumeric(b)     => c0
+          case (a, b) if a == b                                        => c0
+          case (p.Type.Struct(_, _), p.Type.Struct(_, _))              => c0
+          case (p.Type.Ptr(_, _), p.Type.Ptr(_, _))                    => c0
+          case (p.Type.Ptr(_, _), b) if b.kind == p.Type.Kind.Integral => c0
+          case (a, b) if isNumeric(a) && isNumeric(b)                  => c0
           case (a, b) => c0 ~ s"Cannot cast unrelated type ${a.repr} to ${b.repr}: ${e.repr}"
         }
       case p.Expr.BitCast(from, as) =>

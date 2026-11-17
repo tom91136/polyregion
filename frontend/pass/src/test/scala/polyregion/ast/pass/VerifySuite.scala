@@ -71,6 +71,25 @@ class VerifySuite extends munit.FunSuite {
     assert(invalid.exists(_.contains("Cannot bit-cast differently-sized or non-scalar type")), invalid.mkString("\n"))
   }
 
+  test("a pointer reads as its address but an integer does not make a pointer") {
+    val ptr = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global)
+    val toInt = errors(
+      List(
+        p.Stmt.Var(named("p", ptr), None, isMutable = true),
+        p.Stmt.Var(named("addr", p.Type.IntS64), Some(p.Expr.Cast(selectT("p", ptr), p.Type.IntS64)))
+      )
+    )
+    assertEquals(toInt, Nil)
+
+    val toPtr = errors(
+      List(
+        p.Stmt.Var(named("i", p.Type.IntS64), None, isMutable = true),
+        p.Stmt.Var(named("q", ptr), Some(p.Expr.Cast(selectT("i", p.Type.IntS64), ptr)))
+      )
+    )
+    assert(toPtr.exists(_.contains("Cannot cast unrelated type")), toPtr.mkString("\n"))
+  }
+
   private def errors(body: List[p.Stmt]): List[String] =
     Verify(
       program(entry(body = body :+ p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const)))),
