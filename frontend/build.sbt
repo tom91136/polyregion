@@ -440,8 +440,11 @@ lazy val compiler = project
     name                := "compiler",
     assembly / artifact := (assembly / artifact).value.withClassifier(Some("assembly")),
     javacOptions ++= Seq("-proc:none"),
+    scalacOptions ~= (_.filterNot(_.startsWith("-release:"))),
     scalacOptions ++=
-      Seq("-Yretain-trees") ++
+      Seq("-Xunchecked-java-output-version", "17") ++
+        Seq("-Wconf:cat=deprecation&origin=sun\\.misc\\.Unsafe.*:silent") ++
+        Seq("-Yretain-trees") ++
         Seq("-Xmax-inlines", "80"),
     libraryDependencies ++= Seq(
       "net.bytebuddy"  % "byte-buddy" % "1.18.11",
