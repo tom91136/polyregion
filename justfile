@@ -276,6 +276,19 @@ test-scala *args='':
     done
     cd frontend && {{ sbt }} 'pass/testFull' 'codegen/testFull' 'compiler/testFull' 'runtime-scala/testFull' 'ewgen/testFull' 'compiler-testsuite-scala/testFull' {{ args }}
 
+# Run the javalang suites; the annotation processor compiles each offload region during javac.
+test-java *args='':
+    #!/usr/bin/env bash
+    set -uo pipefail
+    BUILD=$(just _native-build)
+    if [ -z "${POLYREGION_NATIVE_LIB_DIR:-}" ] && [ -n "$BUILD" ]; then
+        export POLYREGION_NATIVE_LIB_DIR="$PWD/$BUILD/bindings/jvm"
+    fi
+    for package_service in "$PWD/native/polyc/libpolypass.so" "$PWD/native/polyc/libpolypass.dylib" "$PWD/native/polyc/libpolypass.dll"; do
+        if [ -s "$package_service" ]; then export POLYPASS_PLUGINS="${POLYPASS_PLUGINS:-$package_service}"; break; fi
+    done
+    cd frontend && {{ sbt }} 'compiler-testsuite-java/test' 'compiler-testsuite-java21/test' {{ args }}
+
 # Run the native ctest suite; device targets skip without a GPU/emulator. Extra ctest flags via *args.
 test-native *args='': build-pass-native
     #!/usr/bin/env bash

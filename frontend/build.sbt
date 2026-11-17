@@ -2,6 +2,9 @@
 
 import org.scalajs.linker.interface.{ESVersion, ModuleKind => SJSModuleKind, OutputPatterns}
 
+lazy val minJdk   = 17
+lazy val buildJdk = sys.props.getOrElse("java.specification.version", "0").split('.').last.toInt
+
 Global / concurrentRestrictions := Seq(
   Tags.limit(Tags.CPU, java.lang.Runtime.getRuntime.availableProcessors),
   Tags.limit(Tags.Network, java.lang.Runtime.getRuntime.availableProcessors),
@@ -24,6 +27,8 @@ lazy val exportPassDso    = taskKey[File]("Build the SN pass DSO (nativeLink) an
 lazy val exportMavenRepo  = taskKey[File]("Publish the JVM SDK artefacts as a Maven repository in the native tree.")
 lazy val genCodegen       = taskKey[Unit]("Run polyregion.ast.CodeGen to (re)generate native C++/JNI sources.")
 lazy val genEw            = taskKey[Unit]("Run ewgen.Main to (re)generate the polyinvoke wrangler sources.")
+lazy val censusFull       = taskKey[Unit]("Run the bytecode census over whole jars rather than the default sample.")
+lazy val javaRelease      = settingKey[Int]("JDK release javac compiles against.")
 
 def findBdwgcPrefix: File = {
   val nativeDir = (file(".") / ".." / "native").getAbsoluteFile
@@ -48,6 +53,7 @@ lazy val munitVersion  = "1.3.4"
 
 lazy val commonSettings = Seq(
   scalaVersion     := scala3Version,
+  javaRelease      := minJdk,
   version          := "0.0.1-SNAPSHOT",
   organization     := "uk.ac.bristol.uob-hpc",
   organizationName := "University of Bristol",
@@ -58,7 +64,7 @@ lazy val commonSettings = Seq(
       "-Xlint:all",
       "-XprintProcessorInfo",
       "-XprintRounds"
-    ) ++ Seq("--release", "17"),
+    ) ++ Seq("--release", javaRelease.value.toString),
 //  scalacOptions ~= { options: Seq[String] =>
 //    options.filterNot(
 //      Set("-explain-types", "-explain")
@@ -449,8 +455,17 @@ lazy val compiler = project
     libraryDependencies ++= Seq(
       "net.bytebuddy"  % "byte-buddy" % "1.18.11",
       "com.lihaoyi"   %% "pprint"     % "0.9.6",
-      "org.scalameta" %% "munit"      % munitVersion % Test
-    )
+      "org.scalameta" %% "munit"      % munitVersion % Test,
+      // corpora for the bytecode census, pinned so the lowered-count floors stay meaningful
+      "org.scala-lang"  %% "scala3-compiler" % scala3Version % Test,
+      "com.google.guava" % "guava"           % "33.5.0-jre"  % Test
+    ),
+    censusFull := Def.uncached {
+      Def.taskDyn {
+        System.setProperty("polyregion.bytecode.census", "full")
+        (Test / testOnly).toTask(" polyregion.javalang.BytecodeCensusSuite")
+      }.value
+    }
   )
   .dependsOn(ast.jvm(scala3Version), pass.jvm(scala3Version), `binding-jvm`)
 
@@ -479,23 +494,53 @@ lazy val `compiler-testsuite-scala` = project
   )
   .dependsOn(`runtime-scala`)
 
+lazy val javaSuiteSettings = Seq(
+  autoScalaLibrary := false,
+  javacOptions ++= (if (buildJdk >= 21) Seq("-proc:full") else Nil),
+  javacOptions += "-Apolyregion.deferErrors=true",
+  (Test / javaHome)                      := Some(file(sys.props("java.home"))),
+  libraryDependencies += "com.github.sbt" % "junit-interface" % "0.13.3" % Test,
+  fork                                   := true,
+  Test / javaOptions += "-ea",
+  Test / parallelExecution := false
+)
+
 lazy val `compiler-testsuite-java` = project
   .settings(
     commonSettings,
-    autoScalaLibrary := false,
-    javacOptions ++= Seq("-XprintProcessorInfo", "-XprintRounds"),
+    javaSuiteSettings,
     name := "compiler-testsuite-java",
-    (Test / javaHome) := {
-      // make sure we get the JDK dir and not the JRE
-      val javaHome = file(sys.props("java.home"))
-      if (!(javaHome.getParentFile / "lib" / "tools.jar").exists()) Some(javaHome)
-      else Some(javaHome.getParentFile)
+    Test / javaOptions += {
+      val artefacts =
+        Seq((`runtime-java` / Compile / classDirectory).value, (`binding-jvm` / Compile / classDirectory).value)
+      s"-Dpolyregion.runtimeArtefacts=${artefacts.mkString(java.io.File.pathSeparator)}"
     },
-    libraryDependencies ++= Seq(
-      "com.github.sbt" % "junit-interface" % "0.13.3" % Test
-    )
+    Test / javaOptions += {
+      val converter = fileConverter.value
+      val classpath = (Test / fullClasspath).value.map(a => converter.toPath(a.data).toString)
+      s"-Dpolyregion.hostClasspath=${classpath.mkString(java.io.File.pathSeparator)}"
+    }
   )
-  .dependsOn(`runtime-java`)
+  .dependsOn(`runtime-java`, compiler % Test)
+
+lazy val forwardSuiteJdk = 21
+
+lazy val `compiler-testsuite-java21` = project
+  .settings(
+    commonSettings,
+    javaSuiteSettings,
+    name        := "compiler-testsuite-java21",
+    javaRelease := forwardSuiteJdk,
+    Test / unmanagedSourceDirectories := {
+      val root = (Test / sourceDirectory).value
+      if (buildJdk >= forwardSuiteJdk) Seq(root / "java")
+      else {
+        sLog.value.info(s"compiler-testsuite-java21 needs JDK $forwardSuiteJdk, found $buildJdk: skipping")
+        Nil
+      }
+    }
+  )
+  .dependsOn(`runtime-java`, compiler % Test, `compiler-testsuite-java` % "test->test")
 
 lazy val mainCls = Some("polyregion.examples.CheckApi")
 
@@ -559,6 +604,7 @@ lazy val root = project
     compiler,
     `compiler-testsuite-scala`,
     `compiler-testsuite-java`,
+    `compiler-testsuite-java21`,
     `examples-scala`,
     `benchmarks-scala`
   )
