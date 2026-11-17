@@ -14,6 +14,7 @@ swapoff -a
 rm -f /mnt/swapfile
 
 if zram_ready; then
+  echo 1 > /sys/block/zram0/reset
   echo "$target" > /sys/block/zram0/disksize
   mkswap /dev/zram0
   swapon -p 5 /dev/zram0
