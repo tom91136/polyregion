@@ -478,6 +478,8 @@ lazy val compiler = project
       "net.bytebuddy"  % "byte-buddy" % "1.18.11",
       "com.lihaoyi"   %% "pprint"     % "0.9.6",
       "org.scalameta" %% "munit"      % munitVersion % Test,
+      // the IR tier reads class files through Vineflower's Statement/Exprent tree, which is no stable API
+      ("org.vineflower" % "vineflower" % "1.12.0").classifier("slim"),
       // corpora for the bytecode census, pinned so the lowered-count floors stay meaningful
       "org.scala-lang"  %% "scala3-compiler" % scala3Version % Test,
       "com.google.guava" % "guava"           % "33.5.0-jre"  % Test
