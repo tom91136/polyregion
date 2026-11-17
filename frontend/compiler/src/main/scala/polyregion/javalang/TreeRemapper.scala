@@ -263,8 +263,40 @@ object TreeRemapper {
     else if (l == p.Type.IntS64 || r == p.Type.IntS64) p.Type.IntS64
     else p.Type.IntS32
 
-  private def coerce(scope: Scope, buf: ListBuffer[p.Stmt], t: p.Term, target: p.Type): p.Term =
-    if (t.tpe == target) t else bind(scope, buf, p.Expr.Cast(t, target))
+  private def coerce(scope: Scope, buf: ListBuffer[p.Stmt], t: p.Term, target: p.Type): p.Term = t.tpe match {
+    case same if same == target                                            => t
+    case p.Type.Ptr(pointee @ p.Type.Struct(_, _), _) if pointee == target => t
+    case _                                                                 => bind(scope, buf, p.Expr.Cast(t, target))
+  }
+
+  private def fieldOf(base: p.Term.Select, name: String, tpe: p.Type): p.Term.Select = {
+    val through = base.tpe match {
+      case p.Type.Ptr(p.Type.Struct(_, _), _) => base.steps :+ p.PathStep.Deref
+      case _                                  => base.steps
+    }
+    p.Term.Select(base.root, through :+ p.PathStep.Field(name), tpe)
+  }
+
+  private def referent(t: p.Type): p.Type = t match {
+    case p.Type.Ptr(s @ p.Type.Struct(_, _), _) => s
+    case other                                  => other
+  }
+
+  private def referenceTo(tpe: p.Type): p.Type = tpe match {
+    case s @ p.Type.Struct(_, _) => p.Type.Ptr(s, p.Type.Space.Private)
+    case other                   => other
+  }
+
+  // objects are passed by reference so that a callee writing a field is seen by its caller
+  private def byReference(scope: Scope, buf: ListBuffer[p.Stmt], t: p.Term): p.Term = t match {
+    case sel @ p.Term.Select(_, _, p.Type.Struct(_, _)) =>
+      val space = sel.root.tpe match {
+        case p.Type.Ptr(_, s) => s
+        case _                => p.Type.Space.Private
+      }
+      bind(scope, buf, p.Expr.RefTo(sel, None, sel.tpe, space, p.Region.Rooted(sel.root)))
+    case _ => t
+  }
 
   private def isBoolean(t: p.Type): Boolean = t == p.Type.Bool1
 
@@ -401,7 +433,7 @@ object TreeRemapper {
       for {
         base <- selectPath(scope, buf, fa.getExpression)
         tpe  <- JavaTyper.typer(jcType(fa))
-      } yield p.Term.Select(base.root, base.steps :+ p.PathStep.Field(fa.getIdentifier.toString), tpe)
+      } yield fieldOf(base, fa.getIdentifier.toString, tpe)
     case other => mapExpr(scope, buf, other).map(bind(scope, buf, _)).flatMap(x => asSelect(p.Expr.Alias(x)))
   }
 
@@ -536,7 +568,7 @@ object TreeRemapper {
         recv <- mapExpr(scope, buf, fa.getExpression).map(bind(scope, buf, _))
         tpe  <- JavaTyper.typer(jcType(fa))
         sel  <- asSelect(p.Expr.Alias(recv))
-      } yield p.Expr.Alias(p.Term.Select(sel.root, sel.steps :+ p.PathStep.Field(fa.getIdentifier.toString), tpe))
+      } yield p.Expr.Alias(fieldOf(sel, fa.getIdentifier.toString, tpe))
     case aa: ArrayAccessTree =>
       for {
         arr  <- mapExpr(scope, buf, aa.getExpression).map(bind(scope, buf, _))
@@ -638,7 +670,7 @@ object TreeRemapper {
             case (v: JSymbol.VarSymbol, Some(self)) if !v.isStatic && v.owner.isInstanceOf[JSymbol.ClassSymbol] =>
               JavaTyper
                 .typer(jcType(id))
-                .map(tpe => p.Expr.Alias(p.Term.Select(self, List(p.PathStep.Field(id.getName.toString)), tpe)))
+                .map(tpe => p.Expr.Alias(fieldOf(selectTerm(Nil, self), id.getName.toString, tpe)))
             // TODO module-style references
             case _ => s"Unresolved identifier `${id.getName}` (symbol $sym)".fail
           }
@@ -1012,9 +1044,16 @@ object TreeRemapper {
           else if (isUserMethod(impl)) {
             scope.deps.fnSyms += impl
             scope.calls += impl
-            val receiverTpeArgs = recv.map(_.tpe).collect { case p.Type.Struct(_, ts) => ts }.getOrElse(Nil)
+            val receiverTpeArgs =
+              recv.map(r => referent(r.tpe)).collect { case p.Type.Struct(_, ts) => ts }.getOrElse(Nil)
             (lengthArgsFor(scope, impl, Nil), staticArgsFor(scope, impl)).mapN((ls, ss) =>
-              p.Expr.Invoke(p.Type.FnRef(p.Sym(fullName(impl))), receiverTpeArgs, recv, args ++ ls ++ ss, rtn)
+              p.Expr.Invoke(
+                p.Type.FnRef(p.Sym(fullName(impl))),
+                receiverTpeArgs,
+                recv.map(byReference(scope, buf, _)),
+                args.map(byReference(scope, buf, _)) ++ ls ++ ss,
+                rtn
+              )
             )
           } else s"Cannot lower a functional value backed by `${fullName(impl)}`, which has no body to inline".fail
         }
@@ -1028,7 +1067,8 @@ object TreeRemapper {
   ): Result[Unit] = params.zip(values).traverse_ {
     case (v, Right(c)) => scope.closures.put(symOf(v), c); ().success
     case (v, Left(t)) =>
-      JavaTyper.typer(jcType(v)).map { tpe =>
+      JavaTyper.typer(jcType(v)).map { declared =>
+        val tpe   = if (referent(t.tpe) == declared) t.tpe else declared
         val named = p.Named(scope.uniqueName(v.getName.toString), tpe)
         buf += p.Stmt.Var(named, Some(p.Expr.Alias(coerce(scope, buf, t, tpe))), isMutable = true)
         scope.locals.put(symOf(v), named)
@@ -1299,7 +1339,8 @@ object TreeRemapper {
       argLengths: List[Option[p.Term]],
       rtn: p.Type
   ): Result[p.Expr] = for {
-    self       <- asSelect(p.Expr.Alias(recv))
+    self <- asSelect(p.Expr.Alias(byReference(scope, buf, recv)))
+    refArgs = args.map(byReference(scope, buf, _))
     candidates <- implementationsOf(scope.deps, sym)
     _ <-
       if (candidates.nonEmpty) ().success
@@ -1326,7 +1367,7 @@ object TreeRemapper {
     tag = bind(
       scope,
       buf,
-      p.Expr.Alias(p.Term.Select(self.root, self.steps :+ p.PathStep.Field(JavaTyper.TagMember), p.Type.IntS32))
+      p.Expr.Alias(fieldOf(self, JavaTyper.TagMember, p.Type.IntS32))
     )
     _ <- candidates.traverse_ { (cls, impl) =>
       val fqn = cls.getQualifiedName.toString
@@ -1336,8 +1377,14 @@ object TreeRemapper {
       val hit    = bind(scope, buf, p.Expr.IntrOp(p.Intr.LogicEq(tag, p.Term.IntS32Const(scope.deps.tagFor(fqn)))))
       val armBuf = ListBuffer.empty[p.Stmt]
       (lengthArgsFor(scope, impl, argLengths), staticArgsFor(scope, impl)).mapN { (ls, ss) =>
-        val armSelf = coerce(scope, armBuf, self, p.Type.Struct(p.Sym(JavaTyper.structName(cls)), Nil))
-        val call    = p.Expr.Invoke(p.Type.FnRef(p.Sym(fullName(impl))), Nil, Some(armSelf), args ++ ls ++ ss, rtn)
+        val armSelf = self.tpe match {
+          case p.Type.Ptr(_, space) =>
+            val target = p.Type.Ptr(p.Type.Struct(p.Sym(JavaTyper.structName(cls)), Nil), space)
+            bind(scope, armBuf, p.Expr.Cast(self, target))
+          case _ => self
+        }
+        val call = p.Expr.Invoke(p.Type.FnRef(p.Sym(fullName(impl))), Nil, Some(armSelf), refArgs ++ ls ++ ss, rtn)
+
         if (rtn == p.Type.Unit0) armBuf += p.Stmt.Var(scope.fresh(rtn), Some(call))
         else armBuf += p.Stmt.Mut(resultSel, call)
         buf += p.Stmt.Cond(hit, armBuf.toList, Nil)
@@ -1346,7 +1393,7 @@ object TreeRemapper {
     }
   } yield p.Expr.Alias(if (rtn == p.Type.Unit0) p.Term.Unit0Const else resultSel)
 
-  private def regionAllocated(scope: Scope, tpe: p.Type): Option[JSymbol.ClassSymbol] = tpe match {
+  private def regionAllocated(scope: Scope, tpe: p.Type): Option[JSymbol.ClassSymbol] = referent(tpe) match {
     case p.Type.Struct(name, _) =>
       val fqn = name.fqn.mkString(".")
       scope.deps.witnessed.collectFirst { case c: JSymbol.ClassSymbol if JavaTyper.structName(c) == fqn => c }
@@ -1446,7 +1493,7 @@ object TreeRemapper {
           else s"Unsupported `${fullName(sym)}`: an enum value travels as its ordinal alone".fail
         else if (isRecordAccessor(sym) && args.isEmpty && recv.isDefined)
           asSelect(p.Expr.Alias(recv.get))
-            .map(sel => p.Expr.Alias(p.Term.Select(sel.root, sel.steps :+ p.PathStep.Field(sym.name.toString), rtn)))
+            .map(sel => p.Expr.Alias(fieldOf(sel, sym.name.toString, rtn)))
         else if (recv.isDefined && sym.getModifiers.contains(Modifier.ABSTRACT))
           regionAllocated(scope, recv.get.tpe) match {
             case Some(cls) =>
@@ -1456,7 +1503,13 @@ object TreeRemapper {
                   scope.deps.fnSyms += impl
                   scope.calls += impl
                   (lengthArgsFor(scope, impl, argLengths), staticArgsFor(scope, impl)).mapN((ls, ss) =>
-                    p.Expr.Invoke(p.Type.FnRef(p.Sym(fullName(impl))), Nil, recv, args ++ ls ++ ss, rtn)
+                    p.Expr.Invoke(
+                      p.Type.FnRef(p.Sym(fullName(impl))),
+                      Nil,
+                      recv.map(byReference(scope, buf, _)),
+                      args.map(byReference(scope, buf, _)) ++ ls ++ ss,
+                      rtn
+                    )
                   )
                 }
             case None => emitDispatch(scope, buf, sym, recv.get, args, argLengths, rtn)
@@ -1465,10 +1518,14 @@ object TreeRemapper {
           recv.flatMap(r => regionAllocated(scope, r.tpe)).filter(_ != sym.owner) match {
             case Some(cls) => inheritedCall(scope, buf, sym, cls, recv.get, args, rtn)
             case None =>
-              val receiverTpeArgs = recv.map(_.tpe).collect { case p.Type.Struct(_, ts) => ts }.getOrElse(Nil)
-              if (isUserMethod(sym)) { scope.deps.fnSyms += sym; scope.calls += sym }
+              val receiverTpeArgs =
+                recv.map(r => referent(r.tpe)).collect { case p.Type.Struct(_, ts) => ts }.getOrElse(Nil)
+              val user = isUserMethod(sym)
+              if (user) { scope.deps.fnSyms += sym; scope.calls += sym }
+              val passed  = if (user) recv.map(byReference(scope, buf, _)) else recv
+              val passedA = if (user) args.map(byReference(scope, buf, _)) else args
               (lengthArgsFor(scope, sym, argLengths), staticArgsFor(scope, sym)).mapN((ls, ss) =>
-                p.Expr.Invoke(p.Type.FnRef(p.Sym(fullName(sym))), receiverTpeArgs, recv, args ++ ls ++ ss, rtn)
+                p.Expr.Invoke(p.Type.FnRef(p.Sym(fullName(sym))), receiverTpeArgs, passed, passedA ++ ls ++ ss, rtn)
               )
           }
     } yield e
@@ -1488,8 +1545,10 @@ object TreeRemapper {
         value <- Option(v.getInitializer).traverse(mapExpr(scope, buf, _).map(bind(scope, buf, _)))
         // a local declared at a supertype but built with new keeps the concrete type, widening drops its fields
         tpe = (declared, value.map(_.tpe)) match {
-          case (_: p.Type.Struct, Some(actual: p.Type.Struct)) => actual
-          case _                                               => declared
+          case (p.Type.Struct(_, _), Some(actual @ p.Type.Struct(_, _))) => actual
+          case (p.Type.Struct(name, _), Some(actual @ p.Type.Ptr(p.Type.Struct(pointee, _), _))) if pointee == name =>
+            actual
+          case _ => declared
         }
         named = p.Named(scope.uniqueName(v.getName.toString), tpe)
         _     = scope.locals.put(symOf(v), named)
@@ -1862,6 +1921,8 @@ object TreeRemapper {
       _        <- emitCases(scope, buf, selector, s.getCases.asScala.toList, None)
     } yield ()
 
+  private def passed(isEntry: Boolean, tpe: p.Type): p.Type = if (isEntry) tpe else referenceTo(tpe)
+
   def compileMethod(
       env: ProcessingEnvironment,
       trees: Trees,
@@ -1875,14 +1936,14 @@ object TreeRemapper {
     val receiver =
       if (md.sym.isStatic) None
       else
-        Some(p.Arg(p.Named("this", p.Type.Struct(p.Sym(ownerName(md.sym)), Nil))))
+        Some(p.Arg(p.Named("this", passed(isEntry, p.Type.Struct(p.Sym(ownerName(md.sym)), Nil)))))
     receiver.foreach(r => scope.thisOpt = Some(r.named))
     for {
       declared <- m.getParameters.asScala.toList.zipWithIndex.traverse { (v, i) =>
         deps.capturedClosures.get(symOf(v)).filter(_ => isEntry) match {
           case Some(c) => scope.closures.put(symOf(v), c); Option.empty[p.Arg].success
           case None =>
-            JavaTyper.typer(jcType(v)).map { tpe =>
+            JavaTyper.typer(jcType(v)).map(passed(isEntry, _)).map { tpe =>
               val named = p.Named(scope.uniqueName(v.getName.toString), tpe)
               scope.locals.put(symOf(v), named)
               scope.paramOf.put(symOf(v), i)
