@@ -110,6 +110,22 @@ def nativeCompilerInputFiles: Seq[File] =
 def nativeCompilerInputs(converter: xsbti.FileConverter): Seq[Attributed[xsbti.HashedVirtualFileRef]] =
   nativeCompilerInputFiles.map(file => Attributed.blank(converter.toVirtualFile(file.toPath)))
 
+lazy val processorDigest = taskKey[String]("Digest of what the annotation processor runs on")
+
+// regions are lowered to machine code while javac runs, so a rebuilt processor or native library has to recompile the
+// sources holding them, which zinc cannot see
+lazy val processorTracking = Seq(
+  processorDigest := Def.uncached {
+    val md = java.security.MessageDigest.getInstance("SHA-256")
+    (compiler / Compile / fullClasspath).value.foreach(a => md.update(a.data.contentHashStr.getBytes))
+    nativeCompilerInputFiles
+      .sortBy(_.getName)
+      .foreach(f => md.update(s"${f.getName}:${f.length}:${f.lastModified}".getBytes))
+    md.digest().map("%02x".format(_)).mkString
+  },
+  javacOptions += s"-Apolyregion.processorDigest=${processorDigest.value}"
+)
+
 lazy val nativeCompilerInputsTask =
   taskKey[Seq[Attributed[xsbti.HashedVirtualFileRef]]]("Native compiler libraries that participate in compile caching")
 
@@ -473,7 +489,7 @@ lazy val compiler = project
       }.value
     }
   )
-  .dependsOn(ast.jvm(scala3Version), pass.jvm(scala3Version), `binding-jvm`)
+  .dependsOn(ast.jvm(scala3Version), pass.jvm(scala3Version), `binding-jvm`, codegen, `runtime-java`)
 
 lazy val `compiler-testsuite-scala` = project
   .settings(
@@ -500,7 +516,7 @@ lazy val `compiler-testsuite-scala` = project
   )
   .dependsOn(`runtime-scala`)
 
-lazy val javaSuiteSettings = Seq(
+lazy val javaSuiteSettings = processorTracking ++ Seq(
   autoScalaLibrary := false,
   javacOptions ++= (if (buildJdk >= 21) Seq("-proc:full") else Nil),
   javacOptions += "-Apolyregion.deferErrors=true",

@@ -3,6 +3,7 @@ package polyregion.javalang
 import cats.syntax.all.*
 import com.sun.source.tree.*
 import com.sun.source.util.TreeScanner
+import com.sun.tools.javac.tree.JCTree
 import polyregion.ast.*
 
 import scala.annotation.nowarn
@@ -236,7 +237,12 @@ object LambdaOutliner {
     }
     // Commented lines are trees introduced after Java 8
     private inline def v[T <: Tree](n: T, inline g: (T, Unit) => List[A]) = reduce(f(n), g(n, ()))
-    override def visitCompilationUnit(n: CompilationUnitTree, p: U)       = v(n, super.visitCompilationUnit)
+    // LetExpr.accept throws instead of dispatching, so Lower's output would abort a scan of the whole unit
+    override def scan(n: Tree, p: U): List[A] = n match {
+      case le: JCTree.LetExpr => reduce(f(le), reduce(scan(le.expr, p), scan(le.defs, p)))
+      case other              => super.scan(other, p)
+    }
+    override def visitCompilationUnit(n: CompilationUnitTree, p: U) = v(n, super.visitCompilationUnit)
     // override def visitPackage(n: PackageTree, p: U)                             = v(n, super.visitPackage)
     override def visitImport(n: ImportTree, p: U)                     = v(n, super.visitImport)
     override def visitClass(n: ClassTree, p: U)                       = v(n, super.visitClass)
