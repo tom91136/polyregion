@@ -1336,7 +1336,8 @@ object TreeRemapper {
       val hit    = bind(scope, buf, p.Expr.IntrOp(p.Intr.LogicEq(tag, p.Term.IntS32Const(scope.deps.tagFor(fqn)))))
       val armBuf = ListBuffer.empty[p.Stmt]
       (lengthArgsFor(scope, impl, argLengths), staticArgsFor(scope, impl)).mapN { (ls, ss) =>
-        val call = p.Expr.Invoke(p.Type.FnRef(p.Sym(fullName(impl))), Nil, Some(self), args ++ ls ++ ss, rtn)
+        val armSelf = coerce(scope, armBuf, self, p.Type.Struct(p.Sym(JavaTyper.structName(cls)), Nil))
+        val call    = p.Expr.Invoke(p.Type.FnRef(p.Sym(fullName(impl))), Nil, Some(armSelf), args ++ ls ++ ss, rtn)
         if (rtn == p.Type.Unit0) armBuf += p.Stmt.Var(scope.fresh(rtn), Some(call))
         else armBuf += p.Stmt.Mut(resultSel, call)
         buf += p.Stmt.Cond(hit, armBuf.toList, Nil)
