@@ -1,34 +1,28 @@
 package polyregion.javalang
 
-import cats.Eval
-import cats.data.EitherT
 import cats.syntax.all.*
 import com.sun.source.tree.*
 import com.sun.source.util.*
 import com.sun.tools.javac.code.Symbol.MethodSymbol
-import net.bytebuddy.description.modifier.*
-import net.bytebuddy.implementation.{FieldAccessor, InvocationHandlerAdapter, MethodCall}
-import net.bytebuddy.matcher.ElementMatchers
+import com.sun.tools.javac.tree.JCTree
 import polyregion.__UnsafeObject
 import polyregion.ast.*
+import polyregion.javalang.LambdaOutliner.collectTree
 import polyregion.javalang.Processor.addOpens
 
 import java.lang.reflect.*
-import java.util
-import java.nio.file.Paths
 import javax.annotation.processing.*
 import javax.lang.model.SourceVersion
 import javax.lang.model.element.*
-import javax.tools.Diagnostic.Kind
-import javax.tools.{Diagnostic, JavaFileManager, JavaFileObject, StandardLocation}
+import javax.tools.{Diagnostic, JavaFileObject, StandardLocation}
 import scala.annotation.tailrec
-import scala.collection.immutable.ArraySeq
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
-import scala.reflect.ClassTag
-import scala.util.{Failure, Success, Try, Using}
 
 object Processor {
+
+  final val DeferErrorsOption     = "polyregion.deferErrors"
+  final val ProcessorDigestOption = "polyregion.processorDigest"
 
   private val javacPackages = Seq(
     "com.sun.tools.javac.code",
@@ -48,10 +42,7 @@ object Processor {
     val theUnsafe = classOf[sun.misc.Unsafe].getDeclaredField("theUnsafe")
     theUnsafe.setAccessible(true)
     theUnsafe.get(null).asInstanceOf[sun.misc.Unsafe]
-  } catch {
-    case e: Exception =>
-      null
-  }
+  } catch { case _: Exception => null }
 
   @tailrec def traverseUp[A <: AccessibleObject](cls: Class[?])(f: Class[?] => A): Option[A] = cls match {
     case null => None
@@ -71,16 +62,9 @@ object Processor {
   private def getOwnModule = try {
     val m = getMethod(classOf[Class[?]], "getModule")
     m.invoke(classOf[Processor])
-  } catch {
-    case e: Exception =>
-      null
-  }
+  } catch { case _: Exception => null }
 
-  /* call public api: ModuleLayer.boot().findModule("jdk.compiler").get();
-			  but use reflection because we don't want this code to crash on jdk1.7 and below.
-			  In that case, none of this stuff was needed in the first place, so we just exit via
-			  the catch block and do nothing.
-   */
+  // reflective so a JDK without modules exits through the catch rather than failing to link
   private def getJdkCompilerModule = try {
     val cModuleLayer = Class.forName("java.lang.ModuleLayer")
     val mBoot        = cModuleLayer.getDeclaredMethod("boot")
@@ -89,22 +73,15 @@ object Processor {
     val mFindModule  = cModuleLayer.getDeclaredMethod("findModule", classOf[String])
     val oCompilerO   = mFindModule.invoke(bootLayer, "jdk.compiler")
     cOptional.getDeclaredMethod("get").invoke(oCompilerO)
-  } catch {
-    case e: Exception =>
-      null
-  }
+  } catch { case _: Exception => null }
 
   private def getFirstFieldOffset(unsafe: sun.misc.Unsafe) = try
     unsafe.objectFieldOffset(classOf[__UnsafeObject].getDeclaredField("first"))
-  catch {
-    case e @ (_: NoSuchFieldException | _: SecurityException) =>
-      // can't happen.
-      throw RuntimeException(e)
-  }
+  catch { case e @ (_: NoSuchFieldException | _: SecurityException) => throw RuntimeException(e) }
 
   def findCls(name: String): Option[Class[?]] =
     try Option(Class.forName(name))
-    catch { case e: ClassNotFoundException => None }
+    catch { case _: ClassNotFoundException => None }
 
   def addOpens(packages: Seq[String]): Result[Unit] = findCls("java.lang.Module") match {
     case None => ().success
@@ -119,52 +96,6 @@ object Processor {
         packages.foreach(m.invoke(jdkCompilerModule, _, ownModule))
       }
   }
-
-//  def resolveMethodSignature(
-//      processingEnvironment: ProcessingEnvironment,
-//      cu: CompilationUnitTree,
-//      m: MethodTree
-//  ): String = {
-//    def tpeToSig(t: Tree): String =
-//      t match {
-//        case i: IdentifierTree    => i.getName.toString
-//        case x: PrimitiveTypeTree => x.getPrimitiveTypeKind.toString
-//      }
-//
-////    try{
-//    println(">!" + Trees.instance(processingEnvironment).getPath(cu, m))
-//
-////      println(Trees.instance(processingEnvironment).getElement( Trees.instance(processingEnvironment).getPath(cu, m)).asInstanceOf[ExecutableElement].getReturnType   )
-////    } catch {case e => }
-//
-//    m.getParameters.asScala.map(_.getType).map(tpeToSig(_)).mkString("(", ",", ")") + tpeToSig(m.getReturnType)
-//  }
-
-//  def createClassLookup(xs: List[CompilationUnitTree]): Map[String, (CompilationUnitTree, ClassTree)] = xs
-//    .map { cu =>
-//      val pkg = Option(cu.getPackageName).fold(Nil)(collectTree(_) {
-//        case v: MemberSelectTree => v.getIdentifier.toString :: Nil
-//        case v: IdentifierTree   => v.getName.toString :: Nil
-//        case _                   => Nil
-//      })
-//
-//      def resolveClassTrees(scope: List[String], xs: List[Tree]): List[(String, ClassTree)] = xs match {
-//        case Nil => Nil
-//        case (x: ClassTree) :: xs =>
-//          val current = scope :+ x.getSimpleName.toString
-//          (current.mkString(".") -> x)
-//            :: resolveClassTrees(current, x.getMembers.asScala.toList)
-//            ::: resolveClassTrees(scope, xs)
-//        case (_ :: xs) => resolveClassTrees(scope, xs)
-//      }
-//
-//      println(s"[[]] ${cu.getPackage} => ${cu.getTypeDecls.asScala.toList
-//        .collect { case x: ClassTree => x.getSimpleName.toString }}")
-//
-//      resolveClassTrees(pkg, cu.getTypeDecls.asScala.toList).map((fqcn, c) => fqcn -> (cu, c)).toMap
-//    }
-//    .foldLeft(Map.empty)(_ ++ _)
-
 }
 
 class Processor extends AbstractProcessor {
@@ -173,10 +104,27 @@ class Processor extends AbstractProcessor {
   private val symbolTable = mutable.Map[String, TypeElement]()
   private val methodTable = mutable.Map[String, MethodTree]()
 
+  private def deferErrors: Boolean =
+    processingEnv.getOptions.getOrDefault(Processor.DeferErrorsOption, "false") == "true"
+
+  // lowering can throw rather than return a Left, and javac raises AssertionError on some post-Lower nodes
+  private def guard[A](f: => Result[A]): Result[A] =
+    try f
+    catch { case t: Throwable => Left(t) }
+
+  private def writeClass(env: ProcessingEnvironment, pkg: String, name: String, bytes: scala.Array[Byte]): Unit = {
+    val os = env.getFiler.createResource(StandardLocation.CLASS_OUTPUT, pkg, s"$name.class").openOutputStream()
+    try os.write(bytes)
+    finally os.close()
+  }
+
+  override def getSupportedOptions: java.util.Set[String] =
+    java.util.Set.of[String](Processor.DeferErrorsOption, Processor.ProcessorDigestOption)
+
   override def getSupportedAnnotationTypes: java.util.Set[String] =
     java.util.Collections.singleton[String]("*")
 
-  override def getSupportedSourceVersion: SourceVersion = SourceVersion.RELEASE_8
+  override def getSupportedSourceVersion: SourceVersion = SourceVersion.latestSupported
 
   override def init(processingEnv: ProcessingEnvironment): Unit = {
     super.init(processingEnv)
@@ -192,46 +140,55 @@ class Processor extends AbstractProcessor {
       tasks <- Either
         .catchNonFatal(JavacTask.instance(processingEnv))
         .adaptError(e => RuntimeException("Unable to obtain an instance of JavacTask", e))
-      _ <- Either
+      trees <- Either
         .catchNonFatal(Trees.instance(processingEnv))
         .adaptError(e => RuntimeException("Unable to obtain an instance of Trees", e))
     } yield {
 
       val visited = mutable.Set[JavaFileObject]()
 
-//      val enterVisited = mutable.Map[JavaFileObject, CompilationUnitTree]()
-//      val allClasses   = mutable.Map[String, (CompilationUnitTree, ClassTree)]()
-
       val pool = mutable.Set[MethodTree]()
 
       val generated = mutable.Set[String]()
+
+      // a local class is lifted out of the unit by GENERATE, so its members are caught while still nested
+      val nestedTrees = mutable.Map[MethodSymbol, MethodTree]()
 
       tasks.addTaskListener(new TaskListener {
         override def started(e: TaskEvent): Unit = {
           debug(s"[STARTED]  =>  ${e} ${visited}")
           (e.getKind, e.getCompilationUnit, e.getSourceFile) match {
 
+            // compile at the start of GENERATE, the tree is gone by the time it finishes
             case (TaskEvent.Kind.GENERATE, cu, file) if cu != null && !visited.contains(file) =>
-              // we do any compilation BEFORE (at the start) GENERATE kicks in as the tree is gone (probably gc'd) after GENERATE
               visited += file
 
               val reflector = LambdaOutliner.Reflector(symbolTable.toMap, methodTable.toMap)
 
-              val r = LambdaOutliner.extractDeserializeLambdaMethods(
-                reflector,
-                markerClosures,
-                cu
-              )
+              // bodies javac synthesises after processing (a lambda's impl method) are invisible to `methodTable`
+              val localTrees = guard {
+                Either.catchNonFatal(collectTree(cu) {
+                  case m: JCTree.JCMethodDecl if m.sym != null => (m.sym -> m) :: Nil
+                  case _                                       => Nil
+                }.toMap)
+              }.getOrElse(Map.empty[MethodSymbol, MethodTree]) ++ nestedTrees
 
-              val s = r.flatMap { xs =>
-                xs.traverse((invokeFn, meta) =>
-                  LambdaOutliner.findMethod(reflector, cu, invokeFn, meta).map(m => meta.implCls -> m)
-                )
-              }
-
-              val xs = s match {
-                case Left(x)      => throw x
+              // javac throws on some post-Lower nodes (`LetExpr is not part of a public API`), which would abort every region in the file
+              val xs = guard {
+                LambdaOutliner.extractDeserializeLambdaMethods(reflector, markerClosures, cu).flatMap { xs =>
+                  xs.traverse((invokeFn, meta) =>
+                    LambdaOutliner.findMethod(reflector, cu, invokeFn, meta).map(m => meta.implCls -> m)
+                  )
+                }
+              } match {
                 case Right(value) => value
+                case Left(x) =>
+                  if (!deferErrors) throw x
+                  processingEnv.getMessager.printMessage(
+                    Diagnostic.Kind.WARNING,
+                    s"[PolyRegion] Cannot outline regions in ${e.getSourceFile.getName}: $x"
+                  )
+                  Nil
               }
 
               debug(
@@ -246,33 +203,31 @@ class Processor extends AbstractProcessor {
                 val pkg  = s"polyregion.$$gen$$"
                 val name = s"${cls.replace('.', '$')}$$${x.getName}"
                 val fqcn = s"$pkg.$name"
-                debug(s"Write ${fqcn}")
-                if (!generated.contains(fqcn)) {
-                  val gen =
-                    processingEnv.getFiler.createResource(StandardLocation.CLASS_OUTPUT, pkg, s"$name.class", null)
-                  Using.resource(gen.openOutputStream()) { os =>
-                    val bytes = new net.bytebuddy.ByteBuddy()
-                      .subclass(classOf[ /* polyregion.java.BinaryOffloadExecutable */ Nothing])
-                      .name(fqcn)
-                      .modifiers(Visibility.PUBLIC, TypeManifestation.FINAL)
-                      .defineField(
-                        "$BINARY$",
-                        classOf[scala.Array[Byte]],
-                        Visibility.PUBLIC,
-                        Ownership.STATIC,
-                        FieldManifestation.FINAL
-                      )
-                      .method(ElementMatchers.named("binary"))
-                      .intercept(FieldAccessor.ofField("$BINARY$"))
-                      .make()
-                      .getBytes
-
-                    os.write(bytes)
-                    os.flush()
+                if (generated.contains(fqcn)) debug(s"Skip already generated ${fqcn}")
+                else {
+                  debug(s"Write ${fqcn}")
+                  guard(
+                    Offloader
+                      .compile(processingEnv, trees, symbolTable.toMap, methodTable.toMap, localTrees, x, fqcn)
+                  ) match {
+                    case Left(e) =>
+                      val reason = s"[PolyRegion] Cannot offload ${cls}.${x.getName}: ${e.getMessage}"
+                      debug(e)
+                      if (!deferErrors) processingEnv.getMessager.printMessage(Diagnostic.Kind.ERROR, reason)
+                      else
+                        Offloader.unsupported(fqcn, reason) match {
+                          case Right(stub) =>
+                            processingEnv.getMessager.printMessage(Diagnostic.Kind.WARNING, reason)
+                            writeClass(processingEnv, pkg, name, stub.bytes)
+                            generated += fqcn
+                          case Left(stubError) =>
+                            processingEnv.getMessager
+                              .printMessage(Diagnostic.Kind.ERROR, s"$reason (and the stub failed: $stubError)")
+                        }
+                    case Right(exe) =>
+                      writeClass(processingEnv, pkg, name, exe.bytes)
+                      generated += fqcn
                   }
-                  generated += fqcn
-                } else {
-                  debug(s"OVERWRITE ${fqcn}")
                 }
 
               }
@@ -285,21 +240,23 @@ class Processor extends AbstractProcessor {
         override def finished(e: TaskEvent): Unit = {
           debug(s"[  ENDED]  =>  ${e}")
           e.getKind match {
-            case TaskEvent.Kind.ENTER =>
-//              enterVisited += (e.getSourceFile -> e.getCompilationUnit)
-            case TaskEvent.Kind.ANNOTATION_PROCESSING =>
-//              allClasses ++= createClassLookup(enterVisited.values.toList)
-            case _ => // don't care
+            case TaskEvent.Kind.ANALYZE if e.getCompilationUnit != null =>
+              guard {
+                Either.catchNonFatal(collectTree(e.getCompilationUnit) {
+                  case m: JCTree.JCMethodDecl if m.sym != null => (m.sym -> m) :: Nil
+                  case _                                       => Nil
+                }.foreach(nestedTrees += _))
+              }
+              ()
+            case _ =>
           }
         }
 
       })
     }) match {
       case Right(()) =>
-
       case Left(e) =>
         e.printStackTrace()
-
         processingEnv.getMessager.printMessage(Diagnostic.Kind.ERROR, e.getMessage)
     }
 
@@ -320,7 +277,7 @@ class Processor extends AbstractProcessor {
     symbolTable ++= classes.map(e => e.getQualifiedName.toString -> e)
 
     methodTable ++= classes.flatMap { c =>
-      // we only care about normal method and ctors, any other type of executable cannot be referred directly
+      // no other executable can be named at a call site
       c.getEnclosedElements.asScala
         .collect {
           case e: ExecutableElement if e.getKind == ElementKind.METHOD =>
