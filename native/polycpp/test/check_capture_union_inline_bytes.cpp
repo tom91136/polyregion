@@ -97,8 +97,8 @@ long checksum(const basic_string<StandardLayout> &s) {
 
 long checksum(const basic_string<AlternateLayout> &s) {
   const auto *raw = reinterpret_cast<const unsigned char *>(&s);
-  const bool isLong = raw[23] >> 7;
-  return weigh(isLong ? s.__rep_.__l.__data_ : s.__rep_.__s.__data_, isLong ? s.__rep_.__l.__size_ : raw[23] & 0x7f);
+  const bool isLong = raw[sizeof(s) - 1] >> 7;
+  return weigh(isLong ? s.__rep_.__l.__data_ : s.__rep_.__s.__data_, isLong ? s.__rep_.__l.__size_ : raw[sizeof(s) - 1] & 0x7f);
 }
 
 long checksum(const MsvcString &s) { return weigh(s._Myres >= 16 ? s._Bx._Ptr : s._Bx._Buf, s._Mysize); }
@@ -113,18 +113,21 @@ int main() {
     text[i] = static_cast<char>('a' + (i % 26));
   const auto address = reinterpret_cast<std::uintptr_t>(target.data());
 
-  basic_string<StandardLayout> defaultShort{}, defaultLong{};
-  defaultShort.__rep_.__s.__size_ = 22;
-  for (int i = 0; i < 15; ++i)
+  using Standard = basic_string<StandardLayout>;
+  Standard defaultShort{}, defaultLong{};
+  const auto pointerAt =
+      static_cast<std::size_t>(reinterpret_cast<const char *>(&defaultShort.__rep_.__l.__data_) - defaultShort.__rep_.__s.__data_);
+  defaultShort.__rep_.__s.__size_ = Standard::__min_cap - 1;
+  for (std::size_t i = 0; i < pointerAt; ++i)
     defaultShort.__rep_.__s.__data_[i] = static_cast<char>('A' + i);
-  std::memcpy(defaultShort.__rep_.__s.__data_ + 15, &address, sizeof(address));
+  std::memcpy(defaultShort.__rep_.__s.__data_ + pointerAt, &address, sizeof(address));
   defaultLong.__rep_.__l.__is_long_ = 1;
   defaultLong.__rep_.__l.__cap_ = text.size();
   defaultLong.__rep_.__l.__size_ = text.size();
   defaultLong.__rep_.__l.__data_ = text.data();
 
   basic_string<AlternateLayout> alternateShort{}, alternateLong{};
-  alternateShort.__rep_.__s.__size_ = 8;
+  alternateShort.__rep_.__s.__size_ = sizeof(address);
   std::memcpy(alternateShort.__rep_.__s.__data_, &address, sizeof(address));
   alternateLong.__rep_.__l.__is_long_ = 1;
   alternateLong.__rep_.__l.__cap_ = text.size();
@@ -133,7 +136,7 @@ int main() {
 
   MsvcString msvcShort{}, msvcLong{};
   std::memcpy(msvcShort._Bx._Buf, &address, sizeof(address));
-  msvcShort._Mysize = 8;
+  msvcShort._Mysize = sizeof(address);
   msvcShort._Myres = 15;
   msvcLong._Bx._Ptr = text.data();
   msvcLong._Mysize = text.size();
