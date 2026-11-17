@@ -1258,8 +1258,8 @@ index e61048bd..2c11bea1 100644
 +#include <ocelot/executive/LLVMModuleManager.h>
 +#include <ocelot/executive/LLVMState.h>
 @@ -745,0 +749,7 @@ namespace executive
-+		LLVMModuleManager* manager = LLVMState::moduleManager();
-+		if(manager->isModuleLoaded(id))
++		LLVMModuleManager* manager = properties().ISA == ir::Instruction::LLVM ? LLVMState::moduleManager() : 0;
++		if(manager && manager->isModuleLoaded(id))
 +		{
 +			// Unloading compacts function ids, so discard cached metadata first.
 +			LLVMExecutionManager::flushTranslatedKernels();
