@@ -4,7 +4,6 @@ import static org.junit.Assert.assertEquals;
 
 import org.junit.After;
 import org.junit.Test;
-import polyregion.jvm.runtime.Device;
 
 public class MarshalLifetimeTest {
 
@@ -13,10 +12,9 @@ public class MarshalLifetimeTest {
     BinaryOffloadExecutable.afterPack = null;
   }
 
-  private static void collect(Device.Queue queue) {
+  private static void collect() {
     for (int i = 0; i < 8; i++) {
       System.gc();
-      queue.references.get().size();
       try {
         Thread.sleep(5);
       } catch (InterruptedException e) {

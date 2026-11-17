@@ -6,7 +6,8 @@ import java.lang.invoke.MethodHandles;
 import java.lang.invoke.SerializedLambda;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.util.Arrays;
+import java.util.Collections;
+import java.util.Map;
 import java.util.WeakHashMap;
 
 public final class Runtime {
@@ -19,7 +20,6 @@ public final class Runtime {
       final Class<? extends Serializable> base) {
     for (Class<?> cl = base; cl != null; cl = cl.getSuperclass()) {
       try {
-        System.out.println("in > " + cl);
         Method m = cl.getDeclaredMethod("writeReplace");
         m.setAccessible(true);
         return MethodHandles.lookup().unreflect(m);
@@ -33,65 +33,67 @@ public final class Runtime {
         "Missing writeReplace method for lambda that implements Serializable!");
   }
 
-  public static void offload(OffloadRunnable f) {
-    //		SerializedLambda lambda = extractSerializedLambda(f);
-    //		System.out.println("f0=" + f + " " + lambda.toString() + " === " +
-    // lambda.getImplMethodName());
-    f.run();
-  }
-
-  enum Backend {
-    LLVM
-  }
-
   // don't prevent the key class from unloading
-  private static final WeakHashMap<Class<? extends OffloadRegion>, MethodHandle>
-      regionWriteReplaceMap = new WeakHashMap<>();
+  private static final Map<Class<? extends OffloadRegion>, MethodHandle> regionWriteReplaceMap =
+      Collections.synchronizedMap(new WeakHashMap<Class<? extends OffloadRegion>, MethodHandle>());
 
-  private static final WeakHashMap<Class<? extends OffloadRegion>, OffloadExecutable>
-      regionExecutableMap = new WeakHashMap<>();
+  private static final Map<Class<? extends OffloadRegion>, OffloadExecutable> regionExecutableMap =
+      Collections.synchronizedMap(
+          new WeakHashMap<Class<? extends OffloadRegion>, OffloadExecutable>());
 
   private static MethodHandle resolveWriteReplace(final OffloadRegion region) {
-    return regionWriteReplaceMap.computeIfAbsent(
-        region.getClass(), Runtime::extractWriteReplaceSerializedLambda);
+    Class<? extends OffloadRegion> cls = region.getClass();
+    MethodHandle handle = regionWriteReplaceMap.get(cls);
+    if (handle == null) {
+      handle = extractWriteReplaceSerializedLambda(cls);
+      regionWriteReplaceMap.put(cls, handle);
+    }
+    return handle;
   }
 
   private static OffloadExecutable instantiateOffloadExecutable(
       final OffloadRegion region, final SerializedLambda lambda) {
+    Class<? extends OffloadRegion> key = region.getClass();
+    OffloadExecutable cached = regionExecutableMap.get(key);
+    if (cached != null) return cached;
+
     final String name =
         "polyregion.$gen$."
             + lambda.getImplClass().replace('/', '$')
             + "$"
             + lambda.getImplMethodName();
-    return regionExecutableMap.computeIfAbsent(
-        region.getClass(),
-        x -> {
-          try {
-            Class<? extends OffloadExecutable> cls =
-                Class.forName(name).asSubclass(OffloadExecutable.class);
-            try {
-              return cls.getDeclaredConstructor().newInstance();
-            } catch (InstantiationException
-                | IllegalAccessException
-                | InvocationTargetException
-                | NoSuchMethodException e) {
-              throw new RuntimeException(
-                  "Cannot create a new OffloadExecutable instance of class " + cls, e);
-            }
-          } catch (ClassCastException e) {
-            throw new RuntimeException(
-                "Discovered OffloadExecutable class "
-                    + name
-                    + " does not appear to implement"
-                    + OffloadExecutable.class,
-                e);
-          } catch (ClassNotFoundException e) {
-            throw new RuntimeException("Cannot find OffloadExecutable for class " + name, e);
-          }
-        });
+    OffloadExecutable exe;
+    try {
+      Class<? extends OffloadExecutable> cls =
+          Class.forName(name).asSubclass(OffloadExecutable.class);
+      try {
+        exe = cls.getDeclaredConstructor().newInstance();
+      } catch (InstantiationException
+          | IllegalAccessException
+          | InvocationTargetException
+          | NoSuchMethodException e) {
+        throw new RuntimeException(
+            "Cannot create a new OffloadExecutable instance of class " + cls, e);
+      }
+    } catch (ClassCastException e) {
+      throw new RuntimeException(
+          "Discovered OffloadExecutable class "
+              + name
+              + " does not appear to implement"
+              + OffloadExecutable.class,
+          e);
+    } catch (ClassNotFoundException e) {
+      throw new RuntimeException(
+          "Cannot find OffloadExecutable for class "
+              + name
+              + "; is the polyregion annotation processor on the compiler's processor path?",
+          e);
+    }
+    regionExecutableMap.put(key, exe);
+    return exe;
   }
 
-  public static <R> R offload(OffloadFunction<R> f) {
+  private static Object dispatch(final OffloadRegion f) {
     MethodHandle handle = resolveWriteReplace(f);
     SerializedLambda lambda;
     try {
@@ -101,19 +103,17 @@ public final class Runtime {
     }
 
     final Object[] args = new Object[lambda.getCapturedArgCount()];
-    for (int i = 0, argsLength = args.length; i < argsLength; i++)
-      args[i] = lambda.getCapturedArg(i);
+    for (int i = 0, n = args.length; i < n; i++) args[i] = lambda.getCapturedArg(i);
 
-    OffloadExecutable exe = instantiateOffloadExecutable(f, lambda);
+    return instantiateOffloadExecutable(f, lambda).invoke(args);
+  }
 
-    System.out.println(
-        "f1=" + f + "  => " + lambda.getImplClass() + "." + lambda.getImplMethodName());
-    System.out.println("  args=" + Arrays.toString(args) + " ins=" + f.getClass());
-    System.out.println("  exe=" + exe);
-    exe.invoke(args);
+  public static void offload(OffloadRunnable f) {
+    dispatch(f);
+  }
 
-    //		a.computeIfAbsent(f, r -> "");
-
-    return f.run();
+  @SuppressWarnings("unchecked")
+  public static <R> R offload(OffloadFunction<R> f) {
+    return (R) dispatch(f);
   }
 }

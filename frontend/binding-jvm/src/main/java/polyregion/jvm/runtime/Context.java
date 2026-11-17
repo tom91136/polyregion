@@ -1,7 +1,10 @@
 package polyregion.jvm.runtime;
 
-import java.nio.ByteBuffer;
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.lang.ref.Reference;
+import java.nio.ByteBuffer;
 import java.nio.file.Paths;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -112,6 +115,34 @@ public final class Context implements AutoCloseable {
       this.deviceToHost = deviceToHost;
       this.remoteMallocs = remoteMallocs;
       this.remoteAllocations = remoteAllocations;
+    }
+  }
+
+  private static final class Fence {
+    static final MethodHandle HANDLE = lookup();
+    static volatile Object last;
+
+    private static MethodHandle lookup() {
+      try {
+        return MethodHandles.lookup()
+            .findStatic(
+                Reference.class, "reachabilityFence", MethodType.methodType(void.class, Object.class));
+      } catch (ReflectiveOperationException e) {
+        return null;
+      }
+    }
+  }
+
+  // Reference.reachabilityFence is JDK 9+, and this class loads on JDK 8
+  private static void reachable(Object o) {
+    if (Fence.HANDLE == null) {
+      Fence.last = o;
+      return;
+    }
+    try {
+      Fence.HANDLE.invokeExact(o);
+    } catch (Throwable t) {
+      throw new AssertionError(t);
     }
   }
 
@@ -249,7 +280,7 @@ public final class Context implements AutoCloseable {
             Queue.hook.at("copy.completing");
             cb.complete(null);
           } finally {
-            Reference.reachabilityFence(region);
+            reachable(region);
           }
         });
   }
@@ -267,7 +298,7 @@ public final class Context implements AutoCloseable {
             Queue.hook.at("copy.completing");
             cb.complete(null);
           } finally {
-            Reference.reachabilityFence(region);
+            reachable(region);
           }
         });
   }
@@ -282,7 +313,7 @@ public final class Context implements AutoCloseable {
         bytes,
         failure -> {
           queue.dispatch(cb, failure);
-          Reference.reachabilityFence(keep);
+          reachable(keep);
         });
   }
 
@@ -295,7 +326,7 @@ public final class Context implements AutoCloseable {
         bytes,
         failure -> {
           queue.dispatch(cb, failure);
-          Reference.reachabilityFence(keep);
+          reachable(keep);
         });
   }
 
