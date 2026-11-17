@@ -4,6 +4,7 @@ import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.AbstractMap.SimpleImmutableEntry;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -127,7 +128,9 @@ public final class Device implements AutoCloseable {
       }
 
       void release() {
-        if (devicePtr != 0) device.free(devicePtr);
+        // under a shared address space devicePtr is the direct buffer's own address, owned by the
+        // cleaner
+        if (devicePtr != 0 && !device.sharedAddressSpace) device.free(devicePtr);
         buffer = null;
         devicePtr = 0;
       }
@@ -236,7 +239,8 @@ public final class Device implements AutoCloseable {
 
     public void releaseAll(Object... objects) {
       if (objects.length != 0) for (Object o : objects) release(o);
-      else for (MemoryProxy<?> e : references.get().values()) release(e);
+      // iterate a snapshot, release mutates the map
+      else for (Object o : new ArrayList<>(references.get().keySet())) release(o);
     }
 
     public void enqueueHostToDeviceAsync(ByteBuffer src, long dst, int size, Runnable cb) {

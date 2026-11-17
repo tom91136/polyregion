@@ -2,8 +2,10 @@
 
 import org.scalajs.linker.interface.{ESVersion, ModuleKind => SJSModuleKind, OutputPatterns}
 
-lazy val minJdk   = 17
-lazy val buildJdk = sys.props.getOrElse("java.specification.version", "0").split('.').last.toInt
+lazy val minJdk = 17
+// the runtime ships into applications that may still run Java 8
+lazy val minRuntimeJdk = 8
+lazy val buildJdk      = sys.props.getOrElse("java.specification.version", "0").split('.').last.toInt
 
 Global / concurrentRestrictions := Seq(
   Tags.limit(Tags.CPU, java.lang.Runtime.getRuntime.availableProcessors),
@@ -118,6 +120,8 @@ lazy val sdkPublishSettings = Seq(
 
 lazy val `binding-jvm` = project.settings(
   commonSettings,
+  javaRelease := minRuntimeJdk,
+  javacOptions += "-Xlint:-options",
   name             := "binding-jvm",
   autoScalaLibrary := false
 )
@@ -125,6 +129,8 @@ lazy val `binding-jvm` = project.settings(
 lazy val `runtime-java` = project
   .settings(
     commonSettings,
+    javaRelease := minRuntimeJdk,
+    javacOptions += "-Xlint:-options",
     name := "runtime-java",
     javacOptions ++= Seq("-proc:none"),
     autoScalaLibrary    := false,
