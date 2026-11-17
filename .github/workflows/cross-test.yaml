@@ -6,6 +6,9 @@ on:
       shards:
         type: string
         required: true
+      test-archs:
+        type: string
+        required: true
 
 defaults:
   run:
@@ -13,32 +16,16 @@ defaults:
 
 jobs:
   test-native-misc:
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.test-archs != '' && inputs.test-archs != '[]' }}
     strategy:
       fail-fast: false
       matrix:
-        include: &cross-matrix
-          - arch: riscv64
-            runs_on: ubuntu-24.04-arm
-            qemu_arch: riscv64
-            cross_triple: riscv64-linux-gnu
-            sysroot_variant: ubuntu20
-            sysroot_dockerfile: Dockerfile.ubuntu
-          - arch: ppc64le
-            runs_on: ubuntu-24.04-arm
-            qemu_arch: ppc64le
-            cross_triple: powerpc64le-linux-gnu
-            sysroot_variant: al8
-            sysroot_dockerfile: Dockerfile
-          - arch: arm
-            runs_on: ubuntu-24.04-arm
-            qemu_arch: arm
-            cross_triple: arm-linux-gnueabihf
-            sysroot_variant: ubuntu20
-            sysroot_dockerfile: Dockerfile.ubuntu
-    runs-on: ${{ matrix.runs_on }}
+        arch: ${{ fromJSON(inputs.test-archs) }}
+    runs-on: ubuntu-24.04-arm
     env:
       POLYREGION_ARCH: ${{ matrix.arch }}
+      SYSROOT_VARIANT: ${{ matrix.arch == 'ppc64le' && 'al8' || 'ubuntu20' }}
+      SYSROOT_DOCKERFILE: ${{ matrix.arch == 'ppc64le' && 'Dockerfile' || 'Dockerfile.ubuntu' }}
       POLYC_JS_ENGINE: qjs
       POLYC_PASS_BUNDLE: js
     steps:
@@ -56,16 +43,16 @@ jobs:
           sudo apt-get ${{ env.APT_OPTIONS }} install -y cmake
 
       - &binfmt-register
-        name: Register binfmt-misc for ${{ matrix.qemu_arch }}
-        run: bash ci/install_qemu.sh ${{ matrix.qemu_arch }}
+        name: Register binfmt-misc for ${{ matrix.arch }}
+        run: bash ci/install_qemu.sh ${{ matrix.arch }}
 
       - &restore-sysroot-cached
         name: Restore sysroot cache
         if: ${{ !env.ACT }}
         uses: actions/cache/restore@v5
         with:
-          path: ./sysroot/out/sysroot-${{ matrix.sysroot_variant }}-${{ matrix.arch }}.tar.xz
-          key: sysroot-${{ matrix.sysroot_variant }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles(format('./sysroot/{0}', matrix.sysroot_dockerfile), './sysroot/build.sh') }}
+          path: ./sysroot/out/sysroot-${{ env.SYSROOT_VARIANT }}-${{ matrix.arch }}.tar.xz
+          key: sysroot-${{ env.SYSROOT_VARIANT }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles(format('./sysroot/{0}', env.SYSROOT_DOCKERFILE), './sysroot/build.sh') }}
 
       - &prepare-sysroot-env
         name: Prepare sysroot
@@ -139,7 +126,7 @@ jobs:
           if-no-files-found: ignore
 
   discover-slices:
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.shards != '' }}
     runs-on: ubuntu-24.04
     outputs:
       slices: ${{ steps.gen.outputs.slices }}
@@ -156,21 +143,22 @@ jobs:
 
   test-native-shard:
     needs: discover-slices
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && needs.discover-slices.result == 'success' && inputs.test-archs != '' && inputs.test-archs != '[]' }}
     strategy:
       fail-fast: false
       matrix:
-        arch: [riscv64, ppc64le, arm]
+        arch: ${{ fromJSON(inputs.test-archs) }}
         frontend: [polyfc, other]
         slice: ${{ fromJSON(needs.discover-slices.outputs.slices) }}
         exclude:
           - arch: arm
             frontend: polyfc # XXX upstream flang doesn't support 32-bit targets
-        include: *cross-matrix
     name: test-native-shard (${{ matrix.arch }}, ${{ matrix.frontend }}, ${{ matrix.slice.id }})
-    runs-on: ${{ matrix.runs_on }}
+    runs-on: ubuntu-24.04-arm
     env:
       POLYREGION_ARCH: ${{ matrix.arch }}
+      SYSROOT_VARIANT: ${{ matrix.arch == 'ppc64le' && 'al8' || 'ubuntu20' }}
+      SYSROOT_DOCKERFILE: ${{ matrix.arch == 'ppc64le' && 'Dockerfile' || 'Dockerfile.ubuntu' }}
       POLYC_JS_ENGINE: qjs
       POLYC_PASS_BUNDLE: js
     steps:
@@ -238,14 +226,16 @@ jobs:
           if-no-files-found: ignore
 
   test-native-miniapps:
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.test-archs != '' && inputs.test-archs != '[]' }}
     strategy:
       fail-fast: false
       matrix:
-        include: *cross-matrix
-    runs-on: ${{ matrix.runs_on }}
+        arch: ${{ fromJSON(inputs.test-archs) }}
+    runs-on: ubuntu-24.04-arm
     env:
       POLYREGION_ARCH: ${{ matrix.arch }}
+      SYSROOT_VARIANT: ${{ matrix.arch == 'ppc64le' && 'al8' || 'ubuntu20' }}
+      SYSROOT_DOCKERFILE: ${{ matrix.arch == 'ppc64le' && 'Dockerfile' || 'Dockerfile.ubuntu' }}
       POLYC_JS_ENGINE: qjs
       POLYC_PASS_BUNDLE: js
       MINIAPP_BACKENDS: cpu

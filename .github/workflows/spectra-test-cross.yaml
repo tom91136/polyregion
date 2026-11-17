@@ -2,6 +2,10 @@ name: Spectra cross test
 
 on:
   workflow_call:
+    inputs:
+      archs:
+        type: string
+        required: true
 
 defaults:
   run:
@@ -12,16 +16,16 @@ jobs:
   # Proves the package imports and its cases run on the host under QEMU for every architecture Polyregion ships.
   test-cross:
     name: test-cross (${{ matrix.arch }})
+    if: ${{ !cancelled() && inputs.archs != '' && inputs.archs != '[]' }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { arch: riscv64, qemu_arch: riscv64, sysroot_variant: ubuntu20, sysroot_dockerfile: Dockerfile.ubuntu }
-          - { arch: ppc64le, qemu_arch: ppc64le, sysroot_variant: al8, sysroot_dockerfile: Dockerfile }
-          - { arch: arm, qemu_arch: arm, sysroot_variant: ubuntu20, sysroot_dockerfile: Dockerfile.ubuntu }
+        arch: ${{ fromJSON(inputs.archs) }}
     runs-on: ubuntu-24.04-arm
     env:
       POLYREGION_ARCH: ${{ matrix.arch }}
+      SYSROOT_VARIANT: ${{ matrix.arch == 'ppc64le' && 'al8' || 'ubuntu20' }}
+      SYSROOT_DOCKERFILE: ${{ matrix.arch == 'ppc64le' && 'Dockerfile' || 'Dockerfile.ubuntu' }}
       POLYREGION_DIST: ${{ github.workspace }}/dist
       POLYREGION_TEST_TARGETS: host@native!host@*
     steps:
@@ -37,14 +41,14 @@ jobs:
           sudo apt-get ${{ env.APT_OPTIONS }} update
           sudo apt-get ${{ env.APT_OPTIONS }} install -y cmake ninja-build
 
-      - name: Register binfmt-misc for ${{ matrix.qemu_arch }}
-        run: bash ../ci/install_qemu.sh ${{ matrix.qemu_arch }}
+      - name: Register binfmt-misc for ${{ matrix.arch }}
+        run: bash ../ci/install_qemu.sh ${{ matrix.arch }}
 
       - name: Restore sysroot cache
         uses: actions/cache/restore@v5
         with:
-          path: ./sysroot/out/sysroot-${{ matrix.sysroot_variant }}-${{ matrix.arch }}.tar.xz
-          key: sysroot-${{ matrix.sysroot_variant }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles(format('./sysroot/{0}', matrix.sysroot_dockerfile), './sysroot/build.sh') }}
+          path: ./sysroot/out/sysroot-${{ env.SYSROOT_VARIANT }}-${{ matrix.arch }}.tar.xz
+          key: sysroot-${{ env.SYSROOT_VARIANT }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles(format('./sysroot/{0}', env.SYSROOT_DOCKERFILE), './sysroot/build.sh') }}
 
       - name: Prepare sysroot
         working-directory: .

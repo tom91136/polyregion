@@ -5,6 +5,12 @@ on:
     outputs:
       shards:
         value: ${{ jobs.discover-shards.outputs.shards }}
+      archs:
+        value: ${{ jobs.artifacts.outputs.archs }}
+      emulator-test-archs:
+        value: ${{ jobs.artifacts.outputs.emulator-test-archs }}
+      missing-archs:
+        value: ${{ jobs.artifacts.outputs.missing-archs }}
 
 jobs:
   build-llvm:
@@ -100,6 +106,7 @@ jobs:
 
   build:
     needs: build-llvm
+    if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
       matrix:
@@ -274,3 +281,37 @@ jobs:
           shards=$(jq -R -s -c '[split("\n")[] | select(length > 0) | split("\t") | {id: .[0], shard: .[1], labels: .[2]}]' shards.txt)
           echo "shards=$shards" >> "$GITHUB_OUTPUT"
           echo "shards: $shards"
+
+  artifacts:
+    needs: [build-llvm, build]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+    outputs:
+      archs: ${{ steps.list.outputs.archs }}
+      emulator-test-archs: ${{ steps.list.outputs.emulator-test-archs }}
+      missing-archs: ${{ steps.list.outputs.missing-archs }}
+    steps:
+      - name: List artifacts
+        id: list
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          known=$(printf '%s\n' arm64 x86_64 | sort)
+          names=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --jq '.artifacts[].name')
+          pick() {
+            printf '%s\n' "$names" | jq -R -s -c --arg prefix "$1" --arg suffix "$2" --arg known "$known" '
+              split("\n")
+              | map(select(startswith($prefix) and endswith($suffix)) | ltrimstr($prefix) | rtrimstr($suffix))
+              | map(select(. as $arch | ($known | split("\n")) | index($arch)))'
+          }
+          archs=$(pick polyregion-darwin- -Release)
+          emulator_test_archs=$(pick polyregion-tests-emulators-darwin- -Release)
+          missing=$(comm -23 <(printf '%s\n' "$known") <(printf '%s\n' "$archs" | jq -r '.[]' | sort) |
+            jq -R -s -c 'split("\n") | map(select(length > 0))')
+          {
+            echo "archs=$archs"
+            echo "emulator-test-archs=$emulator_test_archs"
+            echo "missing-archs=$missing"
+          } >> "$GITHUB_OUTPUT"

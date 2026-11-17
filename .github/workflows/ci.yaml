@@ -13,6 +13,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   checks:
@@ -28,6 +29,8 @@ jobs:
     needs: linux-build
     if: ${{ !cancelled() }}
     uses: ./.github/workflows/linux-test.yaml
+    with:
+      archs: ${{ needs.linux-build.outputs.archs }}
 
   linux-emulator-test:
     needs: [linux-build, linux-emulators]
@@ -35,6 +38,8 @@ jobs:
     uses: ./.github/workflows/linux-emulator-test.yaml
     with:
       shards: ${{ needs.linux-build.outputs.shards }}
+      archs: ${{ needs.linux-build.outputs.archs }}
+      emulator-test-archs: ${{ needs.linux-build.outputs.emulator-test-archs }}
 
   macos-build:
     uses: ./.github/workflows/macos-build.yaml
@@ -46,6 +51,8 @@ jobs:
     needs: macos-build
     if: ${{ !cancelled() }}
     uses: ./.github/workflows/macos-test.yaml
+    with:
+      archs: ${{ needs.macos-build.outputs.archs }}
 
   macos-emulator-test:
     needs: [macos-build, macos-emulators]
@@ -53,6 +60,7 @@ jobs:
     uses: ./.github/workflows/macos-emulator-test.yaml
     with:
       shards: ${{ needs.macos-build.outputs.shards }}
+      emulator-test-archs: ${{ needs.macos-build.outputs.emulator-test-archs }}
 
   windows-build:
     uses: ./.github/workflows/windows-build.yaml
@@ -64,6 +72,8 @@ jobs:
     needs: windows-build
     if: ${{ !cancelled() }}
     uses: ./.github/workflows/windows-test.yaml
+    with:
+      archs: ${{ needs.windows-build.outputs.archs }}
 
   windows-emulator-test:
     needs: [windows-build, windows-emulators]
@@ -71,6 +81,7 @@ jobs:
     uses: ./.github/workflows/windows-emulator-test.yaml
     with:
       shards: ${{ needs.windows-build.outputs.shards }}
+      emulator-test-archs: ${{ needs.windows-build.outputs.emulator-test-archs }}
 
   cross-build:
     uses: ./.github/workflows/cross-build.yaml
@@ -81,71 +92,72 @@ jobs:
     uses: ./.github/workflows/cross-test.yaml
     with:
       shards: ${{ needs.linux-build.outputs.shards }}
+      test-archs: ${{ needs.cross-build.outputs.test-archs }}
 
   spectra-vendor:
     uses: ./.github/workflows/spectra-vendor.yaml
 
   spectra-surface:
     needs: linux-build
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && contains(fromJSON(needs.linux-build.outputs.archs || '[]'), 'x86_64') }}
     uses: ./.github/workflows/spectra-surface.yaml
 
   spectra-test-linux:
     name: spectra-test-linux
     needs: [linux-build, linux-emulators]
-    if: ${{ !cancelled() && needs.linux-build.outputs.spectra-package != '' }}
+    if: ${{ !cancelled() && needs.linux-build.outputs.spectra-package != '' && needs.linux-build.outputs.archs != '' && needs.linux-build.outputs.archs != '[]' }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { arch: x86_64, runs_on: ubuntu-24.04 }
-          - { arch: aarch64, runs_on: ubuntu-24.04-arm }
+        arch: ${{ fromJSON(needs.linux-build.outputs.archs) }}
     uses: ./.github/workflows/spectra-test.yaml
     with:
       os: linux
       arch: ${{ matrix.arch }}
-      runs_on: ${{ matrix.runs_on }}
+      runs_on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
 
   spectra-test-macos:
     name: spectra-test-macos
     needs: [macos-build, macos-emulators, linux-build]
-    if: ${{ !cancelled() && needs.linux-build.outputs.spectra-package != '' }}
+    if: ${{ !cancelled() && needs.linux-build.outputs.spectra-package != '' && needs.macos-build.outputs.archs != '' && needs.macos-build.outputs.archs != '[]' }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { arch: arm64, runs_on: macos-26 }
-          - { arch: x86_64, runs_on: macos-26-intel }
+        arch: ${{ fromJSON(needs.macos-build.outputs.archs) }}
     uses: ./.github/workflows/spectra-test.yaml
     with:
       os: darwin
       arch: ${{ matrix.arch }}
-      runs_on: ${{ matrix.runs_on }}
+      runs_on: ${{ matrix.arch == 'x86_64' && 'macos-26-intel' || 'macos-26' }}
 
   spectra-test-windows:
     name: spectra-test-windows
     needs: [windows-build, windows-emulators, linux-build]
-    if: ${{ !cancelled() && needs.linux-build.outputs.spectra-package != '' }}
+    if: ${{ !cancelled() && needs.linux-build.outputs.spectra-package != '' && needs.windows-build.outputs.archs != '' && needs.windows-build.outputs.archs != '[]' }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { arch: amd64, runs_on: windows-2025-vs2026 }
-          - { arch: arm64, runs_on: windows-11-arm }
+        arch: ${{ fromJSON(needs.windows-build.outputs.archs) }}
     uses: ./.github/workflows/spectra-test.yaml
     with:
       os: windows
       arch: ${{ matrix.arch }}
-      runs_on: ${{ matrix.runs_on }}
+      runs_on: ${{ matrix.arch == 'arm64' && 'windows-11-arm' || 'windows-2025-vs2026' }}
 
   spectra-test-cross:
     needs: [cross-build, linux-build]
-    if: ${{ !cancelled() && needs.linux-build.outputs.spectra-package != '' }}
+    if: ${{ !cancelled() && needs.linux-build.outputs.spectra-package != '' && needs.cross-build.outputs.archs != '' && needs.cross-build.outputs.archs != '[]' }}
     uses: ./.github/workflows/spectra-test-cross.yaml
+    with:
+      archs: ${{ needs.cross-build.outputs.archs }}
 
   test-report:
     if: always()
     needs:
+      - linux-build
+      - macos-build
+      - windows-build
+      - cross-build
       - linux-test
       - linux-emulator-test
       - macos-test

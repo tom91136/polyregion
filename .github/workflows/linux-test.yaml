@@ -2,6 +2,10 @@ name: Linux test
 
 on:
   workflow_call:
+    inputs:
+      archs:
+        type: string
+        required: true
 
 defaults:
   run:
@@ -13,24 +17,18 @@ env:
 
 jobs:
   check-dist:
-    # Run for whichever arch built; the leg whose build failed has no artifact and goes red on download.
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.archs != '' && inputs.archs != '[]' }}
     strategy:
       fail-fast: false
       matrix:
-        arch: [x86_64, aarch64]
+        arch: ${{ fromJSON(inputs.archs) }}
         distro:
           - { image: 'almalinux:8',  pkg: 'dnf install -y --setopt=retries=5 --setopt=timeout=30 --setopt=strict=0 git cmake findutils tar gzip gcc-c++ python3 $([ "$POLYREGION_ARCH" = x86_64 ] && echo libquadmath)' }
           - { image: 'almalinux:9',  pkg: 'dnf install -y --setopt=retries=5 --setopt=timeout=30 --setopt=strict=0 git cmake findutils tar gzip gcc-c++ python3 $([ "$POLYREGION_ARCH" = x86_64 ] && echo libquadmath)' }
           - { image: 'almalinux:10', pkg: 'dnf install -y --setopt=retries=5 --setopt=timeout=30 --setopt=strict=0 git cmake findutils tar gzip gcc-c++ python3 $([ "$POLYREGION_ARCH" = x86_64 ] && echo libquadmath)' }
           - { image: 'ubuntu:22.04', pkg: 'apt-get $APT_OPTIONS update && DEBIAN_FRONTEND=noninteractive apt-get $APT_OPTIONS install -y git cmake findutils curl g++ python3 $([ "$POLYREGION_ARCH" = x86_64 ] && echo libquadmath0)' }
           - { image: 'ubuntu:24.04', pkg: 'apt-get $APT_OPTIONS update && DEBIAN_FRONTEND=noninteractive apt-get $APT_OPTIONS install -y git cmake findutils curl g++ python3 $([ "$POLYREGION_ARCH" = x86_64 ] && echo libquadmath0)' }
-        include: &simple-matrix
-          - arch: x86_64
-            runs_on: ubuntu-24.04
-          - arch: aarch64
-            runs_on: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runs_on }}
+    runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     container: ${{ matrix.distro.image }}
     env: &arch-env
       POLYREGION_ARCH: ${{ matrix.arch }}
@@ -93,12 +91,12 @@ jobs:
           if-no-files-found: warn
 
   test-scala:
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.archs != '' && inputs.archs != '[]' }}
     strategy:
       fail-fast: false
       matrix:
-        include: *simple-matrix
-    runs-on: ${{ matrix.runs_on }}
+        arch: ${{ fromJSON(inputs.archs) }}
+    runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     env: *arch-env
     steps:
       - uses: *checkout
@@ -148,23 +146,17 @@ jobs:
           if-no-files-found: warn
 
   build-san:
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.archs != '' && inputs.archs != '[]' }}
     strategy:
       fail-fast: false
       matrix:
-        include: &san-matrix
-          - arch: x86_64
-            runs_on: ubuntu-24.04
-            triple: x86_64-unknown-linux-gnu
-          - arch: aarch64
-            runs_on: ubuntu-24.04-arm
-            triple: aarch64-unknown-linux-gnu
-    runs-on: ${{ matrix.runs_on }}
+        arch: ${{ fromJSON(inputs.archs) }}
+    runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     env:
       POLYREGION_ARCH: ${{ matrix.arch }}
       POLYREGION_ASAN: "ON"
       ASAN_OPTIONS: detect_leaks=0
-      LD_LIBRARY_PATH: ${{ github.workspace }}/native/out/polyregion-Release-${{ matrix.arch }}-dylib-asan-dist/lib/${{ matrix.triple }}
+      LD_LIBRARY_PATH: ${{ github.workspace }}/native/out/polyregion-Release-${{ matrix.arch }}-dylib-asan-dist/lib/${{ matrix.arch }}-unknown-linux-gnu
     steps:
       - name: Free up disk space
         if: ${{ !env.ACT }}
@@ -290,12 +282,12 @@ jobs:
 
   test-native-san:
     needs: build-san
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && needs.build-san.result != 'skipped' }}
     strategy:
       fail-fast: false
       matrix:
-        include: *san-matrix
-    runs-on: ${{ matrix.runs_on }}
+        arch: ${{ fromJSON(inputs.archs) }}
+    runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     env: *arch-env
     steps:
       - uses: *checkout

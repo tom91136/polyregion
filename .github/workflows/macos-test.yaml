@@ -2,20 +2,19 @@ name: macOS test
 
 on:
   workflow_call:
+    inputs:
+      archs:
+        type: string
+        required: true
 
 jobs:
   check-dist:
-    # Run for whichever arch built; the leg whose build failed has no artifact and goes red on download.
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.archs != '' && inputs.archs != '[]' }}
     strategy:
       fail-fast: false
       matrix:
-        include: &simple-matrix
-          - arch: arm64
-            runs_on: macos-26
-          - arch: x86_64
-            runs_on: macos-26-intel
-    runs-on: ${{ matrix.runs_on }}
+        arch: ${{ fromJSON(inputs.archs) }}
+    runs-on: ${{ matrix.arch == 'x86_64' && 'macos-26-intel' || 'macos-26' }}
     env: &arch-env
       POLYREGION_ARCH: ${{ matrix.arch }}
     steps:
@@ -66,12 +65,12 @@ jobs:
           if-no-files-found: warn
 
   test-scala:
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.archs != '' && inputs.archs != '[]' }}
     strategy:
       fail-fast: false
       matrix:
-        include: *simple-matrix
-    runs-on: ${{ matrix.runs_on }}
+        arch: ${{ fromJSON(inputs.archs) }}
+    runs-on: ${{ matrix.arch == 'x86_64' && 'macos-26-intel' || 'macos-26' }}
     env: *arch-env
     steps:
       - uses: *checkout
@@ -118,7 +117,7 @@ jobs:
           if-no-files-found: warn
 
   build-san:
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && contains(fromJSON(inputs.archs || '[]'), 'arm64') }}
     strategy:
       fail-fast: false
       matrix:
@@ -225,7 +224,7 @@ jobs:
 
   test-native-san:
     needs: build-san
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && needs.build-san.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:

@@ -6,6 +6,9 @@ on:
       shards:
         type: string
         required: true
+      emulator-test-archs:
+        type: string
+        required: true
 
 defaults:
   run:
@@ -13,16 +16,12 @@ defaults:
 
 jobs:
   test-native-misc:
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.emulator-test-archs != '' && inputs.emulator-test-archs != '[]' }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - arch: amd64
-            runs_on: windows-2025-vs2026
-          - arch: arm64
-            runs_on: windows-11-arm
-    runs-on: ${{ matrix.runs_on }}
+        arch: ${{ fromJSON(inputs.emulator-test-archs) }}
+    runs-on: ${{ matrix.arch == 'arm64' && 'windows-11-arm' || 'windows-2025-vs2026' }}
     env:
       POLYREGION_ARCH: ${{ matrix.arch }}
     steps:
@@ -120,11 +119,11 @@ jobs:
           if-no-files-found: ignore
 
   test-native-with-emulators:
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.emulator-test-archs != '' && inputs.emulator-test-archs != '[]' && inputs.shards != '' }}
     strategy:
       fail-fast: false
       matrix:
-        arch: [amd64, arm64]
+        arch: ${{ fromJSON(inputs.emulator-test-archs) }}
         slice: ${{ fromJSON(inputs.shards) }}
     name: test-native-with-emulators (${{ matrix.arch }}, ${{ matrix.slice.id }})
     runs-on: ${{ matrix.arch == 'arm64' && 'windows-11-arm' || 'windows-2025-vs2026' }}

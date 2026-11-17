@@ -6,6 +6,12 @@ on:
       shards:
         type: string
         required: true
+      archs:
+        type: string
+        required: true
+      emulator-test-archs:
+        type: string
+        required: true
 
 defaults:
   run:
@@ -13,16 +19,12 @@ defaults:
 
 jobs:
   test-native-misc:
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.emulator-test-archs != '' && inputs.emulator-test-archs != '[]' }}
     strategy:
       fail-fast: false
       matrix:
-        include: &simple-matrix
-          - arch: x86_64
-            runs_on: ubuntu-24.04
-          - arch: aarch64
-            runs_on: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runs_on }}
+        arch: ${{ fromJSON(inputs.emulator-test-archs) }}
+    runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     env: &arch-env
       POLYREGION_ARCH: ${{ matrix.arch }}
     steps:
@@ -113,11 +115,11 @@ jobs:
           if-no-files-found: ignore
 
   test-native-with-emulators:
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.emulator-test-archs != '' && inputs.emulator-test-archs != '[]' && inputs.shards != '' }}
     strategy:
       fail-fast: false
       matrix:
-        arch: [x86_64, aarch64]
+        arch: ${{ fromJSON(inputs.emulator-test-archs) }}
         slice: ${{ fromJSON(inputs.shards) }}
     name: test-native-with-emulators (${{ matrix.arch }}, ${{ matrix.slice.id }})
     runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
@@ -198,12 +200,12 @@ jobs:
           if-no-files-found: ignore
 
   check-miniapps:
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.archs != '' && inputs.archs != '[]' }}
     strategy:
       fail-fast: false
       matrix:
-        include: *simple-matrix
-    runs-on: ${{ matrix.runs_on }}
+        arch: ${{ fromJSON(inputs.archs) }}
+    runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     env: *arch-env
     steps:
       - uses: *checkout

@@ -2,6 +2,13 @@ name: Linux cross build
 
 on:
   workflow_call:
+    outputs:
+      archs:
+        value: ${{ jobs.artifacts.outputs.archs }}
+      test-archs:
+        value: ${{ jobs.artifacts.outputs.test-archs }}
+      missing-archs:
+        value: ${{ jobs.artifacts.outputs.missing-archs }}
 
 defaults:
   run:
@@ -202,6 +209,7 @@ jobs:
 
   build:
     needs: [pass-js, build-llvm]
+    if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
       matrix:
@@ -382,3 +390,37 @@ jobs:
           name: just-linux-${{ matrix.arch }}
           path: just-dist/just
           if-no-files-found: error
+
+  artifacts:
+    needs: [build-llvm, build]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+    outputs:
+      archs: ${{ steps.list.outputs.archs }}
+      test-archs: ${{ steps.list.outputs.test-archs }}
+      missing-archs: ${{ steps.list.outputs.missing-archs }}
+    steps:
+      - name: List artifacts
+        id: list
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          known=$(printf '%s\n' riscv64 ppc64le arm | sort)
+          names=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --jq '.artifacts[].name')
+          pick() {
+            printf '%s\n' "$names" | jq -R -s -c --arg prefix "$1" --arg suffix "$2" --arg known "$known" '
+              split("\n")
+              | map(select(startswith($prefix) and endswith($suffix)) | ltrimstr($prefix) | rtrimstr($suffix))
+              | map(select(. as $arch | ($known | split("\n")) | index($arch)))'
+          }
+          archs=$(pick polyregion-linux- -Release)
+          test_archs=$(pick polyregion-tests-linux- -Release)
+          missing=$(comm -23 <(printf '%s\n' "$known") <(printf '%s\n' "$archs" | jq -r '.[]' | sort) |
+            jq -R -s -c 'split("\n") | map(select(length > 0))')
+          {
+            echo "archs=$archs"
+            echo "test-archs=$test_archs"
+            echo "missing-archs=$missing"
+          } >> "$GITHUB_OUTPUT"
