@@ -452,9 +452,16 @@ ValPtr selectPtrImpl(CodeGen &gen, const Term::Select &select, const bool oneGep
     }
     // runtime index into an inline array element; folds into the one access chain
     if (auto dyn = step.template get<PathStep::IndexDyn>()) {
+      auto *idxV = gen.i64Index(dyn->idx);
+      if (auto p = tpe.template get<Type::Ptr>()) {
+        if (oneGep) throw BackendException("Cannot index a pointer at runtime in a logical access chain: " + to_string(tpe) + fail());
+        flush();
+        root = elemStepPtr(gen, p->comp, loadPointer(root, *p, stepIndex), idxV, qualified(select) + "_select_ptr");
+        tpe = p->comp;
+        continue;
+      }
       auto arr = tpe.template get<Type::Arr>();
       if (!arr) throw BackendException("IndexDyn step on non-array type " + to_string(tpe) + fail());
-      auto *idxV = gen.i64Index(dyn->idx);
       // typed access chain even on SPIR-V kernel: a byte-offset inttoptr loses the per-lane provenance IGC needs
       if (oneGep) {
         if (idxs.empty()) {

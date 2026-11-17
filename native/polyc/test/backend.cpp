@@ -5035,6 +5035,40 @@ TEST_CASE("a narrowing struct-to-struct cast reads the source members, not its a
   CHECK_THAT(eventDataOf(compiled, "llvm_to_obj_opt"), ContainsSubstring("store i32 305"));
 }
 
+TEST_CASE("a runtime index on a pointer in a select path strides from the loaded pointer", "[backend]") {
+  polyregion::compiler::initialise();
+  const ScopedEnv captureIr(polyregion::env::PolyregionDebug, std::string("1"));
+  using namespace polyregion::polyast::dsl;
+
+  const Named buf("buf", Type::Ptr(SInt.widen(), TypeSpace::Global())), r("r", SInt);
+  const auto outTpe = Type::Struct(Sym({"Out"}), {});
+  const StructDef outDef(Sym({"Out"}), {}, {buf, r}, {}, false);
+
+  const Named capture("#capture", Type::Ptr(outTpe.widen(), TypeSpace::Global()));
+  const Named i("i", SInt);
+  const Term::Select elem(capture, {PathStep::Field("buf").widen(), PathStep::IndexDyn(selectNamed(i).widen()).widen()}, SInt);
+
+  Function entry = mkFn("kernel", {Arg(capture, {})}, Unit,
+                        {
+                            Var(i, Expr::Alias(Term::IntS32Const(3).widen()).widen(), false).widen(),
+                            Mut(Select({capture}, r), Expr::Alias(elem.widen()).widen()).widen(),
+                            ret(),
+                        },
+                        FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*offloadEntry*/ true);
+  Program p(entry, {}, {outDef}, PassPhase::Initial(), {});
+
+  polyregion::compiler::Options opts{Target::Object_LLVM_HOST, "native"};
+  opts.pipelineSpec = "FullOpt(level=0)";
+  auto compiled = polyregion::compiler::compile(p, opts, OptLevel::O3);
+  INFO(repr(compiled));
+  CHECK(compiled.messages == "");
+  REQUIRE(compiled.binary != std::nullopt);
+
+  using Catch::Matchers::ContainsSubstring;
+  const auto &ir = llvmIrOf(compiled);
+  CHECK_THAT(ir, ContainsSubstring("getelementptr inbounds i32, ptr"));
+}
+
 static Program absToCaptureProgram(const Type::Any &tpe, const Term::Any &input) {
   using namespace polyregion::polyast::dsl;
 
