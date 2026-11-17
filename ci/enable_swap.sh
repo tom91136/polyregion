@@ -14,11 +14,11 @@ swapoff -a
 rm -f /mnt/swapfile
 
 if zram_ready; then
-  echo 1 > /sys/block/zram0/reset
-  echo "$target" > /sys/block/zram0/disksize
-  mkswap /dev/zram0
-  swapon -p 5 /dev/zram0
-  echo "swap: zram0 ${target} bytes"
+  zram="zram$(cat /sys/class/zram-control/hot_add)"
+  echo "$target" > "/sys/block/$zram/disksize"
+  mkswap "/dev/$zram"
+  swapon -p 5 "/dev/$zram"
+  echo "swap: $zram ${target} bytes"
 else
   echo "swap: zram unavailable, falling back to swapfile"
   read -r avail path < <(df -B1 --output=avail,target -t ext4 -t xfs -t btrfs | tail -n +2 | sort -rn | head -n 1)
