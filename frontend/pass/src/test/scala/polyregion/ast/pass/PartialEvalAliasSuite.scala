@@ -73,6 +73,23 @@ class PartialEvalAliasSuite extends munit.FunSuite {
     )
   }
 
+  test("retyping pointer to a local is not forwarded into a field read") {
+    val s = named("s", sTpe)
+    val q = named("q", ptrTo(innerTpe))
+    val out = pe(
+      List(
+        p.Stmt.Var(s, None, isMutable = true),
+        p.Stmt.Var(
+          q,
+          Some(p.Expr.RefTo(selectT(s), None, innerTpe, p.Type.Space.Private, p.Region.Rooted(s)))
+        ),
+        p.Stmt.Return(p.Expr.Alias(fieldOf(q)("y", p.Type.IntS32)))
+      ),
+      rtn = p.Type.IntS32
+    )
+    assertEquals(returnedTerm(out), Some(fieldOf(q)("y", p.Type.IntS32)))
+  }
+
   test("bare use of a pointer-to-local is left for DCE") {
     val s = named("s", sTpe)
     val q = named("q", ptrTo(sTpe))

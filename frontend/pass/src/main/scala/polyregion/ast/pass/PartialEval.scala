@@ -204,8 +204,8 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
             case p.Expr.Alias(sel: p.Term.Select) if !excluded.contains(name) && !excluded.contains(sel.root) =>
               bindAlias("copy-bind", sel)
             // a write through the pointer leaves its slot stable, so only a bare re-aim invalidates the bind
-            case p.Expr.RefTo(lhs = sel: p.Term.Select, idx = None)
-                if !reassigned.contains(name) &&
+            case p.Expr.RefTo(lhs = sel: p.Term.Select, idx = None, comp = comp)
+                if comp == sel.tpe && !reassigned.contains(name) &&
                   (!AddressRefinement.isPtr(sel.root.tpe) || !reassigned.contains(sel.root)) =>
               log.info(s"addr-bind ${name.repr} = &${sel.repr}")
               st.bindAddr(name, sel)
@@ -565,9 +565,9 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
     syms.filter(s => total.getOrElse(s, 0) == cln.getOrElse(s, 0))
   }
 
-  private def isIdentityRef(idx: Option[p.Term], selTpe: p.Type): Boolean = (idx, selTpe) match {
-    case (None, _)                                                               => true
-    case (Some(p.Term.IntS64Const(0) | p.Term.IntU64Const(0)), p.Type.Ptr(_, _)) => true
+  private def isIdentityRef(idx: Option[p.Term], selTpe: p.Type, comp: p.Type): Boolean = (idx, selTpe) match {
+    case (None, _)                                                               => selTpe == comp
+    case (Some(p.Term.IntS64Const(0) | p.Term.IntU64Const(0)), p.Type.Ptr(c, _)) => c == comp
     case _                                                                       => false
   }
 
@@ -575,7 +575,7 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
     val aliases = f.collectAll[p.Stmt].foldLeft(Map.empty[String, (p.Named, List[p.PathStep])]) { (m, s) =>
       s match {
         case p.Stmt.Var(n, Some(p.Expr.RefTo(p.Term.Select(b, path, selTpe), idx, comp, _, _)), false)
-            if isIdentityRef(idx, selTpe) &&
+            if isIdentityRef(idx, selTpe, comp) &&
               (!reassigned(b.symbol) ||
                 (path.isEmpty && idx.isEmpty && AddressRefinement.isPtr(selTpe) && comp == selTpe)) =>
           val (root, base) = m.getOrElse(b.symbol, (b, Nil))

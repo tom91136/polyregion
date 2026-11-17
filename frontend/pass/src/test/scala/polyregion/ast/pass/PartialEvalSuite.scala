@@ -247,6 +247,21 @@ class PartialEvalSuite extends munit.FunSuite {
     assertEquals(returnedTerm(out), Some(selectT(x)))
   }
 
+  test("deref of a retyping reference does not fold to the referent") {
+    val x    = named("x", p.Type.IntS32)
+    val pp   = named("p", p.Type.Ptr(p.Type.IntS8, p.Type.Space.Global))
+    val read = p.Term.Select(pp, List(p.PathStep.Deref), p.Type.IntS8)
+    val out = pe(
+      List(
+        p.Stmt.Var(pp, Some(p.Expr.RefTo(selectT(x), None, p.Type.IntS8, p.Type.Space.Global, p.Region.Opaque))),
+        p.Stmt.Return(p.Expr.Alias(read))
+      ),
+      rtn = p.Type.IntS8,
+      args = List(arg("x", p.Type.IntS32))
+    )
+    assertEquals(returnedTerm(out), Some(read))
+  }
+
   test("index-zero of a reference: (&x)[0] folds to x") {
     val x  = named("x", p.Type.IntS32)
     val pp = named("p", ptrI32)
