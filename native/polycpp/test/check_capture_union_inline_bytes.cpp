@@ -13,6 +13,12 @@
 #include <numeric>
 #include <vector>
 
+#if __has_cpp_attribute(msvc::no_unique_address)
+  #define NO_UNIQUE_ADDRESS [[msvc::no_unique_address]]
+#else
+  #define NO_UNIQUE_ADDRESS [[no_unique_address]]
+#endif
+
 namespace {
 
 struct Padding0 {};
@@ -39,7 +45,7 @@ template <> struct basic_string<StandardLayout> {
       unsigned char __is_long_ : 1;
       unsigned char __size_ : 7;
     };
-    [[no_unique_address]] Padding0 __padding_;
+    NO_UNIQUE_ADDRESS Padding0 __padding_;
     char __data_[__min_cap];
   };
 
@@ -61,7 +67,7 @@ template <> struct basic_string<AlternateLayout> {
 
   struct __short {
     char __data_[__min_cap];
-    [[no_unique_address]] Padding0 __padding_;
+    NO_UNIQUE_ADDRESS Padding0 __padding_;
     unsigned char __size_ : 7;
     unsigned char __is_long_ : 1;
   };
