@@ -2826,7 +2826,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       [&](const clang::UnaryExprOrTypeTraitExpr *expr) -> Expr::Any {
         if (expr->getKind() == clang::UETT_SizeOf) {
           const auto argumentType = expr->isArgumentType() ? expr->getArgumentType() : expr->getArgumentExpr()->getType();
-          return Expr::SizeOf(handleType(argumentType, r));
+          return conform(r, Expr::SizeOf(handleType(argumentType, r)), handleType(expr->getType(), r));
         }
         const auto tpe = handleType(expr->getType(), r);
         if (clang::Expr::EvalResult eval; expr->EvaluateAsInt(eval, context))
