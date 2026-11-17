@@ -351,11 +351,11 @@ struct TypeLayout {
   }
 
   // a union's pointer-bearing arms are live when `(load(tagWidthInBytes) & tagMask) <tagTest> tagValue`, the others otherwise
-  size_t tagWidthInBytes;
-  size_t tagOffsetInBytes;
-  size_t tagMask;
-  size_t tagValue;
-  TagTest tagTest;
+  size_t tagWidthInBytes = 0;
+  size_t tagOffsetInBytes = 0;
+  size_t tagMask = 0;
+  size_t tagValue = 0;
+  TagTest tagTest = TagTest::Eq;
 
   POLYREGION_RT_PROTECT bool armLive(const AggregateMember &arm, const char *self) const {
     if (tagWidthInBytes == 0) return true;
