@@ -106,7 +106,7 @@ jobs:
         run: just build-llvm -DLLVM_USE_HOST_TOOLS=OFF
 
       - name: Save LLVM cache
-        if: steps.build-llvm.outcome == 'success'
+        if: github.ref == 'refs/heads/main' && steps.build-llvm.outcome == 'success'
         uses: ./.github/actions/save-compressed-cache
         with:
           path: *llvm-path
@@ -155,8 +155,7 @@ jobs:
           distribution: microsoft
           java-version: '17'
 
-      - name: Setup sbt
-        uses: sbt/setup-sbt@v1
+      - uses: ./.github/actions/sbt-cache
 
       - name: Dotenv
         id: dotenv
@@ -209,7 +208,7 @@ jobs:
         run: just build-device-libs
 
       - name: Save device libs cache
-        if: steps.build-device-libs.outcome == 'success'
+        if: github.ref == 'refs/heads/main' && steps.build-device-libs.outcome == 'success'
         uses: &cache-save actions/cache/save@v5
         with:
           path: *devlibs-path
@@ -229,7 +228,7 @@ jobs:
         run: just build-vcpkg-deps
 
       - name: Save vcpkg cache
-        if: steps.build-vcpkg.outcome == 'success'
+        if: github.ref == 'refs/heads/main' && steps.build-vcpkg.outcome == 'success'
         uses: *cache-save
         with:
           path: *vcpkg-path
@@ -296,6 +295,10 @@ jobs:
           name: polyregion-shards-windows-${{ matrix.arch }}
           path: shards.txt
           if-no-files-found: error
+
+      - uses: ./.github/actions/sbt-cache
+        with:
+          save: 'true'
 
   discover-shards:
     needs: build

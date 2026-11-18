@@ -80,8 +80,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Setup sbt
-        uses: sbt/setup-sbt@v1
+      - uses: ./.github/actions/sbt-cache
       - *setup-just
       - *sdkroot
 
@@ -116,6 +115,10 @@ jobs:
           path: ./frontend/target/out/**/test-reports/*.xml
           if-no-files-found: warn
 
+      - uses: ./.github/actions/sbt-cache
+        with:
+          save: 'true'
+
   build-san:
     if: ${{ !cancelled() && contains(fromJSON(inputs.archs || '[]'), 'arm64') }}
     strategy:
@@ -132,6 +135,8 @@ jobs:
     steps:
       - uses: *checkout
       - *setup-java
+
+      - uses: ./.github/actions/sbt-cache
 
       - name: Install dependencies
         env:
@@ -165,17 +170,14 @@ jobs:
           mkdir -p native/out
           tar xzf llvm-dist.tar.gz -C native/out
 
-      - name: Restore device libs cache
-        uses: &cache-restore actions/cache/restore@v5
+      - name: Download san inputs
+        uses: *download
         with:
-          path: ./native/thirdparty/device_libs
-          key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/build.cmake', './native/toolchains/darwin-*.cmake', '!./native/toolchains/*-asan.cmake', './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
+          name: polyregion-san-deps-darwin-${{ matrix.arch }}
+          path: .
 
-      - name: Restore vcpkg cache
-        uses: *cache-restore
-        with:
-          path: ./native/.vcpkg/vcpkg_installed
-          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/vcpkg.json', './native/vcpkg-configuration.json', './native/toolchains/darwin-*.cmake', '!./native/toolchains/*-asan.cmake', './native/.env', './native/ports/**') }}
+      - name: Unpack san inputs
+        run: tar xzf san-deps.tar.gz -C native
 
       - name: Download dist (pass bundle)
         uses: *download
@@ -221,6 +223,10 @@ jobs:
           name: polyregion-tests-darwin-${{ matrix.arch }}-Release-asan
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-asan-dist/**
           if-no-files-found: error
+
+      - uses: ./.github/actions/sbt-cache
+        with:
+          save: 'true'
 
   test-native-san:
     needs: build-san

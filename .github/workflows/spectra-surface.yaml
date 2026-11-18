@@ -26,15 +26,13 @@ jobs:
           sudo apt-get ${{ env.APT_OPTIONS }} update
           sudo apt-get ${{ env.APT_OPTIONS }} install -y cmake ninja-build gfortran
 
-      - name: Setup JDK + sbt cache
+      - name: Setup JDK
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-          cache: sbt
 
-      - name: Setup sbt
-        uses: sbt/setup-sbt@v1
+      - uses: ./.github/actions/sbt-cache
 
       - name: Download Polyregion
         uses: actions/download-artifact@v8
@@ -48,3 +46,7 @@ jobs:
 
       - name: Check format, codegen drift, and language surfaces
         run: just ci
+
+      - uses: ./.github/actions/sbt-cache
+        with:
+          save: 'true'

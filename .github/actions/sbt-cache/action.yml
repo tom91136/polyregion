@@ -1,0 +1,84 @@
+name: sbt cache
+description: Restore the sbt dependency and launcher caches, or save them on main.
+
+inputs:
+  save:
+    description: Save instead of restore; the save only happens on refs/heads/main.
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - id: keys
+      name: Compute cache keys
+      shell: bash
+      run: |
+        echo "deps=sbt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('frontend/build.sbt', 'frontend/project/build.properties', 'frontend/project/plugins.sbt', 'spectra/build.sbt', 'spectra/project/build.properties', 'spectra/project/plugins.sbt') }}" >> "$GITHUB_OUTPUT"
+        echo "launcher=sbt-launchers-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('frontend/project/build.properties', 'spectra/project/build.properties') }}" >> "$GITHUB_OUTPUT"
+
+    - if: inputs.save != 'true'
+      uses: actions/cache/restore@v5
+      with:
+        path: |
+          ~/.ivy2/cache
+          ~/.sbt
+          ~/.cache/coursier
+          ~/Library/Caches/Coursier
+          ~/AppData/Local/Coursier/Cache
+          ~/.cache/sbt
+          ~/Library/Caches/sbt
+          ~/AppData/Local/sbt
+        key: ${{ steps.keys.outputs.deps }}
+        restore-keys: sbt-${{ runner.os }}-${{ runner.arch }}-
+
+    - if: inputs.save != 'true'
+      uses: actions/cache/restore@v5
+      with:
+        path: ~/.sbt/launchers
+        key: ${{ steps.keys.outputs.launcher }}
+        restore-keys: sbt-launchers-${{ runner.os }}-${{ runner.arch }}-
+
+    - id: have-deps
+      if: inputs.save == 'true' && github.ref == 'refs/heads/main'
+      uses: actions/cache/restore@v5
+      with:
+        path: |
+          ~/.ivy2/cache
+          ~/.sbt
+          ~/.cache/coursier
+          ~/Library/Caches/Coursier
+          ~/AppData/Local/Coursier/Cache
+          ~/.cache/sbt
+          ~/Library/Caches/sbt
+          ~/AppData/Local/sbt
+        key: ${{ steps.keys.outputs.deps }}
+        lookup-only: true
+
+    - if: inputs.save == 'true' && github.ref == 'refs/heads/main' && steps.have-deps.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v5
+      with:
+        path: |
+          ~/.ivy2/cache
+          ~/.sbt
+          ~/.cache/coursier
+          ~/Library/Caches/Coursier
+          ~/AppData/Local/Coursier/Cache
+          ~/.cache/sbt
+          ~/Library/Caches/sbt
+          ~/AppData/Local/sbt
+        key: ${{ steps.keys.outputs.deps }}
+
+    - id: have-launcher
+      if: inputs.save == 'true' && github.ref == 'refs/heads/main'
+      uses: actions/cache/restore@v5
+      with:
+        path: ~/.sbt/launchers
+        key: ${{ steps.keys.outputs.launcher }}
+        lookup-only: true
+
+    - if: inputs.save == 'true' && github.ref == 'refs/heads/main' && steps.have-launcher.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v5
+      with:
+        path: ~/.sbt/launchers
+        key: ${{ steps.keys.outputs.launcher }}

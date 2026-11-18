@@ -20,20 +20,18 @@ jobs:
           sudo apt-get ${{ env.APT_OPTIONS }} install -y cmake ninja-build gfortran
 
       - &setup-java
-        name: Setup JDK + sbt cache
+        name: Setup JDK
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-          cache: sbt
-
-      - &setup-sbt
-        name: Setup sbt
-        uses: sbt/setup-sbt@v1
 
       - &setup-just
         name: Setup just
         uses: ./.github/actions/setup-just
+
+      - &sbt-cache
+        uses: ./.github/actions/sbt-cache
 
       - name: Regenerate Scala-derived sources
         run: just _codegen-sbt
@@ -47,14 +45,18 @@ jobs:
       - name: Test bindgen
         run: just test-bindgen
 
+      - uses: ./.github/actions/sbt-cache
+        with:
+          save: 'true'
+
   pass-js-linux:
     runs-on: ubuntu-24.04
     defaults: *bash
     steps:
       - uses: *checkout
       - *setup-java
-      - *setup-sbt
       - *setup-just
+      - *sbt-cache
 
       - name: Build pass bundle (js)
         run: just build-pass-js
@@ -63,6 +65,10 @@ jobs:
         run: |
           test -s native/polyc/polypass.js
           echo "polypass.js size: $(wc -c < native/polyc/polypass.js) bytes"
+
+      - uses: ./.github/actions/sbt-cache
+        with:
+          save: 'true'
 
   pass-js-macos:
     runs-on: macos-26
@@ -75,7 +81,7 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - *setup-sbt
+      - *sbt-cache
 
       - *setup-just
 
@@ -86,6 +92,10 @@ jobs:
         run: |
           test -s native/polyc/polypass.js
           echo "polypass.js size: $(wc -c < native/polyc/polypass.js) bytes"
+
+      - uses: ./.github/actions/sbt-cache
+        with:
+          save: 'true'
 
   pass-js-windows:
     runs-on: windows-2025-vs2026
@@ -101,7 +111,7 @@ jobs:
           distribution: microsoft
           java-version: '17'
 
-      - *setup-sbt
+      - *sbt-cache
 
       - *setup-just
 
@@ -113,3 +123,7 @@ jobs:
         run: |
           test -s native/polyc/polypass.js
           echo "polypass.js size: $(wc -c < native/polyc/polypass.js) bytes"
+
+      - uses: ./.github/actions/sbt-cache
+        with:
+          save: 'true'

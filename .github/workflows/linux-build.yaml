@@ -106,7 +106,7 @@ jobs:
         run: just build-sysroot
 
       - name: Save sysroot cache
-        if: steps.build-sysroot.outcome == 'success'
+        if: github.ref == 'refs/heads/main' && steps.build-sysroot.outcome == 'success'
         uses: &cache-save actions/cache/save@v5
         with:
           path: *sysroot-path
@@ -136,7 +136,7 @@ jobs:
         run: just build-llvm
 
       - name: Save LLVM cache
-        if: steps.build-llvm.outcome == 'success'
+        if: github.ref == 'refs/heads/main' && steps.build-llvm.outcome == 'success'
         uses: ./.github/actions/save-compressed-cache
         with:
           path: *llvm-path
@@ -199,10 +199,8 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-          cache: sbt
 
-      - name: Setup sbt
-        uses: sbt/setup-sbt@v1
+      - uses: ./.github/actions/sbt-cache
 
       - name: Dotenv
         id: dotenv
@@ -246,7 +244,7 @@ jobs:
         run: just build-sysroot
 
       - name: Save sysroot cache
-        if: steps.build-sysroot.outcome == 'success'
+        if: github.ref == 'refs/heads/main' && steps.build-sysroot.outcome == 'success'
         uses: *cache-save
         with:
           path: *sysroot-path
@@ -290,7 +288,7 @@ jobs:
         run: just build-device-libs
 
       - name: Save device libs cache
-        if: steps.build-device-libs.outcome == 'success'
+        if: github.ref == 'refs/heads/main' && steps.build-device-libs.outcome == 'success'
         uses: *cache-save
         with:
           path: *devlibs-path
@@ -310,11 +308,24 @@ jobs:
         run: just build-vcpkg-deps
 
       - name: Save vcpkg cache
-        if: steps.build-vcpkg.outcome == 'success'
+        if: github.ref == 'refs/heads/main' && steps.build-vcpkg.outcome == 'success'
         uses: *cache-save
         with:
           path: *vcpkg-path
           key: *vcpkg-key
+
+      - name: Pack san inputs
+        run: tar czf san-deps.tar.gz -C native .vcpkg/vcpkg_installed thirdparty/device_libs
+
+      - name: Upload san inputs
+        if: ${{ !env.ACT }}
+        uses: *upload
+        with:
+          name: polyregion-san-deps-linux-${{ matrix.arch }}
+          path: san-deps.tar.gz
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Build pass bundle (dso)
         run: just build-pass-native
@@ -344,7 +355,7 @@ jobs:
           just verify-vendor-libs
 
       - name: Save pinned vendor inputs
-        if: ${{ !env.ACT && matrix.arch == 'x86_64' && steps.restore-vendor.outputs.cache-hit != 'true' && steps.build-vendor.outcome == 'success' }}
+        if: ${{ !env.ACT && github.ref == 'refs/heads/main' && matrix.arch == 'x86_64' && steps.restore-vendor.outputs.cache-hit != 'true' && steps.build-vendor.outcome == 'success' }}
         uses: *cache-save
         with:
           path: *vendor-path
@@ -422,6 +433,10 @@ jobs:
           name: just-linux-${{ matrix.arch }}
           path: just-dist/just
           if-no-files-found: error
+
+      - uses: ./.github/actions/sbt-cache
+        with:
+          save: 'true'
 
   discover-shards:
     needs: build

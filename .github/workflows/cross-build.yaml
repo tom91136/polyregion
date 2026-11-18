@@ -20,15 +20,13 @@ jobs:
     steps:
       - uses: &checkout actions/checkout@v6
 
-      - name: Setup JDK + sbt cache
+      - name: Setup JDK
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-          cache: sbt
 
-      - name: Setup sbt
-        uses: sbt/setup-sbt@v1
+      - uses: ./.github/actions/sbt-cache
 
       - &setup-just
         name: Setup just
@@ -60,6 +58,10 @@ jobs:
           name: polyregion-jvm-sdk
           path: native/out/maven
           if-no-files-found: error
+
+      - uses: ./.github/actions/sbt-cache
+        with:
+          save: 'true'
 
   build-llvm:
     strategy:
@@ -145,7 +147,7 @@ jobs:
         run: just build-sysroot
 
       - name: Save sysroot cache
-        if: steps.build-sysroot.outcome == 'success'
+        if: github.ref == 'refs/heads/main' && steps.build-sysroot.outcome == 'success'
         uses: &cache-save actions/cache/save@v5
         with:
           path: *sysroot-path
@@ -183,7 +185,7 @@ jobs:
         run: just build-llvm
 
       - name: Save LLVM cache
-        if: steps.build-llvm.outcome == 'success'
+        if: github.ref == 'refs/heads/main' && steps.build-llvm.outcome == 'success'
         uses: ./.github/actions/save-compressed-cache
         with:
           path: *llvm-path
@@ -252,6 +254,8 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - uses: ./.github/actions/sbt-cache
+
       - name: Restore sysroot cache
         if: ${{ !env.ACT }}
         uses: *cache-restore
@@ -297,7 +301,7 @@ jobs:
         run: just build-device-libs
 
       - name: Save device libs cache
-        if: steps.build-device-libs.outcome == 'success'
+        if: github.ref == 'refs/heads/main' && steps.build-device-libs.outcome == 'success'
         uses: *cache-save
         with:
           path: *devlibs-path
@@ -342,7 +346,7 @@ jobs:
         run: just build-vcpkg-deps
 
       - name: Save vcpkg cache
-        if: steps.build-vcpkg.outcome == 'success'
+        if: github.ref == 'refs/heads/main' && steps.build-vcpkg.outcome == 'success'
         uses: *cache-save
         with:
           path: *vcpkg-path
@@ -390,6 +394,10 @@ jobs:
           name: just-linux-${{ matrix.arch }}
           path: just-dist/just
           if-no-files-found: error
+
+      - uses: ./.github/actions/sbt-cache
+        with:
+          save: 'true'
 
   artifacts:
     needs: [build-llvm, build]

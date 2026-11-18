@@ -92,9 +92,8 @@ jobs:
     steps:
       - uses: *checkout
       - *setup-java
+      - uses: ./.github/actions/sbt-cache
       - *msvc
-      - name: Setup sbt
-        uses: sbt/setup-sbt@v1
       - *setup-just
 
       - name: Download dist
@@ -128,3 +127,7 @@ jobs:
           name: scala-test-results-windows-${{ matrix.arch }}-Release
           path: ./frontend/target/out/**/test-reports/*.xml
           if-no-files-found: warn
+
+      - uses: ./.github/actions/sbt-cache
+        with:
+          save: 'true'

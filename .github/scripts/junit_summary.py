@@ -55,13 +55,13 @@ def row_key(artifact):
     return "-".join(variant.split("-")[:2]), suite
 
 
-def missing_builds(needs):
+def missing_artifacts(needs, suffix):
     missing = []
     for job, state in sorted(needs.items()):
-        if not job.endswith("-build"):
+        if not job.endswith(suffix):
             continue
         arches = json.loads(state.get("outputs", {}).get("missing-archs") or "[]")
-        missing += [f"{job.removesuffix('-build')} {arch}" for arch in arches]
+        missing += [f"{job.removesuffix(suffix)} {arch}" for arch in arches]
     return missing
 
 
@@ -91,9 +91,10 @@ def summary(root, needs):
     for job, state in sorted(needs.items()):
         if state["result"] != "success":
             lines.append(f"| - | {job} | - | - | - | - | job {state['result']} |")
-    missing = missing_builds(needs)
-    if missing:
-        lines += ["", f"Not tested (build artifact missing): {', '.join(missing)}"]
+    for suffix, label in (("-build", "build artifact"), ("-emulators", "emulator bundle")):
+        missing = missing_artifacts(needs, suffix)
+        if missing:
+            lines += ["", f"Not tested ({label} missing): {', '.join(missing)}"]
     for key in sorted(failures):
         lines += ["", f"### {key[0]} {key[1]}: {len(failures[key])} failed", ""]
         lines += [f"- `{test}`" for test in failures[key]]

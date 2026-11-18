@@ -2,6 +2,11 @@ name: macOS emulators
 
 on:
   workflow_call:
+    outputs:
+      archs:
+        value: ${{ jobs.artifacts.outputs.archs }}
+      missing-archs:
+        value: ${{ jobs.artifacts.outputs.missing-archs }}
 
 jobs:
   build-emulators:
@@ -33,7 +38,7 @@ jobs:
         if: steps.restore-emu.outputs.cache-hit != 'true'
         run: just build-emulators
       - name: Save emulators cache
-        if: steps.build-emulators.outcome == 'success'
+        if: github.ref == 'refs/heads/main' && steps.build-emulators.outcome == 'success'
         uses: ./.github/actions/save-compressed-cache
         with:
           path: *emu-path
@@ -47,3 +52,31 @@ jobs:
           name: polyregion-emulators-darwin-${{ matrix.arch }}
           path: emulators-out.tar.gz
           if-no-files-found: error
+
+  artifacts:
+    needs: build-emulators
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+    outputs:
+      archs: ${{ steps.list.outputs.archs }}
+      missing-archs: ${{ steps.list.outputs.missing-archs }}
+    steps:
+      - name: List artifacts
+        id: list
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          known=$(printf '%s\n' arm64 x86_64 | sort)
+          names=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --jq '.artifacts[].name')
+          archs=$(printf '%s\n' "$names" | jq -R -s -c --arg prefix polyregion-emulators-darwin- --arg known "$known" '
+            split("\n")
+            | map(select(startswith($prefix)) | ltrimstr($prefix))
+            | map(select(. as $arch | ($known | split("\n")) | index($arch)))')
+          missing=$(comm -23 <(printf '%s\n' "$known") <(printf '%s\n' "$archs" | jq -r '.[]' | sort) |
+            jq -R -s -c 'split("\n") | map(select(length > 0))')
+          {
+            echo "archs=$archs"
+            echo "missing-archs=$missing"
+          } >> "$GITHUB_OUTPUT"

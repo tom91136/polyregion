@@ -101,14 +101,12 @@ jobs:
     steps:
       - uses: *checkout
       - &setup-java
-        name: Setup JDK + sbt cache
+        name: Setup JDK
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-          cache: sbt
-      - name: Setup sbt
-        uses: sbt/setup-sbt@v1
+      - uses: ./.github/actions/sbt-cache
       - &setup-just
         name: Setup just
         uses: ./.github/actions/setup-just
@@ -145,6 +143,10 @@ jobs:
           path: ./frontend/target/out/**/test-reports/*.xml
           if-no-files-found: warn
 
+      - uses: ./.github/actions/sbt-cache
+        with:
+          save: 'true'
+
   build-san:
     if: ${{ !cancelled() && inputs.archs != '' && inputs.archs != '[]' }}
     strategy:
@@ -178,6 +180,7 @@ jobs:
           sudo apt-get ${{ env.APT_OPTIONS }} install -y cmake ninja-build clang clang-tools lld llvm g++ libcrypt-dev libltdl-dev zlib1g-dev python3-requests ccache
 
       - *setup-java
+      - uses: ./.github/actions/sbt-cache
 
       - name: Dotenv
         id: dotenv
@@ -194,7 +197,7 @@ jobs:
 
       - name: Restore sysroot cache
         if: ${{ !env.ACT }}
-        uses: &cache-restore actions/cache/restore@v5
+        uses: actions/cache/restore@v5
         with:
           path: ./sysroot/out/sysroot-${{ env.SYSROOT_VARIANT }}-${{ matrix.arch }}.tar.xz
           key: sysroot-${{ env.SYSROOT_VARIANT }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./sysroot/Dockerfile', './sysroot/build.sh') }}
@@ -218,19 +221,16 @@ jobs:
           mkdir -p native/out
           tar xzf llvm-dist.tar.gz -C native/out
 
-      - name: Restore device libs cache
+      - name: Download san inputs
         if: ${{ !env.ACT }}
-        uses: *cache-restore
+        uses: *download
         with:
-          path: ./native/thirdparty/device_libs
-          key: device-libs-${{ env.SYSROOT_VARIANT }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/build.cmake', './native/toolchains/linux-*.cmake', '!./native/toolchains/*-asan.cmake', './native/cmake/sysroot_gcc_dir.cmake', './sysroot/Dockerfile', './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
+          name: polyregion-san-deps-linux-${{ matrix.arch }}
+          path: .
 
-      - name: Restore vcpkg cache
+      - name: Unpack san inputs
         if: ${{ !env.ACT }}
-        uses: *cache-restore
-        with:
-          path: ./native/.vcpkg/vcpkg_installed
-          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/vcpkg.json', './native/vcpkg-configuration.json', './native/toolchains/linux-*.cmake', '!./native/toolchains/*-asan.cmake', './native/.env', './native/ports/**', './native/cmake/sysroot_gcc_dir.cmake', './sysroot/Dockerfile') }}
+        run: tar xzf san-deps.tar.gz -C native
 
       - name: Download dist (pass bundle)
         if: ${{ !env.ACT }}
@@ -279,6 +279,10 @@ jobs:
           name: polyregion-tests-linux-${{ matrix.arch }}-Release-asan
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-asan-dist/**
           if-no-files-found: error
+
+      - uses: ./.github/actions/sbt-cache
+        with:
+          save: 'true'
 
   test-native-san:
     needs: build-san

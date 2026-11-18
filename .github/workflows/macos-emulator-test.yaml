@@ -9,14 +9,32 @@ on:
       emulator-test-archs:
         type: string
         required: true
+      emulators:
+        type: string
+        required: true
 
 jobs:
+  emulator-archs:
+    runs-on: ubuntu-24.04
+    outputs:
+      emulator-test-archs: ${{ steps.intersect.outputs.emulator-test-archs }}
+    steps:
+      - id: intersect
+        env:
+          EMULATOR_TEST_ARCHS: ${{ inputs.emulator-test-archs }}
+          EMULATORS: ${{ inputs.emulators }}
+        run: |
+          jq -n -c --argjson emulator_test "${EMULATOR_TEST_ARCHS:-[]}" --argjson emulators "${EMULATORS:-[]}" '
+            $emulator_test - ($emulator_test - $emulators)' > archs.json
+          echo "emulator-test-archs=$(cat archs.json)" >> "$GITHUB_OUTPUT"
+
   test-native-misc:
-    if: ${{ !cancelled() && inputs.emulator-test-archs != '' && inputs.emulator-test-archs != '[]' }}
+    needs: emulator-archs
+    if: ${{ !cancelled() && needs.emulator-archs.outputs.emulator-test-archs != '' && needs.emulator-archs.outputs.emulator-test-archs != '[]' }}
     strategy:
       fail-fast: false
       matrix:
-        arch: ${{ fromJSON(inputs.emulator-test-archs) }}
+        arch: ${{ fromJSON(needs.emulator-archs.outputs.emulator-test-archs) }}
     runs-on: ${{ matrix.arch == 'x86_64' && 'macos-26-intel' || 'macos-26' }}
     env:
       POLYREGION_ARCH: ${{ matrix.arch }}
@@ -99,11 +117,12 @@ jobs:
           if-no-files-found: ignore
 
   test-native-with-emulators:
-    if: ${{ !cancelled() && inputs.emulator-test-archs != '' && inputs.emulator-test-archs != '[]' && inputs.shards != '' }}
+    needs: emulator-archs
+    if: ${{ !cancelled() && needs.emulator-archs.outputs.emulator-test-archs != '' && needs.emulator-archs.outputs.emulator-test-archs != '[]' && inputs.shards != '' }}
     strategy:
       fail-fast: false
       matrix:
-        arch: ${{ fromJSON(inputs.emulator-test-archs) }}
+        arch: ${{ fromJSON(needs.emulator-archs.outputs.emulator-test-archs) }}
         slice: ${{ fromJSON(inputs.shards) }}
     name: test-native-with-emulators (${{ matrix.arch }}, ${{ matrix.slice.id }})
     runs-on: ${{ matrix.arch == 'x86_64' && 'macos-26-intel' || 'macos-26' }}

@@ -85,7 +85,7 @@ jobs:
         run: just build-llvm
 
       - name: Save LLVM cache
-        if: steps.build-llvm.outcome == 'success'
+        if: github.ref == 'refs/heads/main' && steps.build-llvm.outcome == 'success'
         uses: ./.github/actions/save-compressed-cache
         with:
           path: *llvm-path
@@ -122,6 +122,7 @@ jobs:
     steps:
       - uses: *checkout
       - *setup-java
+      - uses: ./.github/actions/sbt-cache
 
       - name: Install dependencies
         # gcc brings gfortran which flang-rt needs at LLVM-runtimes configure time.
@@ -180,7 +181,7 @@ jobs:
         run: just build-device-libs
 
       - name: Save device libs cache
-        if: steps.build-device-libs.outcome == 'success'
+        if: github.ref == 'refs/heads/main' && steps.build-device-libs.outcome == 'success'
         uses: &cache-save actions/cache/save@v5
         with:
           path: *devlibs-path
@@ -200,11 +201,23 @@ jobs:
         run: just build-vcpkg-deps
 
       - name: Save vcpkg cache
-        if: steps.build-vcpkg.outcome == 'success'
+        if: github.ref == 'refs/heads/main' && steps.build-vcpkg.outcome == 'success'
         uses: *cache-save
         with:
           path: *vcpkg-path
           key: *vcpkg-key
+
+      - name: Pack san inputs
+        run: tar czf san-deps.tar.gz -C native .vcpkg/vcpkg_installed thirdparty/device_libs
+
+      - name: Upload san inputs
+        uses: *upload
+        with:
+          name: polyregion-san-deps-darwin-${{ matrix.arch }}
+          path: san-deps.tar.gz
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Build pass bundle (dso)
         run: just build-pass-native
@@ -263,6 +276,10 @@ jobs:
           name: polyregion-shards-darwin-${{ matrix.arch }}
           path: shards.txt
           if-no-files-found: error
+
+      - uses: ./.github/actions/sbt-cache
+        with:
+          save: 'true'
 
   discover-shards:
     needs: build

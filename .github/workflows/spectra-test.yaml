@@ -12,6 +12,9 @@ on:
       runs_on:
         type: string
         required: true
+      emulators:
+        type: string
+        required: true
 
 defaults:
   run:
@@ -48,7 +51,7 @@ jobs:
 
   test:
     needs: slices
-    if: ${{ !cancelled() && needs.slices.result == 'success' }}
+    if: ${{ !cancelled() && needs.slices.result == 'success' && contains(fromJSON(inputs.emulators || '[]'), inputs.arch) }}
     strategy:
       fail-fast: false
       matrix:

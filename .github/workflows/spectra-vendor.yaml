@@ -38,7 +38,7 @@ jobs:
           just verify-vendor-libs
 
       - name: Save pinned vendor inputs
-        if: ${{ !env.ACT && steps.restore-vendor.outputs.cache-hit != 'true' && steps.build-vendor.outcome == 'success' }}
+        if: ${{ !env.ACT && github.ref == 'refs/heads/main' && steps.restore-vendor.outputs.cache-hit != 'true' && steps.build-vendor.outcome == 'success' }}
         uses: &cache-save actions/cache/save@v5
         with:
           path: *vendor-path
@@ -88,7 +88,7 @@ jobs:
           just verify-vendor-libs
 
       - name: Save pinned vendor inputs
-        if: ${{ !env.ACT && steps.restore-vendor.outputs.cache-hit != 'true' && steps.build-vendor.outcome == 'success' }}
+        if: ${{ !env.ACT && github.ref == 'refs/heads/main' && steps.restore-vendor.outputs.cache-hit != 'true' && steps.build-vendor.outcome == 'success' }}
         uses: *cache-save
         with:
           path: *vendor-path
