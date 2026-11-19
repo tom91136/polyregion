@@ -216,28 +216,44 @@ extern "C" POLYREGION_EXPORT void *__polyregion_host_group_state(const uint64_t 
 
 static bool groupedPolicy(const Policy &policy) { return policy.local && policy.local->first.x > 1; }
 
+#if defined(__linux__) || defined(__APPLE__)
+static pthread_t startPosixThread(std::function<void()> body, const size_t stackBytes, const bool detached) {
+  pthread_attr_t attr;
+  pthread_attr_init(&attr);
+  if (stackBytes != 0) pthread_attr_setstacksize(&attr, stackBytes);
+  if (detached) pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+  auto owned = std::make_unique<std::function<void()>>(std::move(body));
+  pthread_t handle{};
+  const int status = pthread_create(
+      &handle, &attr,
+      [](void *raw) -> void * {
+        const std::unique_ptr<std::function<void()>> run(static_cast<std::function<void()> *>(raw));
+        (*run)();
+        return nullptr;
+      },
+      owned.get());
+  pthread_attr_destroy(&attr);
+  if (status != 0) POLYINVOKE_FATAL(RELOBJ_PREFIX, "cannot start a host thread: %s", std::strerror(status));
+  owned.release();
+  return handle;
+}
+#endif
+
+void polyregion::invoke::object::spawnDetached(std::function<void()> body) {
+#if defined(__linux__) || defined(__APPLE__)
+  // XXX glibc's pthread_detach can read the stack of a thread that has already exited and unmapped it
+  startPosixThread(std::move(body), 0, true);
+#else
+  std::thread(std::move(body)).detach();
+#endif
+}
+
 #ifdef POLYINVOKE_EXPLICIT_LANE_STACK
 class LaneThread {
   pthread_t handle{};
 
 public:
-  template <typename F> explicit LaneThread(F body) {
-    pthread_attr_t attr;
-    pthread_attr_init(&attr);
-    pthread_attr_setstacksize(&attr, HostLaneStackBytes);
-    auto owned = std::make_unique<std::function<void()>>(std::move(body));
-    const int status = pthread_create(
-        &handle, &attr,
-        [](void *raw) -> void * {
-          const std::unique_ptr<std::function<void()>> run(static_cast<std::function<void()> *>(raw));
-          (*run)();
-          return nullptr;
-        },
-        owned.get());
-    pthread_attr_destroy(&attr);
-    if (status != 0) POLYINVOKE_FATAL(RELOBJ_PREFIX, "cannot start a lane thread: %s", std::strerror(status));
-    owned.release();
-  }
+  template <typename F> explicit LaneThread(F body) : handle(startPosixThread(std::move(body), HostLaneStackBytes, false)) {}
   void join() { pthread_join(handle, nullptr); }
 };
 #else
@@ -255,7 +271,7 @@ static void groupedLaunch(const size_t groups, const size_t lanes, const MaybeCa
   const auto pending = std::make_shared<std::atomic_size_t>(slots);
   const auto run = std::make_shared<std::function<void(size_t)>>(std::move(task));
   for (size_t slot = 0; slot < slots; ++slot) {
-    std::thread([=] {
+    spawnDetached([=] {
       for (size_t group = slot; group < groups; group += slots) {
         HostGroup state(lanes);
         std::vector<LaneThread> workers;
@@ -274,7 +290,7 @@ static void groupedLaunch(const size_t groups, const size_t lanes, const MaybeCa
           worker.join();
       }
       if (--*pending == 0 && cb) (*cb)();
-    }).detach();
+    });
   }
 }
 
@@ -291,7 +307,7 @@ static void groupAbiLaunch(const size_t groups, const size_t lanes, const size_t
   const auto pending = std::make_shared<std::atomic_size_t>(workers);
   const auto run = std::make_shared<std::function<void(size_t)>>(std::move(task));
   for (size_t worker = 0; worker < workers; ++worker) {
-    std::thread([=] {
+    spawnDetached([=] {
       hostLocalSize = lanes;
       for (size_t group = worker; group < groups; group += workers) {
         if (localBytes > 0) std::memset(hostTaskLocalBlock(), 0, localBytes);
@@ -299,7 +315,7 @@ static void groupAbiLaunch(const size_t groups, const size_t lanes, const size_t
         (*run)(tid);
       }
       if (--*pending == 0 && cb) (*cb)();
-    }).detach();
+    });
   }
 }
 

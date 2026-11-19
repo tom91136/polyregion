@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
@@ -25,6 +26,7 @@ using ReadLock = std::shared_lock<std::shared_mutex>;
 
 inline size_t hostConcurrency() { return std::max<size_t>(1, std::thread::hardware_concurrency()); }
 POLYREGION_EXPORT size_t hostMaxLanes();
+POLYREGION_EXPORT void spawnDetached(std::function<void()> body);
 
 class POLYREGION_EXPORT ObjectDevice : public Device {
 public:
@@ -64,11 +66,11 @@ protected:
     for (size_t w = 0; w < workers; ++w) {
       const size_t begin = w * chunk;
       const size_t end = std::min(N, begin + chunk);
-      std::thread([begin, end, cb, f, pending] {
+      spawnDetached([begin, end, cb, f, pending] {
         for (size_t tid = begin; tid < end; ++tid)
           f(tid);
         if (--*pending == 0 && cb) (*cb)();
-      }).detach();
+      });
     }
   }
 
