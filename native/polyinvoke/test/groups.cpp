@@ -1,5 +1,11 @@
 #include <algorithm>
+#include <atomic>
 #include <vector>
+
+#ifdef __GLIBC__
+  #include <dlfcn.h>
+  #include <pthread.h>
+#endif
 
 #include "fmt/format.h"
 
@@ -18,9 +24,16 @@ using polyregion::polytest::cases::Task;
 
 namespace {
 
+std::atomic_size_t detaches{0};
+
 struct Shape {
   size_t groups, lanes;
 };
+
+void checkStartedDetached(Context &ctx, const size_t before) {
+  const size_t calls = detaches.load() - before;
+  POLYTEST_CHECK_S(ctx, calls == 0, "host workers were detached after start {} times; glibc's pthread_detach races their exit", calls);
+}
 
 std::vector<int32_t> launch(Platform &platform, Device &device, const char *kernel, const Shape shape, const size_t perThread,
                             const bool withLocal = true) {
@@ -41,6 +54,7 @@ std::vector<int32_t> launch(Platform &platform, Device &device, const char *kern
 }
 
 void runGroups(Context &ctx, Backend, Platform &platform, Device &device, const ImageGroup &imageGroup) {
+  const size_t before = detaches.load();
   POLYTEST_REQUIRE_S(ctx, imageGroup.size() == 1, "expected 1 image group, got {}", imageGroup.size());
   device.loadModule("module", imageGroup[0].second);
 
@@ -71,9 +85,12 @@ void runGroups(Context &ctx, Backend, Platform &platform, Device &device, const 
                          "ids {}x{} group {} lane {}: got [{}, {}, {}, {}]", shape.groups, shape.lanes, g, l, at[0], at[1], at[2], at[3]);
       }
   }
+
+  checkStartedDetached(ctx, before);
 }
 
 void runGroupAbi(Context &ctx, Backend, Platform &platform, Device &device, const ImageGroup &imageGroup) {
+  const size_t before = detaches.load();
   POLYTEST_REQUIRE_S(ctx, imageGroup.size() == 1, "expected 1 image group, got {}", imageGroup.size());
   device.loadModule("module", imageGroup[0].second);
 
@@ -118,9 +135,12 @@ void runGroupAbi(Context &ctx, Backend, Platform &platform, Device &device, cons
     POLYTEST_CHECK_S(ctx, at[0] == int32_t(g) && at[1] == int32_t(ungrouped.groups) && at[2] == 0 && at[3] == 1,
                      "group abi ungrouped group {}: got [{}, {}, {}, {}]", g, at[0], at[1], at[2], at[3]);
   }
+
+  checkStartedDetached(ctx, before);
 }
 
 void runFlatAbi(Context &ctx, Backend, Platform &platform, Device &device, const ImageGroup &imageGroup) {
+  const size_t before = detaches.load();
   POLYTEST_REQUIRE_S(ctx, imageGroup.size() == 1, "expected 1 image group, got {}", imageGroup.size());
   device.loadModule("module", imageGroup[0].second);
 
@@ -130,6 +150,8 @@ void runFlatAbi(Context &ctx, Backend, Platform &platform, Device &device, const
       POLYTEST_CHECK_S(ctx, flat[id * 2] == 1 && flat[id * 2 + 1] == int32_t(id), "flat abi {}x{} id {}: got [{}, {}], expected [1, {}]",
                        shape.groups, shape.lanes, id, flat[id * 2], flat[id * 2 + 1], id);
   }
+
+  checkStartedDetached(ctx, before);
 }
 
 std::vector<Task> discoverAll() {
@@ -141,5 +163,13 @@ std::vector<Task> discoverAll() {
 }
 
 } // namespace
+
+#ifdef __GLIBC__
+extern "C" int pthread_detach(pthread_t thread) {
+  static const auto real = reinterpret_cast<int (*)(pthread_t)>(dlsym(RTLD_NEXT, "pthread_detach"));
+  ++detaches;
+  return real(thread);
+}
+#endif
 
 POLYTEST_DISCOVER(discoverAll)
