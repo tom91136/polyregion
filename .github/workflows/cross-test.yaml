@@ -6,7 +6,7 @@ on:
       shards:
         type: string
         required: true
-      test-archs:
+      archs:
         type: string
         required: true
 
@@ -16,11 +16,11 @@ defaults:
 
 jobs:
   test-native-misc:
-    if: ${{ !cancelled() && inputs.test-archs != '' && inputs.test-archs != '[]' }}
+    if: ${{ !cancelled() && inputs.archs != '' && inputs.archs != '[]' }}
     strategy:
       fail-fast: false
       matrix:
-        arch: ${{ fromJSON(inputs.test-archs) }}
+        arch: ${{ fromJSON(inputs.archs) }}
     runs-on: ubuntu-24.04-arm
     env:
       POLYREGION_ARCH: ${{ matrix.arch }}
@@ -143,11 +143,11 @@ jobs:
 
   test-native-shard:
     needs: discover-slices
-    if: ${{ !cancelled() && needs.discover-slices.result == 'success' && inputs.test-archs != '' && inputs.test-archs != '[]' }}
+    if: ${{ !cancelled() && needs.discover-slices.result == 'success' && inputs.archs != '' && inputs.archs != '[]' }}
     strategy:
       fail-fast: false
       matrix:
-        arch: ${{ fromJSON(inputs.test-archs) }}
+        arch: ${{ fromJSON(inputs.archs) }}
         frontend: [polyfc, other]
         slice: ${{ fromJSON(needs.discover-slices.outputs.slices) }}
         exclude:
@@ -226,11 +226,11 @@ jobs:
           if-no-files-found: ignore
 
   test-native-miniapps:
-    if: ${{ !cancelled() && inputs.test-archs != '' && inputs.test-archs != '[]' }}
+    if: ${{ !cancelled() && inputs.archs != '' && inputs.archs != '[]' }}
     strategy:
       fail-fast: false
       matrix:
-        arch: ${{ fromJSON(inputs.test-archs) }}
+        arch: ${{ fromJSON(inputs.archs) }}
     runs-on: ubuntu-24.04-arm
     env:
       POLYREGION_ARCH: ${{ matrix.arch }}

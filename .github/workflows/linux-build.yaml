@@ -5,14 +5,10 @@ on:
     outputs:
       shards:
         value: ${{ jobs.discover-shards.outputs.shards }}
-      spectra-package:
-        value: ${{ jobs.build.outputs.spectra-package }}
       archs:
-        value: ${{ jobs.artifacts.outputs.archs }}
-      emulator-test-archs:
-        value: ${{ jobs.artifacts.outputs.emulator-test-archs }}
+        value: ${{ jobs.arch-status.outputs.archs }}
       missing-archs:
-        value: ${{ jobs.artifacts.outputs.missing-archs }}
+        value: ${{ jobs.arch-status.outputs.missing-archs }}
 
 defaults:
   run:
@@ -106,7 +102,7 @@ jobs:
         run: just build-sysroot
 
       - name: Save sysroot cache
-        if: github.ref == 'refs/heads/main' && steps.build-sysroot.outcome == 'success'
+        if: ${{ !env.ACT && github.ref == 'refs/heads/main' && steps.build-sysroot.outcome == 'success' }}
         uses: &cache-save actions/cache/save@v5
         with:
           path: *sysroot-path
@@ -136,7 +132,7 @@ jobs:
         run: just build-llvm
 
       - name: Save LLVM cache
-        if: github.ref == 'refs/heads/main' && steps.build-llvm.outcome == 'success'
+        if: ${{ !env.ACT && github.ref == 'refs/heads/main' && steps.build-llvm.outcome == 'success' }}
         uses: ./.github/actions/save-compressed-cache
         with:
           path: *llvm-path
@@ -158,8 +154,6 @@ jobs:
   build:
     needs: build-llvm
     if: ${{ !cancelled() }}
-    outputs:
-      spectra-package: ${{ steps.upload-package.outputs.artifact-id }}
     strategy:
       fail-fast: false
       matrix:
@@ -168,11 +162,18 @@ jobs:
             runs_on: ubuntu-24.04
           - arch: aarch64
             runs_on: ubuntu-24.04-arm
+    outputs:
+      x86_64: ${{ steps.built.outputs.x86_64 || steps.started.outputs.x86_64 }}
+      aarch64: ${{ steps.built.outputs.aarch64 || steps.started.outputs.aarch64 }}
     runs-on: ${{ matrix.runs_on }}
     env:
       POLYREGION_ARCH: ${{ matrix.arch }}
       POLYC_PASS_BUNDLE: dso
     steps:
+      - name: Mark leg started
+        id: started
+        run: echo "${{ matrix.arch }}=started" >> "$GITHUB_OUTPUT"
+
       - *free-disk
 
       - uses: *checkout
@@ -244,7 +245,7 @@ jobs:
         run: just build-sysroot
 
       - name: Save sysroot cache
-        if: github.ref == 'refs/heads/main' && steps.build-sysroot.outcome == 'success'
+        if: ${{ !env.ACT && github.ref == 'refs/heads/main' && steps.build-sysroot.outcome == 'success' }}
         uses: *cache-save
         with:
           path: *sysroot-path
@@ -288,7 +289,7 @@ jobs:
         run: just build-device-libs
 
       - name: Save device libs cache
-        if: github.ref == 'refs/heads/main' && steps.build-device-libs.outcome == 'success'
+        if: ${{ !env.ACT && github.ref == 'refs/heads/main' && steps.build-device-libs.outcome == 'success' }}
         uses: *cache-save
         with:
           path: *devlibs-path
@@ -308,7 +309,7 @@ jobs:
         run: just build-vcpkg-deps
 
       - name: Save vcpkg cache
-        if: github.ref == 'refs/heads/main' && steps.build-vcpkg.outcome == 'success'
+        if: ${{ !env.ACT && github.ref == 'refs/heads/main' && steps.build-vcpkg.outcome == 'success' }}
         uses: *cache-save
         with:
           path: *vcpkg-path
@@ -382,7 +383,6 @@ jobs:
 
       - name: Upload the Spectra package
         if: ${{ !env.ACT && matrix.arch == 'x86_64' }}
-        id: upload-package
         uses: *upload
         with:
           name: spectra-package
@@ -438,6 +438,10 @@ jobs:
         with:
           save: 'true'
 
+      - name: Mark leg built
+        id: built
+        run: echo "${{ matrix.arch }}=built" >> "$GITHUB_OUTPUT"
+
   discover-shards:
     needs: build
     runs-on: ubuntu-24.04
@@ -457,36 +461,22 @@ jobs:
           echo "shards=$shards" >> "$GITHUB_OUTPUT"
           echo "shards: $shards"
 
-  artifacts:
-    needs: [build-llvm, build]
+  arch-status:
+    needs: build
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
-    permissions:
-      actions: read
     outputs:
-      archs: ${{ steps.list.outputs.archs }}
-      emulator-test-archs: ${{ steps.list.outputs.emulator-test-archs }}
-      missing-archs: ${{ steps.list.outputs.missing-archs }}
+      archs: ${{ steps.status.outputs.archs }}
+      missing-archs: ${{ steps.status.outputs.missing-archs }}
     steps:
-      - name: List artifacts
-        id: list
+      - name: Collect arch status
+        id: status
         env:
-          GH_TOKEN: ${{ github.token }}
+          LEGS: ${{ toJSON(needs.build.outputs) }}
         run: |
-          known=$(printf '%s\n' x86_64 aarch64 | sort)
-          names=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --jq '.artifacts[].name')
-          pick() {
-            printf '%s\n' "$names" | jq -R -s -c --arg prefix "$1" --arg suffix "$2" --arg known "$known" '
-              split("\n")
-              | map(select(startswith($prefix) and endswith($suffix)) | ltrimstr($prefix) | rtrimstr($suffix))
-              | map(select(. as $arch | ($known | split("\n")) | index($arch)))'
-          }
-          archs=$(pick polyregion-linux- -Release)
-          emulator_test_archs=$(pick polyregion-tests-emulators-linux- -Release)
-          missing=$(comm -23 <(printf '%s\n' "$known") <(printf '%s\n' "$archs" | jq -r '.[]' | sort) |
-            jq -R -s -c 'split("\n") | map(select(length > 0))')
+          archs=$(echo "$LEGS" | jq -c '[to_entries[] | select(.value == "built") | .key]')
+          missing=$(echo "$LEGS" | jq -c '[to_entries[] | select(.value == "started") | .key]')
           {
             echo "archs=$archs"
-            echo "emulator-test-archs=$emulator_test_archs"
             echo "missing-archs=$missing"
           } >> "$GITHUB_OUTPUT"

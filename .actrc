@@ -4,6 +4,7 @@
 --bind
 
 --artifact-server-path /tmp/act-artifacts
+--artifact-server-addr 127.0.0.1
 
 --matrix arch:x86_64
 

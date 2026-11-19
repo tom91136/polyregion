@@ -6,7 +6,7 @@ on:
       shards:
         type: string
         required: true
-      emulator-test-archs:
+      archs:
         type: string
         required: true
       emulators:
@@ -21,25 +21,25 @@ jobs:
   emulator-archs:
     runs-on: ubuntu-24.04
     outputs:
-      emulator-test-archs: ${{ steps.intersect.outputs.emulator-test-archs }}
+      archs: ${{ steps.intersect.outputs.archs }}
     steps:
       - id: intersect
         shell: bash
         env:
-          EMULATOR_TEST_ARCHS: ${{ inputs.emulator-test-archs }}
+          ARCHS: ${{ inputs.archs }}
           EMULATORS: ${{ inputs.emulators }}
         run: |
-          jq -n -c --argjson emulator_test "${EMULATOR_TEST_ARCHS:-[]}" --argjson emulators "${EMULATORS:-[]}" '
-            $emulator_test - ($emulator_test - $emulators)' > archs.json
-          echo "emulator-test-archs=$(cat archs.json)" >> "$GITHUB_OUTPUT"
+          jq -n -c --argjson archs "${ARCHS:-[]}" --argjson emulators "${EMULATORS:-[]}" '
+            $archs - ($archs - $emulators)' > archs.json
+          echo "archs=$(cat archs.json)" >> "$GITHUB_OUTPUT"
 
   test-native-misc:
     needs: emulator-archs
-    if: ${{ !cancelled() && needs.emulator-archs.outputs.emulator-test-archs != '' && needs.emulator-archs.outputs.emulator-test-archs != '[]' }}
+    if: ${{ !cancelled() && needs.emulator-archs.outputs.archs != '' && needs.emulator-archs.outputs.archs != '[]' }}
     strategy:
       fail-fast: false
       matrix:
-        arch: ${{ fromJSON(needs.emulator-archs.outputs.emulator-test-archs) }}
+        arch: ${{ fromJSON(needs.emulator-archs.outputs.archs) }}
     runs-on: ${{ matrix.arch == 'arm64' && 'windows-11-arm' || 'windows-2025-vs2026' }}
     env:
       POLYREGION_ARCH: ${{ matrix.arch }}
@@ -139,11 +139,11 @@ jobs:
 
   test-native-with-emulators:
     needs: emulator-archs
-    if: ${{ !cancelled() && needs.emulator-archs.outputs.emulator-test-archs != '' && needs.emulator-archs.outputs.emulator-test-archs != '[]' && inputs.shards != '' }}
+    if: ${{ !cancelled() && needs.emulator-archs.outputs.archs != '' && needs.emulator-archs.outputs.archs != '[]' && inputs.shards != '' }}
     strategy:
       fail-fast: false
       matrix:
-        arch: ${{ fromJSON(needs.emulator-archs.outputs.emulator-test-archs) }}
+        arch: ${{ fromJSON(needs.emulator-archs.outputs.archs) }}
         slice: ${{ fromJSON(inputs.shards) }}
     name: test-native-with-emulators (${{ matrix.arch }}, ${{ matrix.slice.id }})
     runs-on: ${{ matrix.arch == 'arm64' && 'windows-11-arm' || 'windows-2025-vs2026' }}

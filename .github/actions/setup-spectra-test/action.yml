@@ -56,29 +56,41 @@ runs:
         }
 
     - name: Download Polyregion
+      if: ${{ !env.ACT }}
       uses: actions/download-artifact@v8
       with:
         name: polyregion-${{ inputs.os }}-${{ inputs.arch }}-Release
         path: ${{ github.workspace }}/dist
 
     - name: Download the package
+      if: ${{ !env.ACT }}
       uses: actions/download-artifact@v8
       with:
         name: spectra-package
         path: package
 
     - name: Download emulators
-      if: ${{ inputs.emulators == 'true' }}
+      if: ${{ inputs.emulators == 'true' && !env.ACT }}
       uses: actions/download-artifact@v8
       with:
         name: polyregion-emulators-${{ inputs.os }}-${{ inputs.arch }}
         path: emulators
 
     - name: Unpack emulators
-      if: ${{ inputs.emulators == 'true' }}
+      if: ${{ inputs.emulators == 'true' && !env.ACT }}
       shell: bash
       working-directory: ${{ github.workspace }}
       run: tar xzf emulators/emulators-out.tar.gz -C emulators
+
+    # XXX act has no artifacts; link the paths the downloads would have created to the bound workspace
+    - name: Link artifacts from the bound workspace
+      if: ${{ env.ACT }}
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        dist="$PWD/native/out/polyregion-Release-${{ inputs.arch }}-dylib-dist"
+        ln -sfnT "$dist" dist
+        ln -sfnT "$dist/lib/polyregion/packages" package
 
     - name: Restore executable bits
       shell: bash

@@ -6,11 +6,9 @@ on:
       shards:
         value: ${{ jobs.discover-shards.outputs.shards }}
       archs:
-        value: ${{ jobs.artifacts.outputs.archs }}
-      emulator-test-archs:
-        value: ${{ jobs.artifacts.outputs.emulator-test-archs }}
+        value: ${{ jobs.arch-status.outputs.archs }}
       missing-archs:
-        value: ${{ jobs.artifacts.outputs.missing-archs }}
+        value: ${{ jobs.arch-status.outputs.missing-archs }}
 
 defaults:
   run:
@@ -106,7 +104,7 @@ jobs:
         run: just build-llvm -DLLVM_USE_HOST_TOOLS=OFF
 
       - name: Save LLVM cache
-        if: github.ref == 'refs/heads/main' && steps.build-llvm.outcome == 'success'
+        if: ${{ !env.ACT && github.ref == 'refs/heads/main' && steps.build-llvm.outcome == 'success' }}
         uses: ./.github/actions/save-compressed-cache
         with:
           path: *llvm-path
@@ -137,6 +135,9 @@ jobs:
             runs_on: windows-2025-vs2026
           - arch: arm64
             runs_on: windows-11-arm
+    outputs:
+      amd64: ${{ steps.built.outputs.amd64 || steps.started.outputs.amd64 }}
+      arm64: ${{ steps.built.outputs.arm64 || steps.started.outputs.arm64 }}
     runs-on: ${{ matrix.runs_on }}
     env:
       POLYREGION_ARCH: ${{ matrix.arch }}
@@ -145,6 +146,11 @@ jobs:
       # quickjs-ng is portable C, builds on MSVC. Switch JS engine on Windows.
       POLYC_JS_ENGINE: qjs
     steps:
+      - name: Mark leg started
+        id: started
+        shell: bash
+        run: echo "${{ matrix.arch }}=started" >> "$GITHUB_OUTPUT"
+
       - uses: *checkout
 
       - *install-llvm
@@ -208,7 +214,7 @@ jobs:
         run: just build-device-libs
 
       - name: Save device libs cache
-        if: github.ref == 'refs/heads/main' && steps.build-device-libs.outcome == 'success'
+        if: ${{ !env.ACT && github.ref == 'refs/heads/main' && steps.build-device-libs.outcome == 'success' }}
         uses: &cache-save actions/cache/save@v5
         with:
           path: *devlibs-path
@@ -228,7 +234,7 @@ jobs:
         run: just build-vcpkg-deps
 
       - name: Save vcpkg cache
-        if: github.ref == 'refs/heads/main' && steps.build-vcpkg.outcome == 'success'
+        if: ${{ !env.ACT && github.ref == 'refs/heads/main' && steps.build-vcpkg.outcome == 'success' }}
         uses: *cache-save
         with:
           path: *vcpkg-path
@@ -300,6 +306,11 @@ jobs:
         with:
           save: 'true'
 
+      - name: Mark leg built
+        id: built
+        shell: bash
+        run: echo "${{ matrix.arch }}=built" >> "$GITHUB_OUTPUT"
+
   discover-shards:
     needs: build
     runs-on: ubuntu-24.04
@@ -319,37 +330,23 @@ jobs:
           echo "shards=$shards" >> "$GITHUB_OUTPUT"
           echo "shards: $shards"
 
-  artifacts:
-    needs: [build-llvm, build]
+  arch-status:
+    needs: build
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
-    permissions:
-      actions: read
     outputs:
-      archs: ${{ steps.list.outputs.archs }}
-      emulator-test-archs: ${{ steps.list.outputs.emulator-test-archs }}
-      missing-archs: ${{ steps.list.outputs.missing-archs }}
+      archs: ${{ steps.status.outputs.archs }}
+      missing-archs: ${{ steps.status.outputs.missing-archs }}
     steps:
-      - name: List artifacts
-        id: list
+      - name: Collect arch status
+        id: status
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
+          LEGS: ${{ toJSON(needs.build.outputs) }}
         run: |
-          known=$(printf '%s\n' amd64 arm64 | sort)
-          names=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --jq '.artifacts[].name')
-          pick() {
-            printf '%s\n' "$names" | jq -R -s -c --arg prefix "$1" --arg suffix "$2" --arg known "$known" '
-              split("\n")
-              | map(select(startswith($prefix) and endswith($suffix)) | ltrimstr($prefix) | rtrimstr($suffix))
-              | map(select(. as $arch | ($known | split("\n")) | index($arch)))'
-          }
-          archs=$(pick polyregion-windows- -Release)
-          emulator_test_archs=$(pick polyregion-tests-emulators-windows- -Release)
-          missing=$(comm -23 <(printf '%s\n' "$known") <(printf '%s\n' "$archs" | jq -r '.[]' | sort) |
-            jq -R -s -c 'split("\n") | map(select(length > 0))')
+          archs=$(echo "$LEGS" | jq -c '[to_entries[] | select(.value == "built") | .key]')
+          missing=$(echo "$LEGS" | jq -c '[to_entries[] | select(.value == "started") | .key]')
           {
             echo "archs=$archs"
-            echo "emulator-test-archs=$emulator_test_archs"
             echo "missing-archs=$missing"
           } >> "$GITHUB_OUTPUT"

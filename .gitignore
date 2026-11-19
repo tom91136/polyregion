@@ -218,3 +218,5 @@ vcpkg/
 !/ci/check_miniapps/CMakeLists.txt
 !/ci/check_miniapps/cloverleaf-gold-from-file.patch
 !/ci/check_miniapps/run.sh
+/dist
+/package

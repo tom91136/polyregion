@@ -9,9 +9,6 @@ on:
       archs:
         type: string
         required: true
-      emulator-test-archs:
-        type: string
-        required: true
       emulators:
         type: string
         required: true
@@ -25,27 +22,23 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       archs: ${{ steps.intersect.outputs.archs }}
-      emulator-test-archs: ${{ steps.intersect.outputs.emulator-test-archs }}
     steps:
       - id: intersect
         env:
           ARCHS: ${{ inputs.archs }}
-          EMULATOR_TEST_ARCHS: ${{ inputs.emulator-test-archs }}
           EMULATORS: ${{ inputs.emulators }}
         run: |
-          jq -n -c --argjson archs "${ARCHS:-[]}" --argjson emulator_test "${EMULATOR_TEST_ARCHS:-[]}" --argjson emulators "${EMULATORS:-[]}" '
-            def both($a; $b): $a - ($a - $b);
-            {archs: both($archs; $emulators), emulator_test_archs: both($emulator_test; $emulators)}' > gate.json
-          echo "archs=$(jq -c .archs gate.json)" >> "$GITHUB_OUTPUT"
-          echo "emulator-test-archs=$(jq -c .emulator_test_archs gate.json)" >> "$GITHUB_OUTPUT"
+          jq -n -c --argjson archs "${ARCHS:-[]}" --argjson emulators "${EMULATORS:-[]}" '
+            $archs - ($archs - $emulators)' > archs.json
+          echo "archs=$(cat archs.json)" >> "$GITHUB_OUTPUT"
 
   test-native-misc:
     needs: emulator-archs
-    if: ${{ !cancelled() && needs.emulator-archs.outputs.emulator-test-archs != '' && needs.emulator-archs.outputs.emulator-test-archs != '[]' }}
+    if: ${{ !cancelled() && needs.emulator-archs.outputs.archs != '' && needs.emulator-archs.outputs.archs != '[]' }}
     strategy:
       fail-fast: false
       matrix:
-        arch: ${{ fromJSON(needs.emulator-archs.outputs.emulator-test-archs) }}
+        arch: ${{ fromJSON(needs.emulator-archs.outputs.archs) }}
     runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     env: &arch-env
       POLYREGION_ARCH: ${{ matrix.arch }}
@@ -138,11 +131,11 @@ jobs:
 
   test-native-with-emulators:
     needs: emulator-archs
-    if: ${{ !cancelled() && needs.emulator-archs.outputs.emulator-test-archs != '' && needs.emulator-archs.outputs.emulator-test-archs != '[]' && inputs.shards != '' }}
+    if: ${{ !cancelled() && needs.emulator-archs.outputs.archs != '' && needs.emulator-archs.outputs.archs != '[]' && inputs.shards != '' }}
     strategy:
       fail-fast: false
       matrix:
-        arch: ${{ fromJSON(needs.emulator-archs.outputs.emulator-test-archs) }}
+        arch: ${{ fromJSON(needs.emulator-archs.outputs.archs) }}
         slice: ${{ fromJSON(inputs.shards) }}
     name: test-native-with-emulators (${{ matrix.arch }}, ${{ matrix.slice.id }})
     runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}

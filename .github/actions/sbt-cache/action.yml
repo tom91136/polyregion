@@ -55,7 +55,7 @@ runs:
         key: ${{ steps.keys.outputs.deps }}
         lookup-only: true
 
-    - if: inputs.save == 'true' && github.ref == 'refs/heads/main' && steps.have-deps.outputs.cache-hit != 'true'
+    - if: ${{ !env.ACT && inputs.save == 'true' && github.ref == 'refs/heads/main' && steps.have-deps.outputs.cache-hit != 'true' }}
       uses: actions/cache/save@v5
       with:
         path: |
@@ -77,7 +77,7 @@ runs:
         key: ${{ steps.keys.outputs.launcher }}
         lookup-only: true
 
-    - if: inputs.save == 'true' && github.ref == 'refs/heads/main' && steps.have-launcher.outputs.cache-hit != 'true'
+    - if: ${{ !env.ACT && inputs.save == 'true' && github.ref == 'refs/heads/main' && steps.have-launcher.outputs.cache-hit != 'true' }}
       uses: actions/cache/save@v5
       with:
         path: ~/.sbt/launchers

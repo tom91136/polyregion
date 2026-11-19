@@ -62,16 +62,26 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Download Polyregion
+        if: ${{ !env.ACT }}
         uses: &download actions/download-artifact@v8
         with:
           name: polyregion-linux-${{ matrix.arch }}-Release
           path: ${{ env.POLYREGION_DIST }}
 
       - name: Download the package
+        if: ${{ !env.ACT }}
         uses: *download
         with:
           name: spectra-package
           path: package
+
+      - name: Link artifacts from the bound workspace
+        if: ${{ env.ACT }}
+        working-directory: .
+        run: |
+          dist="$PWD/native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist"
+          ln -sfnT "$dist" "$POLYREGION_DIST"
+          ln -sfnT "$dist/lib/polyregion/packages" package
 
       - name: Shim the dist for QEMU
         working-directory: .

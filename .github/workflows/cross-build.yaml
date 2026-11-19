@@ -4,11 +4,9 @@ on:
   workflow_call:
     outputs:
       archs:
-        value: ${{ jobs.artifacts.outputs.archs }}
-      test-archs:
-        value: ${{ jobs.artifacts.outputs.test-archs }}
+        value: ${{ jobs.arch-status.outputs.archs }}
       missing-archs:
-        value: ${{ jobs.artifacts.outputs.missing-archs }}
+        value: ${{ jobs.arch-status.outputs.missing-archs }}
 
 defaults:
   run:
@@ -147,7 +145,7 @@ jobs:
         run: just build-sysroot
 
       - name: Save sysroot cache
-        if: github.ref == 'refs/heads/main' && steps.build-sysroot.outcome == 'success'
+        if: ${{ !env.ACT && github.ref == 'refs/heads/main' && steps.build-sysroot.outcome == 'success' }}
         uses: &cache-save actions/cache/save@v5
         with:
           path: *sysroot-path
@@ -185,7 +183,7 @@ jobs:
         run: just build-llvm
 
       - name: Save LLVM cache
-        if: github.ref == 'refs/heads/main' && steps.build-llvm.outcome == 'success'
+        if: ${{ !env.ACT && github.ref == 'refs/heads/main' && steps.build-llvm.outcome == 'success' }}
         uses: ./.github/actions/save-compressed-cache
         with:
           path: *llvm-path
@@ -216,12 +214,20 @@ jobs:
       fail-fast: false
       matrix:
         include: *cross-matrix
+    outputs:
+      riscv64: ${{ steps.built.outputs.riscv64 || steps.started.outputs.riscv64 }}
+      ppc64le: ${{ steps.built.outputs.ppc64le || steps.started.outputs.ppc64le }}
+      arm: ${{ steps.built.outputs.arm || steps.started.outputs.arm }}
     runs-on: ${{ matrix.runs_on }}
     env:
       POLYREGION_ARCH: ${{ matrix.arch }}
       POLYC_JS_ENGINE: qjs
       POLYC_PASS_BUNDLE: js
     steps:
+      - name: Mark leg started
+        id: started
+        run: echo "${{ matrix.arch }}=started" >> "$GITHUB_OUTPUT"
+
       - *free-disk
 
       - uses: *checkout
@@ -301,7 +307,7 @@ jobs:
         run: just build-device-libs
 
       - name: Save device libs cache
-        if: github.ref == 'refs/heads/main' && steps.build-device-libs.outcome == 'success'
+        if: ${{ !env.ACT && github.ref == 'refs/heads/main' && steps.build-device-libs.outcome == 'success' }}
         uses: *cache-save
         with:
           path: *devlibs-path
@@ -346,7 +352,7 @@ jobs:
         run: just build-vcpkg-deps
 
       - name: Save vcpkg cache
-        if: github.ref == 'refs/heads/main' && steps.build-vcpkg.outcome == 'success'
+        if: ${{ !env.ACT && github.ref == 'refs/heads/main' && steps.build-vcpkg.outcome == 'success' }}
         uses: *cache-save
         with:
           path: *vcpkg-path
@@ -399,36 +405,26 @@ jobs:
         with:
           save: 'true'
 
-  artifacts:
-    needs: [build-llvm, build]
+      - name: Mark leg built
+        id: built
+        run: echo "${{ matrix.arch }}=built" >> "$GITHUB_OUTPUT"
+
+  arch-status:
+    needs: build
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
-    permissions:
-      actions: read
     outputs:
-      archs: ${{ steps.list.outputs.archs }}
-      test-archs: ${{ steps.list.outputs.test-archs }}
-      missing-archs: ${{ steps.list.outputs.missing-archs }}
+      archs: ${{ steps.status.outputs.archs }}
+      missing-archs: ${{ steps.status.outputs.missing-archs }}
     steps:
-      - name: List artifacts
-        id: list
+      - name: Collect arch status
+        id: status
         env:
-          GH_TOKEN: ${{ github.token }}
+          LEGS: ${{ toJSON(needs.build.outputs) }}
         run: |
-          known=$(printf '%s\n' riscv64 ppc64le arm | sort)
-          names=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --jq '.artifacts[].name')
-          pick() {
-            printf '%s\n' "$names" | jq -R -s -c --arg prefix "$1" --arg suffix "$2" --arg known "$known" '
-              split("\n")
-              | map(select(startswith($prefix) and endswith($suffix)) | ltrimstr($prefix) | rtrimstr($suffix))
-              | map(select(. as $arch | ($known | split("\n")) | index($arch)))'
-          }
-          archs=$(pick polyregion-linux- -Release)
-          test_archs=$(pick polyregion-tests-linux- -Release)
-          missing=$(comm -23 <(printf '%s\n' "$known") <(printf '%s\n' "$archs" | jq -r '.[]' | sort) |
-            jq -R -s -c 'split("\n") | map(select(length > 0))')
+          archs=$(echo "$LEGS" | jq -c '[to_entries[] | select(.value == "built") | .key]')
+          missing=$(echo "$LEGS" | jq -c '[to_entries[] | select(.value == "started") | .key]')
           {
             echo "archs=$archs"
-            echo "test-archs=$test_archs"
             echo "missing-archs=$missing"
           } >> "$GITHUB_OUTPUT"

@@ -35,10 +35,17 @@ jobs:
       - uses: ./.github/actions/sbt-cache
 
       - name: Download Polyregion
+        if: ${{ !env.ACT }}
         uses: actions/download-artifact@v8
         with:
           name: polyregion-linux-x86_64-Release
           path: ${{ env.POLYREGION_DIST }}
+
+      - name: Link Polyregion from the bound workspace
+        if: ${{ env.ACT }}
+        working-directory: .
+        run: |
+          ln -sfnT "$PWD/native/out/polyregion-Release-x86_64-dylib-dist" "$POLYREGION_DIST"
 
       - name: Restore executable bits
         working-directory: .
