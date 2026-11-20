@@ -112,6 +112,7 @@ lazy val sdkPublishSettings = Seq(
 
 lazy val `binding-jvm` = project.settings(
   commonSettings,
+  sdkPublishSettings,
   name             := "binding-jvm",
   autoScalaLibrary := false
 )
@@ -119,12 +120,12 @@ lazy val `binding-jvm` = project.settings(
 lazy val `runtime-java` = project
   .settings(
     commonSettings,
+    sdkPublishSettings,
     name := "runtime-java",
     javacOptions ++= Seq("-proc:none"),
     autoScalaLibrary    := false,
     assembly / artifact := (assembly / artifact).value.withClassifier(Some("assembly"))
   )
-  .dependsOn(`binding-jvm`)
 
 lazy val `runtime-scala` = project
   .settings(
@@ -547,7 +548,13 @@ lazy val root = project
     exportMavenRepo := Def.uncached {
       Def.taskDyn {
         IO.delete(mavenDir)
-        Def.sequential(ast.jvm(scala3Version) / publish, bindgen / publish, Def.task(mavenDir))
+        Def.sequential(
+          ast.jvm(scala3Version) / publish,
+          bindgen / publish,
+          `binding-jvm` / publish,
+          `runtime-java` / publish,
+          Def.task(mavenDir)
+        )
       }.value
     }
   )

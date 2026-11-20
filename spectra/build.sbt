@@ -37,6 +37,15 @@ lazy val polyregionVersion: String =
     case other                => sys.error(s"Expected one bindgen version in $polyregionMaven, found $other")
   }
 
+lazy val sdkSettings = Seq(
+  polyregionSdk := polyregionMaven.getAbsolutePath,
+  csrResolvers := {
+    val sdk = MavenCache("polyregion-sdk", file(polyregionSdk.value))
+    sdk +: csrResolvers.value.filterNot(_.name == "local")
+  },
+  updateCacheName := s"${updateCacheName.value}_${Hash.toHex(Hash(polyregionSdk.value)).take(8)}"
+)
+
 lazy val api = Project("spectraApi", file("test/scala"))
   .settings(
     commonSettings,
@@ -48,16 +57,26 @@ lazy val api = Project("spectraApi", file("test/scala"))
     )
   )
 
+lazy val javaApi = Project("spectraJavaApi", file("test/java"))
+  .settings(
+    commonSettings,
+    sdkSettings,
+    name             := "spectra-java-api",
+    autoScalaLibrary := false,
+    crossPaths       := false,
+    javacOptions ++= Seq("--release", "8", "-Xlint:all,-options", "-Werror", "-proc:none"),
+    libraryDependencies += "uk.ac.bristol.uob-hpc" %% "runtime-java" % polyregionVersion,
+    Compile / unmanagedSources ++= Seq(
+      file("generated/java/polyregion/Spectra.java"),
+      file("test/java/polyregion/check_surface.java")
+    )
+  )
+
 lazy val spectra = Project("spectra", file("."))
   .settings(
     commonSettings,
-    name          := "spectra",
-    polyregionSdk := polyregionMaven.getAbsolutePath,
-    csrResolvers := {
-      val sdk = MavenCache("polyregion-sdk", file(polyregionSdk.value))
-      sdk +: csrResolvers.value.filterNot(_.name == "local")
-    },
-    updateCacheName := s"${updateCacheName.value}_${Hash.toHex(Hash(polyregionSdk.value)).take(8)}",
+    sdkSettings,
+    name := "spectra",
     libraryDependencies ++= Seq(
       "uk.ac.bristol.uob-hpc" %% "bindgen" % polyregionVersion,
       "org.scalameta"         %% "munit"   % "1.3.4" % Test
@@ -75,4 +94,4 @@ lazy val spectra = Project("spectra", file("."))
       }.value
     }
   )
-  .aggregate(api)
+  .aggregate(api, javaApi)

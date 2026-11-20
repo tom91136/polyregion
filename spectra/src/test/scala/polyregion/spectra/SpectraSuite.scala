@@ -4,7 +4,7 @@ import java.nio.file.{Files, Paths}
 
 import polyregion.ast.PolyAST as p
 import polyregion.ast.generated.PolyPackageWireSchema
-import polyregion.ast.{Core, MsgPack, validate, validateInterfaceDeclaration}
+import polyregion.ast.{Core, InterfaceCodeGen, MsgPack, validate, validateInterfaceDeclaration}
 
 import scala.jdk.CollectionConverters.*
 import scala.util.Using
@@ -120,6 +120,23 @@ class SpectraSuite extends munit.FunSuite {
       assert(scalaSurface.contains(width), s"Scala surface has no $width instantiation")
       assert(fortranSurface.contains(width), s"Fortran surface has no $width instantiation")
     }
+  }
+
+  test("generated Java surface calls every declaration once per overload") {
+    val surface = Files.readString(root.resolve("test/java/polyregion/check_surface.java"))
+    val stubs   = Files.readString(root.resolve("generated/java/polyregion/Spectra.java"))
+
+    Spectra.interfaceDef.declarations.foreach { decl =>
+      val name      = decl.name.last
+      val overloads = InterfaceCodeGen.javaOverloadCount(decl)
+      assertEquals(raw"Spectra\.$name\(".r.findAllIn(surface).size, overloads, s"Java: $name")
+      assertEquals(
+        raw"""@Interface\("spectra:spectra\.$name"\)""".r.findAllIn(stubs).size,
+        overloads,
+        s"Java stubs: $name"
+      )
+    }
+    assert(surface.contains("Value"), "Java surface has no reference instantiation")
   }
 
   test("generated C++ surface instantiates every host body") {

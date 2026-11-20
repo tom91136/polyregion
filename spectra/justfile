@@ -85,7 +85,7 @@ test:
     #!/usr/bin/env bash
     set -euo pipefail
     dist="$(just dist)"
-    POLYREGION_DIST="$dist" {{ sbt }} 'testOnly polyregion.spectra.SpectraSuite; spectraApi/compile'
+    POLYREGION_DIST="$dist" {{ sbt }} 'testOnly polyregion.spectra.SpectraSuite; spectraApi/compile; spectraJavaApi/compile'
     cmake -S "{{ root }}" -B "{{ root }}/target/cmake" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$dist"
     cmake --build "{{ root }}/target/cmake" -j {{ jobs }}
     ctest --test-dir "{{ root }}/target/cmake" --output-on-failure
