@@ -19,12 +19,12 @@ object ChildJvm {
       .distinct
       .mkString(File.pathSeparator)
 
-  def run(main: String, env: Map[String, String]): (Int, String) = {
+  def run(main: String, env: Map[String, String], flags: List[String] = Nil): (Int, String) = {
     val java      = Path.of(System.getProperty("java.home"), "bin", "java").toString
     val jvmFlags  = ManagementFactory.getRuntimeMXBean.getInputArguments.asScala.filterNot(_.startsWith("-agentlib"))
     val errorFile = Files.createTempFile("hs_err", ".log")
-    val command =
-      List(java) ++ jvmFlags ++ List(s"-XX:ErrorFile=$errorFile", "-XX:-CreateCoredumpOnCrash", "-cp", classpath, main)
+    val command = List(java) ++ jvmFlags ++ flags ++
+      List(s"-XX:ErrorFile=$errorFile", "-XX:-CreateCoredumpOnCrash", "-cp", classpath, main)
     val builder = new ProcessBuilder(command.asJava).redirectErrorStream(true)
     builder.environment().remove("POLYRT_PLATFORM")
     env.foreach((k, v) => builder.environment().put(k, v))
