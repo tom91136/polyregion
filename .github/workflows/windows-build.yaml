@@ -46,11 +46,9 @@ jobs:
         # github-hosted runners normally ship LLVM at C:\Program Files\LLVM, but the
         # windows-11-arm runner may not, so install explicitly via winget.
         shell: pwsh
-        env:
-          LLVM_HOST_VERSION: "21.1.6"
         run: |
           if (-not (Get-Command clang-cl -ErrorAction SilentlyContinue)) {
-            winget install --id LLVM.LLVM --version $env:LLVM_HOST_VERSION --silent --disable-interactivity --accept-source-agreements --accept-package-agreements
+            winget install --id LLVM.LLVM --silent --disable-interactivity --accept-source-agreements --accept-package-agreements
           }
           echo "C:\Program Files\LLVM\bin" >> $env:GITHUB_PATH
 
