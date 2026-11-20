@@ -126,7 +126,7 @@ PackageExportMetadata packageExportMetadata(const clang::FunctionDecl *decl, cla
     if (parseSym(packageImplementsPrefix, implements, "implementation")) continue;
     if (!value.starts_with(packageRequiresPrefix)) continue;
     const auto capability = value.drop_front(packageRequiresPrefix.size());
-    if (capability.empty()) {
+    if (capability.empty() || capability.contains('@')) {
       emit(diag, annotation->getLocation(), clang::DiagnosticsEngine::Level::Error,
            POLYREGION_DIAG_POLYSTL "Malformed package capability: %0", value.str());
       invalid = true;

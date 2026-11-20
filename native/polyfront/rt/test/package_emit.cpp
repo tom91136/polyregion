@@ -730,6 +730,42 @@ TEST_CASE("package emission deduplicates identical struct definitions") {
   CHECK(selected.value->program.defs.size() == 1);
 }
 
+TEST_CASE("package root search rejects missing and ambiguous packages") {
+  TemporaryDirectory first;
+  TemporaryDirectory second;
+  const auto value = fixture(1);
+  REQUIRE(emitPackage(value, first.path.str().str()));
+  REQUIRE(emitPackage(value, second.path.str().str()));
+  const std::vector<std::string> roots{first.path.str().str(), second.path.str().str()};
+
+  const auto ambiguous = loadPackage("foo", roots);
+  REQUIRE_FALSE(ambiguous);
+  CHECK(ambiguous.errors == std::vector<std::string>{"library `foo` is ambiguous across 2 package roots"});
+
+  const auto missing = loadPackage("missing", roots);
+  REQUIRE_FALSE(missing);
+  CHECK(missing.errors == std::vector<std::string>{"no package is available for library `missing`"});
+
+  const auto noRoots = loadPackage("foo", {});
+  REQUIRE_FALSE(noRoots);
+  CHECK(noRoots.errors == std::vector<std::string>{"no package is available for library `foo`"});
+}
+
+TEST_CASE("package root search rejects a package whose identity differs from its directory") {
+  TemporaryDirectory root;
+  const auto encoded = detail::encodeArchive(Interface(Sym({"bar"}), {}, {}), {});
+  REQUIRE(encoded);
+  llvm::SmallString<128> directory(root.path);
+  llvm::sys::path::append(directory, "foo");
+  REQUIRE_FALSE(llvm::sys::fs::create_directory(directory));
+  llvm::sys::path::append(directory, PackageName);
+  REQUIRE(writeBytes(directory, *encoded.value));
+
+  const auto result = loadPackage("foo", {root.path.str().str()});
+  REQUIRE_FALSE(result);
+  CHECK(result.errors == std::vector<std::string>{"package identity differs: expected `foo`, got `bar`"});
+}
+
 #ifndef _WIN32
 TEST_CASE("package emission rejects a symbolic-link package directory") {
   TemporaryDirectory root;

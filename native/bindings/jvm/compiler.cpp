@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -143,7 +144,10 @@ jbyteArray Compiler::loadPackage0(JNIEnv *env, jclass, jstring name, jstring roo
     const auto hydrated = pkg::hydratePackage(*archive.value, headers, implementations);
     if (!hydrated) throw std::runtime_error(hydrated.errors | mk_string("\n"));
     const auto bytes = polyast::package_to_msgpack(*hydrated.value);
+    if (bytes.size() > static_cast<size_t>(std::numeric_limits<jsize>::max()))
+      throw std::runtime_error("hydrated package exceeds the Java array size limit");
     auto *out = env->NewByteArray(jsize(bytes.size()));
+    if (!out) return out;
     env->SetByteArrayRegion(out, 0, jsize(bytes.size()), reinterpret_cast<const jbyte *>(bytes.data()));
     return out;
   });
