@@ -10,24 +10,21 @@ namespace polyregion::generated::registry::Compiler {
 [[maybe_unused]] jobjectArray layoutOf0(JNIEnv *env, jclass, jbyteArray structDef, jobject options);
 [[maybe_unused]] jbyteArray loadPackage0(JNIEnv *env, jclass, jstring name, jstring roots, jstring capabilities);
 
-thread_local jclass clazz = nullptr;
-
 static void unregisterMethods(JNIEnv *env) {
-  if (!clazz) return;
-  if (env->UnregisterNatives(clazz) != 0) {
+  jclass found = env->FindClass("polyregion/jvm/compiler/Compiler");
+  if (!found) return env->ExceptionClear();
+  const jint result = env->UnregisterNatives(found);
+  env->DeleteLocalRef(found);
+  if (result != 0) {
     throw std::logic_error("UnregisterNatives returned non-zero for polyregion/jvm/compiler/Compiler");
   }
-  env->DeleteGlobalRef(clazz);
-  clazz = nullptr;
 }
 
 static void registerMethods(JNIEnv *env) {
-  if (clazz) return;
-  auto *found = env->FindClass("polyregion/jvm/compiler/Compiler");
+  jclass found = env->FindClass("polyregion/jvm/compiler/Compiler");
   if (!found) {
     throw std::logic_error("Cannot find class polyregion/jvm/compiler/Compiler");
   }
-  clazz = reinterpret_cast<jclass>(env->NewGlobalRef(found));
   const static JNINativeMethod methods[5] = {
       {.name = const_cast<char *>("compile0"),
        .signature = const_cast<char *>("([BZLpolyregion/jvm/compiler/Options;B)Lpolyregion/jvm/compiler/Compilation;"),
@@ -42,7 +39,9 @@ static void registerMethods(JNIEnv *env) {
       {.name = const_cast<char *>("loadPackage0"),
        .signature = const_cast<char *>("(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)[B"),
        .fnPtr = reinterpret_cast<void *>(&loadPackage0)}};
-  if (env->RegisterNatives(clazz, methods, 5) != 0) {
+  const jint result = env->RegisterNatives(found, methods, 5);
+  env->DeleteLocalRef(found);
+  if (result != 0) {
     throw std::logic_error("RegisterNatives returned non-zero for polyregion/jvm/compiler/Compiler");
   }
 }

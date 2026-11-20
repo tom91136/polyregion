@@ -132,7 +132,7 @@ object CppJniBindGen {
         ::: publicMethods.map(f => s"jmethodID" -> s"${descriptorSafe(f)}Method")
 
     val metaStructMemberInits =
-      ("clazz", s"""reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("$jniName")))""", cls.getName)
+      ("clazz", "reinterpret_cast<jclass>(env->NewGlobalRef(found))", cls.getName)
         :: publicFields.map { case (name, tpe) =>
           (s"${name}Field", s"""env->GetFieldID(clazz, "$name", "${descriptor(tpe)}")""", tpe.getName)
         }
@@ -256,8 +256,8 @@ object CppJniBindGen {
          |  };
          |${metaStructMembers.map((t, n) => s"  $t $n;").mkString("\n")}
          |private:
-         |  explicit $clsName(JNIEnv *env);
-         |  static thread_local std::unique_ptr<$clsName> cached;
+         |  $clsName(JNIEnv *env, jclass found);
+         |  static thread_local std::vector<std::unique_ptr<$clsName>> cached;
          |public:
          |  static $clsName& of(JNIEnv *env);
          |  static void drop(JNIEnv *env);
@@ -268,20 +268,32 @@ object CppJniBindGen {
     val structImpl =
       s"""$clsName::Instance::Instance(const $clsName &meta, jobject instance) : meta(meta), instance(instance) {}
          |${(instStructFieldGetterFnImpls ++ instStructMethodFnImpls).mkString("\n")}
-         |$clsName::$clsName(JNIEnv *env)
+         |$clsName::$clsName(JNIEnv *env, jclass found)
          |    : ${metaStructMemberInits
           .map { case (m, v, comment) => s"$m($v)" }
           .mkString(s",\n      ")} { };
-         |thread_local std::unique_ptr<$clsName> $clsName::cached = {};
+         |thread_local std::vector<std::unique_ptr<$clsName>> $clsName::cached = {};
          |$clsName& $clsName::of(JNIEnv *env) {
-         |  if(!cached) cached = std::unique_ptr<$clsName>(new $clsName(env));
-         |  return *cached;
+         |  jclass found = env->FindClass("$jniName");
+         |  for (auto &entry : cached) {
+         |    if (env->IsSameObject(entry->clazz, found)) {
+         |      env->DeleteLocalRef(found);
+         |      return *entry;
+         |    }
+         |  }
+         |  auto &entry = cached.emplace_back(new $clsName(env, found));
+         |  env->DeleteLocalRef(found);
+         |  return *entry;
          |}
          |void $clsName::drop(JNIEnv *env){
-         |  if(cached) {
-         |    env->DeleteGlobalRef(cached->clazz);
-         |    cached.reset();
-         |  }
+         |  jclass found = env->FindClass("$jniName");
+         |  if (!found) return env->ExceptionClear();
+         |  std::erase_if(cached, [&](auto &entry) {
+         |    if (!env->IsSameObject(entry->clazz, found)) return false;
+         |    env->DeleteGlobalRef(entry->clazz);
+         |    return true;
+         |  });
+         |  env->DeleteLocalRef(found);
          |}
          |$clsName::Instance $clsName::wrap(JNIEnv *env, jobject instance) { return {*this, instance}; }
          |${(metaStructStaticMethodFnImpls ++ instStructCtorFactoryFnImpls).mkString("\n")}
@@ -341,27 +353,26 @@ object CppJniBindGen {
          |${constants.map(c => s"$c;").mkString("\n")}
          |${prototypes.map(p => s"[[maybe_unused]] $p;").mkString("\n")}
          |
-         |thread_local jclass clazz = nullptr;
-         |
          |static void unregisterMethods(JNIEnv *env) {
-         |  if (!clazz) return;
-         |  if(env->UnregisterNatives(clazz) != 0){
+         |  jclass found = env->FindClass("$jniName");
+         |  if (!found) return env->ExceptionClear();
+         |  const jint result = env->UnregisterNatives(found);
+         |  env->DeleteLocalRef(found);
+         |  if(result != 0){
          |    throw std::logic_error("UnregisterNatives returned non-zero for $jniName");
          |  }
-         |  env->DeleteGlobalRef(clazz);
-         |  clazz = nullptr;
          |}
          |
          |static void registerMethods(JNIEnv *env) {
-         |  if (clazz) return;
-         |  auto *found = env->FindClass("$jniName");
+         |  jclass found = env->FindClass("$jniName");
          |  if(!found){
          |    throw std::logic_error("Cannot find class $jniName");
          |  }
-         |  clazz = reinterpret_cast<jclass>(env->NewGlobalRef(found));
          |  const static JNINativeMethod methods[${registerEntries.length}] = {
          |${registerEntries.map("      " + _).mkString(",\n")}};
-         |  if(env->RegisterNatives(clazz, methods, ${registerEntries.length}) != 0){
+         |  const jint result = env->RegisterNatives(found, methods, ${registerEntries.length});
+         |  env->DeleteLocalRef(found);
+         |  if(result != 0){
          |    throw std::logic_error("RegisterNatives returned non-zero for $jniName");
          |  }
          |}

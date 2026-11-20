@@ -18,24 +18,21 @@ namespace polyregion::generated::registry::Platforms {
 [[maybe_unused]] jlong pointerOfDirectBuffer0(JNIEnv *env, jclass, jobject buffer);
 [[maybe_unused]] jlongArray pointerOfDirectBuffers0(JNIEnv *env, jclass, jobjectArray buffers);
 
-thread_local jclass clazz = nullptr;
-
 static void unregisterMethods(JNIEnv *env) {
-  if (!clazz) return;
-  if (env->UnregisterNatives(clazz) != 0) {
+  jclass found = env->FindClass("polyregion/jvm/runtime/Platforms");
+  if (!found) return env->ExceptionClear();
+  const jint result = env->UnregisterNatives(found);
+  env->DeleteLocalRef(found);
+  if (result != 0) {
     throw std::logic_error("UnregisterNatives returned non-zero for polyregion/jvm/runtime/Platforms");
   }
-  env->DeleteGlobalRef(clazz);
-  clazz = nullptr;
 }
 
 static void registerMethods(JNIEnv *env) {
-  if (clazz) return;
-  auto *found = env->FindClass("polyregion/jvm/runtime/Platforms");
+  jclass found = env->FindClass("polyregion/jvm/runtime/Platforms");
   if (!found) {
     throw std::logic_error("Cannot find class polyregion/jvm/runtime/Platforms");
   }
-  clazz = reinterpret_cast<jclass>(env->NewGlobalRef(found));
   const static JNINativeMethod methods[13] = {{.name = const_cast<char *>("CUDA0"),
                                                .signature = const_cast<char *>("()Lpolyregion/jvm/runtime/Platform;"),
                                                .fnPtr = reinterpret_cast<void *>(&CUDA0)},
@@ -75,7 +72,9 @@ static void registerMethods(JNIEnv *env) {
                                               {.name = const_cast<char *>("pointerOfDirectBuffers0"),
                                                .signature = const_cast<char *>("([Ljava/nio/Buffer;)[J"),
                                                .fnPtr = reinterpret_cast<void *>(&pointerOfDirectBuffers0)}};
-  if (env->RegisterNatives(clazz, methods, 13) != 0) {
+  const jint result = env->RegisterNatives(found, methods, 13);
+  env->DeleteLocalRef(found);
+  if (result != 0) {
     throw std::logic_error("RegisterNatives returned non-zero for polyregion/jvm/runtime/Platforms");
   }
 }

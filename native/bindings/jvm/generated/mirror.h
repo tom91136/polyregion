@@ -1,5 +1,6 @@
 #include <memory>
 #include <optional>
+#include <vector>
 
 #include <jni.h>
 namespace polyregion::generated {
@@ -15,8 +16,8 @@ struct ByteBuffer {
   jmethodID allocate_ILjava_nio_ByteBuffer_Method;
 
 private:
-  explicit ByteBuffer(JNIEnv *env);
-  static thread_local std::unique_ptr<ByteBuffer> cached;
+  ByteBuffer(JNIEnv *env, jclass found);
+  static thread_local std::vector<std::unique_ptr<ByteBuffer>> cached;
 
 public:
   static ByteBuffer &of(JNIEnv *env);
@@ -36,8 +37,8 @@ struct Property {
   jmethodID ctor0Method;
 
 private:
-  explicit Property(JNIEnv *env);
-  static thread_local std::unique_ptr<Property> cached;
+  Property(JNIEnv *env, jclass found);
+  static thread_local std::vector<std::unique_ptr<Property>> cached;
 
 public:
   static Property &of(JNIEnv *env);
@@ -62,8 +63,8 @@ struct Dim3 {
   jmethodID ctor0Method;
 
 private:
-  explicit Dim3(JNIEnv *env);
-  static thread_local std::unique_ptr<Dim3> cached;
+  Dim3(JNIEnv *env, jclass found);
+  static thread_local std::vector<std::unique_ptr<Dim3>> cached;
 
 public:
   static Dim3 &of(JNIEnv *env);
@@ -90,8 +91,8 @@ struct Policy {
   jmethodID ctor2Method;
 
 private:
-  explicit Policy(JNIEnv *env);
-  static thread_local std::unique_ptr<Policy> cached;
+  Policy(JNIEnv *env, jclass found);
+  static thread_local std::vector<std::unique_ptr<Policy>> cached;
 
 public:
   static Policy &of(JNIEnv *env);
@@ -112,8 +113,8 @@ struct Device {
   jmethodID ctor0Method;
 
 private:
-  explicit Device(JNIEnv *env);
-  static thread_local std::unique_ptr<Device> cached;
+  Device(JNIEnv *env, jclass found);
+  static thread_local std::vector<std::unique_ptr<Device>> cached;
 
 public:
   static Device &of(JNIEnv *env);
@@ -132,8 +133,8 @@ struct Platform {
   jmethodID ctor0Method;
 
 private:
-  explicit Platform(JNIEnv *env);
-  static thread_local std::unique_ptr<Platform> cached;
+  Platform(JNIEnv *env, jclass found);
+  static thread_local std::vector<std::unique_ptr<Platform>> cached;
 
 public:
   static Platform &of(JNIEnv *env);
@@ -152,8 +153,8 @@ struct Event {
   jmethodID ctor0Method;
 
 private:
-  explicit Event(JNIEnv *env);
-  static thread_local std::unique_ptr<Event> cached;
+  Event(JNIEnv *env, jclass found);
+  static thread_local std::vector<std::unique_ptr<Event>> cached;
 
 public:
   static Event &of(JNIEnv *env);
@@ -172,8 +173,8 @@ struct Layout {
   jmethodID ctor0Method;
 
 private:
-  explicit Layout(JNIEnv *env);
-  static thread_local std::unique_ptr<Layout> cached;
+  Layout(JNIEnv *env, jclass found);
+  static thread_local std::vector<std::unique_ptr<Layout>> cached;
 
 public:
   static Layout &of(JNIEnv *env);
@@ -192,8 +193,8 @@ struct Member {
   jmethodID ctor0Method;
 
 private:
-  explicit Member(JNIEnv *env);
-  static thread_local std::unique_ptr<Member> cached;
+  Member(JNIEnv *env, jclass found);
+  static thread_local std::vector<std::unique_ptr<Member>> cached;
 
 public:
   static Member &of(JNIEnv *env);
@@ -216,8 +217,8 @@ struct Options {
   jmethodID ctor0Method;
 
 private:
-  explicit Options(JNIEnv *env);
-  static thread_local std::unique_ptr<Options> cached;
+  Options(JNIEnv *env, jclass found);
+  static thread_local std::vector<std::unique_ptr<Options>> cached;
 
 public:
   static Options &of(JNIEnv *env);
@@ -236,8 +237,8 @@ struct Compilation {
   jmethodID ctor0Method;
 
 private:
-  explicit Compilation(JNIEnv *env);
-  static thread_local std::unique_ptr<Compilation> cached;
+  Compilation(JNIEnv *env, jclass found);
+  static thread_local std::vector<std::unique_ptr<Compilation>> cached;
 
 public:
   static Compilation &of(JNIEnv *env);
@@ -256,8 +257,8 @@ struct String {
   jclass clazz;
 
 private:
-  explicit String(JNIEnv *env);
-  static thread_local std::unique_ptr<String> cached;
+  String(JNIEnv *env, jclass found);
+  static thread_local std::vector<std::unique_ptr<String>> cached;
 
 public:
   static String &of(JNIEnv *env);
@@ -276,8 +277,8 @@ struct Runnable {
   jmethodID run_VMethod;
 
 private:
-  explicit Runnable(JNIEnv *env);
-  static thread_local std::unique_ptr<Runnable> cached;
+  Runnable(JNIEnv *env, jclass found);
+  static thread_local std::vector<std::unique_ptr<Runnable>> cached;
 
 public:
   static Runnable &of(JNIEnv *env);
@@ -296,8 +297,8 @@ struct File {
   jmethodID delete_ZMethod;
 
 private:
-  explicit File(JNIEnv *env);
-  static thread_local std::unique_ptr<File> cached;
+  File(JNIEnv *env, jclass found);
+  static thread_local std::vector<std::unique_ptr<File>> cached;
 
 public:
   static File &of(JNIEnv *env);

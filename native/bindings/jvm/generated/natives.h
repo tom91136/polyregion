@@ -8,24 +8,21 @@ namespace polyregion::generated::registry::Natives {
 [[maybe_unused]] void dynamicLibraryRelease0(JNIEnv *env, jclass, jlong handle);
 [[maybe_unused]] void registerFilesToDropOnUnload0(JNIEnv *env, jclass, jobject file);
 
-thread_local jclass clazz = nullptr;
-
 static void unregisterMethods(JNIEnv *env) {
-  if (!clazz) return;
-  if (env->UnregisterNatives(clazz) != 0) {
+  jclass found = env->FindClass("polyregion/jvm/Natives");
+  if (!found) return env->ExceptionClear();
+  const jint result = env->UnregisterNatives(found);
+  env->DeleteLocalRef(found);
+  if (result != 0) {
     throw std::logic_error("UnregisterNatives returned non-zero for polyregion/jvm/Natives");
   }
-  env->DeleteGlobalRef(clazz);
-  clazz = nullptr;
 }
 
 static void registerMethods(JNIEnv *env) {
-  if (clazz) return;
-  auto *found = env->FindClass("polyregion/jvm/Natives");
+  jclass found = env->FindClass("polyregion/jvm/Natives");
   if (!found) {
     throw std::logic_error("Cannot find class polyregion/jvm/Natives");
   }
-  clazz = reinterpret_cast<jclass>(env->NewGlobalRef(found));
   const static JNINativeMethod methods[3] = {{.name = const_cast<char *>("dynamicLibraryLoad0"),
                                               .signature = const_cast<char *>("(Ljava/lang/String;)J"),
                                               .fnPtr = reinterpret_cast<void *>(&dynamicLibraryLoad0)},
@@ -35,7 +32,9 @@ static void registerMethods(JNIEnv *env) {
                                              {.name = const_cast<char *>("registerFilesToDropOnUnload0"),
                                               .signature = const_cast<char *>("(Ljava/io/File;)V"),
                                               .fnPtr = reinterpret_cast<void *>(&registerFilesToDropOnUnload0)}};
-  if (env->RegisterNatives(clazz, methods, 3) != 0) {
+  const jint result = env->RegisterNatives(found, methods, 3);
+  env->DeleteLocalRef(found);
+  if (result != 0) {
     throw std::logic_error("RegisterNatives returned non-zero for polyregion/jvm/Natives");
   }
 }

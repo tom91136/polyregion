@@ -1,8 +1,8 @@
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <mutex>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include "polyregion/dl.h"
@@ -20,12 +20,27 @@ static std::vector<jobject> files;
 
 static JavaVM *CurrentVM = {};
 
+struct Binding {
+  polyregion_dl_handle handle;
+  jweak owner;
+  std::size_t holders;
+};
+
 static std::mutex dlMutex;
-static std::unordered_map<polyregion_dl_handle, std::size_t> dlRefcount;
+static std::vector<Binding> bindings;
+
+static std::vector<Binding>::iterator findBinding(JNIEnv *env, polyregion_dl_handle handle, jclass owner) {
+  std::erase_if(bindings, [&](const Binding &b) {
+    if (!env->IsSameObject(b.owner, nullptr)) return false;
+    env->DeleteWeakGlobalRef(b.owner);
+    return true;
+  });
+  return std::find_if(bindings.begin(), bindings.end(),
+                      [&](const Binding &b) { return b.handle == handle && env->IsSameObject(b.owner, owner); });
+}
 
 [[maybe_unused]] JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *) {
   if (const char *d = std::getenv(polyregion::env::PolyregionDebug); d && *d) fprintf(stdout, "Shim JNI_OnLoad\n");
-  files.clear(); // In case OnUnload didn't finish normally
   CurrentVM = vm;
 
   JNIEnv *env = getEnv(vm);
@@ -40,7 +55,6 @@ static std::unordered_map<polyregion_dl_handle, std::size_t> dlRefcount;
   }();
   if (debug) fprintf(stdout, "Shim JNI_OnUnload\n");
   JNIEnv *env = getEnv(vm);
-  Natives::unregisterMethods(env);
 
   if (!files.empty()) {
     if (debug) fprintf(stdout, "Registered files: %zu\n", files.size());
@@ -52,7 +66,6 @@ static std::unordered_map<polyregion_dl_handle, std::size_t> dlRefcount;
     }
     files.clear();
   }
-  CurrentVM = nullptr;
 }
 
 void Natives::registerFilesToDropOnUnload0(JNIEnv *env, jclass, jobject file) { files.push_back(env->NewGlobalRef(file)); }
@@ -62,18 +75,17 @@ static std::string resolveDlError() {
   return message ? std::string(message) : "(no message reported)";
 }
 
-jlong Natives::dynamicLibraryLoad0(JNIEnv *env, jclass, jstring name) {
+jlong Natives::dynamicLibraryLoad0(JNIEnv *env, jclass self, jstring name) {
   const auto str = fromJni(env, name);
   if (auto *dylib = polyregion_dl_open(str.c_str()); !dylib) {
     throwGeneric(env, EX, "Cannot load library `" + str + "` :" + resolveDlError());
     return {};
   } else {
-    bool firstLoad;
-    {
-      const std::scoped_lock lock(dlMutex);
-      firstLoad = dlRefcount[dylib]++ == 0;
-    }
-    if (firstLoad) {
+    const std::scoped_lock lock(dlMutex);
+    if (const auto it = findBinding(env, dylib, self); it != bindings.end()) {
+      it->holders++;
+    } else {
+      bindings.push_back({dylib, env->NewWeakGlobalRef(self), 1});
       if (auto *f = polyregion_dl_find(dylib, "JNI_OnLoad")) {
         reinterpret_cast<jint (*)(JavaVM *, void *)>(f)(CurrentVM, nullptr);
       }
@@ -82,22 +94,16 @@ jlong Natives::dynamicLibraryLoad0(JNIEnv *env, jclass, jstring name) {
   }
 }
 
-void Natives::dynamicLibraryRelease0(JNIEnv *env, jclass, jlong handle) {
+void Natives::dynamicLibraryRelease0(JNIEnv *env, jclass self, jlong handle) {
   auto *typedHandle = reinterpret_cast<polyregion_dl_handle>(handle);
-  bool lastRelease;
   {
     const std::scoped_lock lock(dlMutex);
-    const auto it = dlRefcount.find(typedHandle);
-    if (it == dlRefcount.end() || --it->second == 0) {
-      lastRelease = true;
-      if (it != dlRefcount.end()) dlRefcount.erase(it);
-    } else {
-      lastRelease = false;
-    }
-  }
-  if (lastRelease) {
-    if (auto *f = polyregion_dl_find(typedHandle, "JNI_OnUnload")) {
-      reinterpret_cast<void (*)(JavaVM *, void *)>(f)(CurrentVM, nullptr);
+    if (const auto it = findBinding(env, typedHandle, self); it != bindings.end() && --it->holders == 0) {
+      if (auto *f = polyregion_dl_find(typedHandle, "JNI_OnUnload")) {
+        reinterpret_cast<void (*)(JavaVM *, void *)>(f)(CurrentVM, nullptr);
+      }
+      env->DeleteWeakGlobalRef(it->owner);
+      bindings.erase(it);
     }
   }
   if (const auto code = polyregion_dl_close(typedHandle); code != 0) {
