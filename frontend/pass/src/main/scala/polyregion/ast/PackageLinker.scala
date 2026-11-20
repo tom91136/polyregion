@@ -133,6 +133,9 @@ private[polyregion] object PackageLinker {
         errors += s"implementation `$name` is not exported"
       if (implementation.requiredCapabilities.distinct.size != implementation.requiredCapabilities.size)
         errors += s"implementation `$name` has duplicate capabilities"
+      implementation.requiredCapabilities.filter(_.contains('@')).foreach { capability =>
+        errors += s"implementation `$name` has malformed capability `$capability`"
+      }
       val declarations = implementation.implements.toList.flatMap(declarationsByName.getOrElse(_, Nil))
       val compatible =
         declarations.flatMap(decl => ProgramLinker.matchImplementation(implementation.decl, decl).toOption)

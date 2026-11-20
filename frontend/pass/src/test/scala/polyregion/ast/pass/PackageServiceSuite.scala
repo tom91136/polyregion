@@ -529,6 +529,33 @@ class PackageServiceSuite extends munit.FunSuite {
     assert(duplicate.left.exists(_.contains("package fragment identities must be unique")))
   }
 
+  test("package linking rejects a requirement that names a link target") {
+    val publicName = p.Sym("library.apply")
+    val public = p.FunctionDecl(
+      publicName,
+      Nil,
+      None,
+      Nil,
+      Nil,
+      Nil,
+      p.Type.Unit0,
+      p.Function.Affinity.Host
+    )
+    val implementation = function(
+      public.copy(name = p.Sym("implementation.apply")),
+      implements = Some(publicName),
+      capabilities = List("spectra.thrust@cuda")
+    )
+    val linked = PackageLinker.link(
+      p.Package.LinkRequest(
+        p.Interface(p.Sym("library"), List(public)),
+        List(fragment("harvest-17", List(implementation)))
+      )
+    )
+    val message = "implementation `implementation.apply` has malformed capability `spectra.thrust@cuda`"
+    assert(linked.left.exists(_.contains(message)), linked)
+  }
+
   test("fragment links retain only the overload implemented by that fragment") {
     val name = p.Sym("library.apply")
     def declaration(tpe: p.Type) = p.FunctionDecl(

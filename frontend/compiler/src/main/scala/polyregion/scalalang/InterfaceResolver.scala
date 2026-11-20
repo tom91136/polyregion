@@ -25,15 +25,12 @@ private[scalalang] object InterfaceResolver {
       capabilities: Set[String] = configuredCapabilities
   ): Either[List[String], p.Package] =
     for {
-      bytes <- roots match {
-        case "" => Left(List(s"no library package is available for interface `$packageName`"))
-        case roots =>
-          try Right(compiler.loadPackage(packageName, roots, capabilities.mkString(",")))
-          catch {
-            case error: polyregion.jvm.compiler.PolyregionCompilerException =>
-              Left(error.getMessage.linesIterator.toList)
-          }
-      }
+      bytes <-
+        try Right(compiler.loadPackage(packageName, roots, capabilities.mkString(",")))
+        catch {
+          case error: polyregion.jvm.compiler.PolyregionCompilerException =>
+            Left(error.getMessage.linesIterator.toList)
+        }
       versioned <- MsgPack
         .decode[MsgPack.Versioned[p.Package]](bytes)
         .left
