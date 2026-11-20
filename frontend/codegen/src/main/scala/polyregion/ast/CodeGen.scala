@@ -101,7 +101,6 @@ private[polyregion] object CodeGen {
         (classOf[polyregion.jvm.runtime.Property], _ => false, _ => true, _ => false),
         (classOf[polyregion.jvm.runtime.Dim3], _ => true, _ => true, _ => false),
         (classOf[polyregion.jvm.runtime.Policy], _ => true, _ => true, _ => false),
-        (classOf[polyregion.jvm.runtime.Device.Queue], _ => false, _ => true, _ => false),
         (classOf[polyregion.jvm.runtime.Device], _ => false, _ => true, _ => false),
         (classOf[polyregion.jvm.runtime.Platform], _ => false, _ => true, _ => false),
         (classOf[polyregion.jvm.compiler.Event], _ => false, _ => true, _ => false),

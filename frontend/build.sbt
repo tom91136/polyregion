@@ -138,7 +138,7 @@ lazy val `runtime-scala` = project
     ),
     assembly / artifact := (assembly / artifact).value.withClassifier(Some("assembly"))
   )
-  .dependsOn(`binding-jvm`, compiler % Compile, codegen % Compile)
+  .dependsOn(`binding-jvm`, compiler % Compile, codegen % Compile, `runtime-java` % Test)
 
 lazy val ast = (projectMatrix in file("ast"))
   .settings(

@@ -101,26 +101,6 @@ public:
   Instance operator()(JNIEnv *env, jobject global, jobject local) const;
   Instance operator()(JNIEnv *env, jobject global, jobject local, jint localMemoryBytes) const;
 };
-struct Queue {
-  struct Instance {
-    const Queue &meta;
-    jobject instance;
-    Instance(const Queue &meta, jobject instance);
-    template <typename T, typename F> std::optional<T> map(F &&f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
-  };
-  jclass clazz;
-  jmethodID ctor0Method;
-
-private:
-  explicit Queue(JNIEnv *env);
-  static thread_local std::unique_ptr<Queue> cached;
-
-public:
-  static Queue &of(JNIEnv *env);
-  static void drop(JNIEnv *env);
-  Instance wrap(JNIEnv *env, jobject instance);
-  Instance operator()(JNIEnv *env, jlong nativePeer, jobject device) const;
-};
 struct Device {
   struct Instance {
     const Device &meta;

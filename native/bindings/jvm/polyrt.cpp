@@ -30,8 +30,11 @@ using namespace generated::registry;
 
 static constexpr const char *EX = "polyregion/jvm/runtime/PolyregionRuntimeException";
 
+static JavaVM *CurrentVM = nullptr;
+
 [[maybe_unused]] JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *) {
   if (const char *d = std::getenv(env::PolyregionDebug); d && *d) fprintf(stderr, "OnLoad polyrt\n");
+  CurrentVM = vm;
   JNIEnv *env = getEnv(vm);
   if (!env) return JNI_ERR;
 #ifndef _WIN32
@@ -168,6 +171,32 @@ void loadImages(void *context, ImageSet &set) {
   }
 }
 
+void runCompletion(void *user) {
+  auto *completion = static_cast<jobject>(user);
+  JNIEnv *env = nullptr;
+  const bool attach = CurrentVM->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6) == JNI_EDETACHED;
+  if (attach && CurrentVM->AttachCurrentThreadAsDaemon(reinterpret_cast<void **>(&env), nullptr) != JNI_OK) {
+    fprintf(stderr, "polyrt-JNI: cannot attach a completion thread to the JVM, aborting\n");
+    std::abort();
+  }
+  if (auto *run = env->GetMethodID(env->GetObjectClass(completion), "run", "()V"); run) env->CallVoidMethod(completion, run);
+  if (env->ExceptionCheck()) env->ExceptionDescribe();
+  env->DeleteGlobalRef(completion);
+  if (attach) CurrentVM->DetachCurrentThread();
+}
+
+void copyAsync(JNIEnv *env, const jlong context, const uintptr_t dst, const uintptr_t src, const jlong bytes, const int32_t direction,
+               jobject completion) {
+  if (bytes < 0) throw std::runtime_error("Cannot copy " + std::to_string(bytes) + " bytes");
+  if (!completion) throw std::runtime_error("The completion is null");
+  auto *global = env->NewGlobalRef(completion);
+  if (!global) throw std::runtime_error("Cannot create a global reference for the completion");
+  if (!polyrt_remote_memcpy_async(toHandle(context), dst, src, static_cast<size_t>(bytes), direction, &runCompletion, global)) {
+    env->DeleteGlobalRef(global);
+    check(false);
+  }
+}
+
 std::vector<rt::Type> readTypes(const std::vector<jbyte> &raw) {
   std::vector<rt::Type> types;
   for (const auto t : raw)
@@ -283,6 +312,52 @@ void Context::copyFromDevice0(JNIEnv *env, jclass, jlong context, jlong src, job
                                + std::to_string(env->GetDirectBufferCapacity(dst)));
     check(polyrt_remote_memcpy(toHandle(context), reinterpret_cast<uintptr_t>(local), static_cast<uintptr_t>(src),
                                static_cast<size_t>(bytes), 1));
+  });
+}
+
+void Context::copyToDeviceAsync0(JNIEnv *env, jclass, jlong context, jobject src, jlong dst, jlong bytes, jobject completion) {
+  wrapException(env, EX, [&] {
+    const auto *local = env->GetDirectBufferAddress(src);
+    if (!local) throw std::runtime_error("The source is not a direct buffer");
+    if (bytes < 0 || bytes > env->GetDirectBufferCapacity(src))
+      throw std::runtime_error("Cannot copy " + std::to_string(bytes) + " bytes from a buffer of "
+                               + std::to_string(env->GetDirectBufferCapacity(src)));
+    copyAsync(env, context, static_cast<uintptr_t>(dst), reinterpret_cast<uintptr_t>(local), bytes, 0, completion);
+  });
+}
+
+void Context::copyFromDeviceAsync0(JNIEnv *env, jclass, jlong context, jlong src, jobject dst, jlong bytes, jobject completion) {
+  wrapException(env, EX, [&] {
+    auto *local = env->GetDirectBufferAddress(dst);
+    if (!local) throw std::runtime_error("The destination is not a direct buffer");
+    if (bytes < 0 || bytes > env->GetDirectBufferCapacity(dst))
+      throw std::runtime_error("Cannot copy " + std::to_string(bytes) + " bytes into a buffer of "
+                               + std::to_string(env->GetDirectBufferCapacity(dst)));
+    copyAsync(env, context, reinterpret_cast<uintptr_t>(local), static_cast<uintptr_t>(src), bytes, 1, completion);
+  });
+}
+
+jlong Context::address0(JNIEnv *env, jclass, jobject buffer) {
+  return wrapException(env, EX, [&] {
+    const auto *address = env->GetDirectBufferAddress(buffer);
+    if (!address) throw std::runtime_error("The buffer is not a direct buffer");
+    return static_cast<jlong>(reinterpret_cast<uintptr_t>(address));
+  });
+}
+
+jboolean Context::sharedAddressSpace0(JNIEnv *env, jclass, jlong context) {
+  return wrapException(env, EX, [&] { return static_cast<jboolean>(polyrt_device_shared_address_space(toHandle(context))); });
+}
+
+jlongArray Context::stats0(JNIEnv *env, jclass, jlong context) {
+  return wrapException(env, EX, [&] {
+    PolyrtStats stats{};
+    check(polyrt_stats(toHandle(context), &stats));
+    const jlong values[] = {static_cast<jlong>(stats.launches), static_cast<jlong>(stats.h2dCopies), static_cast<jlong>(stats.d2hCopies),
+                            static_cast<jlong>(stats.remoteMallocs)};
+    auto *array = env->NewLongArray(4);
+    env->SetLongArrayRegion(array, 0, 4, values);
+    return array;
   });
 }
 

@@ -289,30 +289,6 @@ class ContextSuite extends munit.FunSuite {
     assertEquals(failures.size, 0, failures.toString)
   }
 
-  test("polyinvoke and polyrt launch side by side in one process") {
-    val n      = 32
-    val target = ct.Target.LLVM_HOST
-    val c      = compile(fillProgram, target, "native")
-    val device = Platforms.Relocatable().devices()(0)
-    device.loadModule("fill@polyinvoke", c.program)
-    val queue   = device.createQueue(0)
-    val direct0 = direct(n * 4)
-    val done    = new java.util.concurrent.CountDownLatch(1)
-    queue.enqueueInvokeAsync(
-      "fill@polyinvoke",
-      "fill",
-      java.util.Arrays.asList[rt.Arg[?]](rt.Arg.of(0L), rt.Arg.ptr(Platforms.pointerOfDirectBuffer(direct0))),
-      rt.Arg.of(),
-      rt.Policy(rt.Dim3(n, 1, 1)),
-      () => done.countDown()
-    )
-    assert(done.await(30, java.util.concurrent.TimeUnit.SECONDS))
-    assertEquals((0 until n).map(i => direct0.getInt(i * 4)).toList, (0 until n).toList)
-    checkFill(rt.Context.current())
-    ensureProbe()
-    assertNotEquals(probe(rt.Context.current(), 7)._2, 0L)
-  }
-
   test("copies are bounded by the buffer and start at its position") {
     val ctx = rt.Context.create(hostDevice)
     try {

@@ -806,6 +806,9 @@ POLYREGION_EXPORT extern "C" uint64_t polyrt_device_global_memory_bytes(void *co
 POLYREGION_EXPORT extern "C" uint64_t polyrt_device_compute_units(void *context) {
   return requireDeviceCapability(context, __func__, [](auto &device) { return device.computeUnits(); });
 }
+POLYREGION_EXPORT extern "C" bool polyrt_device_shared_address_space(void *context) {
+  return requireContext(context, __func__).device->sharedAddressSpace();
+}
 POLYREGION_EXPORT extern "C" uint64_t polyrt_device_cuda_architecture_major(void *context) {
   return requireContext(context, __func__).device->cudaArchitectureMajor();
 }
@@ -871,14 +874,15 @@ static void remoteFree(void *context, const uintptr_t ptr) {
   forgetTemporaryAllocation(execution, ptr);
 }
 
-static bool enqueueRemoteMemcpy(void *context, const uintptr_t dst, const uintptr_t src, const size_t bytes, const int32_t direction) {
+static bool enqueueRemoteMemcpy(void *context, const uintptr_t dst, const uintptr_t src, const size_t bytes, const int32_t direction,
+                                const MaybeCallback &cb = {}) {
   if (bytes == 0 || src == 0 || dst == 0) return false;
   auto &execution = requireContext(context, __func__);
   if (!execution.heapActive.load(std::memory_order_acquire)) {
     switch (direction) {
-      case 0: execution.copyHostToDevice(reinterpret_cast<const void *>(src), dst, 0, bytes); break;
-      case 1: execution.copyDeviceToHost(src, 0, reinterpret_cast<void *>(dst), bytes); break;
-      default: execution.copyDeviceToDevice(src, 0, dst, 0, bytes); break;
+      case 0: execution.copyHostToDevice(reinterpret_cast<const void *>(src), dst, 0, bytes, cb); break;
+      case 1: execution.copyDeviceToHost(src, 0, reinterpret_cast<void *>(dst), bytes, cb); break;
+      default: execution.copyDeviceToDevice(src, 0, dst, 0, bytes, cb); break;
     }
     return true;
   }
@@ -906,6 +910,7 @@ static bool enqueueRemoteMemcpy(void *context, const uintptr_t dst, const uintpt
       break;
     }
   }
+  if (cb) (*cb)();
   return true;
 }
 
@@ -1295,6 +1300,19 @@ POLYREGION_EXPORT extern "C" bool polyrt_remote_free(void *context, const uintpt
 POLYREGION_EXPORT extern "C" bool polyrt_remote_memcpy(void *context, const uintptr_t dst, const uintptr_t src, const size_t bytes,
                                                        const int32_t direction) noexcept {
   return runtimeStatus(__func__, [&] { remoteMemcpy(context, dst, src, bytes, direction); });
+}
+
+POLYREGION_EXPORT extern "C" bool polyrt_remote_memcpy_async(void *context, const uintptr_t dst, const uintptr_t src, const size_t bytes,
+                                                             const int32_t direction, const PolyrtCompletion completion,
+                                                             void *user) noexcept {
+  return runtimeStatus(__func__, [&] {
+    if (!completion) throw std::invalid_argument("null completion");
+    auto &execution = requireContext(context, __func__);
+    if (bytes == 0) return completion(user);
+    if (src == 0 || dst == 0) throw std::invalid_argument("null address");
+    const std::scoped_lock lock(execution.transaction);
+    enqueueRemoteMemcpy(context, dst, src, bytes, direction, MaybeCallback{[completion, user] { completion(user); }});
+  });
 }
 
 POLYREGION_EXPORT extern "C" bool polyrt_remote_launch(void *context, const char *moduleName, const char *kernelName, const size_t gridX,

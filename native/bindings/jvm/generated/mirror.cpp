@@ -106,27 +106,6 @@ Policy::Instance Policy::operator()(JNIEnv *env, jobject global, jobject local, 
   return {*this, env->NewObject(clazz, ctor2Method, global, local, localMemoryBytes)};
 }
 
-Queue::Instance::Instance(const Queue &meta, jobject instance) : meta(meta), instance(instance) {}
-
-Queue::Queue(JNIEnv *env)
-    : clazz(reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("polyregion/jvm/runtime/Device$Queue")))),
-      ctor0Method(env->GetMethodID(clazz, "<init>", "(JLpolyregion/jvm/runtime/Device;)V")) {};
-thread_local std::unique_ptr<Queue> Queue::cached = {};
-Queue &Queue::of(JNIEnv *env) {
-  if (!cached) cached = std::unique_ptr<Queue>(new Queue(env));
-  return *cached;
-}
-void Queue::drop(JNIEnv *env) {
-  if (cached) {
-    env->DeleteGlobalRef(cached->clazz);
-    cached.reset();
-  }
-}
-Queue::Instance Queue::wrap(JNIEnv *env, jobject instance) { return {*this, instance}; }
-Queue::Instance Queue::operator()(JNIEnv *env, jlong nativePeer, jobject device) const {
-  return {*this, env->NewObject(clazz, ctor0Method, nativePeer, device)};
-}
-
 Device::Instance::Instance(const Device &meta, jobject instance) : meta(meta), instance(instance) {}
 
 Device::Device(JNIEnv *env)

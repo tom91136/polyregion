@@ -72,17 +72,18 @@ struct ExecutionContext {
   void settle() {
     if (!queue->quiescent()) wait();
   }
-  void copyDeviceToDevice(uintptr_t src, size_t srcOffset, uintptr_t dst, size_t dstOffset, size_t bytes) {
+  void copyDeviceToDevice(uintptr_t src, size_t srcOffset, uintptr_t dst, size_t dstOffset, size_t bytes,
+                          const invoke::MaybeCallback &cb = {}) {
     counters.d2dCopies.fetch_add(1, std::memory_order_relaxed);
-    queue->enqueueDeviceToDeviceAsync(src, srcOffset, dst, dstOffset, bytes, {});
+    queue->enqueueDeviceToDeviceAsync(src, srcOffset, dst, dstOffset, bytes, cb);
   }
-  void copyHostToDevice(const void *src, uintptr_t dst, size_t dstOffset, size_t bytes) {
+  void copyHostToDevice(const void *src, uintptr_t dst, size_t dstOffset, size_t bytes, const invoke::MaybeCallback &cb = {}) {
     counters.h2dCopies.fetch_add(1, std::memory_order_relaxed);
-    queue->enqueueHostToDeviceAsync(src, dst, dstOffset, bytes, {});
+    queue->enqueueHostToDeviceAsync(src, dst, dstOffset, bytes, cb);
   }
-  void copyDeviceToHost(uintptr_t src, size_t srcOffset, void *dst, size_t bytes) {
+  void copyDeviceToHost(uintptr_t src, size_t srcOffset, void *dst, size_t bytes, const invoke::MaybeCallback &cb = {}) {
     counters.d2hCopies.fetch_add(1, std::memory_order_relaxed);
-    queue->enqueueDeviceToHostAsync(src, srcOffset, dst, bytes, {});
+    queue->enqueueDeviceToHostAsync(src, srcOffset, dst, bytes, cb);
   }
 };
 
@@ -184,6 +185,7 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT uint64_t polyrt_device_subgroup_size(voi
 POLYREGION_RT_PROTECT POLYREGION_EXPORT uint64_t polyrt_device_local_memory_bytes(void *context);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT uint64_t polyrt_device_global_memory_bytes(void *context);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT uint64_t polyrt_device_compute_units(void *context);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_device_shared_address_space(void *context);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT uint64_t polyrt_device_cuda_architecture_major(void *context);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT uint64_t polyrt_device_cuda_architecture_minor(void *context);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT polyregion::polyrt::DeviceKind polyrt_device_kind(void *context);
@@ -196,6 +198,12 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_remote_temp_malloc(void *con
 POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_remote_free(void *context, uintptr_t ptr) noexcept;
 POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_remote_memcpy(void *context, uintptr_t dst, uintptr_t src, size_t bytes,
                                                                   int32_t direction) noexcept;
+// completion is called once from an unspecified thread after the copy settles, or inline for an empty copy; it is not
+// called when the call returns false
+typedef void (*PolyrtCompletion)(void *user);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_remote_memcpy_async(void *context, uintptr_t dst, uintptr_t src, size_t bytes,
+                                                                        int32_t direction, PolyrtCompletion completion,
+                                                                        void *user) noexcept;
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_device_usm_host_acquire(void *context, void *remote, uint64_t bytes, int32_t mode);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_device_usm_host_release(void *context, void *remote, void *local, uint64_t bytes,
                                                                             int32_t mode);

@@ -1,9 +1,12 @@
 package polyregion.jvm.runtime;
 
 import java.nio.ByteBuffer;
+import java.lang.ref.Reference;
 import java.nio.file.Paths;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
+import java.util.function.Function;
 import polyregion.jvm.Loader;
 import polyregion.jvm.NativeLibrary;
 
@@ -33,6 +36,18 @@ public final class Context implements AutoCloseable {
   static native void copyToDevice0(long context, ByteBuffer src, long dst, long bytes);
 
   static native void copyFromDevice0(long context, long src, ByteBuffer dst, long bytes);
+
+  static native void copyToDeviceAsync0(
+      long context, ByteBuffer src, long dst, long bytes, Runnable completion);
+
+  static native void copyFromDeviceAsync0(
+      long context, long src, ByteBuffer dst, long bytes, Runnable completion);
+
+  static native long address0(ByteBuffer buffer);
+
+  static native boolean sharedAddressSpace0(long context);
+
+  static native long[] stats0(long context);
 
   static native int select0(
       long context,
@@ -82,13 +97,27 @@ public final class Context implements AutoCloseable {
     }
   }
 
+  public static final class Stats {
+    public final long launches, hostToDevice, deviceToHost, remoteMallocs;
+
+    Stats(long launches, long hostToDevice, long deviceToHost, long remoteMallocs) {
+      this.launches = launches;
+      this.hostToDevice = hostToDevice;
+      this.deviceToHost = deviceToHost;
+      this.remoteMallocs = remoteMallocs;
+    }
+  }
+
   private static void ensureLoaded() {
     if (Library.INSTANCE == null) throw new AssertionError();
   }
 
+  private static volatile Context current;
+
   private final long handle;
   private final boolean owned;
   private final AtomicBoolean closed = new AtomicBoolean();
+  private final Queue queue = new Queue(this);
 
   private Context(long handle, boolean owned) {
     this.handle = handle;
@@ -133,18 +162,35 @@ public final class Context implements AutoCloseable {
 
   public static Context current() {
     ensureLoaded();
-    long handle = current0();
-    if (handle == 0) throw new PolyregionRuntimeException("The default context has no device");
-    return new Context(handle, false);
+    Context context = current;
+    if (context == null)
+      synchronized (Context.class) {
+        context = current;
+        if (context == null) {
+          long handle = current0();
+          if (handle == 0) throw new PolyregionRuntimeException("The default context has no device");
+          current = context = new Context(handle, false);
+        }
+      }
+    return context;
   }
 
-  private void requireOpen() {
+  public static long addressOf(ByteBuffer buffer) {
+    ensureLoaded();
+    return address0(buffer);
+  }
+
+  void requireOpen() {
     if (closed.get()) throw new PolyregionRuntimeException("Context " + handle + " is closed");
   }
 
   public long malloc(long bytes) {
     requireOpen();
     return malloc0(handle, bytes);
+  }
+
+  void freeRaw(long pointer) {
+    free0(handle, pointer);
   }
 
   public void free(long pointer) {
@@ -160,6 +206,95 @@ public final class Context implements AutoCloseable {
   public void copyFromDevice(long src, ByteBuffer dst, long bytes) {
     requireOpen();
     copyFromDevice0(handle, src, dst.slice(), bytes);
+  }
+
+  void copyToDeviceDirect(ByteBuffer src, long dst, long bytes, Completion cb) {
+    requireOpen();
+    ByteBuffer region = src.slice();
+    copyToDeviceAsync0(
+        handle,
+        region,
+        dst,
+        bytes,
+        () -> {
+          try {
+            cb.complete(null);
+          } finally {
+            Reference.reachabilityFence(region);
+          }
+        });
+  }
+
+  void copyFromDeviceDirect(long src, ByteBuffer dst, long bytes, Completion cb) {
+    requireOpen();
+    ByteBuffer region = dst.slice();
+    copyFromDeviceAsync0(
+        handle,
+        src,
+        region,
+        bytes,
+        () -> {
+          try {
+            cb.complete(null);
+          } finally {
+            Reference.reachabilityFence(region);
+          }
+        });
+  }
+
+  /** The completion runs once on the queue's completion thread, never on a driver thread. */
+  public void copyToDevice(ByteBuffer src, long dst, long bytes, Completion cb) {
+    Objects.requireNonNull(cb, "cb");
+    ByteBuffer keep = src;
+    copyToDeviceDirect(
+        src,
+        dst,
+        bytes,
+        failure -> {
+          queue.dispatch(cb, failure);
+          Reference.reachabilityFence(keep);
+        });
+  }
+
+  public void copyFromDevice(long src, ByteBuffer dst, long bytes, Completion cb) {
+    Objects.requireNonNull(cb, "cb");
+    ByteBuffer keep = dst;
+    copyFromDeviceDirect(
+        src,
+        dst,
+        bytes,
+        failure -> {
+          queue.dispatch(cb, failure);
+          Reference.reachabilityFence(keep);
+        });
+  }
+
+  public boolean sharedAddressSpace() {
+    requireOpen();
+    return sharedAddressSpace0(handle);
+  }
+
+  public Queue queue() {
+    return queue;
+  }
+
+  public <R> R residentValue(Object[] residents, Function<Queue.Scope, R> body) {
+    return queue.resident(residents, body);
+  }
+
+  public void resident(Object[] residents, Consumer<Queue.Scope> body) {
+    queue.resident(
+        residents,
+        scope -> {
+          body.accept(scope);
+          return null;
+        });
+  }
+
+  public Stats stats() {
+    requireOpen();
+    long[] values = stats0(handle);
+    return new Stats(values[0], values[1], values[2], values[3]);
   }
 
   public int select(ModuleImage[] images) {
@@ -231,7 +366,13 @@ public final class Context implements AutoCloseable {
 
   @Override
   public void close() {
-    if (owned && closed.compareAndSet(false, true)) destroy0(handle);
+    if (owned && closed.compareAndSet(false, true)) {
+      try {
+        queue.close();
+      } finally {
+        destroy0(handle);
+      }
+    }
   }
 
   @Override

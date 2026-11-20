@@ -36,11 +36,8 @@ using namespace gen::registry;
 
 static constexpr const char *EX = "polyregion/jvm/runtime/PolyregionRuntimeException";
 
-static JavaVM *CurrentVM;
-
 [[maybe_unused]] JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *) {
   if (const char *d = std::getenv(env::PolyregionDebug); d && *d) fprintf(stderr, "OnLoad runtime\n");
-  CurrentVM = vm;
   JNIEnv *env = getEnv(vm);
   if (!env) return JNI_ERR;
   rt::init();
@@ -55,10 +52,6 @@ static JavaVM *CurrentVM;
   gen::Platform::drop(env);
   gen::Property::drop(env);
   gen::Device::drop(env);
-  gen::Queue::drop(env);
-  gen::Runnable::drop(env);
-  gen::Policy::drop(env);
-  gen::Dim3::drop(env);
   gen::String::drop(env);
   Platforms::unregisterMethods(env);
   Platform::unregisterMethods(env);
@@ -68,7 +61,6 @@ static std::atomic<jlong> peerCounter = 0;
 static std::unordered_map<jlong, std::shared_ptr<rt::Platform>> platforms;
 static std::unordered_map<jlong, std::shared_ptr<rt::Device>> devices;
 static std::unordered_map<jlong, std::vector<std::unique_ptr<std::string>>> deviceModuleImages;
-static std::unordered_map<jlong, std::shared_ptr<rt::DeviceQueue>> deviceQueues;
 static std::mutex lock;
 
 template <typename T, typename U> static auto emplaceRef(std::unordered_map<jlong, std::shared_ptr<T>> &storage, std::shared_ptr<U> x) {
@@ -91,7 +83,6 @@ static jobjectArray toJni(JNIEnv *env, const std::vector<rt::Property> &xs) {
 
 void Platforms::deleteAllPeers0(JNIEnv *, jclass) {
   const std::scoped_lock l(lock);
-  deviceQueues.clear();
   devices.clear();
   deviceModuleImages.clear();
   platforms.clear();
@@ -100,10 +91,6 @@ void Platforms::deleteAllPeers0(JNIEnv *, jclass) {
 void Platform::deletePlatformPeer0(JNIEnv *, jclass, jlong nativePeer) {
   const std::scoped_lock l(lock);
   platforms.erase(nativePeer);
-}
-void Platform::deleteQueuePeer0(JNIEnv *, jclass, jlong nativePeer) {
-  const std::scoped_lock l(lock);
-  deviceQueues.erase(nativePeer);
 }
 void Platform::deleteDevicePeer0(JNIEnv *, jclass, jlong nativePeer) {
   const std::scoped_lock l(lock);
@@ -214,94 +201,4 @@ jlong Platform::malloc0(JNIEnv *env, jclass, jlong nativePeer, jlong size, jbyte
 
 void Platform::free0(JNIEnv *env, jclass, jlong nativePeer, jlong handle) {
   wrapException(env, EX, [&] { findRef(env, devices, nativePeer)->freeDevice(handle); });
-}
-
-jobject Platform::createQueue0(JNIEnv *env, jclass, jlong nativePeer, jobject owner, jlong timeoutMillis) {
-  return wrapException(env, EX, [&] {
-    auto queue = findRef(env, devices, nativePeer)
-                     ->createQueue(std::chrono::duration_cast<std::chrono::duration<int64_t>>(std::chrono::milliseconds(timeoutMillis)));
-    auto [peer, _] = emplaceRef(deviceQueues, std::shared_ptr(std::move(queue)));
-    return gen::Queue::of(env)(env, peer, owner).instance;
-  });
-}
-
-static rt::MaybeCallback fromJni(JNIEnv *env, jobject cb) {
-  return !cb ? std::nullopt : std::make_optional([cbRef = env->NewGlobalRef(cb)] {
-    JNIEnv *attachedEnv{};
-    if (CurrentVM->AttachCurrentThread(reinterpret_cast<void **>(&attachedEnv), nullptr) != JNI_OK) {
-      // Can't attach here so just send the error to stderr.
-      fprintf(stderr, "Unable to attach thread <%zx> to JVM from a callback passed to enqueueInvokeAsync\n",
-              std::hash<std::thread::id>()(std::this_thread::get_id()));
-    }
-    if (!cbRef) throwGeneric(attachedEnv, EX, "Unable to retrieve reference to the callback passed to enqueueInvokeAsync");
-    else {
-      if (const char *d = std::getenv(env::PolyregionDebug); d && *d) fprintf(stderr, "JNI thread attached\n");
-      gen::Runnable::of(attachedEnv).wrap(attachedEnv, cbRef).run(attachedEnv);
-      if (attachedEnv->ExceptionCheck()) attachedEnv->ExceptionClear();
-      attachedEnv->DeleteGlobalRef(cbRef);
-      gen::Runnable::drop(attachedEnv);
-    }
-
-    CurrentVM->DetachCurrentThread();
-  });
-}
-
-void Platform::enqueueHostToDeviceAsync0(JNIEnv *env, jclass, //
-                                         jlong nativePeer,    //
-                                         jobject src, jlong dst, jint size, jobject cb) {
-  auto *srcPtr = env->GetDirectBufferAddress(src);
-  if (!srcPtr) throwGeneric(env, EX, "The source ByteBuffer is not backed by an direct allocation.");
-
-  wrapException(env, EX, [&] { findRef(env, deviceQueues, nativePeer)->enqueueHostToDeviceAsync(srcPtr, dst, 0, size, fromJni(env, cb)); });
-}
-void Platform::enqueueDeviceToHostAsync0(JNIEnv *env, jclass, //
-                                         jlong nativePeer,    //
-                                         jlong src, jobject dst, jint size, jobject cb) {
-  auto *dstPtr = env->GetDirectBufferAddress(dst);
-  if (!dstPtr) throwGeneric(env, EX, "The destination ByteBuffer is not backed by an direct allocation.");
-  wrapException(env, EX, [&] { findRef(env, deviceQueues, nativePeer)->enqueueDeviceToHostAsync(src, 0, dstPtr, size, fromJni(env, cb)); });
-}
-
-static rt::Dim3 fromJni(JNIEnv *env, const generated::Dim3::Instance &d3) {
-  return {static_cast<size_t>(d3.x(env)), static_cast<size_t>(d3.y(env)), static_cast<size_t>(d3.z(env))};
-}
-
-void Platform::enqueueInvokeAsync0(JNIEnv *env, jclass, jlong nativePeer, //
-                                   jstring moduleName, jstring symbol,    //
-                                   jbyteArray argTypes,                   //
-                                   jbyteArray argData,                    //
-                                   jobject policy, jobject cb) {
-
-  auto argCount = env->GetArrayLength(argTypes);
-  if (argCount == 0) {
-    throwGeneric(env, EX, "empty argTypes, expecting at >= 1 for return type");
-    return;
-  }
-
-  wrapException(env, EX, [&] {
-    static_assert(sizeof(jbyte) == sizeof(std::byte));
-    static_assert(sizeof(jbyte) == sizeof(rt::Type));
-
-    auto argTs = fromJni<jbyte>(env, argTypes) ^ map([](const auto &t) { return static_cast<rt::Type>(t); });
-    const auto argPs = fromJni<jbyte>(env, argData) ^ map([](const auto &t) { return static_cast<std::byte>(t); });
-
-    const auto p = gen::Policy::of(env).wrap(env, policy);
-    const auto global = fromJni(env, p.global(env, gen::Dim3::of(env)));
-    auto localMemoryBytes = p.localMemoryBytes(env);
-    const auto local = p.local(env, gen::Dim3::of(env)).map<rt::Dim3>([&](const auto &x) { return fromJni(env, x); });
-    if (!local && localMemoryBytes) {
-      throwGeneric(env, EX, "Launch configured with no local dims but with local memory");
-    }
-
-    findRef(env, deviceQueues, nativePeer)
-        ->enqueueInvokeAsync(
-            fromJni(env, moduleName), fromJni(env, symbol), argTs, argPs,
-            rt::Policy{.global = global, .local = local ^ map([&](const auto &d) { return std::make_pair(d, localMemoryBytes); })},
-            fromJni(env, cb));
-
-    if (argTs[argCount - 1] == rt::Type::Ptr) {
-      const auto args = argTs ^ mk_string(",", [](const auto &tpe) { return std::string(magic_enum::enum_name(tpe)); });
-      throwGeneric(env, EX, "Returning pointers is unimplemented, args (return at the end): " + args);
-    }
-  });
 }
