@@ -20,6 +20,7 @@ endif ()
 add_library(polyc-JNIshim SHARED generated/mirror.cpp shim.cpp)
 add_library(polyc-JNI SHARED generated/mirror.cpp compiler.cpp)
 add_library(polyinvoke-JNI SHARED generated/mirror.cpp runtime.cpp)
+add_library(polyrt-JNI SHARED polyrt.cpp)
 
 
 target_include_directories(polyc-JNIshim PRIVATE
@@ -37,15 +38,27 @@ target_include_directories(polyinvoke-JNI PRIVATE
 
         ${JNI_INCLUDE_DIRS})
 
+target_include_directories(polyrt-JNI PRIVATE
+        ${JNI_INCLUDE_DIRS})
+
 target_link_libraries(polyc-JNIshim PRIVATE ${DL_LIB} PUBLIC polycommon)
 target_link_libraries(polyc-JNI PRIVATE polyc)
 target_link_libraries(polyinvoke-JNI PRIVATE polyinvoke-static Aspartame::Aspartame)
+target_link_libraries(polyrt-JNI PRIVATE polyinvoke-obj polyrt-obj polyreflect-rt Aspartame::Aspartame)
 
 
 
 polyregion_apply_common_options(polyc-JNIshim)
 polyregion_apply_common_options(polyc-JNI)
 polyregion_apply_common_options(polyinvoke-JNI)
+polyregion_apply_common_options(polyrt-JNI)
+if (APPLE)
+    target_link_options(polyrt-JNI PRIVATE LINKER:-undefined,dynamic_lookup LINKER:-exported_symbols_list,${CMAKE_CURRENT_SOURCE_DIR}/polyrt-JNI.exp)
+    set_target_properties(polyrt-JNI PROPERTIES INSTALL_RPATH "@loader_path/polycpp/lib")
+elseif (UNIX)
+    target_link_options(polyrt-JNI PRIVATE LINKER:--exclude-libs,ALL LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/polyrt-JNI.map)
+    set_target_properties(polyrt-JNI PROPERTIES INSTALL_RPATH "$ORIGIN/polycpp/lib")
+endif ()
 
 # Running `strip` on macOS drops even more stuff than just compiling with -dead_strip.
 if (APPLE)
@@ -59,6 +72,6 @@ if (APPLE)
             ARGS -SXx $<TARGET_FILE:polyc-JNI>)
 endif ()
 
-install(TARGETS polyc-JNI polyc-JNIshim polyinvoke-JNI
+install(TARGETS polyc-JNI polyc-JNIshim polyinvoke-JNI polyrt-JNI
         LIBRARY DESTINATION lib
         RUNTIME DESTINATION lib)

@@ -22,7 +22,11 @@ static void unregisterMethods(JNIEnv *env) {
 
 static void registerMethods(JNIEnv *env) {
   if (clazz) return;
-  clazz = reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("polyregion/jvm/compiler/Compiler")));
+  auto *found = env->FindClass("polyregion/jvm/compiler/Compiler");
+  if (!found) {
+    throw std::logic_error("Cannot find class polyregion/jvm/compiler/Compiler");
+  }
+  clazz = reinterpret_cast<jclass>(env->NewGlobalRef(found));
   const static JNINativeMethod methods[4] = {
       {.name = const_cast<char *>("compile0"),
        .signature = const_cast<char *>("([BZLpolyregion/jvm/compiler/Options;B)Lpolyregion/jvm/compiler/Compilation;"),

@@ -118,6 +118,7 @@ private[polyregion] object CodeGen {
       classOf[polyregion.jvm.compiler.Compiler],
       classOf[polyregion.jvm.runtime.Platforms],
       classOf[polyregion.jvm.runtime.Platform],
+      classOf[polyregion.jvm.runtime.Context],
       classOf[polyregion.jvm.Natives]
     ).map { c =>
       val (name, header) = CppJniBindGen.generateRegisterNative(c)

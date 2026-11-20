@@ -21,7 +21,11 @@ static void unregisterMethods(JNIEnv *env) {
 
 static void registerMethods(JNIEnv *env) {
   if (clazz) return;
-  clazz = reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("polyregion/jvm/Natives")));
+  auto *found = env->FindClass("polyregion/jvm/Natives");
+  if (!found) {
+    throw std::logic_error("Cannot find class polyregion/jvm/Natives");
+  }
+  clazz = reinterpret_cast<jclass>(env->NewGlobalRef(found));
   const static JNINativeMethod methods[3] = {{.name = const_cast<char *>("dynamicLibraryLoad0"),
                                               .signature = const_cast<char *>("(Ljava/lang/String;)J"),
                                               .fnPtr = reinterpret_cast<void *>(&dynamicLibraryLoad0)},

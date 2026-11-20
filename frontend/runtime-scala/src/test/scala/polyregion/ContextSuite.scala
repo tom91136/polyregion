@@ -1,0 +1,358 @@
+package polyregion
+
+import polyregion.ast.{CodeGen, MsgPack, PolyAST as p}
+import polyregion.jvm.compiler as ct
+import polyregion.jvm.runtime as rt
+import polyregion.scalalang.Platforms
+
+import java.nio.{ByteBuffer, ByteOrder}
+
+class ContextSuite extends munit.FunSuite {
+
+  private val PtrTpe      = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global)
+  private val HostKind    = 1
+  private val ObjectFmt   = 2
+  private val ManagedKind = 2
+
+  private def select(tpe: p.Type, n: String): (p.Named, p.Term.Select) = {
+    val named = p.Named(n, tpe)
+    named -> p.Term.Select(named, Nil, tpe)
+  }
+
+  private def fillProgram: p.Program = {
+    val (out, outRef) = select(PtrTpe, "out")
+    val (gid, gidRef) = select(p.Type.IntU32, "gid")
+    val (idx, idxRef) = select(p.Type.IntS32, "idx")
+    val body = List(
+      p.Stmt.Var(gid, Some(p.Expr.SpecOp(p.Spec.GpuGlobalIdx(p.Term.IntU32Const(0)))), false),
+      p.Stmt.Var(idx, Some(p.Expr.Cast(gidRef, p.Type.IntS32)), false),
+      p.Stmt.Update(outRef, idxRef, idxRef),
+      p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+    )
+    val decl = p.FunctionDecl(
+      p.Sym("fill"),
+      Nil,
+      None,
+      List(p.Arg(out)),
+      Nil,
+      Nil,
+      p.Type.Unit0,
+      p.Function.Affinity.Offload
+    )
+    p.Program(
+      Some(
+        p.Function(
+          decl,
+          body,
+          p.Function.Visibility.Exported,
+          p.Function.FpMode.Relaxed,
+          p.CallConvention.OffloadEntry
+        )
+      ),
+      Nil,
+      Nil
+    )
+  }
+
+  private def probeProgram: p.Program = {
+    val ctxTpe          = p.Spec.ContextType
+    val outTpe          = p.Type.Ptr(p.Type.IntU64, p.Type.Space.Global)
+    val (ctx, ctxRef)   = select(ctxTpe, "ctx")
+    val (out, outRef)   = select(outTpe, "out")
+    val (mem, memRef)   = select(ctxTpe, "mem")
+    val (adr, adrRef)   = select(p.Type.IntU64, "adr")
+    val (seed, seedRef) = select(p.Type.IntU64, "seed")
+    val body = List(
+      p.Stmt.Var(mem, Some(p.Expr.SpecOp(p.Spec.RemoteAlloc(ctxRef, p.Term.IntU64Const(64)))), false),
+      p.Stmt.Var(adr, Some(p.Expr.Cast(memRef, p.Type.IntU64)), false),
+      p.Stmt.Update(outRef, p.Term.IntS32Const(0), seedRef),
+      p.Stmt.Update(outRef, p.Term.IntS32Const(1), adrRef),
+      p.Stmt.Var(p.Named("freed", p.Type.Unit0), Some(p.Expr.SpecOp(p.Spec.RemoteFree(ctxRef, memRef))), false),
+      p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+    )
+    val decl = p.FunctionDecl(
+      p.Sym("probe"),
+      Nil,
+      None,
+      List(p.Arg(ctx), p.Arg(out), p.Arg(seed)),
+      Nil,
+      Nil,
+      p.Type.Unit0,
+      p.Function.Affinity.Host
+    )
+    p.Program(
+      Some(
+        p.Function(
+          decl,
+          body,
+          p.Function.Visibility.Exported,
+          p.Function.FpMode.Relaxed,
+          p.CallConvention.RegularCall
+        )
+      ),
+      Nil,
+      Nil
+    )
+  }
+
+  private def compile(program: p.Program, target: ct.Target, arch: String): ct.Compilation = {
+    val compiler = ct.Compiler.create()
+    try
+      compiler.compile(
+        MsgPack.encode(CodeGen.programVersioned(program)),
+        false,
+        ct.Options.of(target, arch),
+        ct.Opt.O3.value
+      )
+    finally compiler.close()
+  }
+
+  private def hostDevice: rt.DeviceInfo = rt.Context
+    .platforms()
+    .flatMap(_.devices)
+    .find(d => d.platformKind == HostKind && d.moduleFormat == ObjectFmt)
+    .getOrElse(fail("no host object device in the catalogue"))
+
+  private def nvidiaDevice: Option[rt.DeviceInfo] =
+    rt.Context.platforms().flatMap(_.devices).find(d => d.platformKind == ManagedKind && d.cudaArchitectureMajor > 0)
+
+  private def direct(bytes: Int): ByteBuffer = ByteBuffer.allocateDirect(bytes).order(ByteOrder.nativeOrder)
+
+  private def ptrArgs(ptr: Long): (Array[Byte], Array[Byte]) =
+    (Array(rt.Type.PTR.value), ByteBuffer.allocate(8).order(ByteOrder.nativeOrder).putLong(ptr).array)
+
+  private val ProbeName = "probe@host"
+
+  private def ensureProbe(): Unit = synchronized {
+    if (!rt.Context.hostProgramLoaded(ProbeName))
+      rt.Context.loadHostProgram(ProbeName, compile(probeProgram, ct.Target.LLVM_HOST, "native").program)
+  }
+
+  private def probe(ctx: rt.Context, seed: Long): (Long, Long) = {
+    val out   = direct(16)
+    val types = Array(rt.Type.PTR.value, rt.Type.LONG.value)
+    val data = ByteBuffer
+      .allocate(16)
+      .order(ByteOrder.nativeOrder)
+      .putLong(Platforms.pointerOfDirectBuffer(out))
+      .putLong(seed)
+      .array
+    ctx.callHost(Array.empty, ProbeName, "probe", types, data)
+    (out.getLong(0), out.getLong(8))
+  }
+
+  test("platforms and devices are enumerated") {
+    val platforms = rt.Context.platforms()
+    assert(platforms.nonEmpty)
+    platforms.zipWithIndex.foreach { (platform, i) =>
+      assertEquals(platform.index, i)
+      assert(platform.name.nonEmpty)
+      platform.devices.zipWithIndex.foreach { (device, j) =>
+        assertEquals(device.platform, i)
+        assertEquals(device.index, j)
+        assert(device.name.nonEmpty)
+      }
+    }
+    assertEquals(hostDevice.isGpu, false)
+  }
+
+  test("a created context can be destroyed once") {
+    val ctx = rt.Context.create(hostDevice)
+    assertNotEquals(ctx, rt.Context.current())
+    ctx.close()
+    ctx.close()
+  }
+
+  test("a destroyed context rejects every operation") {
+    val ctx = rt.Context.create(hostDevice)
+    ctx.close()
+    intercept[rt.PolyregionRuntimeException](ctx.malloc(16))
+    intercept[rt.PolyregionRuntimeException](ctx.free(1))
+    intercept[rt.PolyregionRuntimeException](ctx.select(Array.empty[rt.ModuleImage]))
+    intercept[rt.PolyregionRuntimeException](
+      ctx.launch(Array.empty, "m", "k", Array.empty, Array.empty, rt.Policy(rt.Dim3(1, 1, 1)))
+    )
+  }
+
+  test("a context for a missing device is rejected") {
+    intercept[rt.PolyregionRuntimeException](rt.Context.create(Int.MaxValue, 0))
+    intercept[rt.PolyregionRuntimeException](rt.Context.create(hostDevice.platform, Int.MaxValue))
+  }
+
+  test("the default context is not destroyed by close") {
+    val ctx = rt.Context.current()
+    ctx.close()
+    assertEquals(rt.Context.current(), ctx)
+    val bytes = ctx.malloc(16)
+    assertNotEquals(bytes, 0L)
+    ctx.free(bytes)
+  }
+
+  private def checkFill(ctx: rt.Context): Unit = {
+    val n             = 64
+    val target        = ct.Target.LLVM_HOST
+    val c             = compile(fillProgram, target, "native")
+    val image         = rt.ModuleImage("fill@host", target, c.features, c.program)
+    val buffer        = direct(n * 4)
+    val (types, data) = ptrArgs(Platforms.pointerOfDirectBuffer(buffer))
+    assertEquals(ctx.select(Array(image)), 0)
+    ctx.launch(Array(image), image.name, "fill", types, data, rt.Policy(rt.Dim3(n, 1, 1)))
+    (0 until n).foreach(i => assertEquals(buffer.getInt(i * 4), i))
+  }
+
+  test("a host kernel launches through a created context") {
+    val ctx = rt.Context.create(hostDevice)
+    try checkFill(ctx)
+    finally ctx.close()
+  }
+
+  test("a host kernel launches through the default context") {
+    checkFill(rt.Context.current())
+  }
+
+  test("a kernel image for another platform kind is not selected") {
+    val ctx = rt.Context.create(hostDevice)
+    try {
+      val c     = compile(fillProgram, ct.Target.LLVM_NVPTX64, "sm_80")
+      val image = rt.ModuleImage("fill@nv", ct.Target.LLVM_NVPTX64, c.features, c.program)
+      assertEquals(ctx.select(Array(image)), -1)
+      val e = intercept[rt.PolyregionRuntimeException] {
+        val (types, data) = ptrArgs(1)
+        ctx.launch(Array(image), image.name, "fill", types, data, rt.Policy(rt.Dim3(1, 1, 1)))
+      }
+      assert(e.getMessage.contains("fill@nv"), e.getMessage)
+    } finally ctx.close()
+  }
+
+  test("a host program is called with the context as its first argument") {
+    ensureProbe()
+    val ctx = rt.Context.create(hostDevice)
+    try {
+      val (seed, adr) = probe(ctx, 0x5eed1234L)
+      assertEquals(seed, 0x5eed1234L)
+      assertNotEquals(adr, 0L)
+    } finally ctx.close()
+  }
+
+  test("a host program on a destroyed context fails with the context message") {
+    ensureProbe()
+    val ctx = rt.Context.create(hostDevice)
+    ctx.close()
+    val e = intercept[rt.PolyregionRuntimeException](probe(ctx, 1))
+    assert(e.getMessage.startsWith("Context ") && e.getMessage.endsWith(" is closed"), e.getMessage)
+  }
+
+  test("an unknown host program is rejected") {
+    val ctx = rt.Context.create(hostDevice)
+    try {
+      val e = intercept[rt.PolyregionRuntimeException](
+        ctx.callHost(Array.empty, "missing@host", "probe", Array.empty, Array.empty)
+      )
+      assertEquals(e.getMessage, "Host program `missing@host` is not loaded")
+    } finally ctx.close()
+  }
+
+  test("an unknown host entry is rejected") {
+    ensureProbe()
+    val ctx = rt.Context.create(hostDevice)
+    try {
+      val e = intercept[rt.PolyregionRuntimeException](
+        ctx.callHost(Array.empty, ProbeName, "absent", Array.empty, Array.empty)
+      )
+      assertEquals(e.getMessage, s"Host program `$ProbeName` has no entry `absent`")
+    } finally ctx.close()
+  }
+
+  test("host programs run concurrently on separate contexts") {
+    ensureProbe()
+    val failures = java.util.concurrent.ConcurrentLinkedQueue[Throwable]()
+    val threads = (0 until 8).map { t =>
+      new Thread(
+        (
+            () =>
+              try {
+                val ctx = rt.Context.create(hostDevice)
+                try
+                  (0 until 50).foreach { i =>
+                    val seed          = t * 1000L + i
+                    val (echoed, adr) = probe(ctx, seed)
+                    assertEquals(echoed, seed)
+                    assertNotEquals(adr, 0L)
+                  }
+                finally ctx.close()
+              } catch { case e: Throwable => failures.add(e) }
+        ): Runnable
+      )
+    }
+    threads.foreach(_.start())
+    threads.foreach(_.join())
+    assertEquals(failures.size, 0, failures.toString)
+  }
+
+  test("polyinvoke and polyrt launch side by side in one process") {
+    val n      = 32
+    val target = ct.Target.LLVM_HOST
+    val c      = compile(fillProgram, target, "native")
+    val device = Platforms.Relocatable().devices()(0)
+    device.loadModule("fill@polyinvoke", c.program)
+    val queue   = device.createQueue(0)
+    val direct0 = direct(n * 4)
+    val done    = new java.util.concurrent.CountDownLatch(1)
+    queue.enqueueInvokeAsync(
+      "fill@polyinvoke",
+      "fill",
+      java.util.Arrays.asList[rt.Arg[?]](rt.Arg.of(0L), rt.Arg.ptr(Platforms.pointerOfDirectBuffer(direct0))),
+      rt.Arg.of(),
+      rt.Policy(rt.Dim3(n, 1, 1)),
+      () => done.countDown()
+    )
+    assert(done.await(30, java.util.concurrent.TimeUnit.SECONDS))
+    assertEquals((0 until n).map(i => direct0.getInt(i * 4)).toList, (0 until n).toList)
+    checkFill(rt.Context.current())
+    ensureProbe()
+    assertNotEquals(probe(rt.Context.current(), 7)._2, 0L)
+  }
+
+  test("copies are bounded by the buffer and start at its position") {
+    val ctx = rt.Context.create(hostDevice)
+    try {
+      val remote = ctx.malloc(16)
+      try {
+        val small = direct(4)
+        intercept[rt.PolyregionRuntimeException](ctx.copyFromDevice(remote, small, 64))
+        intercept[rt.PolyregionRuntimeException](ctx.copyToDevice(small, remote, 64))
+        val source = direct(16)
+        (0 until 16).foreach(i => source.put(i, i.toByte))
+        source.position(8)
+        intercept[rt.PolyregionRuntimeException](ctx.copyToDevice(source, remote, 9))
+        ctx.copyToDevice(source, remote, 8)
+        val back = direct(8)
+        ctx.copyFromDevice(remote, back, 8)
+        (0 until 8).foreach(i => assertEquals(back.get(i), (8 + i).toByte))
+      } finally ctx.free(remote)
+    } finally ctx.close()
+  }
+
+  test("a kernel launches on an NVIDIA device through a created context") {
+    nvidiaDevice match {
+      case None => assume(false, "no CUDA device in the catalogue")
+      case Some(device) =>
+        val n      = 256
+        val target = ct.Target.LLVM_NVPTX64
+        val c      = compile(fillProgram, target, s"sm_${device.cudaArchitectureMajor}${device.cudaArchitectureMinor}")
+        val image  = rt.ModuleImage("fill@nv", target, c.features, c.program)
+        val ctx    = rt.Context.create(device)
+        try {
+          val remote = ctx.malloc(n * 4)
+          try {
+            val (types, data) = ptrArgs(remote)
+            assertEquals(ctx.select(Array(image)), 0)
+            ctx.launch(Array(image), image.name, "fill", types, data, rt.Policy(rt.Dim3(n, 1, 1)))
+            val back = direct(n * 4)
+            ctx.copyFromDevice(remote, back, n * 4)
+            (0 until n).foreach(i => assertEquals(back.getInt(i * 4), i))
+          } finally ctx.free(remote)
+        } finally ctx.close()
+    }
+  }
+}

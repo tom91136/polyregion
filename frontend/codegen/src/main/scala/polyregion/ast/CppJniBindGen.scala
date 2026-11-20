@@ -40,19 +40,19 @@ object CppJniBindGen {
       .replace('$', '_')
 
   private def jniTypeName(t: Class[?]): String = t match {
-    case x if x.equals(java.lang.Double.TYPE)                        => "jdouble"
-    case x if x.equals(java.lang.Float.TYPE)                         => "jfloat"
-    case x if x.equals(java.lang.Long.TYPE)                          => "jlong"
-    case x if x.equals(java.lang.Integer.TYPE)                       => "jint"
-    case x if x.equals(java.lang.Short.TYPE)                         => "jshort"
-    case x if x.equals(java.lang.Character.TYPE)                     => "jcharacter"
-    case x if x.equals(java.lang.Boolean.TYPE)                       => "jboolean"
-    case x if x.equals(java.lang.Byte.TYPE)                          => "jbyte"
-    case x if x.equals(java.lang.Void.TYPE)                          => "void"
-    case x if x.isArray && x.getComponentType.getName == StringClass => s"jobjectArray" // jstringArray is not a thing
-    case x if x.isArray                                              => s"${jniTypeName(x.getComponentType)}Array"
-    case x if x.getName == StringClass                               => "jstring"
-    case _                                                           => "jobject"
+    case x if x.equals(java.lang.Double.TYPE)              => "jdouble"
+    case x if x.equals(java.lang.Float.TYPE)               => "jfloat"
+    case x if x.equals(java.lang.Long.TYPE)                => "jlong"
+    case x if x.equals(java.lang.Integer.TYPE)             => "jint"
+    case x if x.equals(java.lang.Short.TYPE)               => "jshort"
+    case x if x.equals(java.lang.Character.TYPE)           => "jcharacter"
+    case x if x.equals(java.lang.Boolean.TYPE)             => "jboolean"
+    case x if x.equals(java.lang.Byte.TYPE)                => "jbyte"
+    case x if x.equals(java.lang.Void.TYPE)                => "void"
+    case x if x.isArray && !x.getComponentType.isPrimitive => s"jobjectArray" // jstringArray is not a thing
+    case x if x.isArray                                    => s"${jniTypeName(x.getComponentType)}Array"
+    case x if x.getName == StringClass                     => "jstring"
+    case _                                                 => "jobject"
   }
 
   private def jniTypedFunctionName(t: Class[?]): String = t match {
@@ -354,7 +354,11 @@ object CppJniBindGen {
          |
          |static void registerMethods(JNIEnv *env) {
          |  if (clazz) return;
-         |  clazz = reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("$jniName")));
+         |  auto *found = env->FindClass("$jniName");
+         |  if(!found){
+         |    throw std::logic_error("Cannot find class $jniName");
+         |  }
+         |  clazz = reinterpret_cast<jclass>(env->NewGlobalRef(found));
          |  const static JNINativeMethod methods[${registerEntries.length}] = {
          |${registerEntries.map("      " + _).mkString(",\n")}};
          |  if(env->RegisterNatives(clazz, methods, ${registerEntries.length}) != 0){

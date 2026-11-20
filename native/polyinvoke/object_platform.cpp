@@ -812,11 +812,7 @@ void ObjectDeviceQueue::launchHost(const char *prefix, const Policy &policy, con
     default: POLYINVOKE_FATAL(prefix, "unknown host abi %lld", static_cast<long long>(abi));
   }
 }
-void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
-                                                std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) {
-  POLYINVOKE_TRACE();
-  validatePolicyAndArgs(RELOBJ_PREFIX, types, policy);
-
+uint64_t RelocatableDeviceQueue::resolveSymbol(const std::string &moduleName, const std::string &symbol, const bool required) {
   details::LoadedCodeObject *obj = nullptr;
   {
     const ReadLock r(mutex);
@@ -824,23 +820,39 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
     if (moduleIt == objects.end()) POLYINVOKE_FATAL(RELOBJ_PREFIX, "No module named %s was loaded", moduleName.c_str());
     obj = moduleIt->second.get();
   }
-  const auto resolve = [&](const std::string &name, const bool required) -> uint64_t {
-    ReadLock r(obj->symbolCacheMutex);
-    if (const auto it = obj->symbolCache.find(name); it != obj->symbolCache.end()) return it->second;
-    r.unlock();
-    const WriteLock w(obj->symbolCacheMutex);
-    if (const auto it = obj->symbolCache.find(name); it != obj->symbolCache.end()) return it->second;
-    const auto fnName = withGlobalPrefix(globalPrefix, name);
-    auto symOrErr = es.lookup({obj->jd}, fnName);
-    uint64_t address = 0;
-    if (symOrErr) address = symOrErr->getAddress().getValue();
-    else if (required)
-      POLYINVOKE_FATAL(RELOBJ_PREFIX, "Symbol `%s` not found in the given object: %s", fnName.c_str(),
-                       toString(symOrErr.takeError()).c_str());
-    else llvm::consumeError(symOrErr.takeError());
-    obj->symbolCache.emplace(name, address);
-    return address;
-  };
+  ReadLock r(obj->symbolCacheMutex);
+  if (const auto it = obj->symbolCache.find(symbol); it != obj->symbolCache.end()) return it->second;
+  r.unlock();
+  const WriteLock w(obj->symbolCacheMutex);
+  if (const auto it = obj->symbolCache.find(symbol); it != obj->symbolCache.end()) return it->second;
+  const auto fnName = withGlobalPrefix(globalPrefix, symbol);
+  auto symOrErr = es.lookup({obj->jd}, fnName);
+  uint64_t address = 0;
+  if (symOrErr) address = symOrErr->getAddress().getValue();
+  else if (required)
+    POLYINVOKE_FATAL(RELOBJ_PREFIX, "Symbol `%s` not found in the given object: %s", fnName.c_str(),
+                     toString(symOrErr.takeError()).c_str());
+  else llvm::consumeError(symOrErr.takeError());
+  obj->symbolCache.emplace(symbol, address);
+  return address;
+}
+
+bool RelocatableDeviceQueue::invokeEntryBlocking(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
+                                                 std::vector<std::byte> argData) {
+  POLYINVOKE_TRACE();
+  const auto address = resolveSymbol(moduleName, symbol, false);
+  if (address == 0) return false;
+  auto argPtrs = detail::argDataAsPointers(types, argData);
+  ffiInvoke(RELOBJ_PREFIX, address, types, argPtrs);
+  return true;
+}
+
+void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
+                                                std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) {
+  POLYINVOKE_TRACE();
+  validatePolicyAndArgs(RELOBJ_PREFIX, types, policy);
+
+  const auto resolve = [&](const std::string &name, const bool required) { return resolveSymbol(moduleName, name, required); };
   const auto symAddr = resolve(symbol, true);
   const auto staticBytesAddr = resolve(symbol + polyregion::program_meta::HostStaticLocalBytesSuffix, false);
   validateLocalStorage(RELOBJ_PREFIX, policy, staticBytesAddr);

@@ -138,9 +138,13 @@ class POLYREGION_EXPORT RelocatableDeviceQueue final : public ObjectDeviceQueue 
   llvm::orc::ExecutionSession &es;
   char globalPrefix;
 
+  uint64_t resolveSymbol(const std::string &moduleName, const std::string &symbol, bool required);
+
 public:
   RelocatableDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(objects) objects, decltype(mutex) mutex,
                          llvm::orc::ExecutionSession &es, char globalPrefix);
+  POLYREGION_EXPORT bool invokeEntryBlocking(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
+                                             std::vector<std::byte> argData) override;
   POLYREGION_EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
                                             std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) override;
 };

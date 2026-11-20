@@ -629,7 +629,8 @@ set(POLYREGION_DIST_TARGETS
         polyinfo
         polyc-JNI
         polyc-JNIshim
-        polyinvoke-JNI)
+        polyinvoke-JNI
+        polyrt-JNI)
 if (POLYREGION_HAS_FLANG)
     list(APPEND POLYREGION_DIST_TARGETS polyfc)
 endif ()

@@ -34,7 +34,11 @@ static void unregisterMethods(JNIEnv *env) {
 
 static void registerMethods(JNIEnv *env) {
   if (clazz) return;
-  clazz = reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("polyregion/jvm/runtime/Platform")));
+  auto *found = env->FindClass("polyregion/jvm/runtime/Platform");
+  if (!found) {
+    throw std::logic_error("Cannot find class polyregion/jvm/runtime/Platform");
+  }
+  clazz = reinterpret_cast<jclass>(env->NewGlobalRef(found));
   const static JNINativeMethod methods[15] = {
       {.name = const_cast<char *>("createQueue0"),
        .signature = const_cast<char *>("(JLpolyregion/jvm/runtime/Device;J)Lpolyregion/jvm/runtime/Device$Queue;"),

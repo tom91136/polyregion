@@ -1,0 +1,384 @@
+#include <chrono>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <memory>
+#include <mutex>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "magic_enum/magic_enum.hpp"
+
+#include "polyinvoke/runtime.h"
+#include "polyregion/env_keys.h"
+#include "polyregion/types.h"
+#include "polyrt/rt.h"
+
+#include "generated/context.h"
+#include "jni_utils.h"
+
+#ifndef _WIN32
+  #include <dlfcn.h>
+#endif
+
+using namespace polyregion;
+namespace rt = ::invoke;
+using namespace generated::registry;
+
+static constexpr const char *EX = "polyregion/jvm/runtime/PolyregionRuntimeException";
+
+[[maybe_unused]] JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *) {
+  if (const char *d = std::getenv(env::PolyregionDebug); d && *d) fprintf(stderr, "OnLoad polyrt\n");
+  JNIEnv *env = getEnv(vm);
+  if (!env) return JNI_ERR;
+#ifndef _WIN32
+  // host programs loaded by polyinvoke resolve the polyrt entry points from the global scope
+  if (Dl_info info{}; !dladdr(reinterpret_cast<void *>(&JNI_OnLoad), &info) || !info.dli_fname
+                      || !dlopen(info.dli_fname, RTLD_NOW | RTLD_GLOBAL | RTLD_NOLOAD)) {
+    fprintf(stderr, "polyrt-JNI: cannot promote the library to global scope: %s\n", dlerror());
+    return JNI_ERR;
+  }
+#endif
+  Context::registerMethods(env);
+  return JNI_VERSION_1_1;
+}
+
+[[maybe_unused]] JNIEXPORT void JNICALL JNI_OnUnload(JavaVM *vm, void *) {
+  if (const char *d = std::getenv(env::PolyregionDebug); d && *d) fprintf(stderr, "OnUnload polyrt\n");
+  if (JNIEnv *env = getEnv(vm); env) Context::unregisterMethods(env);
+}
+
+namespace {
+
+struct RaisedAssert {
+  bool raised = false;
+  uint32_t code = 0;
+  std::string message;
+};
+thread_local RaisedAssert raisedAssert;
+
+void rethrowAssert() {
+  if (const auto raised = std::exchange(raisedAssert, {}); raised.raised)
+    throw std::runtime_error("Device assertion failed (code " + std::to_string(raised.code) + "): " + raised.message);
+}
+
+void *toHandle(const jlong handle) { return reinterpret_cast<void *>(static_cast<intptr_t>(handle)); }
+jlong fromHandle(void *handle) { return static_cast<jlong>(reinterpret_cast<intptr_t>(handle)); }
+
+void check(const bool ok) {
+  if (!ok) throw std::runtime_error(polyrt_error_message());
+}
+
+struct HostRuntime {
+  std::unique_ptr<rt::Platform> platform;
+  std::unique_ptr<rt::Device> device;
+  std::unique_ptr<rt::DeviceQueue> queue;
+  std::mutex mutex;
+};
+
+HostRuntime &hostRuntime() {
+  static auto *host = [] {
+    auto runtime = std::make_unique<HostRuntime>();
+    auto platform = rt::Platform::of(rt::Backend::RelocatableObject);
+    if (std::holds_alternative<std::string>(platform))
+      throw std::runtime_error("The relocatable object backend failed to initialise: " + std::get<std::string>(platform));
+    runtime->platform = std::move(std::get<std::unique_ptr<rt::Platform>>(platform));
+    auto devices = runtime->platform->enumerate();
+    if (devices.empty()) throw std::runtime_error("The relocatable object backend has no device");
+    runtime->device = std::move(devices.front());
+    runtime->queue = runtime->device->createQueue(std::chrono::seconds(600));
+    return runtime.release();
+  }();
+  return *host;
+}
+
+struct Transaction {
+  void *context;
+  explicit Transaction(void *context) : context(context) { check(polyrt_context_acquire(context)); }
+  Transaction(const Transaction &) = delete;
+  Transaction &operator=(const Transaction &) = delete;
+  void end() {
+    if (const auto ended = std::exchange(context, nullptr); ended) check(polyrt_context_release(ended));
+  }
+  ~Transaction() {
+    if (context) polyrt_context_release(context);
+  }
+};
+
+struct ImageSet {
+  std::vector<std::string> names;
+  std::vector<int32_t> kinds, formats;
+  std::vector<std::vector<std::string>> features;
+  std::vector<std::vector<const char *>> featurePointers;
+  std::vector<std::vector<jbyte>> images;
+};
+
+ImageSet readImages(JNIEnv *env, jobjectArray names, jbyteArray targets, jobjectArray features, jobjectArray images) {
+  ImageSet set;
+  const auto count = env->GetArrayLength(names);
+  const auto targetValues = fromJni<jbyte>(env, targets);
+  if (static_cast<jsize>(targetValues.size()) != count || env->GetArrayLength(features) != count || env->GetArrayLength(images) != count)
+    throw std::runtime_error("The image names, targets, features and images differ in length");
+  for (jsize i = 0; i < count; ++i) {
+    auto *name = reinterpret_cast<jstring>(env->GetObjectArrayElement(names, i));
+    set.names.emplace_back(fromJni(env, name));
+    env->DeleteLocalRef(name);
+
+    const auto target =
+        magic_enum::enum_cast<compiletime::Target>(static_cast<std::underlying_type_t<compiletime::Target>>(targetValues[i]));
+    const auto format = target ? runtime::moduleFormatOf(*target) : std::nullopt;
+    if (!target || !format) throw std::runtime_error("Unknown target value: " + std::to_string(targetValues[i]));
+    set.kinds.emplace_back(static_cast<int32_t>(runtime::targetPlatformKind(*target)));
+    set.formats.emplace_back(static_cast<int32_t>(*format));
+
+    auto *featureArray = reinterpret_cast<jobjectArray>(env->GetObjectArrayElement(features, i));
+    auto &strings = set.features.emplace_back();
+    for (jsize j = 0, n = env->GetArrayLength(featureArray); j < n; ++j) {
+      auto *feature = reinterpret_cast<jstring>(env->GetObjectArrayElement(featureArray, j));
+      strings.emplace_back(fromJni(env, feature));
+      env->DeleteLocalRef(feature);
+    }
+    env->DeleteLocalRef(featureArray);
+
+    auto *image = reinterpret_cast<jbyteArray>(env->GetObjectArrayElement(images, i));
+    set.images.emplace_back(fromJni<jbyte>(env, image));
+    env->DeleteLocalRef(image);
+  }
+  for (const auto &strings : set.features) {
+    auto &pointers = set.featurePointers.emplace_back();
+    for (const auto &s : strings)
+      pointers.emplace_back(s.c_str());
+  }
+  return set;
+}
+
+void loadImages(void *context, ImageSet &set) {
+  for (size_t i = 0; i < set.names.size(); ++i) {
+    const auto &name = set.names[i];
+    bool settled = false;
+    for (size_t j = 0; j < set.names.size() && !settled; ++j)
+      if (set.names[j] == name)
+        settled =
+            polyrt_remote_load(context, name.c_str(), set.kinds[j], set.formats[j], set.features[j].size(), set.featurePointers[j].data(),
+                               set.images[j].size(), reinterpret_cast<const uint8_t *>(set.images[j].data()));
+    if (!settled) throw std::runtime_error("No image of module `" + name + "` is compatible with the context's device");
+  }
+}
+
+std::vector<rt::Type> readTypes(const std::vector<jbyte> &raw) {
+  std::vector<rt::Type> types;
+  for (const auto t : raw)
+    types.emplace_back(static_cast<rt::Type>(t));
+  return types;
+}
+
+} // namespace
+
+extern "C" void __polyregion_builtin_assert(const uint32_t code, const char *message) { // NOLINT(*-reserved-identifier)
+  raisedAssert = {.raised = true, .code = code, .message = message ? message : ""};
+}
+
+jint Context::platformCount0(JNIEnv *env, jclass) {
+  return wrapException(env, EX, [&] {
+    int32_t count = 0;
+    check(polyrt_platform_count(&count));
+    return static_cast<jint>(count);
+  });
+}
+
+jlongArray Context::platformInfo0(JNIEnv *env, jclass, jint platform) {
+  return wrapException(env, EX, [&] {
+    PolyrtPlatformInfo info{};
+    check(polyrt_platform_info(platform, &info));
+    const jlong values[] = {info.backend, info.kind, info.deviceCount};
+    auto *array = env->NewLongArray(3);
+    env->SetLongArrayRegion(array, 0, 3, values);
+    return array;
+  });
+}
+
+jstring Context::platformName0(JNIEnv *env, jclass, jint platform) {
+  return wrapException(env, EX, [&] {
+    PolyrtPlatformInfo info{};
+    check(polyrt_platform_info(platform, &info));
+    return toJni(env, std::string(info.name, strnlen(info.name, sizeof(info.name))));
+  });
+}
+
+jlongArray Context::deviceInfo0(JNIEnv *env, jclass, jint platform, jint device) {
+  return wrapException(env, EX, [&] {
+    PolyrtDeviceInfo info{};
+    check(polyrt_device_info(platform, device, &info));
+    const jlong values[] = {info.backend,
+                            info.platformKind,
+                            info.moduleFormat,
+                            info.deviceKind,
+                            info.cudaArchitectureMajor,
+                            info.cudaArchitectureMinor,
+                            static_cast<jlong>(info.globalMemoryBytes),
+                            static_cast<jlong>(info.computeUnits)};
+    auto *array = env->NewLongArray(8);
+    env->SetLongArrayRegion(array, 0, 8, values);
+    return array;
+  });
+}
+
+jstring Context::deviceName0(JNIEnv *env, jclass, jint platform, jint device) {
+  return wrapException(env, EX, [&] {
+    PolyrtDeviceInfo info{};
+    check(polyrt_device_info(platform, device, &info));
+    return toJni(env, std::string(info.name, strnlen(info.name, sizeof(info.name))));
+  });
+}
+
+jlong Context::create0(JNIEnv *env, jclass, jint platform, jint device) {
+  return wrapException(env, EX, [&] {
+    void *context = nullptr;
+    check(polyrt_context_create(platform, device, &context));
+    return fromHandle(context);
+  });
+}
+
+void Context::destroy0(JNIEnv *env, jclass, jlong context) {
+  wrapException(env, EX, [&] { check(polyrt_context_destroy(toHandle(context))); });
+}
+
+jlong Context::current0(JNIEnv *env, jclass) {
+  return wrapException(env, EX, [&] { return fromHandle(polyrt_context_current()); });
+}
+
+jlong Context::malloc0(JNIEnv *env, jclass, jlong context, jlong bytes) {
+  return wrapException(env, EX, [&] {
+    uintptr_t pointer = 0;
+    check(polyrt_remote_malloc(toHandle(context), static_cast<size_t>(bytes), &pointer));
+    return static_cast<jlong>(pointer);
+  });
+}
+
+void Context::free0(JNIEnv *env, jclass, jlong context, jlong pointer) {
+  wrapException(env, EX, [&] { check(polyrt_remote_free(toHandle(context), static_cast<uintptr_t>(pointer))); });
+}
+
+void Context::copyToDevice0(JNIEnv *env, jclass, jlong context, jobject src, jlong dst, jlong bytes) {
+  wrapException(env, EX, [&] {
+    const auto *local = env->GetDirectBufferAddress(src);
+    if (!local) throw std::runtime_error("The source is not a direct buffer");
+    if (bytes < 0 || bytes > env->GetDirectBufferCapacity(src))
+      throw std::runtime_error("Cannot copy " + std::to_string(bytes) + " bytes from a buffer of "
+                               + std::to_string(env->GetDirectBufferCapacity(src)));
+    check(polyrt_remote_memcpy(toHandle(context), static_cast<uintptr_t>(dst), reinterpret_cast<uintptr_t>(local),
+                               static_cast<size_t>(bytes), 0));
+  });
+}
+
+void Context::copyFromDevice0(JNIEnv *env, jclass, jlong context, jlong src, jobject dst, jlong bytes) {
+  wrapException(env, EX, [&] {
+    auto *local = env->GetDirectBufferAddress(dst);
+    if (!local) throw std::runtime_error("The destination is not a direct buffer");
+    if (bytes < 0 || bytes > env->GetDirectBufferCapacity(dst))
+      throw std::runtime_error("Cannot copy " + std::to_string(bytes) + " bytes into a buffer of "
+                               + std::to_string(env->GetDirectBufferCapacity(dst)));
+    check(polyrt_remote_memcpy(toHandle(context), reinterpret_cast<uintptr_t>(local), static_cast<uintptr_t>(src),
+                               static_cast<size_t>(bytes), 1));
+  });
+}
+
+jint Context::select0(JNIEnv *env, jclass, jlong context, //
+                      jobjectArray imageNames, jbyteArray imageTargets, jobjectArray imageFeatures, jobjectArray images) {
+  return wrapException(env, EX, [&] {
+    auto set = readImages(env, imageNames, imageTargets, imageFeatures, images);
+    auto *handle = toHandle(context);
+    Transaction transaction(handle);
+    jint selected = -1;
+    for (size_t i = 0; i < set.names.size() && selected < 0; ++i)
+      if (polyrt_remote_load(handle, set.names[i].c_str(), set.kinds[i], set.formats[i], set.features[i].size(),
+                             set.featurePointers[i].data(), set.images[i].size(), reinterpret_cast<const uint8_t *>(set.images[i].data())))
+        selected = static_cast<jint>(i);
+    transaction.end();
+    return selected;
+  });
+}
+
+void Context::launch0(JNIEnv *env, jclass, jlong context,                                                                //
+                      jobjectArray imageNames, jbyteArray imageTargets, jobjectArray imageFeatures, jobjectArray images, //
+                      jstring moduleName, jstring kernel, jbyteArray argTypes, jbyteArray argData, jlongArray dims) {
+  wrapException(env, EX, [&] {
+    auto set = readImages(env, imageNames, imageTargets, imageFeatures, images);
+    const auto module = fromJni(env, moduleName);
+    const auto entry = fromJni(env, kernel);
+    const auto types = readTypes(fromJni<jbyte>(env, argTypes));
+    auto data = fromJni<jbyte>(env, argData);
+    const auto launch = fromJni(env, dims);
+    if (launch.size() != 7) throw std::runtime_error("Expected 7 launch dimensions, got " + std::to_string(launch.size()));
+    auto bytes = std::vector<std::byte>(reinterpret_cast<const std::byte *>(data.data()),
+                                        reinterpret_cast<const std::byte *>(data.data()) + data.size());
+    const auto pointers = rt::detail::argDataAsPointers(types, bytes);
+    std::vector<uint8_t> rawTypes;
+    for (const auto t : types)
+      rawTypes.emplace_back(static_cast<uint8_t>(t));
+
+    auto *handle = toHandle(context);
+    Transaction transaction(handle);
+    loadImages(handle, set);
+    raisedAssert = {};
+    check(polyrt_remote_launch(handle, module.c_str(), entry.c_str(), launch[0], launch[1], launch[2], launch[3], launch[4], launch[5],
+                               launch[6], rawTypes.size(), rawTypes.data(), pointers.data()));
+    transaction.end();
+    rethrowAssert();
+  });
+}
+
+void Context::loadHostProgram0(JNIEnv *env, jclass, jstring name, jbyteArray image) {
+  wrapException(env, EX, [&] {
+    auto &host = hostRuntime();
+    const auto moduleName = fromJni(env, name);
+    const auto data = fromJni<jbyte>(env, image);
+    const std::scoped_lock lock(host.mutex);
+    if (host.device->moduleLoaded(moduleName)) throw std::runtime_error("Host program `" + moduleName + "` is already loaded");
+    host.device->loadModule(moduleName, std::string(reinterpret_cast<const char *>(data.data()), data.size()));
+  });
+}
+
+jboolean Context::hostProgramLoaded0(JNIEnv *env, jclass, jstring name) {
+  return wrapException(env, EX, [&] {
+    auto &host = hostRuntime();
+    const std::scoped_lock lock(host.mutex);
+    return static_cast<jboolean>(host.device->moduleLoaded(fromJni(env, name)));
+  });
+}
+
+void Context::callHost0(JNIEnv *env, jclass, jlong context,                                                                //
+                        jobjectArray imageNames, jbyteArray imageTargets, jobjectArray imageFeatures, jobjectArray images, //
+                        jstring programName, jstring entry, jbyteArray argTypes, jbyteArray argData) {
+  wrapException(env, EX, [&] {
+    auto set = readImages(env, imageNames, imageTargets, imageFeatures, images);
+    const auto program = fromJni(env, programName);
+    const auto symbol = fromJni(env, entry);
+    auto types = readTypes(fromJni<jbyte>(env, argTypes));
+    const auto data = fromJni<jbyte>(env, argData);
+
+    auto *handle = toHandle(context);
+    types.insert(types.begin(), rt::Type::Ptr);
+    types.emplace_back(rt::Type::Void);
+    std::vector<std::byte> bytes(sizeof(void *));
+    std::memcpy(bytes.data(), &handle, sizeof(void *));
+    bytes.insert(bytes.end(), reinterpret_cast<const std::byte *>(data.data()),
+                 reinterpret_cast<const std::byte *>(data.data()) + data.size());
+
+    auto &host = hostRuntime();
+    {
+      const std::scoped_lock lock(host.mutex);
+      if (!host.device->moduleLoaded(program)) throw std::runtime_error("Host program `" + program + "` is not loaded");
+    }
+    Transaction transaction(handle);
+    loadImages(handle, set);
+    raisedAssert = {};
+    if (!host.queue->invokeEntryBlocking(program, symbol, types, std::move(bytes)))
+      throw std::runtime_error("Host program `" + program + "` has no entry `" + symbol + "`");
+    transaction.end();
+    rethrowAssert();
+  });
+}

@@ -131,6 +131,8 @@ lazy val `runtime-scala` = project
     commonSettings,
     name := "runtime-scala",
     javacOptions ++= Seq("-proc:none"),
+    Test / fork              := true,
+    Test / parallelExecution := false,
     libraryDependencies ++= Seq(
       "org.scalameta" %% "munit" % munitVersion % Test
     ),

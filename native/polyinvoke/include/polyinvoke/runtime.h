@@ -489,6 +489,12 @@ struct POLYREGION_EXPORT DeviceQueue {
     enqueueInvokeAsync(moduleName, symbol, buffer.types, buffer.data, policy, cb);
   }
 
+  // false when the module has no such symbol
+  virtual POLYREGION_EXPORT bool invokeEntryBlocking(const std::string &, const std::string &, const std::vector<Type> &,
+                                                     std::vector<std::byte>) {
+    return false;
+  }
+
   virtual POLYREGION_EXPORT void enqueueWaitBlocking() = 0;
 
   [[nodiscard]] virtual POLYREGION_EXPORT bool quiescent() { return false; }
