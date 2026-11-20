@@ -286,6 +286,50 @@ class PackageServiceSuite extends munit.FunSuite {
     ProgramLinker.link(p.Program.LinkRequest(List(pkg), p.Program(None, List(root), Nil)))
   }
 
+  private def importCall(callers: List[p.Function]) = {
+    val publicName = p.Sym("library.call")
+    val rootName   = p.Sym("consumer.call")
+    val root = function(
+      decl(rootName, p.Function.Affinity.Host),
+      implements = Some(publicName),
+      visibility = p.Function.Visibility.Exported
+    )
+    val implementation = function(
+      decl(p.Sym("implementation.call"), p.Function.Affinity.Host),
+      implements = Some(publicName),
+      visibility = p.Function.Visibility.Exported
+    )
+    val pkg = p.Package(
+      p.Interface(p.Sym("library"), List(decl(publicName, p.Function.Affinity.Host))),
+      p.Program(None, List(implementation), Nil)
+    )
+    val signatures = Map(rootName -> ProgramLinker.CallSignature(publicName, Nil, None, Nil, p.Type.Unit0))
+    ProgramLinker.importProgram(
+      p.Program.LinkRequest(List(pkg), p.Program(None, root :: callers, Nil)),
+      signatures
+    )
+  }
+
+  test("imports reject offload functions calling host interface roots") {
+    val kernel = function(
+      decl(p.Sym("kernel.device"), p.Function.Affinity.Offload),
+      List(invokeStmt(p.Sym("consumer.call")), unitReturn.head)
+    ).copy(convention = p.CallConvention.OffloadEntry)
+    assertEquals(
+      importCall(List(kernel)),
+      Left(List("offload function `kernel.device` calls host function `consumer.call`"))
+    )
+  }
+
+  test("imports allow host functions to call interface roots") {
+    val caller = function(
+      decl(p.Sym("host.caller"), p.Function.Affinity.Host),
+      List(invokeStmt(p.Sym("consumer.call")), unitReturn.head)
+    )
+    val imported = importCall(List(caller))
+    assert(imported.isRight, imported)
+  }
+
   test("offload functions reject calls into host functions") {
     val hostName   = p.Sym("host.helper")
     val kernelName = p.Sym("kernel.device")

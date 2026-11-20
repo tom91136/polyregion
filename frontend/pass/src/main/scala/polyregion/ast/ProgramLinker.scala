@@ -1400,6 +1400,11 @@ private[polyregion] object ProgramLinker {
     Either.cond(distinct.isEmpty, linked, distinct)
   }
 
+  private def consumerRoots(request: p.Program.LinkRequest): List[p.Function] =
+    request.consumer.functions.filter(function =>
+      function.visibility == p.Function.Visibility.Exported && function.implements.nonEmpty
+    ) ++ request.consumer.entry.toList.filter(_.implements.nonEmpty)
+
   private def resolveRoots[A](
       request: p.Program.LinkRequest,
       resolveRoot: (p.Function, RootScope) => Either[List[String], A]
@@ -1413,9 +1418,7 @@ private[polyregion] object ProgramLinker {
       }
       .flatten
       .distinct
-    val roots = request.consumer.functions.filter(function =>
-      function.visibility == p.Function.Visibility.Exported && function.implements.nonEmpty
-    ) ++ request.consumer.entry.toList.filter(_.implements.nonEmpty)
+    val roots     = consumerRoots(request)
     val rootNames = roots.map(_.name).toSet
     val callerFns = request.consumer.functions.filterNot(function => rootNames(function.name))
     val packagesByDeclaration =
@@ -1479,10 +1482,25 @@ private[polyregion] object ProgramLinker {
     }
   }
 
+  private def validateImportedHostCalls(
+      imported: p.Program,
+      callers: List[p.Function]
+  ): Either[List[String], p.Program] = {
+    val callerNames = callers.map(_.name).toSet
+    val checked = p.Program(
+      None,
+      callers ::: imported.functions.filterNot(function => callerNames(function.name)),
+      Nil
+    )
+    validateOffloadHostCalls(propagateHostAffinity(checked)).map(_ => imported)
+  }
+
   def importProgram(
       request: p.Program.LinkRequest,
       signatures: Map[p.Sym, CallSignature]
-  ): Either[List[String], p.Program] =
+  ): Either[List[String], p.Program] = {
+    val rootNames = consumerRoots(request).map(_.name).toSet
+    val callers   = request.consumer.functions.filterNot(function => rootNames(function.name))
     resolveRequest(
       request,
       (root, scope) =>
@@ -1490,5 +1508,6 @@ private[polyregion] object ProgramLinker {
           .get(root.name)
           .toRight(List(s"consumer root `${root.name.repr}` has no logical call signature"))
           .flatMap(signature => importRoot(root, signature, scope))
-    ).flatMap(mergeLinkedPrograms)
+    ).flatMap(mergeLinkedPrograms).flatMap(validateImportedHostCalls(_, callers))
+  }
 }
