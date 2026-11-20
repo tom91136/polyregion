@@ -4,6 +4,7 @@ import polyregion.ast.PolyAST as p
 
 final case class FortranConfig(moduleName: String)
 final case class ScalaConfig(packageName: String, objectName: String)
+final case class JavaConfig(packageName: String, className: String)
 
 private[ast] object InterfaceCodeGenSupport {
 
@@ -55,6 +56,9 @@ private[ast] object InterfaceCodeGenSupport {
 
   val FallbackMarker = "polyregion_interface_fallback"
 
+  def interfaceIdentity(interfaceDef: p.Interface, decl: p.FunctionDecl): String =
+    List(interfaceDef.name.fqn.mkString("."), decl.name.fqn.mkString(".")).mkString(":")
+
   def marker(interfaceDef: p.Interface, decl: p.FunctionDecl): String =
-    List("polyregion_interface", interfaceDef.name.fqn.mkString("."), decl.name.fqn.mkString(".")).mkString(":")
+    s"polyregion_interface:${interfaceIdentity(interfaceDef, decl)}"
 }

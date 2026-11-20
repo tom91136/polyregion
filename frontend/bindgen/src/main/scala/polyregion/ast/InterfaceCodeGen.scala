@@ -16,6 +16,15 @@ object InterfaceCodeGen {
   def scalaObject(interfaceDef: p.Interface, config: ScalaConfig): String =
     ScalaInterfaceCodeGen(interfaceDef, config)
 
+  def javaClass(interfaceDef: p.Interface, config: JavaConfig): String =
+    JavaInterfaceCodeGen(interfaceDef, config)
+
+  def javaSurface(interfaceDef: p.Interface, config: JavaConfig, className: String): String =
+    JavaInterfaceCodeGen.surface(interfaceDef, config, className)
+
+  def javaOverloadCount(decl: p.FunctionDecl): Int =
+    JavaInterfaceCodeGen.overloadCount(decl)
+
   def checkCurrent(path: Path, expected: String): Either[String, Unit] =
     if (!Files.exists(path)) Left(s"generated output is missing: $path")
     else {
