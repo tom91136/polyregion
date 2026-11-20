@@ -48,13 +48,18 @@ public final class Marshal implements AutoCloseable {
 
   private final Queue queue;
   private Boolean shared;
+  private boolean closed;
   private final Twins twins;
   private final HostView foreign;
   private final List<Staged> staged = new ArrayList<>();
   private final TreeMap<Long, Staged> byPointer = new TreeMap<>();
   private final IdentityHashMap<Object, Long> pointers = new IdentityHashMap<>();
+  private final IdentityHashMap<Object, Long> dataPointers = new IdentityHashMap<>();
   private final Map<Long, Object> objects = new HashMap<>();
   private final IdentityHashMap<Object, ReadBack> readBacks = new IdentityHashMap<>();
+  private final IdentityHashMap<Object, String> writing = new IdentityHashMap<>();
+  private final IdentityHashMap<Object, Boolean> inlined = new IdentityHashMap<>();
+  private final IdentityHashMap<Object, Map<String, Object>> children = new IdentityHashMap<>();
 
   public Marshal(Queue queue) {
     this(queue, null, null);
@@ -77,6 +82,10 @@ public final class Marshal implements AutoCloseable {
   private boolean shared() {
     if (shared == null) shared = queue.context().sharedAddressSpace();
     return shared;
+  }
+
+  private void requireOpen() {
+    if (closed) throw new IllegalStateException("This marshal is closed");
   }
 
   private static final class Settled implements Completion {
@@ -111,16 +120,19 @@ public final class Marshal implements AutoCloseable {
   /**
    * Uploads a finished buffer and returns the device pointer of its first byte. A device that
    * shares the host address space reads the buffer in place, so nothing is registered with the
-   * queue.
+   * queue. Must not be called from a queue completion, which cannot wait for itself.
    */
   public long stage(ByteBuffer host) {
-    long pointer;
-    if (shared()) pointer = Context.addressOf(host);
-    else {
-      Settled settled = new Settled();
-      pointer = queue.invalidate(host, settled);
-      settled.await();
-    }
+    requireOpen();
+    Queue.requireNotCompletionThread();
+    if (shared()) return register(host, Context.addressOf(host));
+    Settled settled = new Settled();
+    long pointer = register(host, queue.invalidate(host, settled));
+    settled.await();
+    return pointer;
+  }
+
+  private long register(ByteBuffer host, long pointer) {
     Staged s = new Staged(host, pointer);
     staged.add(s);
     byPointer.put(pointer, s);
@@ -134,6 +146,8 @@ public final class Marshal implements AutoCloseable {
 
   /** Copies every staged buffer back to the host. */
   public void sync() {
+    requireOpen();
+    Queue.requireNotCompletionThread();
     if (shared()) return;
     for (Staged s : staged) {
       Settled settled = new Settled();
@@ -147,6 +161,7 @@ public final class Marshal implements AutoCloseable {
    * contains it, or the {@link HostView} for memory outside any.
    */
   public ByteBuffer host(long pointer, long size) {
+    requireOpen();
     Map.Entry<Long, Staged> e = byPointer.floorEntry(pointer);
     if (e != null) {
       Staged s = e.getValue();
@@ -173,6 +188,19 @@ public final class Marshal implements AutoCloseable {
     pointers.put(root, pointer);
   }
 
+  /**
+   * The device pointer of the elements {@code owner} holds, or {@code absent}. It is kept apart
+   * from {@link #pointerOf} because a container can be staged as a struct and as its data.
+   */
+  public long dataPointerOf(Object owner, long absent) {
+    Long p = dataPointers.get(owner);
+    return p == null ? absent : p;
+  }
+
+  public void bindData(Object owner, long pointer) {
+    dataPointers.put(owner, pointer);
+  }
+
   public Object objectAt(long pointer) {
     return objects.get(pointer);
   }
@@ -186,13 +214,75 @@ public final class Marshal implements AutoCloseable {
     return twins;
   }
 
+  private void enter(Object o, String where) {
+    String earlier = writing.put(o, where);
+    if (earlier != null)
+      throw new TwinException(
+          "Cyclic object graph: "
+              + o.getClass().getName()
+              + " is reached again through "
+              + where
+              + " while it is being written through "
+              + earlier);
+  }
+
+  private void leave(Object o) {
+    writing.remove(o);
+  }
+
+  /** Records which child object a field held when it was written, so read-back updates that one. */
+  public void child(Object parent, String field, Object child) {
+    Map<String, Object> m = children.get(parent);
+    if (m == null) children.put(parent, m = new HashMap<>());
+    m.put(field, child);
+  }
+
+  /** The child object {@code field} held when {@code parent} was written. */
+  public Object child(Object parent, String field) {
+    Map<String, Object> m = children.get(parent);
+    Object c = m == null ? null : m.get(field);
+    if (c == null)
+      throw new TwinException(
+          "No child was written for " + parent.getClass().getName() + "." + field);
+    return c;
+  }
+
+  /**
+   * Writes an object that travels by value inside its parent. Such an object has no device
+   * identity of its own, so it may be written once per marshal, through one path.
+   */
+  public void inline(Object child, Twin twin, ByteBuffer dst, int at, String where) {
+    if (pointers.containsKey(child) || inlined.put(child, Boolean.TRUE) != null)
+      throw new TwinException(
+          "Object "
+              + child.getClass().getName()
+              + " is reached more than once ("
+              + where
+              + "); a nested object travels by value and has one copy");
+    enter(child, where);
+    try {
+      twin.write(this, child, dst, at);
+    } finally {
+      leave(child);
+    }
+  }
+
   /** Stages the image of a captured object as a buffer of its own. */
   public long instance(Object root) {
+    requireOpen();
     Long known = pointers.get(root);
     if (known != null) return known;
+    if (inlined.containsKey(root))
+      throw new TwinException(
+          "Object " + root.getClass().getName() + " is staged on its own and also nested by value");
     final Twin twin = twins().of(root.getClass());
     final ByteBuffer buffer = allocate(twin.layout().size);
-    twin.write(this, root, buffer, 0);
+    enter(root, "the capture of " + root.getClass().getName());
+    try {
+      twin.write(this, root, buffer, 0);
+    } finally {
+      leave(root);
+    }
     long pointer = stage(buffer);
     pointers.put(root, pointer);
     final Object target = root;
@@ -211,15 +301,29 @@ public final class Marshal implements AutoCloseable {
    * at the layout's stride, arrays of arrays as a table of row pointers.
    */
   public long array(Object array) {
+    return array(array, "a captured array", "");
+  }
+
+  /**
+   * As {@link #array(Object)} for the array held by a field. {@code element} is the layout name
+   * the field declares for its elements, empty when it declares none.
+   */
+  public long array(Object array, String where, String element) {
+    requireOpen();
     Long known = pointers.get(array);
     if (known != null) return known;
     Class<?> component = array.getClass().getComponentType();
-    long pointer;
-    if (component.isPrimitive()) pointer = primitiveArray(array, Prim.of(component));
-    else if (component.isArray()) pointer = rowTable((Object[]) array);
-    else pointer = structArray((Object[]) array);
-    pointers.put(array, pointer);
-    return pointer;
+    enter(array, where);
+    try {
+      long pointer;
+      if (component.isPrimitive()) pointer = primitiveArray(array, Prim.of(component));
+      else if (component.isArray()) pointer = rowTable((Object[]) array, where);
+      else pointer = structArray((Object[]) array, where, element);
+      pointers.put(array, pointer);
+      return pointer;
+    } finally {
+      leave(array);
+    }
   }
 
   private long primitiveArray(final Object array, final Prim prim) {
@@ -236,38 +340,46 @@ public final class Marshal implements AutoCloseable {
     return pointer;
   }
 
-  private long rowTable(Object[] rows) {
+  private long rowTable(Object[] rows, String where) {
     long[] ptrs = new long[rows.length];
     for (int i = 0; i < rows.length; i++) {
-      if (rows[i] == null)
-        throw new TwinException("Row " + i + " of a captured array is null");
-      ptrs[i] = array(rows[i]);
+      if (rows[i] == null) throw new TwinException("Row " + i + " of a captured array is null");
+      ptrs[i] = array(rows[i], where + "[" + i + "]", "");
     }
     ByteBuffer buffer = allocate(ptrs.length * Long.BYTES);
     Prim.native0(buffer).asLongBuffer().put(ptrs);
     return stage(buffer);
   }
 
-  private long structArray(final Object[] rows) {
+  private long structArray(Object[] source, String where, String element) {
+    final Object[] rows = source.clone();
     Twin twin = null;
     for (Object row : rows) {
-      if (row == null)
-        throw new TwinException("Element of a captured object array is null");
+      if (row == null) throw new TwinException("Element of a captured object array is null");
       Twin t = twins().of(row.getClass());
       if (twin != null && t != twin)
         throw new TwinException("A captured object array must hold one concrete type");
       twin = t;
     }
-    final Twin element = twin;
+    if (twin != null && !element.isEmpty() && !twin.layout().name.equals(element))
+      throw new TwinException(
+          where
+              + " declares elements of layout "
+              + element
+              + " but holds "
+              + twin.layout().name);
+    final Twin elementTwin = twin;
     final int stride = twin == null ? 0 : twin.layout().size;
     final ByteBuffer buffer = allocate(stride * rows.length);
-    for (int i = 0; i < rows.length; i++) element.write(this, rows[i], buffer, i * stride);
+    for (int i = 0; i < rows.length; i++)
+      inline(rows[i], elementTwin, buffer, i * stride, where + "[" + i + "]");
     long pointer = stage(buffer);
     readBacks.put(
-        rows,
+        source,
         new ReadBack() {
           public void run() {
-            for (int i = 0; i < rows.length; i++) element.read(Marshal.this, rows[i], buffer, i * stride);
+            for (int i = 0; i < rows.length; i++)
+              elementTwin.read(Marshal.this, rows[i], buffer, i * stride);
           }
         });
     return pointer;
@@ -275,6 +387,7 @@ public final class Marshal implements AutoCloseable {
 
   /** Copies the synced device state of one staged object or array back into it. */
   public void readBack(Object target) {
+    requireOpen();
     ReadBack r = readBacks.get(target);
     if (r == null) throw new TwinException("Nothing was staged for " + target.getClass().getName());
     r.run();
@@ -289,9 +402,10 @@ public final class Marshal implements AutoCloseable {
     for (ReadBack r : new ArrayList<>(readBacks.values())) r.run();
   }
 
-  /** Releases every staged buffer, also after a failed launch. */
+  /** Releases every staged buffer, also after a failed launch. The marshal cannot be used afterwards. */
   @Override
   public void close() {
+    closed = true;
     RuntimeException failure = null;
     if (!staged.isEmpty() && !shared())
       for (Staged s : staged)
@@ -303,6 +417,13 @@ public final class Marshal implements AutoCloseable {
         }
     staged.clear();
     byPointer.clear();
+    pointers.clear();
+    dataPointers.clear();
+    objects.clear();
+    readBacks.clear();
+    writing.clear();
+    inlined.clear();
+    children.clear();
     if (failure != null) throw failure;
   }
 }

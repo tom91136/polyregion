@@ -4,7 +4,7 @@ import cats.syntax.all.*
 import polyregion.ast.{PolyAST as p, *}
 import polyregion.jvm.runtime as rt
 import polyregion.jvm.twin.{FieldAccess, Layout, Marshal}
-import polyregion.prism.StdLib
+import polyregion.prism.{Prism, StdLib}
 
 import java.nio.{ByteBuffer, ByteOrder}
 import scala.quoted.*
@@ -93,7 +93,7 @@ object Pickler {
       q: Quoted
   )( //
       sdef: p.StructDef,
-      layouts: Map[p.StructDef, (Layout, Option[polyregion.prism.Prism])]
+      layouts: Map[p.StructDef, (Layout, Option[Prism])]
   ): StructMapping[q.Term] = {
     val (layout, maybePrism) =
       layouts.getOrElse(sdef, q.report.errorAndAbort(s"Unseen sdef ${sdef.repr}, known reprs: ${layouts}"))
@@ -118,7 +118,7 @@ object Pickler {
   def deriveAllRepr(using
       q: Quoted
   )( //
-      lut: Map[p.Sym, (p.StructDef, Option[polyregion.prism.Prism])],
+      lut: Map[p.Sym, (p.StructDef, Option[Prism])],
       sdef: p.StructDef,
       repr: q.TypeRepr
   ): Map[p.StructDef, q.TypeRepr] = {
@@ -128,8 +128,8 @@ object Pickler {
         if (added0.contains(name)) Nil
         else
           lut.get(name) match {
-            case None            => Nil
-            case Some((sdef, _)) => go(sdef, q.TermRef(repr, member), added0)
+            case None              => Nil
+            case Some((target, _)) => go(target, q.TermRef(repr, member), added0)
           }
       // For array-element struct types (`Type.Ptr(Struct, ...)`) we have no parent TermRef path
       // to descend through. The parent struct here is always a single-type-param container
@@ -181,7 +181,7 @@ object Pickler {
       q: Quoted
   )(
       lut: Map[p.Sym, p.StructDef],
-      layouts: Map[p.StructDef, (Layout, Option[polyregion.prism.Prism])],
+      layouts: Map[p.StructDef, (Layout, Option[Prism])],
       reprs: Map[p.StructDef, q.TypeRepr],
       residentPointer: Expr[Any => Long]
   ) = {
@@ -266,10 +266,7 @@ object Pickler {
         reachable(recv, m.name) match {
           case Some(accessible) => q.Assign(accessible, value.asTerm).asExprOf[Unit]
           case None =>
-            '{
-              val access = ${ fieldAccess(recv, m) }
-              if (access.writable) access.set(${ recv.asExprOf[AnyRef] }, $value)
-            }
+            '{ ${ fieldAccess(recv, m) }.set(${ recv.asExprOf[AnyRef] }, $value) }
         }
       }
 
@@ -307,10 +304,7 @@ object Pickler {
               val elementOffset = '{ ${ Expr(elementSizeInBytes) } * i }
               comp match {
                 case p.Type.Struct(name, _) if lut.contains(name) =>
-                  // Inline struct slot — the kernel reads/writes struct bytes directly at
-                  // arrBuffer[i*structSize..(i+1)*structSize] (no pointer indirection). For null inputs
-                  // (result-holder pre-fill, see BaseSuite.offload1) the slot stays zeroed since the kernel
-                  // will overwrite it.
+                  // null elements (result holder pre-fill) stay zeroed
                   '{
                     val elem = $expr(i)
                     if (elem != null) ${ callFill(name, 'elem, m, 'arrBuffer, elementOffset) }
@@ -322,7 +316,23 @@ object Pickler {
             }
             i += 1
           }
-          $m.stage(arrBuffer)
+          val arrPtr = $m.stage(arrBuffer)
+          ${
+            comp match {
+              case p.Type.Struct(name, _) if lut.contains(name) =>
+                // a later reference to an element resolves to its slot, but one captured earlier keeps its own copy
+                '{
+                  var j = 0
+                  while (j < $expr.length_) {
+                    val elem = $expr(j)
+                    if (elem != null) $m.bind(elem, arrPtr + j.toLong * ${ Expr(elementSizeInBytes) })
+                    j += 1
+                  }
+                }
+              case _ => '{ () }
+            }
+          }
+          arrPtr
         }
     }
 
@@ -342,34 +352,27 @@ object Pickler {
               val resident = $residentPointer($root)
               if (resident != 0L) resident
               else {
-                val known = $m.pointerOf($root, -1L)
+                val known = $m.dataPointerOf($root, -1L)
                 if (known != -1L) known
                 else {
                   val staged = ${ writeArray[t](seq, comp, m) }
-                  $m.bind($root, staged)
+                  $m.bindData($root, staged)
                   staged
                 }
               }
             }
             writePrim(buffer, memberOffset, p.Type.IntS64, ptr)
           case (_, p.Type.Struct(name, _)) if lut.get(name).exists(_.members.isEmpty) =>
-            // Empty-member struct field (e.g. trait-based mirrors like `Monoid` whose
-            // dispatch is resolved without reading the field). The backend lays these out
-            // inline as 0-byte slots, so there's nothing to write — and trying to put an
-            // 8-byte pointer at the slot's offset would overflow the parent buffer when the
-            // parent is composed of nothing but such slots.
+            // zero-width slot, nothing to write
             '{ () }
           case (_, p.Type.Struct(name, _)) if lut.contains(name) =>
-            // Nested struct field — laid out INLINE in the parent buffer at memberOffset
-            // (matches the kernel's `functionBoundary=false` member layout).
+            // laid out inline in the parent, as the kernel reads it
             callFill(name, readField(rootAfterPrism.asTerm, member).asExpr, m, buffer, memberOffset)
           case (_, p.Type.Struct(_, _)) =>
-            // Opaque struct member (e.g. scala.Option) — kernel doesn't access this field;
-            // skip (the inline layout has no slot for it anyway).
+            // opaque to the kernel, no slot
             '{ () }
           case (_, p.Type.Ptr(_, _)) =>
-            // Opaque Ptr field on a captured singleton (e.g. `scala.Array$.emptyByteArray`);
-            // not a MutableSeq prism target and unused after intrinsification.
+            // not a MutableSeq prism target and unused after intrinsification
             '{ () }
           case (_, _) =>
             writePrim(buffer, memberOffset, member.tpe, readField(rootAfterPrism.asTerm, member).asExpr)
@@ -659,42 +662,49 @@ object Pickler {
               val root: t  = $rootExpr
               val writePtr = $m.pointerOf(root, -1L)
               val readPtr  = $ptrExpr
-              (writePtr, readPtr) match {
-                case (_, 0L) => null.asInstanceOf[t] // object reassignment for var to null
-                case (-1L, _) => // object not previously written, fail
-                  throw RuntimeException(
-                    s"Val root object ${root} was not previously written, cannot read from to 0x${readPtr.toHexString}"
-                  )
-                case (writePtr, readPtr) if writePtr == readPtr => // same ptr, do the update
-                  ${
-                    // If we have a prism, then a full read is required as we need a concrete instance.
-                    (mapping.write, mapping.read) match {
-                      case (Some((_, write)), Some((mirror, read))) => readThroughPrism('readPtr, write, read)
-                      case (_, None) => '{ ${ updateMapping('root, 'readPtr, m, mapping) }; root }
-                      case _         => ???
-                    }
+              if (readPtr == 0L) null.asInstanceOf[t] // object reassignment for var to null
+              else if (root == null) ${
+                // a nested inline struct or a var that was null has no earlier object to update
+                (mapping.write, mapping.read) match {
+                  case (Some((_, write)), Some((_, read))) => readThroughPrism('readPtr, write, read)
+                  case (_, None)                           => readMapping[t]('readPtr, m, mapping)
+                  case _                                   => ???
+                }
+              }
+              else if (writePtr == -1L) // object not previously written, fail
+                throw RuntimeException(
+                  s"Val root object $root was not previously written, cannot read from to 0x${readPtr.toHexString}"
+                )
+              else if (writePtr == readPtr) // same ptr, do the update
+                ${
+                  // If we have a prism, then a full read is required as we need a concrete instance.
+                  (mapping.write, mapping.read) match {
+                    case (Some((_, write)), Some((_, read))) => readThroughPrism('readPtr, write, read)
+                    case (_, None) => '{ ${ updateMapping('root, 'readPtr, m, mapping) }; root }
+                    case _         => ???
                   }
-                case (writePtr, readPtr) => // object reassignment for var
-                  // Make sure we update the old writePtr (possibly orphaned, unless reassigned somewhere else) first.
-                  // This is to make sure modified object without a root (e.g through reassignment) is corrected updated.
-                  ${ callUpdate(mapping.source.name, 'root, 'writePtr, m) }
-                  // Now, readPtr is either a new allocation or a an existing one, possibly shared.
-                  // We check that it hasn't already been read/updated yet (the object may be recursive) and proceed to
-                  // create the object.
-                  $m.objectAt(readPtr) match {
-                    case null => // not seen yet
-                      ${
-                        (mapping.write, mapping.read) match {
-                          case (Some((_, write)), Some((mirror, read))) =>
-                            debug(s"sss = ${rootExpr.asTerm.tpe.widenTermRefByName.show}")
-                            debug(s"sss = ${write(rootExpr.asTerm).tpe.widenTermRefByName.show}")
-                            readThroughPrism('readPtr, write, read)
-                          case (_, None) => readMapping[t]('readPtr, m, mapping)
-                          case _         => ???
-                        }
+                }
+              else { // object reassignment for var
+                // Make sure we update the old writePtr (possibly orphaned, unless reassigned somewhere else) first.
+                // This is to make sure modified object without a root (e.g through reassignment) is corrected updated.
+                ${ callUpdate(mapping.source.name, 'root, 'writePtr, m) }
+                // Now, readPtr is either a new allocation or a an existing one, possibly shared.
+                // We check that it hasn't already been read/updated yet (the object may be recursive) and proceed to
+                // create the object.
+                $m.objectAt(readPtr) match {
+                  case null => // not seen yet
+                    ${
+                      (mapping.write, mapping.read) match {
+                        case (Some((_, write)), Some((_, read))) =>
+                          debug(s"sss = ${rootExpr.asTerm.tpe.widenTermRefByName.show}")
+                          debug(s"sss = ${write(rootExpr.asTerm).tpe.widenTermRefByName.show}")
+                          readThroughPrism('readPtr, write, read)
+                        case (_, None) => readMapping[t]('readPtr, m, mapping)
+                        case _         => ???
                       }
-                    case existing => existing.asInstanceOf[t] // Existing allocation found, use it.
-                  }
+                    }
+                  case existing => existing.asInstanceOf[t] // Existing allocation found, use it.
+                }
               }
             }
         }
@@ -708,21 +718,19 @@ object Pickler {
               val root     = $rootExpr
               val writePtr = $m.pointerOf(root, -1L)
               val readPtr  = $ptrExpr
-              (writePtr, readPtr) match {
-                case (0L, 0L) => () // was null, still null, no-op
-                case (-1L, _) => // object not previously written, fail
-                  throw RuntimeException(
-                    s"Val root object ${root} was not previously written, cannot update from to 0x${readPtr.toHexString}"
-                  )
-                case (writePtr, readPtr) if writePtr == readPtr => // same ptr, do the update
-                  ${ updateMapping('root, 'readPtr, m, mapping) }
+              if (writePtr == 0L && readPtr == 0L) () // was null, still null, no-op
+              else if (writePtr == -1L)               // object not previously written, fail
+                throw RuntimeException(
+                  s"Val root object $root was not previously written, cannot update from to 0x${readPtr.toHexString}"
+                )
+              else if (writePtr == readPtr) { // same ptr, do the update
+                ${ updateMapping('root, 'readPtr, m, mapping) }
 
-                  $m.bindObject(readPtr, root)
-                case (writePtr, readPtr) => // object reassignment for val, fail
-                  throw RuntimeException(
-                    s"Cannot update immutable val, setting ${root} (0x${writePtr.toHexString}) to 0x${readPtr.toHexString}"
-                  )
-              }
+                $m.bindObject(readPtr, root)
+              } else // object reassignment for val, fail
+                throw RuntimeException(
+                  s"Cannot update immutable val, setting $root (0x${writePtr.toHexString}) to 0x${readPtr.toHexString}"
+                )
               ()
             }
         }

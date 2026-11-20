@@ -52,14 +52,29 @@ public final class Layout {
     /** The layout name of the nested object or array element, empty for primitives. */
     public final String element;
 
+    /** Whether the kernel never changes the field, so a host {@code final} field is allowed. */
+    public final boolean readOnly;
+
     public Field(
         String name, String descriptor, Kind kind, int offset, int size, String element) {
+      this(name, descriptor, kind, offset, size, element, false);
+    }
+
+    public Field(
+        String name,
+        String descriptor,
+        Kind kind,
+        int offset,
+        int size,
+        String element,
+        boolean readOnly) {
       this.name = Objects.requireNonNull(name);
       this.descriptor = Objects.requireNonNull(descriptor);
       this.kind = Objects.requireNonNull(kind);
       this.offset = offset;
       this.size = size;
       this.element = Objects.requireNonNull(element);
+      this.readOnly = readOnly;
     }
 
     @Override
@@ -112,7 +127,7 @@ public final class Layout {
     return "Layout{" + name + ", size=" + size + ", fields=" + java.util.Arrays.toString(fields) + "}";
   }
 
-  private static final String VERSION = "TL1";
+  private static final String VERSION = "TL2";
 
   private static String escape(String s) {
     StringBuilder b = new StringBuilder(s.length());
@@ -131,14 +146,23 @@ public final class Layout {
     for (int i = 0; i < s.length(); i++) {
       char c = s.charAt(i);
       if (c == '%') {
-        b.append((char) Integer.parseInt(s.substring(i + 1, i + 5), 16));
+        if (i + 5 > s.length()) throw new TwinException("Truncated escape in `" + s + "`");
+        b.append((char) parseInt(s.substring(i + 1, i + 5), 16));
         i += 4;
       } else b.append(c);
     }
     return b.toString();
   }
 
-  /** {@code name:className:size:alignment:tagOffset:tag:member,member,...} with {@code member = name@offset:size:kind:descriptor:element}. */
+  private static int parseInt(String text, int radix) {
+    try {
+      return Integer.parseInt(text, radix);
+    } catch (NumberFormatException e) {
+      throw new TwinException("Malformed number `" + text + "` in a layout", e);
+    }
+  }
+
+  /** {@code name:className:size:alignment:tagOffset:tag:member,member,...} with {@code member = name@offset:size:kind:descriptor:element:flags}, flags being {@code r} for a read-only field. */
   public String encode() {
     StringBuilder b = new StringBuilder();
     b.append(escape(name)).append(':').append(escape(className)).append(':');
@@ -149,6 +173,7 @@ public final class Layout {
       if (i > 0) b.append(',');
       b.append(escape(f.name)).append('@').append(f.offset).append(':').append(f.size).append(':');
       b.append(f.kind.code).append(':').append(escape(f.descriptor)).append(':').append(escape(f.element));
+      b.append(':').append(f.readOnly ? "r" : "");
     }
     return b.toString();
   }
@@ -167,24 +192,27 @@ public final class Layout {
     if (!head[6].isEmpty())
       for (String member : head[6].split(",")) {
         int at = member.indexOf('@');
-        String[] rest = member.substring(at + 1).split(":", 5);
-        if (at < 0 || rest.length != 5) throw new TwinException("Malformed layout member `" + member + "`");
+        if (at < 0) throw new TwinException("Malformed layout member `" + member + "`");
+        String[] rest = member.substring(at + 1).split(":", 6);
+        if (rest.length != 6 || rest[2].length() != 1)
+          throw new TwinException("Malformed layout member `" + member + "`");
         fields.add(
             new Field(
                 unescape(member.substring(0, at)),
                 unescape(rest[3]),
                 Kind.of(rest[2].charAt(0)),
-                Integer.parseInt(rest[0]),
-                Integer.parseInt(rest[1]),
-                unescape(rest[4])));
+                parseInt(rest[0], 10),
+                parseInt(rest[1], 10),
+                unescape(rest[4]),
+                rest[5].equals("r")));
       }
     return new Layout(
         unescape(head[0]),
         unescape(head[1]),
-        Integer.parseInt(head[2]),
-        Integer.parseInt(head[3]),
-        Integer.parseInt(head[4]),
-        Integer.parseInt(head[5]),
+        parseInt(head[2], 10),
+        parseInt(head[3], 10),
+        parseInt(head[4], 10),
+        parseInt(head[5], 10),
         fields.toArray(new Field[0]));
   }
 
@@ -196,7 +224,8 @@ public final class Layout {
     for (int i = 1; i < parts.length; i++) {
       if (parts[i].isEmpty()) continue;
       Layout l = decode(parts[i]);
-      out.put(l.name, l);
+      if (out.put(l.name, l) != null)
+        throw new TwinException("Duplicate layout name `" + l.name + "`");
     }
     return out;
   }

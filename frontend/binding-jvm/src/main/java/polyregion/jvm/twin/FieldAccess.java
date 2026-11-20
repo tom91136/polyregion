@@ -13,8 +13,10 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>The handle comes from {@code MethodHandles.privateLookupIn}, so fields of JDK classes need the
  * owning package opened to the caller ({@code --add-opens java.base/java.util=ALL-UNNAMED}). The
- * lookup goes through reflection so this class loads on a JDK without {@code VarHandle}, where
- * {@link #of} fails with a {@link TwinException} instead.
+ * source uses only the Java 8 API and reaches {@code VarHandle} reflectively. A build for JDK 8
+ * (javalang) therefore loads on a JDK 8 runtime, where {@link #of} fails with a {@link
+ * TwinException}; a build for a newer JDK (this repository's default) loads where it was built
+ * for.
  */
 public final class FieldAccess {
 
@@ -28,8 +30,8 @@ public final class FieldAccess {
     this.setter = setter;
   }
 
-  public boolean writable() {
-    return setter != null;
+  public boolean isFinal() {
+    return setter == null;
   }
 
   public Object get(Object target) {

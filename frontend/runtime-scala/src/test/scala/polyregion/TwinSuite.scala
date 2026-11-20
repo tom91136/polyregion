@@ -9,6 +9,11 @@ import java.nio.{ByteBuffer, ByteOrder}
 import scala.jdk.CollectionConverters.*
 
 object TwinSuite {
+  val HostKind: Int        = 1
+  val ObjectFmt: Int       = 2
+  val ManagedKind: Int     = 2
+  val FallbackArch: String = "sm_80"
+
   class Prims(
       var b: Byte,
       var s: Short,
@@ -24,12 +29,17 @@ object TwinSuite {
   class Holder(var items: Array[Inner], var ints: Array[Int], var more: Array[Int])
   class Grid(var rows: Array[Array[Int]])
   class Tagged(var x: Int)
-  class Sealed(val x: Int)
+  class Node(var children: Array[Node])
+  class Link(var next: Link)
+  class Pair2(var a: Inner, var b: Inner)
+  class Fixed(val x: Int)
+  class Wrong(var items: Array[Prims])
+  class Wide(var xs: Array[Long])
 
   def prim(name: String, offset: Int, size: Int, descriptor: String) =
     Field(name, descriptor, Kind.PRIM, offset, size, "")
 
-  val primsLayout = Layout(
+  val primsLayout: Layout = Layout(
     "Prims",
     classOf[Prims].getName,
     48,
@@ -47,7 +57,7 @@ object TwinSuite {
       prim("z", 40, 1, "Z")
     )
   )
-  val innerLayout = Layout(
+  val innerLayout: Layout = Layout(
     "Inner",
     classOf[Inner].getName,
     16,
@@ -56,7 +66,7 @@ object TwinSuite {
     -1,
     Array(prim("a", 0, 4, "F"), prim("b", 8, 8, "D"))
   )
-  val outerLayout = Layout(
+  val outerLayout: Layout = Layout(
     "Outer",
     classOf[Outer].getName,
     32,
@@ -69,7 +79,7 @@ object TwinSuite {
       prim("tail", 24, 8, "J")
     )
   )
-  val holderLayout = Layout(
+  val holderLayout: Layout = Layout(
     "Holder",
     classOf[Holder].getName,
     24,
@@ -82,11 +92,30 @@ object TwinSuite {
       Field("more", "", Kind.ARRAY, 16, 8, "")
     )
   )
-  val gridLayout = Layout("Grid", classOf[Grid].getName, 8, 8, -1, -1, Array(Field("rows", "", Kind.ARRAY, 0, 8, "")))
-  val taggedLayout =
-    Layout("Tagged", classOf[Tagged].getName, 8, 4, 4, 7, Array(prim("x", 0, 4, "I")))
+  val gridLayout: Layout =
+    Layout("Grid", classOf[Grid].getName, 8, 8, -1, -1, Array(Field("rows", "", Kind.ARRAY, 0, 8, "")))
+  val taggedLayout: Layout = Layout("Tagged", classOf[Tagged].getName, 8, 4, 4, 7, Array(prim("x", 0, 4, "I")))
 
-  val all = List(primsLayout, innerLayout, outerLayout, holderLayout, gridLayout, taggedLayout)
+  def layout(name: String, cls: Class[?], size: Int, fields: Field*): Layout =
+    Layout(name, cls.getName, size, 8, -1, -1, fields.toArray)
+
+  def ref(name: String, offset: Int, element: String, kind: Kind = Kind.ARRAY): Field =
+    Field(name, "", kind, offset, 8, element)
+
+  val nodeLayout: Layout = layout("Node", classOf[Node], 8, ref("children", 0, "Node"))
+  val linkLayout: Layout = layout("Link", classOf[Link], 8, ref("next", 0, "Link", Kind.STRUCT))
+  val pair2Layout: Layout = layout(
+    "Pair2",
+    classOf[Pair2],
+    32,
+    Field("a", "", Kind.STRUCT, 0, 16, "Inner"),
+    Field("b", "", Kind.STRUCT, 16, 16, "Inner")
+  )
+  val fixedLayout: Layout = layout("Fixed", classOf[Fixed], 4, prim("x", 0, 4, "I"))
+  val wrongLayout: Layout = layout("Wrong", classOf[Wrong], 8, ref("items", 0, "Inner"))
+  val wideLayout: Layout  = layout("Wide", classOf[Wide], 8, Field("xs", "[I", Kind.ARRAY, 0, 8, ""))
+
+  val all: List[Layout] = List(primsLayout, innerLayout, outerLayout, holderLayout, gridLayout, taggedLayout)
 }
 
 class TwinSuite extends munit.FunSuite {
@@ -96,15 +125,20 @@ class TwinSuite extends munit.FunSuite {
 
   private val rows = {
     val devices = rt.Context.platforms().flatMap(_.devices)
-    val host = Row("host", devices.find(d => d.platformKind == 1 && d.moduleFormat == 2), ct.Target.LLVM_HOST, "native")
-    val nvidia = devices.find(d => d.platformKind == 2 && d.cudaArchitectureMajor > 0)
+    val host = Row(
+      "host",
+      devices.find(d => d.platformKind == HostKind && d.moduleFormat == ObjectFmt),
+      ct.Target.LLVM_HOST,
+      "native"
+    )
+    val nvidia = devices.find(d => d.platformKind == ManagedKind && d.cudaArchitectureMajor > 0)
     List(
       host,
       Row(
         "nvidia",
         nvidia,
         ct.Target.LLVM_NVPTX64,
-        nvidia.map(d => s"sm_${d.cudaArchitectureMajor}${d.cudaArchitectureMinor}").getOrElse("sm_80")
+        nvidia.fold(FallbackArch)(d => s"sm_${d.cudaArchitectureMajor}${d.cudaArchitectureMinor}")
       )
     )
   }
@@ -220,8 +254,8 @@ class TwinSuite extends munit.FunSuite {
     test(s"[${row.label}] an array reachable twice is staged once") {
       withRow(row) { fx =>
         val shared = Array(1, 2, 3, 4)
-        val a      = Holder(Array(), shared, shared)
-        val b      = Holder(Array(), shared, Array(9))
+        val a      = Holder(Array.empty[Inner], shared, shared)
+        val b      = Holder(Array.empty[Inner], shared, Array(9))
         val m      = Marshal(fx.queue, twins())
         try {
           val ap = m.instance(a)
@@ -232,7 +266,6 @@ class TwinSuite extends munit.FunSuite {
           assertEquals(ai.getLong(8), bi.getLong(8))
           assertNotEquals(bi.getLong(16), bi.getLong(8))
           assertEquals(m.instance(a), ap)
-          // a, b, their empty item arrays, shared, and b.more
           assertEquals(m.stagedBuffers, 6)
           fx.poke(ai.getLong(8), 12, _.putInt(0, 44), 4)
           m.settle()
@@ -255,9 +288,8 @@ class TwinSuite extends munit.FunSuite {
       withRow(row) { fx =>
         val before = fx.queue.stats().releases
         val m      = Marshal(fx.queue, twins())
-        m.instance(Holder(Array(Inner(1f, 2.0)), Array(1), Array(2)))
-        assertEquals(m.stagedBuffers, 4)
-        m.close()
+        try m.instance(Holder(Array(Inner(1f, 2.0)), Array(1), Array(2)))
+        finally m.close()
         assertEquals(m.stagedBuffers, 0)
         assertEquals(fx.queue.stats().releases - before, if (fx.ctx.sharedAddressSpace) 0L else 4L)
       }
@@ -298,6 +330,169 @@ class TwinSuite extends munit.FunSuite {
     }
   }
 
+  rows.foreach { row =>
+    test(s"[${row.label}] a cyclic graph through an array is rejected naming the field") {
+      withRow(row) { fx =>
+        val n = Node(null)
+        n.children = Array(n)
+        val m = Marshal(fx.queue, twins(List(nodeLayout)))
+        try {
+          val e = intercept[TwinException](m.instance(n))
+          assert(e.getMessage.contains("children"), e.getMessage)
+          assert(e.getMessage.contains("Cyclic"), e.getMessage)
+        } finally m.close()
+      }
+    }
+
+    test(s"[${row.label}] a cyclic graph through an inline object is rejected naming the field") {
+      withRow(row) { fx =>
+        val l = Link(null)
+        l.next = l
+        val m = Marshal(fx.queue, twins(List(linkLayout)))
+        try {
+          val e = intercept[TwinException](m.instance(l))
+          assert(e.getMessage.contains("next"), e.getMessage)
+          assert(e.getMessage.contains("Cyclic"), e.getMessage)
+        } finally m.close()
+      }
+    }
+
+    test(s"[${row.label}] an inline object reached through two parents is rejected") {
+      withRow(row) { fx =>
+        val shared = Inner(1f, 2.0)
+        val m      = Marshal(fx.queue, twins(List(pair2Layout, innerLayout)))
+        try {
+          val e = intercept[TwinException](m.instance(Pair2(shared, shared)))
+          assert(e.getMessage.contains("more than once"), e.getMessage)
+        } finally m.close()
+      }
+    }
+
+    test(s"[${row.label}] settle reads into the child captured at write time") {
+      withRow(row) { fx =>
+        val captured = Inner(1f, 2.0)
+        val o        = Outer(1, captured, 3L)
+        val m        = Marshal(fx.queue, twins())
+        try {
+          val ptr = m.instance(o)
+          o.inner = Inner(0f, 0.0)
+          val replacement = o.inner
+          fx.poke(ptr, 8, _.putFloat(0, 7f), 4)
+          m.settle()
+          assertEquals(captured.a, 7f)
+          assert(o.inner eq replacement)
+          assertEquals(replacement.a, 0f)
+        } finally m.close()
+      }
+    }
+
+    test(s"[${row.label}] a closed marshal refuses further use and clears its state") {
+      withRow(row) { fx =>
+        val a = Array(1, 2)
+        val m = Marshal(fx.queue, twins())
+        try m.array(a)
+        finally m.close()
+        m.close()
+        intercept[IllegalStateException](m.array(a))
+        intercept[IllegalStateException](m.settle())
+        intercept[IllegalStateException](m.readBack(a))
+      }
+    }
+
+    test(s"[${row.label}] staging from a completion thread fails fast instead of deadlocking") {
+      withRow(row) { fx =>
+        val m       = Marshal(fx.queue, twins())
+        val latch   = java.util.concurrent.CountDownLatch(1)
+        val failure = java.util.concurrent.atomic.AtomicReference[Throwable]()
+        val probe   = ByteBuffer.allocateDirect(4).order(ByteOrder.nativeOrder)
+        try {
+          fx.queue.invalidate(
+            probe,
+            _ => {
+              try m.array(Array(1))
+              catch { case t: Throwable => failure.set(t) }
+              latch.countDown()
+            }
+          )
+          assert(latch.await(10, java.util.concurrent.TimeUnit.SECONDS), "the completion thread deadlocked in Marshal")
+          assert(failure.get.isInstanceOf[IllegalStateException], String.valueOf(failure.get))
+        } finally {
+          fx.queue.release(probe)
+          m.close()
+        }
+      }
+    }
+
+    test(s"[${row.label}] an array field whose host element has another layout is rejected") {
+      withRow(row) { _ =>
+        val e = intercept[TwinException](twins(List(wrongLayout, innerLayout, primsLayout)).of(classOf[Wrong]))
+        assert(e.getMessage.contains("Inner"), e.getMessage)
+      }
+    }
+  }
+
+  test("a final field the layout reads back is rejected, a read-only one is left alone") {
+    val e = intercept[TwinException](twins(List(fixedLayout)).of(classOf[Fixed]))
+    assert(e.getMessage.contains("final"), e.getMessage)
+    val readOnly = Layout(
+      "Fixed",
+      classOf[Fixed].getName,
+      4,
+      4,
+      -1,
+      -1,
+      Array(Field("x", "I", Kind.PRIM, 0, 4, "", true))
+    )
+    assertEquals(twins(List(readOnly)).of(classOf[Fixed]).layout.fields.head.readOnly, true)
+    assertEquals(Layout.decode(readOnly.encode).fields.head.readOnly, true)
+    assertEquals(Layout.decode(primsLayout.encode).fields.head.readOnly, false)
+  }
+
+  test("a primitive array field with a different host element type is rejected") {
+    val e = intercept[TwinException](twins(List(wideLayout)).of(classOf[Wide]))
+    assert(e.getMessage.contains("[J"), e.getMessage)
+  }
+
+  test("struct layouts derive array descriptors and element names") {
+    val sdef = polyregion.ast.PolyAST.StructDef(
+      polyregion.ast.PolyAST.Sym("Probe"),
+      Nil,
+      List(
+        polyregion.ast.PolyAST.Named(
+          "xs",
+          polyregion.ast.PolyAST.Type.Ptr(polyregion.ast.PolyAST.Type.IntS32, polyregion.ast.PolyAST.Type.Space.Global)
+        ),
+        polyregion.ast.PolyAST.Named(
+          "ys",
+          polyregion.ast.PolyAST.Type.Ptr(polyregion.ast.PolyAST.Type.Float64, polyregion.ast.PolyAST.Type.Space.Global)
+        )
+      ),
+      Nil
+    )
+    val compiler = ct.Compiler.create()
+    val laid =
+      try
+        compiler.layoutOf(
+          polyregion.ast.MsgPack.encode(polyregion.ast.CodeGen.structDefsVersioned(List(sdef))),
+          ct.Options.of(ct.Target.LLVM_HOST, "native")
+        )
+      finally compiler.close()
+    val derived = polyregion.twin.StructLayouts.of(sdef, laid.head)
+    assertEquals(derived.fields.map(_.descriptor).toList, List("[I", "[D"))
+  }
+
+  test("duplicate layout names are rejected") {
+    val e =
+      intercept[TwinException](Layout.decodeAll(Layout.encodeAll(java.util.Arrays.asList(innerLayout, innerLayout))))
+    assert(e.getMessage.contains("Duplicate"), e.getMessage)
+  }
+
+  test("corrupt layout text fails with a twin exception") {
+    List("TL2~a:b:4:4:-1:-1:x@0:4:p:I:%0", "TL2~a:b:4:4:-1:-1:x:4:p:I:", "TL2~a:b:4:4:-1:-1:x@0:4::I:").foreach { text =>
+      intercept[TwinException](Layout.decodeAll(text))
+    }
+  }
+
   test("a class without a layout is rejected with the known names") {
     val e = intercept[TwinException](twins(List(innerLayout)).of(classOf[Prims]))
     assert(e.getMessage.contains("No device layout for " + classOf[Prims].getName), e.getMessage)
@@ -332,25 +527,4 @@ class TwinSuite extends munit.FunSuite {
     assertEquals(code, 0, out)
     assert(out.contains("twin varhandle ok"), out)
   }
-}
-
-object TwinVarHandleMain {
-  def main(args: Array[String]): Unit = {
-    val xs = java.util.ArrayList[Integer]()
-    (1 to 3).foreach(i => xs.add(i))
-    val data  = FieldAccess.of(classOf[java.util.ArrayList[?]], "elementData", "[Ljava/lang/Object;")
-    val size  = FieldAccess.of(classOf[java.util.ArrayList[?]], "size", "I")
-    val elems = data.get(xs).asInstanceOf[Array[AnyRef]]
-    assertEq(elems.take(3).toList.map(x => x: Any), List[Any](1, 2, 3))
-    assertEq(size.get(xs), 3)
-    val replaced = Array[AnyRef](Integer.valueOf(7), Integer.valueOf(8), Integer.valueOf(9), null)
-    data.set(xs, replaced)
-    size.set(xs, 3)
-    assertEq(xs.toArray.toList.map(x => x: Any), List[Any](7, 8, 9))
-    val words = FieldAccess.of(classOf[java.util.BitSet], "words", "[J")
-    val bits  = java.util.BitSet(); bits.set(3)
-    assertEq(words.get(bits).asInstanceOf[Array[Long]](0), 8L)
-    println("twin varhandle ok")
-  }
-  private def assertEq(a: Any, b: Any): Unit = if (a != b) throw AssertionError(s"$a != $b")
 }

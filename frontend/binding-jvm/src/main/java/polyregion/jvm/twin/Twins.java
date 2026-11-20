@@ -28,6 +28,10 @@ public final class Twins {
     return l;
   }
 
+  Layout find(String className) {
+    return layouts.get(className);
+  }
+
   public Twin of(Class<?> type) {
     Twin t = twins.get(type.getName());
     if (t != null) return t;

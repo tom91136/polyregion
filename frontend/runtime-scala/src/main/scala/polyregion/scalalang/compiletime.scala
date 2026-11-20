@@ -4,7 +4,7 @@ import cats.syntax.all.*
 import polyregion.ast.{PolyAST as p, *}
 import polyregion.jvm.twin.Marshal
 import polyregion.jvm.{compiler as ct, runtime as rt}
-import polyregion.twin.TwinLayouts
+import polyregion.twin.StructLayouts
 import polyregion.prism.StdLib
 import polyregion.scalalang as srt
 
@@ -110,15 +110,16 @@ object compiletime {
               ) :: Nil).success
             } else s"Target type `${vendorTpe}` != ${cpTargetTpe} ".fail
           case AppliedType(_, List(ConstantType(StringConstant(arch)))) =>
-            val target = TypeRepr.of[target].widenTermRefByName.dealias
-            val vendor = target.memberType(target.typeSymbol.typeMember("Arch")).dealias
-            if (vendor <:< TypeRepr.of[ct.Target])
+            val applied = TypeRepr.of[target].widenTermRefByName.dealias
+            val vendor  = applied.memberType(applied.typeSymbol.typeMember("Arch")).dealias
+            if (vendor <:< TypeRepr.of[ct.Target] && !vendor.termSymbol.isNoSymbol)
               (ReifiedConfig(
                 target = ct.Target.valueOf(vendor.termSymbol.name),
                 arch = arch,
                 opt = Opt.valueOf(TypeRepr.of[opt].termSymbol.name).value
               ) :: Nil).success
-            else s"Target type `${vendor}` != ${TypeRepr.of[ct.Target]} ".fail
+            else
+              s"Target type `${applied.show}` has no ${TypeRepr.of[ct.Target].show} constant, found `${vendor.show}`".fail
           case bad => s"Target type `${bad}` does not contain a String constant refinement or has illegal bounds".fail
         }
       case '[x *: xs] =>
@@ -338,10 +339,11 @@ object compiletime {
 
         lazy val modules = $modulesExpr
 
-        val marshal = Marshal($ctx.queue, null, Platforms.directBufferFromPointer(_, _))
+        var marshal: Marshal = null
 
         val outcome: Either[Throwable, Unit] =
           try {
+            marshal = Marshal($ctx.queue, null, Platforms.directBufferFromPointer(_, _))
             val found = $ctx.select(modules)
             if (found == -1)
               Left(
@@ -367,7 +369,7 @@ object compiletime {
                     val layouts0 = configLayouts.map(l => p.Sym(l.name) -> l).toMap
 
                     val layouts = prog.defs.flatMap { sd =>
-                      layouts0.get(sd.name).map(layout => sd -> (TwinLayouts.of(sd, layout), prismRefs.get(sd.name)))
+                      layouts0.get(sd.name).map(layout => sd -> (StructLayouts.of(sd, layout), prismRefs.get(sd.name)))
                     }.toMap
                     val allReprsInCaptures = capturesWithStructDefs
                       .collect { case (_, Some(sdef), term) =>
@@ -445,10 +447,16 @@ object compiletime {
           }
 
         val released =
-          try { marshal.close(); Right(()) }
-          catch { case e: Throwable => Left(e) }
+          try {
+            if (marshal != null) marshal.close()
+            Right(())
+          } catch { case e: Throwable => Left(e) }
 
-        cb_(if (outcome.isLeft) outcome else released)
+        cb_((outcome, released) match {
+          case (Left(failure), Left(closing)) => failure.addSuppressed(closing); outcome
+          case (Left(_), _)                   => outcome
+          case _                              => released
+        })
       }
       given q.Printer[q.Tree] = q.Printer.TreeAnsiCode
       debug("Code=" + code.asTerm.show)
