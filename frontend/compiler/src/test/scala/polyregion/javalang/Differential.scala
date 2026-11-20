@@ -30,8 +30,8 @@ object Differential {
     Invocation(m.invoke(receiver.orNull, fresh*), fresh)
   }
 
-  def interpret(fn: p.Function, args: List[Any]): Invocation = {
-    val vm = Interpreter.Vm(p.Program(Some(fn), Nil, Nil))
+  def interpret(fn: p.Function, args: List[Any], callees: List[p.Function] = Nil): Invocation = {
+    val vm = Interpreter.Vm(p.Program(Some(fn), callees, Nil))
     def buffer(len: Int, comp: p.Type, write: (Long, Int) => Unit): Long = {
       val addr = vm.allocOf(comp, len.toLong)
       (0 until len).foreach(i => write(addr + i * vm.sizeOf(comp), i))

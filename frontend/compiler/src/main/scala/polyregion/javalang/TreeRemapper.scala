@@ -4,6 +4,7 @@ import cats.syntax.all.*
 import com.sun.source.tree.*
 import com.sun.source.util.Trees
 import com.sun.tools.javac.code.Symbol as JSymbol
+import com.sun.tools.javac.processing.JavacProcessingEnvironment
 import com.sun.tools.javac.tree.JCTree
 import polyregion.ast.{PolyAST as p, *}
 
@@ -11,6 +12,7 @@ import javax.annotation.processing.ProcessingEnvironment
 import javax.lang.model.`type`.{ArrayType, DeclaredType, TypeKind, TypeMirror}
 import javax.lang.model.element.{ElementKind, Modifier, TypeElement}
 import javax.lang.model.util.{Elements, Types}
+import javax.tools.{JavaFileManager, JavaFileObject, StandardLocation}
 import scala.annotation.tailrec
 import scala.collection.immutable.ListSet
 import scala.collection.mutable
@@ -31,9 +33,11 @@ object TreeRemapper {
       val classTable: Map[String, TypeElement],
       val elements: Elements,
       val types: Types,
-      val capturedClosures: Map[JSymbol, Closure]
+      val capturedClosures: Map[JSymbol, Closure],
+      val classBytes: BytecodeResolver.ClassBytes
   ) {
-    val fnSyms = mutable.LinkedHashSet.empty[JSymbol.MethodSymbol]
+    val fnSyms        = mutable.LinkedHashSet.empty[JSymbol.MethodSymbol]
+    val bytecodeRoots = mutable.LinkedHashSet.empty[BytecodeRemapper.Ref]
 
     def treeOf(sym: JSymbol.MethodSymbol): Option[MethodTree] =
       localTrees.get(sym).orElse(methodTable.get(fullName(sym))).filter(bodied(_))
@@ -860,8 +864,7 @@ object TreeRemapper {
       case _ => None
     }
 
-  private val mathOwners = Set("java.lang.Math", "java.lang.StrictMath")
-  private val EnumOwner  = "java.lang.Enum"
+  private val EnumOwner = "java.lang.Enum"
 
   private def isRecordAccessor(sym: JSymbol.MethodSymbol): Boolean = sym.owner match {
     case c: JSymbol.ClassSymbol if c.getKind == ElementKind.RECORD =>
@@ -916,39 +919,54 @@ object TreeRemapper {
     }.map(_ => slotSel)
   }
 
-  private def mathIntrinsic(sym: JSymbol.MethodSymbol, args: List[p.Term], rtn: p.Type): Result[p.Expr] = {
-    def math(m: p.Math) = p.Expr.MathOp(m).success
-    def intr(i: p.Intr) = p.Expr.IntrOp(i).success
-    (sym.name.toString, args) match {
-      case ("sin", x :: Nil)        => math(p.Math.Sin(x, rtn))
-      case ("cos", x :: Nil)        => math(p.Math.Cos(x, rtn))
-      case ("tan", x :: Nil)        => math(p.Math.Tan(x, rtn))
-      case ("asin", x :: Nil)       => math(p.Math.Asin(x, rtn))
-      case ("acos", x :: Nil)       => math(p.Math.Acos(x, rtn))
-      case ("atan", x :: Nil)       => math(p.Math.Atan(x, rtn))
-      case ("sinh", x :: Nil)       => math(p.Math.Sinh(x, rtn))
-      case ("cosh", x :: Nil)       => math(p.Math.Cosh(x, rtn))
-      case ("tanh", x :: Nil)       => math(p.Math.Tanh(x, rtn))
-      case ("signum", x :: Nil)     => math(p.Math.Signum(x, rtn))
-      case ("abs", x :: Nil)        => math(p.Math.Abs(x, rtn))
-      case ("round", x :: Nil)      => math(p.Math.Round(x, rtn))
-      case ("ceil", x :: Nil)       => math(p.Math.Ceil(x, rtn))
-      case ("floor", x :: Nil)      => math(p.Math.Floor(x, rtn))
-      case ("rint", x :: Nil)       => math(p.Math.Rint(x, rtn))
-      case ("sqrt", x :: Nil)       => math(p.Math.Sqrt(x, rtn))
-      case ("cbrt", x :: Nil)       => math(p.Math.Cbrt(x, rtn))
-      case ("exp", x :: Nil)        => math(p.Math.Exp(x, rtn))
-      case ("expm1", x :: Nil)      => math(p.Math.Expm1(x, rtn))
-      case ("log", x :: Nil)        => math(p.Math.Log(x, rtn))
-      case ("log1p", x :: Nil)      => math(p.Math.Log1p(x, rtn))
-      case ("log10", x :: Nil)      => math(p.Math.Log10(x, rtn))
-      case ("pow", x :: y :: Nil)   => math(p.Math.Pow(x, y, rtn))
-      case ("atan2", x :: y :: Nil) => math(p.Math.Atan2(x, y, rtn))
-      case ("hypot", x :: y :: Nil) => math(p.Math.Hypot(x, y, rtn))
-      case ("min", x :: y :: Nil)   => intr(p.Intr.Min(x, y, rtn))
-      case ("max", x :: y :: Nil)   => intr(p.Intr.Max(x, y, rtn))
-      case (other, xs)              => s"Unsupported ${ownerName(sym)}.$other with ${xs.size} argument(s)".fail
+  private def descriptorOf(deps: DepCollector, sym: JSymbol.MethodSymbol): String = {
+    def one(t: TypeMirror): String = deps.types.erasure(t) match {
+      case a: ArrayType => s"[${one(a.getComponentType)}"
+      case d: DeclaredType =>
+        s"L${deps.elements.getBinaryName(d.asElement.asInstanceOf[TypeElement]).toString.replace('.', '/')};"
+      case other =>
+        other.getKind match {
+          case TypeKind.BOOLEAN => "Z"
+          case TypeKind.BYTE    => "B"
+          case TypeKind.SHORT   => "S"
+          case TypeKind.INT     => "I"
+          case TypeKind.LONG    => "J"
+          case TypeKind.CHAR    => "C"
+          case TypeKind.FLOAT   => "F"
+          case TypeKind.DOUBLE  => "D"
+          case _                => "V"
+        }
     }
+    s"(${sym.getParameters.asScala.map(v => one(v.asType)).mkString})${one(sym.getReturnType)}"
+  }
+
+  private def binaryOwnerName(deps: DepCollector, sym: JSymbol.MethodSymbol): String = sym.owner match {
+    case c: JSymbol.ClassSymbol => deps.elements.getBinaryName(c).toString
+    case other                  => other.toString
+  }
+
+  private def intrinsicOf(
+      deps: DepCollector,
+      sym: JSymbol.MethodSymbol,
+      args: List[p.Term],
+      rtn: p.Type
+  ): Option[p.Expr] =
+    Option
+      .when(sym.isStatic)(Intrinsics.lookup(ownerName(sym), sym.name.toString, descriptorOf(deps, sym), args, rtn))
+      .flatten
+
+  private def isBytecodeCallee(deps: DepCollector, sym: JSymbol.MethodSymbol): Boolean =
+    sym.isStatic && !sym.getModifiers.contains(Modifier.ABSTRACT) && deps.treeOf(sym).isEmpty
+
+  private def bytecodeCall(
+      deps: DepCollector,
+      sym: JSymbol.MethodSymbol,
+      args: List[p.Term],
+      rtn: p.Type
+  ): p.Expr = {
+    val ref = BytecodeRemapper.Ref(binaryOwnerName(deps, sym), sym.name.toString, descriptorOf(deps, sym))
+    deps.bytecodeRoots += ref
+    p.Expr.Invoke(p.Type.FnRef(BytecodeRemapper.symbolOf(ref.owner, ref.name)), Nil, None, args, rtn)
   }
 
   // closureOf lowers captured arguments as it goes, so it cannot serve as a predicate
@@ -1081,22 +1099,25 @@ object TreeRemapper {
       .flatMap { terms =>
         impl.asType.getParameterTypes.asScala.toList.traverse(JavaTyper.typer).flatMap { paramTpes =>
           val args = if (paramTpes.size == terms.size) terms.zip(paramTpes).map(coerce(scope, buf, _, _)) else terms
-          if (mathOwners.contains(ownerName(impl))) mathIntrinsic(impl, args, rtn)
-          else if (isUserMethod(impl)) {
-            scope.deps.fnSyms += impl
-            scope.calls += impl
-            val receiverTpeArgs =
-              recv.map(r => referent(r.tpe)).collect { case p.Type.Struct(_, ts) => ts }.getOrElse(Nil)
-            (lengthArgsFor(scope, impl, Nil), staticArgsFor(scope, impl)).mapN((ls, ss) =>
-              p.Expr.Invoke(
-                p.Type.FnRef(p.Sym(fullName(impl))),
-                receiverTpeArgs,
-                recv.map(byReference(scope, buf, _)),
-                args.map(byReference(scope, buf, _)) ++ ls ++ ss,
-                rtn
+          intrinsicOf(scope.deps, impl, args, rtn) match {
+            case Some(e) => e.success
+            case None if isUserMethod(impl) =>
+              scope.deps.fnSyms += impl
+              scope.calls += impl
+              val receiverTpeArgs =
+                recv.map(r => referent(r.tpe)).collect { case p.Type.Struct(_, ts) => ts }.getOrElse(Nil)
+              (lengthArgsFor(scope, impl, Nil), staticArgsFor(scope, impl)).mapN((ls, ss) =>
+                p.Expr.Invoke(
+                  p.Type.FnRef(p.Sym(fullName(impl))),
+                  receiverTpeArgs,
+                  recv.map(byReference(scope, buf, _)),
+                  args.map(byReference(scope, buf, _)) ++ ls ++ ss,
+                  rtn
+                )
               )
-            )
-          } else s"Cannot lower a functional value backed by `${fullName(impl)}`, which has no body to inline".fail
+            case None =>
+              s"Cannot lower a functional value backed by `${fullName(impl)}`, which has no body to inline".fail
+          }
         }
       }
   }
@@ -1521,52 +1542,63 @@ object TreeRemapper {
       }
       argLengths = lowered.map(_._2)
       args       = if (paramTpes.size == raw.size) raw.zip(paramTpes).map(coerce(scope, buf, _, _)) else raw
-      e <-
-        if (mathOwners.contains(ownerName(sym))) mathIntrinsic(sym, args, rtn)
-        else if (sym.name.toString == "<init>")
-          if (args.isEmpty) (p.Expr.Alias(p.Term.Unit0Const): p.Expr).success
-          else s"Unsupported constructor delegation to `${fullName(sym)}`".fail
-        else if (ownerName(sym) == EnumOwner && recv.isDefined)
-          if (sym.name.toString == "ordinal" && args.isEmpty) p.Expr.Alias(recv.get).success
-          else s"Unsupported `${fullName(sym)}`: an enum value travels as its ordinal alone".fail
-        else if (isRecordAccessor(sym) && args.isEmpty && recv.isDefined)
-          asSelect(p.Expr.Alias(recv.get))
-            .map(sel => p.Expr.Alias(fieldOf(sel, sym.name.toString, rtn)))
-        else if (recv.isDefined && sym.getModifiers.contains(Modifier.ABSTRACT))
-          regionAllocated(scope, recv.get.tpe) match {
-            case Some(cls) =>
-              overrideIn(scope, cls, sym)
-                .failIfEmpty(s"`${cls.flatName}` declares no override of `${fullName(sym)}` to call")
-                .flatMap { impl =>
-                  scope.deps.fnSyms += impl
-                  scope.calls += impl
-                  (lengthArgsFor(scope, impl, argLengths), staticArgsFor(scope, impl)).mapN((ls, ss) =>
-                    p.Expr.Invoke(
-                      p.Type.FnRef(p.Sym(fullName(impl))),
-                      Nil,
-                      recv.map(byReference(scope, buf, _)),
-                      args.map(byReference(scope, buf, _)) ++ ls ++ ss,
-                      rtn
-                    )
-                  )
-                }
-            case None => emitDispatch(scope, buf, Dispatch(sym, recv.get, args, rtn), argLengths)
-          }
-        else
-          recv.flatMap(r => regionAllocated(scope, r.tpe)).filter(_ != sym.owner) match {
-            case Some(cls) => inheritedCall(scope, buf, Dispatch(sym, recv.get, args, rtn), cls)
-            case None =>
-              val receiverTpeArgs =
-                recv.map(r => referent(r.tpe)).collect { case p.Type.Struct(_, ts) => ts }.getOrElse(Nil)
-              val user = isUserMethod(sym)
-              if (user) { scope.deps.fnSyms += sym; scope.calls += sym }
-              val passed  = if (user) recv.map(byReference(scope, buf, _)) else recv
-              val passedA = if (user) args.map(byReference(scope, buf, _)) else args
-              (lengthArgsFor(scope, sym, argLengths), staticArgsFor(scope, sym)).mapN((ls, ss) =>
-                p.Expr.Invoke(p.Type.FnRef(p.Sym(fullName(sym))), receiverTpeArgs, passed, passedA ++ ls ++ ss, rtn)
-              )
-          }
+      intrinsic  = intrinsicOf(scope.deps, sym, args, rtn)
+      e <- intrinsic.fold(invokeOf(scope, buf, sym, recv, args, argLengths, rtn))(_.success)
     } yield e
+
+  private def invokeOf(
+      scope: Scope,
+      buf: mutable.ListBuffer[p.Stmt],
+      sym: JSymbol.MethodSymbol,
+      recv: Option[p.Term],
+      args: List[p.Term],
+      argLengths: List[Option[p.Term]],
+      rtn: p.Type
+  ): Result[p.Expr] =
+    if (recv.isEmpty && isBytecodeCallee(scope.deps, sym)) bytecodeCall(scope.deps, sym, args, rtn).success
+    else if (sym.name.toString == "<init>")
+      if (args.isEmpty) (p.Expr.Alias(p.Term.Unit0Const): p.Expr).success
+      else s"Unsupported constructor delegation to `${fullName(sym)}`".fail
+    else if (ownerName(sym) == EnumOwner && recv.isDefined)
+      if (sym.name.toString == "ordinal" && args.isEmpty) p.Expr.Alias(recv.get).success
+      else s"Unsupported `${fullName(sym)}`: an enum value travels as its ordinal alone".fail
+    else if (isRecordAccessor(sym) && args.isEmpty && recv.isDefined)
+      asSelect(p.Expr.Alias(recv.get))
+        .map(sel => p.Expr.Alias(fieldOf(sel, sym.name.toString, rtn)))
+    else if (recv.isDefined && sym.getModifiers.contains(Modifier.ABSTRACT))
+      regionAllocated(scope, recv.get.tpe) match {
+        case Some(cls) =>
+          overrideIn(scope, cls, sym)
+            .failIfEmpty(s"`${cls.flatName}` declares no override of `${fullName(sym)}` to call")
+            .flatMap { impl =>
+              scope.deps.fnSyms += impl
+              scope.calls += impl
+              (lengthArgsFor(scope, impl, argLengths), staticArgsFor(scope, impl)).mapN((ls, ss) =>
+                p.Expr.Invoke(
+                  p.Type.FnRef(p.Sym(fullName(impl))),
+                  Nil,
+                  recv.map(byReference(scope, buf, _)),
+                  args.map(byReference(scope, buf, _)) ++ ls ++ ss,
+                  rtn
+                )
+              )
+            }
+        case None => emitDispatch(scope, buf, Dispatch(sym, recv.get, args, rtn), argLengths)
+      }
+    else
+      recv.flatMap(r => regionAllocated(scope, r.tpe)).filter(_ != sym.owner) match {
+        case Some(cls) => inheritedCall(scope, buf, Dispatch(sym, recv.get, args, rtn), cls)
+        case None =>
+          val receiverTpeArgs =
+            recv.map(r => referent(r.tpe)).collect { case p.Type.Struct(_, ts) => ts }.getOrElse(Nil)
+          val user = isUserMethod(sym)
+          if (user) { scope.deps.fnSyms += sym; scope.calls += sym }
+          val passed  = if (user) recv.map(byReference(scope, buf, _)) else recv
+          val passedA = if (user) args.map(byReference(scope, buf, _)) else args
+          (lengthArgsFor(scope, sym, argLengths), staticArgsFor(scope, sym)).mapN((ls, ss) =>
+            p.Expr.Invoke(p.Type.FnRef(p.Sym(fullName(sym))), receiverTpeArgs, passed, passedA ++ ls ++ ss, rtn)
+          )
+      }
 
   private def mapStmt(scope: Scope, buf: mutable.ListBuffer[p.Stmt], t: StatementTree): Result[Unit] = t match {
     case b: BlockTree => b.getStatements.asScala.toList.traverse_(mapStmt(scope, buf, _))
@@ -2154,6 +2186,23 @@ object TreeRemapper {
       localTrees: Map[JSymbol.MethodSymbol, MethodTree]
   )
 
+  // classpath jars through javac's own file manager, the running JDK for everything it ships
+  private def classBytesOf(env: ProcessingEnvironment): BytecodeResolver.ClassBytes = {
+    val manager = env match {
+      case j: JavacProcessingEnvironment => Option(j.getContext.get(classOf[JavaFileManager]))
+      case _                             => None
+    }
+    owner =>
+      manager
+        .flatMap(m => Option(m.getJavaFileForInput(StandardLocation.CLASS_PATH, owner, JavaFileObject.Kind.CLASS)))
+        .map { f =>
+          val in = f.openInputStream()
+          try in.readAllBytes()
+          finally in.close()
+        }
+        .orElse(BytecodeResolver.runtimeClasses(owner))
+  }
+
   def compileRegion(sources: Sources, entry: MethodTree): Result[Region] = {
     import sources.*
     val entrySym = methodDeclSym(entry)
@@ -2164,7 +2213,8 @@ object TreeRemapper {
       classTable,
       env.getElementUtils,
       env.getTypeUtils,
-      capturedClosures(localTrees, entry)
+      capturedClosures(localTrees, entry),
+      classBytesOf(env)
     )
     for {
       // exploratory lowering, discarded: learns the call graph and statics needed to size signatures
@@ -2173,7 +2223,9 @@ object TreeRemapper {
       plan = Some(Plan(planStatics(deps), planLengths(deps)))
       entryAndStatics <- compileMethod(entry, deps, Role.Entry, plan)
       (entryFn, statics) = entryAndStatics
-      depFns <- compileTransitive(trees, deps, entrySym, plan = plan)
+      sourceFns   <- compileTransitive(trees, deps, entrySym, plan = plan)
+      bytecodeFns <- BytecodeResolver.resolve(deps.bytecodeRoots.toList, deps.classBytes)
+      depFns = sourceFns ++ bytecodeFns
       signatureStructs <- structSyms(entryFn :: depFns).flatTraverse { sym =>
         val fqn = sym.fqn.mkString(".")
         classTable.get(fqn) match {

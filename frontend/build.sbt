@@ -628,6 +628,16 @@ def compilerTestsuiteSettings(projectName: String) = Seq(
   )
 )
 
+lazy val `compiler-testsuite-helpers` = project
+  .settings(
+    commonSettings,
+    javaRelease := minRuntimeJdk,
+    javacOptions += "-Xlint:-options",
+    name             := "compiler-testsuite-helpers",
+    autoScalaLibrary := false,
+    exportJars       := true
+  )
+
 lazy val `compiler-testsuite-scala` = project
   .settings(
     commonSettings,
@@ -637,7 +647,7 @@ lazy val `compiler-testsuite-scala` = project
       cudaSuites(file.getName) || hipSuites(file.getName) || spectraSuiteBase(file.getName)
     ))
   )
-  .dependsOn(`runtime-scala`)
+  .dependsOn(`runtime-scala`, `compiler-testsuite-helpers` % Test)
 
 def deviceSuiteProject(
     projectName: String,
@@ -674,7 +684,7 @@ def deviceSuiteProject(
         else base
       }
     )
-    .dependsOn(`runtime-scala`)
+    .dependsOn(`runtime-scala`, `compiler-testsuite-helpers` % Test)
 
 def cudaSuiteProject(projectName: String, targets: Seq[String]) =
   deviceSuiteProject(projectName, targets, cudaSuites, cudaSuiteSupport, spectraSuiteBase + "SpectraLaunchSuite.scala")
@@ -727,7 +737,7 @@ lazy val `compiler-testsuite-java` = project
       s"-Dpolyregion.hostClasspath=${classpath.mkString(java.io.File.pathSeparator)}"
     }
   )
-  .dependsOn(`runtime-java`, compiler % Test)
+  .dependsOn(`runtime-java`, compiler % Test, `compiler-testsuite-helpers` % Test)
 
 lazy val forwardSuiteJdk = 21
 
@@ -820,6 +830,7 @@ lazy val root = project
     `runtime-scala`,
     `runtime-java`,
     compiler,
+    `compiler-testsuite-helpers`,
     `compiler-testsuite-scala`,
     `compiler-testsuite-cuda`,
     `compiler-testsuite-cuda-host`,

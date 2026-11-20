@@ -6,7 +6,7 @@ import org.jetbrains.java.decompiler.modules.decompiler.StatEdge
 import org.jetbrains.java.decompiler.modules.decompiler.exps.FunctionExprent.FunctionType
 import org.jetbrains.java.decompiler.modules.decompiler.exps.*
 import org.jetbrains.java.decompiler.modules.decompiler.stats.*
-import org.jetbrains.java.decompiler.struct.gen.{CodeType, VarType}
+import org.jetbrains.java.decompiler.struct.gen.{CodeType, MethodDescriptor, VarType}
 import polyregion.ast.{PolyAST as p, *}
 
 import scala.collection.mutable
@@ -16,6 +16,12 @@ import scala.jdk.CollectionConverters.*
 object BytecodeRemapper {
 
   private val Global = p.Type.Space.Global
+
+  case class Ref(owner: String, name: String, desc: String) {
+    def repr: String = s"$owner.$name$desc"
+  }
+
+  def symbolOf(owner: String, name: String): p.Sym = p.Sym(s"$owner.$name")
 
   private def nameOf(t: VarType): String =
     Option(t.value).filter(_ => t.`type` == CodeType.OBJECT).fold(String.valueOf(t))(_.replace('/', '.'))
@@ -129,6 +135,7 @@ object BytecodeRemapper {
 
     private val ids = Iterator.from(0)
     val declared    = mutable.LinkedHashMap.empty[String, p.Named]
+    val calls       = mutable.LinkedHashSet.empty[Ref]
 
     private val jmp: p.Term.Select = p.Term.Select(p.Named("#jmp", p.Type.IntS32), Nil, p.Type.IntS32)
 
@@ -184,6 +191,23 @@ object BytecodeRemapper {
         )
       }
     }
+
+    private def invoke(i: InvocationExprent, buf: mutable.ListBuffer[p.Stmt]): Result[p.Term] =
+      if (i.getInvocationType != InvocationExprent.InvocationType.STATIC) unsupported(i)
+      else {
+        val owner = i.getClassname.replace('/', '.')
+        val md    = MethodDescriptor.parseDescriptor(i.getStringDescriptor)
+        for {
+          params <- md.params.toList.traverse(typeOf(_))
+          rtn    <- typeOf(md.ret)
+          args   <- i.getLstParameters.asScala.toList.traverse(expr(_, buf))
+          lowered = args.zip(params).map((a, t) => coerce(buf, a, t))
+          call = Intrinsics.lookup(owner, i.getName, i.getStringDescriptor, lowered, rtn).getOrElse {
+            calls += Ref(owner, i.getName, i.getStringDescriptor)
+            p.Expr.Invoke(p.Type.FnRef(symbolOf(owner, i.getName)), Nil, None, lowered, rtn)
+          }
+        } yield bind(buf, call)
+      }
 
     private def unsupported(e: Exprent): Result[Nothing] = e match {
       case i: InvocationExprent =>
@@ -415,6 +439,7 @@ object BytecodeRemapper {
       case a: ArrayExprent =>
         arrayParts(a, buf).map((sel, idx, comp) => bind(buf, p.Expr.Index(sel, idx, comp)))
       case a: AssignmentExprent => assign(a, buf)
+      case i: InvocationExprent => invoke(i, buf)
       case other                => unsupported(other)
     }
 
@@ -452,6 +477,7 @@ object BytecodeRemapper {
       case a: AssignmentExprent                       => assign(a, buf).map(_ => ())
       case f: FunctionExprent if f.getFuncType.isPPMM => step(f, buf, wantValue = false).map(_ => ())
       case _: VarExprent                              => ().success
+      case i: InvocationExprent                       => invoke(i, buf).map(_ => ())
       case x: ExitExprent =>
         x.getExitType match {
           case ExitExprent.Type.RETURN =>
@@ -588,9 +614,13 @@ object BytecodeRemapper {
     } yield v
 
   def lower(classBytes: Array[Byte], name: String, desc: String): Result[p.Function] =
+    lowerWithCalls(classBytes, name, desc).map(_._1)
+
+  // the second component is every static callee the body invokes that no intrinsic covers
+  def lowerWithCalls(classBytes: Array[Byte], name: String, desc: String): Result[(p.Function, List[Ref])] =
     Vineflower.structure(classBytes, name, desc)(lowerMethod(_, name))
 
-  private def lowerMethod(m: Vineflower.Method, name: String): Result[p.Function] = for {
+  private def lowerMethod(m: Vineflower.Method, name: String): Result[(p.Function, List[Ref])] = for {
     owner    <- m.cl.qualifiedName.replace('/', '.').success
     isStati  <- m.mt.hasModifier(CodeConstants.ACC_STATIC).success
     slotVars <- varsOf(m.root).success
@@ -633,9 +663,9 @@ object BytecodeRemapper {
       )
     // PolyAST scopes a Var to its block and a slot written in a loop is read after it, so slots are hoisted
     lowerer.declared.values.foreach(n => prologue += p.Stmt.Var(n, None, isMutable = true))
-    p.Function(
+    val fn = p.Function(
       decl = p.FunctionDecl(
-        name = p.Sym(s"$owner.$name"),
+        name = symbolOf(owner, name),
         tpeVars = Nil,
         receiver = None,
         args = args,
@@ -644,11 +674,16 @@ object BytecodeRemapper {
         rtn = rtn,
         affinity = p.Function.Affinity.Offload
       ),
-      body = prologue.toList ++ copies ++ body,
+      body = prologue.toList ++ copies ++ body ++ Option.when(
+        rtn == p.Type.Unit0 && !body.lastOption.exists(_.isInstanceOf[p.Stmt.Return])
+      )(
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      ),
       visibility = p.Function.Visibility.Exported,
       fpMode = p.Function.FpMode.Relaxed,
       convention = p.CallConvention.RegularCall
     )
+    (fn, lowerer.calls.toList)
   }
 
   private def words(t: p.Type): Int = t match {

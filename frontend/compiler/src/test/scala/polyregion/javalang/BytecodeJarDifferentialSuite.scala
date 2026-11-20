@@ -3,7 +3,8 @@ package polyregion.javalang
 import net.bytebuddy.jar.asm.{Opcodes, Type as AsmType}
 import polyregion.ast.PolyAST as p
 
-import scala.util.Random
+import java.util.jar.JarFile
+import scala.util.{Random, Using}
 
 class BytecodeJarDifferentialSuite extends munit.FunSuite {
 
@@ -26,6 +27,7 @@ class BytecodeJarDifferentialSuite extends munit.FunSuite {
       name: String,
       desc: String,
       fn: p.Function,
+      callees: List[p.Function],
       method: java.lang.reflect.Method,
       receiver: Option[Object]
   ) {
@@ -49,8 +51,14 @@ class BytecodeJarDifferentialSuite extends munit.FunSuite {
       m.zip(receiver)
     } catch { case _: Throwable => None }
 
+  private def classesOf(corpus: Census.Corpus): BytecodeResolver.ClassBytes = owner =>
+    Using(JarFile(corpus.jar)) { jar =>
+      Option(jar.getEntry(BytecodeResolver.classFile(owner))).map(e => jar.getInputStream(e).readAllBytes())
+    }.toOption.flatten.orElse(BytecodeResolver.runtimeClasses(owner))
+
   private def discover(corpus: Census.Corpus): List[Candidate] = {
-    val out = List.newBuilder[Candidate]
+    val out     = List.newBuilder[Candidate]
+    val classes = classesOf(corpus)
     Census.eachClass(corpus.jar, Census.entriesOf(corpus.jar)) { (_, bytes) =>
       val owner =
         try Census.ownerOf(bytes)
@@ -59,12 +67,13 @@ class BytecodeJarDifferentialSuite extends munit.FunSuite {
         try Census.methodsOf(bytes)
         catch { case _: Throwable => Nil }
       ms.filter((n, d, _) => eligible(n, d)).foreach { (name, desc, access) =>
-        BytecodeRemapper.lower(bytes, name, desc) match {
-          case Right(fn) =>
-            resolve(owner, name, desc, (access & Opcodes.ACC_STATIC) != 0).foreach { (m, r) =>
-              out += Candidate(owner, name, desc, fn, m, r)
-            }
-          case Left(_) => ()
+        val lowered = BytecodeRemapper
+          .lowerWithCalls(bytes, name, desc)
+          .flatMap((fn, calls) => BytecodeResolver.resolve(calls, classes).map(fn -> _))
+        lowered.foreach { (fn, callees) =>
+          resolve(owner, name, desc, (access & Opcodes.ACC_STATIC) != 0).foreach { (m, r) =>
+            out += Candidate(owner, name, desc, fn, callees, m, r)
+          }
         }
       }
     }
@@ -117,15 +126,15 @@ class BytecodeJarDifferentialSuite extends munit.FunSuite {
 
   private def compare(c: Candidate, args: List[Any]): Verdict = {
     val expected =
-      try Right(Differential.invoke(c.method, c.receiver, args).result)
+      try Census.bounded(2000L)(Differential.invoke(c.method, c.receiver, args).result).toRight(())
       catch { case e: Throwable => Left(e) }
     expected match {
-      // the JVM throws where PolyRegion leaves the result undefined, so the input says nothing
+      // the JVM throws, or never returns, where PolyRegion leaves the result undefined, so the input says nothing
       case Left(_) => Verdict.Skipped
       case Right(e) =>
         val where = s"$c(${args.map(Differential.render(_)).mkString(", ")})"
         val actual =
-          try Right(Differential.interpret(c.fn, args).result)
+          try Right(Differential.interpret(c.fn, args, c.callees).result)
           catch { case t: Throwable => Left(t) }
         actual match {
           case Left(t) => Verdict.Disagreed(s"$where: jvm=${Differential.render(e)} interpreter threw $t")

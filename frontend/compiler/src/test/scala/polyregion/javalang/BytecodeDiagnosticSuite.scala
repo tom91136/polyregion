@@ -15,6 +15,7 @@ class BytecodeDiagnosticSuite extends munit.FunSuite {
       |  public int instanceMethod(int a) { return a + field; }
       |  public static int calls(int a) { return helper(a) + 1; }
       |  public static int helper(int a) { return a * 2; }
+      |  public static int viaString(int a) { return String.valueOf(a).length(); }
       |  public static int strings(int a) { String s = "hello"; return s.length() + a; }
       |  public static int concat(int a) { String s = "n=" + a; return s.hashCode(); }
       |  public static int guarded(int a) { try { return 1 / a; } catch (ArithmeticException e) { return 0; } }
@@ -49,7 +50,7 @@ class BytecodeDiagnosticSuite extends munit.FunSuite {
   }
 
   test("instance methods that read a field")(refuses("instanceMethod", "Unsupported field access `Unsupported.field`"))
-  test("calls to other methods")(refuses("calls", "Unsupported call `Unsupported.helper(I)I`"))
+  test("calls returning objects")(refuses("viaString", "java.lang.String"))
   test("string constants")(refuses("strings", "String"))
   test("string concatenation")(refuses("concat", "String"))
   test("exception handlers")(refuses("guarded", "catch"))
@@ -60,6 +61,17 @@ class BytecodeDiagnosticSuite extends munit.FunSuite {
   test("lambdas")(refuses("lambda", "Cannot lower the JVM type `java.util.function.IntUnaryOperator`"))
   test("reference comparisons")(refuses("nulls", "device heap"))
   test("monitors")(refuses("locked", "synchronized"))
+
+  test("static calls are recorded for the resolver") {
+    val m    = clazz.getDeclaredMethods.find(_.getName == "calls").get
+    val desc = net.bytebuddy.jar.asm.Type.getMethodDescriptor(m)
+    BytecodeRemapper.lowerWithCalls(bytes, "calls", desc) match {
+      case Left(e) => fail(e.getMessage)
+      case Right((fn, callees)) =>
+        assertEquals(callees, List(BytecodeRemapper.Ref("Unsupported", "helper", "(I)I")))
+        assert(fn.repr.contains("&Unsupported.helper"), fn.repr)
+    }
+  }
 
   test("a truncated class file is reported rather than silently mislowered") {
     Vineflower.classNameOf(Array[Byte](0xca.toByte, 0xfe.toByte, 0xba.toByte, 0xbe.toByte)) match {

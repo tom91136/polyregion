@@ -1,5 +1,6 @@
 package polyregion.javalang
 
+import org.jetbrains.java.decompiler.code.CodeConstants
 import org.jetbrains.java.decompiler.main.collectors.ImportCollector
 import org.jetbrains.java.decompiler.main.decompiler.CancelationManager
 import org.jetbrains.java.decompiler.main.extern.{IFernflowerLogger, IFernflowerPreferences, IResultSaver}
@@ -89,6 +90,13 @@ object Vineflower {
       case e: Throwable                            => e.failE
     } finally DecompilerContext.setCurrentContext(absent)
   }
+
+  def staticDescriptors(classBytes: Array[Byte], name: String): Result[List[String]] =
+    withContext(classBytes) { cl =>
+      cl.getMethods.asScala.toList
+        .filter(m => m.getName == name && m.hasModifier(CodeConstants.ACC_STATIC))
+        .map(_.getDescriptor)
+    }
 
   def classNameOf(classBytes: Array[Byte]): Result[String] =
     withContext(classBytes)(_.qualifiedName)
