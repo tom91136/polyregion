@@ -730,7 +730,13 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
             return;
           }
           case mlir::arith::CmpFPredicate::ONE: {
-            intr2(x, Bind<Intr::LogicNeq>());
+            const auto l = newVar(handleValueAsScalar(x.getLhs()));
+            const auto r = newVar(handleValueAsScalar(x.getRhs()));
+            const auto ne = newVar(Expr::IntrOp(Intr::LogicNeq(l, r)).widen());
+            const auto lOrdered = newVar(Expr::IntrOp(Intr::LogicEq(l, l)).widen());
+            const auto rOrdered = newVar(Expr::IntrOp(Intr::LogicEq(r, r)).widen());
+            const auto ordered = newVar(Expr::IntrOp(Intr::LogicAnd(lOrdered, rOrdered)).widen());
+            witness(x.getResult(), Expr::IntrOp(Intr::LogicAnd(ne, ordered)).widen());
             return;
           }
 

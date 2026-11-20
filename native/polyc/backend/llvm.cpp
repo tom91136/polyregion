@@ -870,7 +870,7 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
               return binaryNumOp(
                   expr, v.x, v.y, v.x.tpe(), //
                   [&](const auto &l, const auto &r) { return B.CreateICmpNE(l, r); },
-                  [&](const auto &l, const auto &r) { return B.CreateFCmpONE(l, r); });
+                  [&](const auto &l, const auto &r) { return B.CreateFCmpUNE(l, r); });
             },
             [&](const Intr::LogicLte &v) -> ValPtr {
               return binaryNumOp(
