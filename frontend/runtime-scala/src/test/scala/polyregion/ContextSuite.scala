@@ -54,6 +54,42 @@ class ContextSuite extends munit.FunSuite {
     )
   }
 
+  private def assertProgram(code: p.Enums.AssertCode, message: String): p.Program = {
+    val (out, outRef) = select(PtrTpe, "out")
+    val body = List(
+      p.Stmt.Update(outRef, p.Term.IntS32Const(0), p.Term.IntS32Const(7)),
+      p.Stmt.Var(
+        p.Named("trap", p.Type.Unit0),
+        Some(p.Expr.SpecOp(p.Spec.Assert(p.Term.IntU32Const(code.value), p.Term.StringConst(message)))),
+        false
+      ),
+      p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+    )
+    val decl = p.FunctionDecl(
+      p.Sym("trap"),
+      Nil,
+      None,
+      List(p.Arg(out)),
+      Nil,
+      Nil,
+      p.Type.Unit0,
+      p.Function.Affinity.Offload
+    )
+    p.Program(
+      Some(
+        p.Function(
+          decl,
+          body,
+          p.Function.Visibility.Exported,
+          p.Function.FpMode.Relaxed,
+          p.CallConvention.OffloadEntry
+        )
+      ),
+      Nil,
+      Nil
+    )
+  }
+
   private def probeProgram: p.Program = {
     val ctxTpe          = p.Spec.ContextType
     val outTpe          = p.Type.Ptr(p.Type.IntU64, p.Type.Space.Global)
@@ -208,6 +244,69 @@ class ContextSuite extends munit.FunSuite {
 
   test("a host kernel launches through the default context") {
     checkFill(rt.Context.current())
+  }
+
+  private val trapCounter = java.util.concurrent.atomic.AtomicInteger()
+
+  private def launchAssert(ctx: rt.Context, code: p.Enums.AssertCode, message: String): Unit = {
+    val target        = ct.Target.LLVM_HOST
+    val c             = compile(assertProgram(code, message), target, "native")
+    val image         = rt.ModuleImage(s"trap${trapCounter.incrementAndGet()}@host", target, c.features, c.program)
+    val buffer        = direct(4)
+    val (types, data) = ptrArgs(Platforms.pointerOfDirectBuffer(buffer))
+    assertEquals(ctx.select(Array(image)), 0)
+    ctx.launch(Array(image), image.name, "trap", types, data, rt.Policy(rt.Dim3(1, 1, 1)))
+  }
+
+  test("a kernel that asserts advertises the error argument feature") {
+    val c = compile(assertProgram(p.Enums.AssertCode.Assert, "no"), ct.Target.LLVM_HOST, "native")
+    assert(c.features.contains(p.Conventions.ErrorArg), c.features.mkString(","))
+    val plain = compile(fillProgram, ct.Target.LLVM_HOST, "native")
+    assert(!plain.features.contains(p.Conventions.ErrorArg), plain.features.mkString(","))
+  }
+
+  test("a kernel assert raises an AssertionError carrying the device message") {
+    val ctx = rt.Context.create(hostDevice)
+    try {
+      val e = intercept[AssertionError](launchAssert(ctx, p.Enums.AssertCode.Assert, "device says no"))
+      assertEquals(e.getMessage, "device says no")
+    } finally ctx.close()
+  }
+
+  test("a kernel recursion overflow raises a runtime exception, not a VM error") {
+    val ctx = rt.Context.create(hostDevice)
+    try {
+      val e = intercept[rt.PolyregionRuntimeException](
+        launchAssert(ctx, p.Enums.AssertCode.RecursionLimit, "recursion depth exceeded 1024")
+      )
+      assert(e.getMessage.contains("RLIM"), e.getMessage)
+      assert(e.getMessage.contains("recursion depth exceeded 1024"), e.getMessage)
+    } finally ctx.close()
+  }
+
+  test("any other kernel assert code raises a runtime exception naming the code and message") {
+    val ctx = rt.Context.create(hostDevice)
+    try {
+      val e = intercept[rt.PolyregionRuntimeException](
+        launchAssert(ctx, p.Enums.AssertCode.Exception, "java.lang.ArithmeticException: / by zero")
+      )
+      assert(e.getMessage.contains("EXCP"), e.getMessage)
+      assert(e.getMessage.contains("java.lang.ArithmeticException: / by zero"), e.getMessage)
+    } finally ctx.close()
+  }
+
+  test("a kernel assert on the default context raises an AssertionError") {
+    val e = intercept[AssertionError](launchAssert(rt.Context.current(), p.Enums.AssertCode.Assert, "default says no"))
+    assertEquals(e.getMessage, "default says no")
+  }
+
+  test("a context launches again after a kernel assert") {
+    val ctx = rt.Context.create(hostDevice)
+    try {
+      intercept[AssertionError](launchAssert(ctx, p.Enums.AssertCode.Assert, "first"))
+      intercept[AssertionError](launchAssert(ctx, p.Enums.AssertCode.Assert, "second"))
+      checkFill(ctx)
+    } finally ctx.close()
   }
 
   test("a kernel image for another platform kind is not selected") {

@@ -13,6 +13,7 @@
 #include "magic_enum/magic_enum.hpp"
 
 #include "polyinvoke/runtime.h"
+#include "polyregion/enums.h"
 #include "polyregion/env_keys.h"
 #include "polyregion/types.h"
 #include "polyrt/rt.h"
@@ -63,9 +64,26 @@ struct RaisedAssert {
 };
 thread_local RaisedAssert raisedAssert;
 
-void rethrowAssert() {
-  if (const auto raised = std::exchange(raisedAssert, {}); raised.raised)
-    throw std::runtime_error("Device assertion failed (code " + std::to_string(raised.code) + "): " + raised.message);
+std::string codeName(const uint32_t code) {
+  std::string name;
+  for (int shift = 0; shift < 32; shift += 8) {
+    const auto c = static_cast<char>((code >> shift) & 0xff);
+    if (c < 0x20 || c > 0x7e) {
+      char hex[11];
+      snprintf(hex, sizeof(hex), "0x%08x", code);
+      return hex;
+    }
+    name.push_back(c);
+  }
+  return name;
+}
+
+void raiseAssert(JNIEnv *env) {
+  const auto raised = std::exchange(raisedAssert, {});
+  if (!raised.raised) return;
+  if (raised.code == static_cast<uint32_t>(polyregion::invoke::AssertCode::Assert))
+    throwGeneric(env, "java/lang/AssertionError", raised.message);
+  else throwGeneric(env, EX, "Device assertion failed (code " + codeName(raised.code) + "): " + raised.message);
 }
 
 void *toHandle(const jlong handle) { return reinterpret_cast<void *>(static_cast<intptr_t>(handle)); }
@@ -404,7 +422,7 @@ void Context::launch0(JNIEnv *env, jclass, jlong context,                       
     check(polyrt_remote_launch(handle, module.c_str(), entry.c_str(), launch[0], launch[1], launch[2], launch[3], launch[4], launch[5],
                                launch[6], rawTypes.size(), rawTypes.data(), pointers.data()));
     transaction.end();
-    rethrowAssert();
+    raiseAssert(env);
   });
 }
 
@@ -456,6 +474,6 @@ void Context::callHost0(JNIEnv *env, jclass, jlong context,                     
     if (!host.queue->invokeEntryBlocking(program, symbol, types, std::move(bytes)))
       throw std::runtime_error("Host program `" + program + "` has no entry `" + symbol + "`");
     transaction.end();
-    rethrowAssert();
+    raiseAssert(env);
   });
 }

@@ -628,11 +628,8 @@ compiler::package::compile(polyast::ProgramLinkRequest request, const compiletim
       return {.value = {}, .errors = {"linked consumer entry compilation failed for " + moduleName + ": " + device->messages}};
     const auto format = runtime::moduleFormatOf(target);
     if (!format) continue;
-    auto features = device->features;
-    if (device->entryArgs ^ exists([](const auto &arg) { return arg.symbol == conventions::ErrorArg; }))
-      features.emplace_back(conventions::ErrorArg);
     remoteModules.emplace_back(moduleName, static_cast<int32_t>(*format), static_cast<int32_t>(runtime::targetPlatformKind(target)),
-                               std::move(features), std::move(*device->binary));
+                               device->features, std::move(*device->binary));
   }
   return {.value = polyast::CompileBundle(std::move(*host->binary), std::move(remoteModules), std::move(implementations), std::move(unfit),
                                           std::move(compileRootInfo)),
@@ -812,6 +809,8 @@ polyast::CompileResult compiler::emit(Staged staged, const compiletime::OptLevel
   polyast::CompileResult c = mkBackend()->compileProgram(effective, opt);
   if (staged.hadEntry && !effective.entry) throw std::logic_error("pipeline removed the Program entry");
   if (effective.entry) c.entryArgs = effective.entry->decl.args ^ map([](const auto &a) { return a.named; });
+  if (c.entryArgs ^ exists([](const auto &arg) { return arg.symbol == conventions::ErrorArg; }))
+    c.features.emplace_back(conventions::ErrorArg);
   for (const auto &entry : effective.metadata)
     if (entry.key.starts_with(conventions::HostAbiNoteMeta)) c.messages += (c.messages.empty() ? "" : "\n") + entry.value;
   c.events ^= concat(staged.events);
