@@ -1231,6 +1231,23 @@ private[polyregion] object ProgramLinker {
     Either.cond(errors.isEmpty, program, errors)
   }
 
+  private def validateOffloadHostCalls(program: p.Program): Either[List[String], p.Program] = {
+    val functions = program.entry.toList ::: program.functions
+    val hostNames = functions.collect {
+      case function if function.affinity == p.Function.Affinity.Host => function.name
+    }.toSet
+    val errors = functions.flatMap { function =>
+      if (function.affinity != p.Function.Affinity.Offload) Nil
+      else
+        function
+          .collectWhere[p.Expr] { case p.Expr.Invoke(p.Type.FnRef(target), _, _, _, _) => target }
+          .distinct
+          .filter(hostNames)
+          .map(target => s"offload function `${function.name.fqcn}` calls host function `${target.fqcn}`")
+    }
+    Either.cond(errors.isEmpty, program, errors)
+  }
+
   private def propagateHostAffinity(program: p.Program): p.Program = {
     val all    = program.entry.toList ::: program.functions
     val byName = all.groupBy(_.name)
@@ -1299,12 +1316,16 @@ private[polyregion] object ProgramLinker {
     val closed = closeRemoteTargets(monomorphic, Set.empty)
     closed
       .map { program =>
+        val reachable = DeadFunctionElimination(program, PluginEntry.defaultLog)
+        propagateHostAffinity(reachable)
+      }
+      .flatMap(validateOffloadHostCalls)
+      .map { program =>
         val inlined = stackDepth.fold(OffloadEntryInline())(OffloadEntryInline(_))(program, PluginEntry.defaultLog)
         val flattened =
           if (logicalAddressing) inlined else KernelCaptureFlatten(inlined, PluginEntry.defaultLog)
         val functions = DeadFunctionElimination(flattened, PluginEntry.defaultLog)
-        val structs   = DeadStructElimination(functions, PluginEntry.defaultLog)
-        propagateHostAffinity(structs)
+        DeadStructElimination(functions, PluginEntry.defaultLog)
       }
       .flatMap(validateRemoteLaunchTargets)
   }

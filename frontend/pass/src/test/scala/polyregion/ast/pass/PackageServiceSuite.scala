@@ -252,6 +252,77 @@ class PackageServiceSuite extends munit.FunSuite {
     assertEquals(retained.affinity, p.Function.Affinity.Offload)
   }
 
+  private def decl(name: p.Sym, affinity: p.Function.Affinity) =
+    p.FunctionDecl(name, Nil, None, Nil, Nil, Nil, p.Type.Unit0, affinity)
+
+  private def invokeStmt(callee: p.Sym) = p.Stmt.Var(
+    p.Named("call", p.Type.Unit0),
+    Some(p.Expr.Invoke(p.Type.FnRef(callee), Nil, None, Nil, p.Type.Unit0))
+  )
+
+  private def handleStmt(callee: p.Sym) = p.Stmt.Var(
+    p.Named("handle", p.Type.FnRef(callee)),
+    Some(p.Expr.Alias(p.Term.Poison(p.Type.FnRef(callee))))
+  )
+
+  private def linkCall(body: List[p.Stmt], functions: List[p.Function]) = {
+    val publicName = p.Sym("library.call")
+    val publicDecl = decl(publicName, p.Function.Affinity.Host)
+    val implementation = function(
+      publicDecl.copy(name = p.Sym("implementation.call")),
+      body :+ unitReturn.head,
+      implements = Some(publicName),
+      visibility = p.Function.Visibility.Exported
+    )
+    val pkg = p.Package(
+      p.Interface(p.Sym("library"), List(publicDecl)),
+      p.Program(None, implementation :: functions, Nil)
+    )
+    val root = function(
+      publicDecl.copy(name = p.Sym("consumer.call")),
+      implements = Some(publicName),
+      visibility = p.Function.Visibility.Exported
+    )
+    ProgramLinker.link(p.Program.LinkRequest(List(pkg), p.Program(None, List(root), Nil)))
+  }
+
+  test("offload functions reject calls into host functions") {
+    val hostName   = p.Sym("host.helper")
+    val kernelName = p.Sym("kernel.device")
+    val kernel = function(
+      decl(kernelName, p.Function.Affinity.Offload),
+      List(invokeStmt(hostName), unitReturn.head)
+    ).copy(convention = p.CallConvention.OffloadEntry)
+    val linked = linkCall(
+      List(handleStmt(kernelName)),
+      List(kernel, function(decl(hostName, p.Function.Affinity.Host)))
+    )
+    assertEquals(linked, Left(List("offload function `kernel.device` calls host function `host.helper`")))
+  }
+
+  test("host functions may call offload functions") {
+    val helperName = p.Sym("kernel.helper")
+    val linked = linkCall(
+      List(invokeStmt(helperName)),
+      List(function(decl(helperName, p.Function.Affinity.Offload)))
+    )
+    assert(linked.isRight, linked)
+  }
+
+  test("offload functions may call offload functions") {
+    val helperName = p.Sym("kernel.helper")
+    val kernelName = p.Sym("kernel.device")
+    val kernel = function(
+      decl(kernelName, p.Function.Affinity.Offload),
+      List(invokeStmt(helperName), unitReturn.head)
+    ).copy(convention = p.CallConvention.OffloadEntry)
+    val linked = linkCall(
+      List(handleStmt(kernelName)),
+      List(kernel, function(decl(helperName, p.Function.Affinity.Offload)))
+    )
+    assert(linked.isRight, linked)
+  }
+
   test("linking composes a context-aware implementation ABI") {
     val name    = p.Sym("library.copy")
     val pointer = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global)
