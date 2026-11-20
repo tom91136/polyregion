@@ -70,6 +70,9 @@ class Quoted(val underlying: scala.quoted.Quotes) {
       )
   )
 
+  /** show crashes on synthetic annotations such as @retains */
+  def safeShow(t: Tree): String = scala.util.Try(t.show).getOrElse(t.toString)
+
   // TODO rename to RemapContext
   case class RemapContext(
       root: Symbol,
@@ -78,6 +81,7 @@ class Quoted(val underlying: scala.quoted.Quotes) {
 
       refs: Map[Symbol, p.Expr] = Map.empty, // ident/select table
       names: Map[Symbol, Int] = Map.empty,
+      closures: Map[Symbol, DefDef] = Map.empty, // val -> its lambda method
       invokeCaptures: Map[Symbol, List[p.Term]] = Map.empty,
       deps: Dependencies = Dependencies(),
       stmts: List[p.Stmt] = List.empty, // fn statements
@@ -120,6 +124,9 @@ class Quoted(val underlying: scala.quoted.Quotes) {
     def withInvokeCapture(s: Symbol, xs: List[p.Term]): RemapContext =
       copy(invokeCaptures = invokeCaptures + (s -> xs))
 
+    def withClosure(s: Symbol, dd: DefDef): RemapContext =
+      copy(closures = closures + (s -> dd))
+
     def noStmts: RemapContext = copy(stmts = Nil)
     // def mark(s: p.Signature, d: DefDef) = copy(defs = defs + (s -> d))
     infix def ::=(xs: p.Stmt*): RemapContext = copy(stmts = stmts ++ xs)
@@ -138,7 +145,7 @@ class Quoted(val underlying: scala.quoted.Quotes) {
 		 |[Refs]:
 		 |  -> ${refs.mkString("\n  -> ")}
 		 |[Trace]
-		 |  ->${traces.map(x => s"${x.show} -> $x".indent_(1)).mkString("---\n  ->")}
+		 |  ->${traces.map(x => s"${safeShow(x)} -> $x".indent_(1)).mkString("---\n  ->")}
 		 |[Stmts]
 		 |  ->${stmts.map(_.repr.indent_(1)).mkString("  ->")}""".stripMargin.fail[A]
 

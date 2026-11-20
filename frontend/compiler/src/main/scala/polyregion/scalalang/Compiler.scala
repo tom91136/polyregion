@@ -290,6 +290,9 @@ object Compiler {
     } yield (imports._1 ::: fns, imports._2 ++ clsDeps, moduleSymDeps)
   }
 
+  private def showTree(using q: Quoted)(t: q.Tree): String =
+    Try(t.show(using q.Printer.TreeAnsiCode)).getOrElse(t.toString)
+
   @SuppressWarnings(Array("bonsai:repeated-subexpression"))
   def compileFn(using
       q: Quoted
@@ -302,9 +305,9 @@ object Compiler {
   ): Result[(p.Function, q.Dependencies)] =
     for {
       log <- sink.subLog(s"Compile DefDef: ${f.name}").success
-      _      = log.info(s"Body", f.show(using q.Printer.TreeAnsiCode))
+      _      = log.info(s"Body", showTree(f))
       symbol = f.symbol
-      rhs <- f.rhs.failIfEmpty(s"Function does not contain an implementation: (in ${symbol.maybeOwner}) ${f.show}")
+      rhs <- f.rhs.failIfEmpty(s"Function does not contain an implementation: (in ${symbol.maybeOwner}) ${showTree(f)}")
 
       // First we run the typer on the return type to see if we can just return a term based on the type.
       (fnRtnTerm -> fnRtnTpe, fnRtnWit) <- Retyper.typer0(f.returnTpt.tpe)
@@ -392,8 +395,11 @@ object Compiler {
         .getOrElse("<no pos>")
       s"Compile term: $label"
     }.success
-    _ = log.info("Body (AST)", pprint.tokenize(term, indent = 1, showFieldNames = true).mkString)
-    _ = log.info("Body (Ascii)", term.show(using q.Printer.TreeAnsiCode))
+    _ = log.info(
+      "Body (AST)",
+      Try(pprint.tokenize(term, indent = 1, showFieldNames = true).mkString).getOrElse(term.toString)
+    )
+    _ = log.info("Body (Ascii)", showTree(term))
 
     (termValue, c)      <- q.RemapContext(root = root, refs = scope).mapTerm(term, None, tpeArgs)
     (_ -> termTpe, wit) <- Retyper.typer0(term.tpe)
@@ -490,6 +496,88 @@ object Compiler {
       _ = log.info("Fn after replacements", mappedFn.repr)
 
     } yield (mappedFn, mappedFnDeps, structDefs, deps.modules.keySet)
+
+  def wireCaptures(program: p.Program, includeModules: Boolean = true): Result[p.Program] = program.entry match {
+    case None => "compiler optimisation removed the program entry".fail
+    case Some(entry) =>
+      val fnByName: Map[p.Sym, p.Function] = (entry :: program.functions).map(fn => fn.name -> fn).toMap
+      // Transitive module-capture types each function needs, including those from its callees.
+      // The call graph is invariant across iterations: only the per-fn capture sets grow;
+      // we collect callees once up front rather than re-walking every body each iteration.
+      def computeTransitiveModuleCaps(): Map[p.Sym, List[p.Arg]] = {
+        val callGraph: Map[p.Sym, List[p.Sym]] =
+          fnByName.view.mapValues(_.collectWhere[p.Expr] { case ivk: p.Expr.Invoke => ivk.calleeName }).toMap
+        var current: Map[p.Sym, List[p.Arg]] = fnByName.view.mapValues(_.moduleCaptures).toMap
+        var changed                          = true
+        while (changed) {
+          changed = false
+          val next = current.map { case (sym, caps) =>
+            val seen = scala.collection.mutable.Set.from(caps.map(_.named.tpe))
+            val merged = callGraph(sym)
+              .foldLeft(caps.reverse) { (acc, callee) =>
+                current.getOrElse(callee, Nil).foldLeft(acc) { (acc1, cap) =>
+                  if (seen.add(cap.named.tpe)) cap :: acc1 else acc1
+                }
+              }
+              .reverse
+            sym -> merged
+          }
+          if (next != current) { changed = true; current = next }
+        }
+        current
+      }
+      val transitive   = if (includeModules) computeTransitiveModuleCaps() else Map.empty[p.Sym, List[p.Arg]]
+      val entryAllCaps = transitive.getOrElse(entry.name, entry.moduleCaptures)
+      val newEntry     = entry.copy(decl = entry.decl.copy(moduleCaptures = entryAllCaps))
+      val entryCapByTpe: Map[p.Type, p.Named] =
+        (newEntry.moduleCaptures ++ newEntry.termCaptures).map(arg => arg.named.tpe -> arg.named).toMap
+
+      // Update each function's own moduleCaptures to its transitive set, so when its body
+      // forwards a capture into a callee Invoke, the capture name is in scope.
+      def updateFnCaps(fn: p.Function): p.Function =
+        if (!includeModules) fn
+        else {
+          val transitiveCaps = transitive.getOrElse(fn.name, fn.moduleCaptures)
+          if (transitiveCaps == fn.moduleCaptures) fn
+          else fn.copy(decl = fn.decl.copy(moduleCaptures = transitiveCaps))
+        }
+
+      // Rebuild the LUT from post-updateFnCaps functions so callee.moduleCaptures reflects
+      // the transitive set the backend will actually register.
+      val updatedFns                              = newEntry :: program.functions.map(updateFnCaps)
+      val updatedFnByName: Map[p.Sym, p.Function] = updatedFns.map(fn => fn.name -> fn).toMap
+
+      def patchFn(fn: p.Function): p.Function = {
+        val ownCapByTpe: Map[p.Type, p.Named] =
+          (fn.moduleCaptures ++ fn.termCaptures).map(arg => arg.named.tpe -> arg.named).toMap
+        def patchIvk(ivk: p.Expr.Invoke): p.Expr.Invoke = updatedFnByName.get(ivk.calleeName) match {
+          case None    => ivk
+          case Some(c) =>
+            // captures are always a leading prefix; a pre-opt patch may have added ones the
+            // optimiser has since dropped from the callee, so normalise to the current set
+            val existing = math.max(0, ivk.args.size - c.args.size)
+            val actual   = ivk.args.drop(existing)
+            val needed   = (if (includeModules) c.moduleCaptures else Nil) ++ c.termCaptures
+            if (needed.size == existing) ivk
+            else
+              ivk.copy(args = needed.map { arg =>
+                val tpe   = arg.named.tpe
+                val named = ownCapByTpe.get(tpe).orElse(entryCapByTpe.get(tpe)).getOrElse(arg.named)
+                selectTerm(Nil, named)
+              } ::: actual)
+        }
+        fn.modifyAll[p.Expr] {
+          case ivk: p.Expr.Invoke => patchIvk(ivk)
+          case x                  => x
+        }
+      }
+      program
+        .copy(
+          entry = Some(patchFn(newEntry)),
+          functions = updatedFns.tail.map(patchFn)
+        )
+        .success
+  }
 
   def compileExpr(using
       q: Quoted
@@ -892,6 +980,7 @@ object Compiler {
 
     optPassLog = log.subLog("Opt Passes")
 
+    unoptWired <- wireCaptures(unopt, includeModules = false)
     opt = scala.Function.chain(
       List[ProgramPass](
         printPass(Intrinsify),
@@ -899,93 +988,10 @@ object Compiler {
         PartialEval(),
         DeadArgElimination
       ).map(p => p(_, optPassLog))
-    )(unopt)
+    )(unoptWired)
     (monomorphicToPolymorphicSym, opt) <- MonoStruct(opt, log).success
 
-    // Wire up Invoke captures and propagate captures transitively up to the entry. compileFn
-    // doesn't know what captures a function will need until its body is compiled (in a separate
-    // RemapContext from the entry/caller). After opt passes finalise per-function capture lists,
-    // walk the program: ensure every Invoke passes the captures its callee needs, and that the
-    // entry's own captures cover the transitive closure of all module captures any reachable
-    // function needs.
-    entry <- opt.entry.failIfEmpty("compiler optimisation removed the program entry")
-    opt <- {
-      val fnByName: Map[p.Sym, p.Function] = (entry :: opt.functions).map(fn => fn.name -> fn).toMap
-      // Transitive module-capture types each function needs, including those from its callees.
-      // The call graph is invariant across iterations: only the per-fn capture sets grow;
-      // we collect callees once up front rather than re-walking every body each iteration.
-      def computeTransitiveModuleCaps(): Map[p.Sym, List[p.Arg]] = {
-        val callGraph: Map[p.Sym, List[p.Sym]] =
-          fnByName.view.mapValues(_.collectWhere[p.Expr] { case ivk: p.Expr.Invoke => ivk.calleeName }).toMap
-        var current: Map[p.Sym, List[p.Arg]] = fnByName.view.mapValues(_.moduleCaptures).toMap
-        var changed                          = true
-        while (changed) {
-          changed = false
-          val next = current.map { case (sym, caps) =>
-            val seen = scala.collection.mutable.Set.from(caps.map(_.named.tpe))
-            val merged = callGraph(sym)
-              .foldLeft(caps.reverse) { (acc, callee) =>
-                current.getOrElse(callee, Nil).foldLeft(acc) { (acc1, cap) =>
-                  if (seen.add(cap.named.tpe)) cap :: acc1 else acc1
-                }
-              }
-              .reverse
-            sym -> merged
-          }
-          if (next != current) { changed = true; current = next }
-        }
-        current
-      }
-      val transitive   = computeTransitiveModuleCaps()
-      val entryAllCaps = transitive.getOrElse(entry.name, entry.moduleCaptures)
-      val newEntry     = entry.copy(decl = entry.decl.copy(moduleCaptures = entryAllCaps))
-      val entryCapByTpe: Map[p.Type, p.Named] =
-        (newEntry.moduleCaptures ++ newEntry.termCaptures).map(arg => arg.named.tpe -> arg.named).toMap
-
-      // Update each function's own moduleCaptures to its transitive set, so when its body
-      // forwards a capture into a callee Invoke, the capture name is in scope.
-      def updateFnCaps(fn: p.Function): p.Function = {
-        val transitiveCaps = transitive.getOrElse(fn.name, fn.moduleCaptures)
-        if (transitiveCaps == fn.moduleCaptures) fn
-        else fn.copy(decl = fn.decl.copy(moduleCaptures = transitiveCaps))
-      }
-
-      // Rebuild the LUT from post-updateFnCaps functions so callee.moduleCaptures reflects
-      // the transitive set the backend will actually register.
-      val updatedFns                              = newEntry :: opt.functions.map(updateFnCaps)
-      val updatedFnByName: Map[p.Sym, p.Function] = updatedFns.map(fn => fn.name -> fn).toMap
-
-      def patchFn(fn: p.Function): p.Function = {
-        val ownCapByTpe: Map[p.Type, p.Named] =
-          (fn.moduleCaptures ++ fn.termCaptures).map(arg => arg.named.tpe -> arg.named).toMap
-        def patchIvk(ivk: p.Expr.Invoke): p.Expr.Invoke = updatedFnByName.get(ivk.calleeName) match {
-          case None => ivk
-          case Some(c) =>
-            val expected = c.args.size + c.moduleCaptures.size + c.termCaptures.size
-            if (ivk.args.size >= expected) ivk
-            else {
-              val needed = c.moduleCaptures ++ c.termCaptures
-              if (needed.isEmpty) ivk
-              else
-                ivk.copy(args = needed.map { arg =>
-                  val tpe   = arg.named.tpe
-                  val named = ownCapByTpe.get(tpe).orElse(entryCapByTpe.get(tpe)).getOrElse(arg.named)
-                  selectTerm(Nil, named)
-                } ::: ivk.args)
-            }
-        }
-        fn.modifyAll[p.Expr] {
-          case ivk: p.Expr.Invoke => patchIvk(ivk)
-          case x                  => x
-        }
-      }
-      opt
-        .copy(
-          entry = Some(patchFn(newEntry)),
-          functions = updatedFns.tail.map(patchFn)
-        )
-        .success
-    }
+    opt <- wireCaptures(opt)
 
     // verify again after optimisation
     optLog = log.subLog("Opt")

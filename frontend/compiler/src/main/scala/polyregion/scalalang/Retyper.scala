@@ -194,6 +194,10 @@ object Retyper {
 
   def typer0(using q: Quoted)(repr: q.TypeRepr): Result[(q.Retyped, q.ClsWitnesses)] =
     (repr.dealias.widenTermRefByName.simplified match {
+      case tpe if tpe.typeSymbol == q.defn.NullClass =>
+        (None -> p.Type.Ptr(p.Type.Nothing, p.Type.Space.Global), Map.empty).success
+      case tpe if tpe.typeSymbol == q.defn.NothingClass =>
+        (None -> p.Type.Nothing, Map.empty).success
       case ref @ q.TypeRef(_, name) if ref.typeSymbol.isAbstractType => (None -> p.Type.Var(name), Map.empty).success
       case q.ParamRef(q.PolyType(args, _, _), argIdx)          => (None -> p.Type.Var(args(argIdx)), Map.empty).success
       case q.TypeBounds(_, _)                                  => (None -> p.Type.Nothing, Map.empty).success
@@ -299,16 +303,28 @@ object Retyper {
           case q.FloatConstant(v)   => (Some(p.Expr.Alias(p.Term.Float32Const(v))) -> p.Type.Float32, Map.empty).success
           case q.DoubleConstant(v)  => (Some(p.Expr.Alias(p.Term.Float64Const(v))) -> p.Type.Float64, Map.empty).success
           case q.CharConstant(v)    => (Some(p.Expr.Alias(p.Term.IntU16Const(v))) -> p.Type.IntU16, Map.empty).success
-          case q.StringConstant(v)  => ???
-          case q.UnitConstant       => (Some(p.Expr.Alias(p.Term.Unit0Const)) -> p.Type.Unit0, Map.empty).success
-          case q.NullConstant       => ???
+          case q.StringConstant(v) =>
+            (
+              Some(p.Expr.Alias(p.Term.StringConst(v))) ->
+                p.Type.Ptr(p.Type.IntS8, p.Type.Space.Constant),
+              Map.empty
+            ).success
+          case q.UnitConstant => (Some(p.Expr.Alias(p.Term.Unit0Const)) -> p.Type.Unit0, Map.empty).success
+          case q.NullConstant =>
+            (
+              Some(p.Expr.Alias(p.Term.NullPtrConst(p.Type.Nothing, p.Type.Space.Global, p.Region.Opaque))) ->
+                p.Type.Ptr(p.Type.Nothing, p.Type.Space.Global),
+              Map.empty
+            ).success
           case q.ClassOfConstant(cls) =>
             val reifiedTpe = q.TypeRepr.typeConstructorOf(classOf[Class[?]]).appliedTo(cls)
             typer0(reifiedTpe).map { case (_ -> tpe, wit) =>
               (Some(p.Expr.Alias(p.Term.Poison(tpe))) -> tpe, wit)
             }
         }
-      case q.ParamRef(r, i) => ???
+      case q.ParamRef(m: q.MethodType, i) => m match { case q.MethodType(_, argTpes, _) => typer0(argTpes(i)) }
+      case q.ParamRef(r, i) =>
+        s"Unsupported type parameter reference $i in ${Try(r.show).getOrElse(r.toString)}".fail
       case expr =>
         resolveClsFromTpeRepr(expr).flatMap { (sym, tpeVars, symbol, kind) =>
           liftClsToTpe(sym, tpeVars, symbol, kind) match {

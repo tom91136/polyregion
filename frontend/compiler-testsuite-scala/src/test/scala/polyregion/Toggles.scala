@@ -8,6 +8,7 @@ object Toggles {
   final inline val BufferSuite           = true
   final inline val CaptureSuite          = true
   final inline val CastSuite             = true
+  final inline val ClosureSuite          = true
   final inline val CollectionLengthSuite = true
   final inline val CompoundCaptureSuite  = true
   final inline val CompoundOpsSuite      = true

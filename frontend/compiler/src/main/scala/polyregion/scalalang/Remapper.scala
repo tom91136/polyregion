@@ -7,6 +7,7 @@ import polyregion.ast.{PolyAST as p, *, given}
 import polyregion.intrinsic.IntrinsicTable
 
 import scala.annotation.tailrec
+import scala.util.Try
 
 object Remapper {
 
@@ -15,11 +16,9 @@ object Remapper {
     // Recurse fully so type vars nested inside Struct args, Ptr components, or curried inner Execs
     // (e.g. `<T>(Int) => <>(ClassTag[T]) => Array[T]`) are all rewritten.
     def resolve(t: p.Type): p.Type = t match {
-      case p.Type.Var(name, _) =>
-        tpeTable.get(name) match {
-          case Some(value) => value
-          case None        => ???
-        }
+      case v @ p.Type.Var(name, _) =>
+        // unapplied vars stay generic for Specialisation
+        tpeTable.getOrElse(name, v)
       case p.Type.Struct(name, args) =>
         p.Type.Struct(name, args.map(resolve))
       case p.Type.Ptr(comp, space)         => p.Type.Ptr(resolve(comp), space)
@@ -51,6 +50,34 @@ object Remapper {
       Retyper.typer0(arg.tpt.tpe).map { case (_ -> t, wit) => ((arg, p.Named(arg.name, t)) :: Nil, wit) }
     }
 
+  /** Resolves the local `DefDef` behind a closure term: a lambda literal, a `Block` that defines the lambda method, or
+    * a reference to a val/def holding one.
+    */
+  private def closureDefOf(using q: Quoted)(term: q.Term, depth: Int = 0): Option[q.DefDef] =
+    if (depth > 8) None
+    else
+      term match {
+        case block: q.Block => closureDefOf(block.expr, depth + 1)
+        case closure: q.Closure =>
+          val method = closure.meth match {
+            case i: q.Ident => i.symbol
+            case other      => other.symbol
+          }
+          method.tree match {
+            case dd: q.DefDef => Some(dd)
+            case _            => None
+          }
+        case q.Typed(x, _)      => closureDefOf(x, depth + 1)
+        case q.Inlined(_, _, x) => closureDefOf(x, depth + 1)
+        case ref: q.Ref =>
+          ref.symbol.tree match {
+            case dd: q.DefDef if ref.symbol.name.contains("$anonfun") => Some(dd)
+            case vd: q.ValDef                                         => vd.rhs.flatMap(closureDefOf(_, depth + 1))
+            case _                                                    => None
+          }
+        case _ => None
+      }
+
   private[scalalang] def receiverOf(owningClass: p.Type): Result[(Option[p.Named], List[p.Type.Var])] =
     owningClass match {
       case t @ p.Type.Struct(_, args) =>
@@ -63,6 +90,92 @@ object Remapper {
 
   def deriveModuleStructCaptures(using q: Quoted)(d: q.Dependencies): List[p.Named] =
     d.modules.values.toList.map(t => p.Named(t.name.fqn.mkString("_"), t))
+
+  private def isFnTpe(t: p.Type, u: p.Type) = (t, u) match {
+    case (p.Type.Struct(structSym, _), p.Type.Exec(tpeVars, args, rtnTpe)) =>
+      // Without parents on Type.Struct, we approximate by matching Function$n by sym only.
+      structSym match {
+        case p.Sym("scala" :: s"Function$n" :: Nil) if args.size == n.toInt => true
+        case _                                                              => false
+      }
+    case _ => false
+  }
+
+  private def structConforms(using q: Quoted)(sub: p.Sym, sup: p.Sym): Boolean =
+    Try(q.Symbol.requiredClass(sub.fqcn)).toOption
+      .exists(_.typeRef.baseClasses.exists(b => Retyper.structName0(b) == sup))
+
+  private def invokeDefDef(using
+      q: Quoted
+  )(
+      ctx: q.RemapContext,
+      fn: q.DefDef,
+      receiver: Option[p.Expr],
+      tpe: p.Type,
+      tpeArgs: List[p.Type],
+      termArgss: List[List[p.Expr]]
+  ): Result[(p.Expr, q.RemapContext)] = {
+    // Assert that the term list matches Exec's nested (recursive) types.
+    // Note that Exec treats both empty args `()` and no-args as `Nil` where as the collected arg lists through
+    // `Apply` will give empty args as `Nil` and not collect no-args at all because no application took place.
+    val termTpess  = termArgss.map(_.map(_.tpe)) // Poison type???
+    val execTpess  = collectExecArgLists(tpe)
+    val calleeName = fn.symbol.fullName
+    val rootName   = ctx.root.fullName
+    for {
+      // First we validate the application by checking whether types of the positional arguments line up.
+      _ <- (fn.termParamss.isEmpty, termTpess, execTpess) match {
+        case (true, Nil, (Nil :: Nil) | Nil) =>
+          ().success // no-ap; no-arg Exec (`Nil::Nil`) or no Exec (`Nil`)
+        case (false, tss, ess) if tss == ess => ().success // everything else, do the assertion
+        case (ap, tss, ess) => // we may have unapplied generic types from the exec side
+          (tss.flatten, ess.flatten) match {
+            case (ts, es) if ts.size == es.size =>
+              ts.zip(es).traverse {
+                case (t, e) if t == e      => t.success // same type
+                case (t, p.Type.Var(_, _)) => t.success // applied type
+                case (p.Type.Struct(termSym, termArgs), p.Type.Struct(execSym, execArgs)) =>
+                  if (termSym == execSym) {
+                    if (termArgs.size != execArgs.size)
+                      s"Class generic type arity mismatch calling $calleeName: ${termArgs.size} != ${execArgs.size} ".fail
+                    else ().success
+                  } else if (structConforms(termSym, execSym)) ().success
+                  else s"Class type mismatch calling $calleeName from $rootName: $termSym != $execSym ".fail
+                case (t, u) if isFnTpe(t, u) || isFnTpe(u, t) => t.success
+                case (t, u) => s"Cannot match $t with $u calling $calleeName from $rootName".fail
+              }
+            case (ts, es) =>
+              s"Argument size mismatch calling $calleeName: ${ts.map(_.repr)}(size=${ts.size}) != ${es.map(_.repr)}(size=${es.size})".fail
+          }
+      }
+      rtnTpe = resolveExecRtnTpe(tpe)
+      ivk <- ctx.mkInvoke(fn, tpeArgs, receiver, termArgss.flatten, rtnTpe)
+    } yield ivk
+  }
+
+  private def invokeClosureDef(using
+      q: Quoted
+  )(
+      ctx: q.RemapContext,
+      dd: q.DefDef,
+      tpe: p.Type,
+      tpeArgs: List[p.Type],
+      termArgss: List[List[p.Expr]]
+  ): Result[(p.Expr, q.RemapContext)] =
+    Retyper
+      .owningClassSymbol(dd.symbol)
+      .failIfEmpty(s"${dd.symbol} does not have an owning class symbol")
+      .flatMap { classSym =>
+        Retyper.clsSymTyper0(classSym).flatMap { tpe0 =>
+          (classSym.tree, tpe0) match {
+            case (clsDef: q.ClassDef, s @ p.Type.Struct(_, _)) =>
+              ctx.bindThis(clsDef, s).flatMap { c =>
+                invokeDefDef(c, dd, Some(selectExpr(Nil, p.Named("this", s))), tpe, tpeArgs, termArgss)
+              }
+            case (illegal, t) => s"Unexpected closure owner $illegal with type $t".fail
+          }
+        }
+      }
 
   extension (using q: Quoted)(c: q.RemapContext) {
 
@@ -89,10 +202,18 @@ object Remapper {
           (term -> tpe, c) <- c.typerAndWitness(tpeTree.tpe)
           // if tpe is singleton, substitute with constant directly
           (ref, c) <- term.fold((c !! tree).mapTerm(rhs, Some(tpe)))(x => (x, c).success)
-          // term
+          // a closure value has no Exec representation; it stands for the outlined callable itself
+          varTpe = ref.tpe match {
+            case _: p.Type.FnRef => ref.tpe
+            case _               => tpe
+          }
+          closure = closureDefOf(rhs).orElse(rhs match {
+            case r: q.Ref => c.closures.get(r.symbol)
+            case _        => None
+          })
         } yield (
           p.Expr.Alias(p.Term.Unit0Const),
-          c ::= p.Stmt.Var(p.Named(name, tpe), Some(ref))
+          closure.fold(c)(dd => c.withClosure(tree.symbol, dd)) ::= p.Stmt.Var(p.Named(name, varTpe), Some(ref))
           // case (v: q.ErasedMethodVal, tpe: q.ErasedFnTpe) => c.suspend(name -> tpe)(v)
         )
       case q.ValDef(name, tpe, None) => c.fail(s"Unexpected variable $name:$tpe")
@@ -343,57 +464,19 @@ object Remapper {
           // Call no-arg functions (i.e. `x.toDouble` or just `def fn = ???; fn` ) directly or pass-through if not no-arg
           def invokeOrSelect(
               c: q.RemapContext
-          )(sym: q.Symbol, receiver: Option[p.Expr])(select: => Result[p.Expr]) = {
-
-            def isFnTpe(t: p.Type, u: p.Type) = (t, u) match {
-              case (p.Type.Struct(structSym, _), p.Type.Exec(tpeVars, args, rtnTpe)) =>
-                // Without parents on Type.Struct, we approximate by matching Function$n by sym only.
-                structSym match {
-                  case p.Sym("scala" :: s"Function$n" :: Nil) if args.size == n.toInt => true
-                  case _                                                              => false
-                }
-              case _ => false
-            }
-
+          )(sym: q.Symbol, receiver: Option[p.Expr])(select: => Result[p.Expr]) =
             sym.tree match {
-              case fn: q.DefDef => // `receiver?.$fn`
-                // Assert that the term list matches Exec's nested (recursive) types.
-                // Note that Exec treats both empty args `()` and no-args as `Nil` where as the collected arg lists through
-                // `Apply` will give empty args as `Nil` and not collect no-args at all because no application took place.
-                val termTpess = termArgss.map(_.map(_.tpe)) // Poison type???
-                val execTpess = collectExecArgLists(tpe)
-                for {
-                  // First we validate the application by checking whether types of the positional arguments line up.
-                  _ <- (fn.termParamss.isEmpty, termTpess, execTpess) match {
-                    case (true, Nil, (Nil :: Nil) | Nil) =>
-                      ().success // no-ap; no-arg Exec (`Nil::Nil`) or no Exec (`Nil`)
-                    case (false, tss, ess) if tss == ess => ().success // everything else, do the assertion
-                    case (ap, tss, ess) => // we may have unapplied generic types from the exec side
-                      (tss.flatten, ess.flatten) match {
-                        case (ts, es) if ts.size == es.size =>
-                          ts.zip(es).traverse {
-                            case (t, e) if t == e      => t.success // same type
-                            case (t, p.Type.Var(_, _)) => t.success // applied type
-                            case (p.Type.Struct(termSym, termArgs), p.Type.Struct(execSym, execArgs)) =>
-                              if (termSym != execSym) s"Class type mismatch: $termSym != $execSym ".fail
-                              else if (termArgs.size != execArgs.size)
-                                s"Class generic type arity mismatch: ${termArgs.size} != ${execArgs.size} ".fail
-                              else ().success
-                            case (t, u) if isFnTpe(t, u) || isFnTpe(u, t) => t.success
-                            case (t, u)                                   => s"Cannot match $t with $u".fail
-                          }
-                        case (ts, es) =>
-                          s"Argument size mismatch ${ts.map(_.repr)}(size=${ts.size}) != ${es.map(_.repr)}(size=${es.size})".fail
-                      }
-                  }
-                  rtnTpe = resolveExecRtnTpe(tpe)
-                  ivk <- c.mkInvoke(fn, tpeArgs, receiver, termArgss.flatten, rtnTpe)
-                } yield ivk
+              case fn: q.DefDef => invokeDefDef(c, fn, receiver, tpe, tpeArgs, termArgss)
               case local: q.ValDef => // sym.$local
-                for (s <- select) yield s -> c
+                c.closures
+                  .get(local.symbol)
+                  .orElse(local.rhs.flatMap(closureDefOf(_)))
+                  .filter(_ => termArgss.nonEmpty) match {
+                  case Some(dd) => invokeClosureDef(c, dd, tpe, tpeArgs, termArgss)
+                  case None     => for (s <- select) yield s -> c
+                }
               case illegal => s"unexpected invoke/select receiver ${illegal}".fail
             }
-          }
 
           // We handle any reference to arbitrarily nested objects/modules (including direct ident with no nesting, as produced by `inline` calls)
           // directly because they are singletons (i.e. can appear anywhere with no dependencies, even the owner).
@@ -499,7 +582,8 @@ object Remapper {
                   case q.TermRef(_, name) if name != s => name
                   case _                               => s
                 }
-                val local = p.Named(name, tpe)
+                val localTpe = c.closures.get(ident.symbol).fold(tpe)(dd => p.Type.FnRef(p.Sym(dd.symbol.fullName)))
+                val local    = p.Named(name, localTpe)
 
                 handleThisRef(ident, local)
                   .orElse(handleObjectSelect(ident, local))
@@ -582,6 +666,13 @@ object Remapper {
                 val named = p.Named(name, tpe)
                 handleThisRef(select, named)
                   .orElse(handleObjectSelect(select, named))
+                  .orElse(
+                    c.closures
+                      .get(root.symbol)
+                      .orElse(closureDefOf(root))
+                      .filter(_ => termArgss.nonEmpty)
+                      .map(dd => invokeClosureDef(c, dd, tpe, tpeArgs, termArgss))
+                  )
                   .getOrElse {
                     // Otherwise we go through the usual path of resolution  (nested classes where each instance has an `this` reference to the owning class)
                     c.mapTerm(root).flatMap {
@@ -650,13 +741,14 @@ object Remapper {
 
       (tpeArgs, termArgss, term) match {
         case (Nil, Nil, q.NamedArg(name, rhs)) => (c1 !! term).mapTerm(rhs) // named argument: `$name = $rhs`
-        case (Nil, Nil, q.Typed(x, _))         => (c1 !! term).mapTerm(x)   // type ascription: `value : T`
-        case (Nil, Nil, q.Inlined(call, bindings, expansion)) => // inlined DefDef
+        case (ta, ts, q.Typed(x, _)) =>
+          (c1 !! term).mapTerm(x, tpeArgs = ta, termArgss = ts) // type ascription: `value : T`
+        case (ta, ts, q.Inlined(call, bindings, expansion)) => // inlined DefDef
           for {
             // For non-inlined args, bindings will contain all relevant arguments with rhs.
             // TODO I think call is safe to ignore here? It looks like a subtree from the expansion...
             (_, c) <- (c1 !! term).mapTrees(bindings)
-            (v, c) <- (c !! term).mapTerm(expansion)
+            (v, c) <- (c !! term).mapTerm(expansion, tpeArgs = ta, termArgss = ts)
           } yield (v, c)
         case (Nil, Nil, q.Literal(q.BooleanConstant(v))) => (p.Expr.Alias(p.Term.Bool1Const(v)), c1 !! term).pure
         case (Nil, Nil, q.Literal(q.IntConstant(v)))     => (p.Expr.Alias(p.Term.IntS32Const(v)), c1 !! term).pure
@@ -668,11 +760,16 @@ object Remapper {
         case (Nil, Nil, q.Literal(q.CharConstant(v)))    => (p.Expr.Alias(p.Term.IntU16Const(v)), c1 !! term).pure
         case (Nil, Nil, q.Literal(q.UnitConstant()))     => (p.Expr.Alias(p.Term.Unit0Const), c1 !! term).pure
         case (Nil, Nil, q.Literal(q.StringConstant(v))) =>
-          ??? // XXX alloc new string instance
+          (p.Expr.Alias(p.Term.StringConst(v)), c1 !! term).pure
         case (Nil, Nil, q.Literal(q.ClassOfConstant(_))) => typedVar(termTpe)
         case (Nil, Nil, l @ q.Literal(q.NullConstant())) =>
           c1.typerAndWitness(l.tpe).map { case (_ -> tpe, c) =>
-            (p.Expr.Alias(p.Term.Poison(tpe)), c !! term)
+            val nullTpe = eventualTpe.collect { case ptr: p.Type.Ptr => ptr }.getOrElse(tpe)
+            val term0 = nullTpe match {
+              case p.Type.Ptr(comp, space) => p.Term.NullPtrConst(comp, space, p.Region.Opaque)
+              case _                       => p.Term.NullPtrConst(p.Type.Nothing, p.Type.Space.Global, p.Region.Opaque)
+            }
+            (p.Expr.Alias(term0), c !! term)
           }
         case (Nil, Nil, q.This(_)) => // reference to the current class: `this.???`
           // XXX Don't use typerAndWitness here, we need to record the witnessing of `this` separately.
@@ -705,10 +802,25 @@ object Remapper {
         case (Nil, Nil, q.New(tpt)) => // new instance *without* arg application: `new $tpt`
           typedVar(tpt.tpe)
         case (tpeArgs, termArgs0, ap @ q.Apply(fun, args)) => // *single* application of some terms: `$fun($args...)`
-          for {
-            (args, c) <- c1.down(ap).mapTerms(args)
-            (fun, c)  <- (c !! ap).mapTerm(fun, tpeArgs = tpeArgs, termArgss = args :: termArgs0)
-          } yield (fun, c)
+          val closure = fun match {
+            case r: q.Ref => c1.closures.get(r.symbol).orElse(closureDefOf(fun))
+            case _        => closureDefOf(fun)
+          }
+          closure match {
+            case Some(dd) =>
+              for {
+                // map the lambda literal first so its method and captures are registered
+                (_, c)        <- (c1 !! ap).mapTerm(fun)
+                (args, c)     <- c.down(ap).mapTerms(args)
+                (_ -> tpe, c) <- c.typerAndWitness(fun.tpe)
+                (res, c)      <- invokeClosureDef(c, dd, tpe, tpeArgs, args :: termArgs0)
+              } yield (res, c)
+            case None =>
+              for {
+                (args, c) <- c1.down(ap).mapTerms(args)
+                (fun, c)  <- (c !! ap).mapTerm(fun, tpeArgs = tpeArgs, termArgss = args :: termArgs0)
+              } yield (fun, c)
+          }
         case (_, _, q.Block(stat, expr)) => // block expression: `{ $stmts...; $expr }`
           // Type/term args may carry through when an inlined polymorphic call (e.g. ClassTag.apply
           // for an Array.ofDim implicit) lands as a Block result. Pass them down to the result expr.
@@ -760,6 +872,14 @@ object Remapper {
             cond <- (thenTerm.tpe, elseTerm.tpe, eventualTpe) match {
               case (`tpe`, `tpe`, _) => // Same on both side, perfect
                 mkCondStmts(tpe)
+              case (p.Type.Nothing, `tpe`, _) => // diverging branch (e.g. `throw`)
+                mkCondStmts(tpe)
+              case (`tpe`, p.Type.Nothing, _) =>
+                mkCondStmts(tpe)
+              case (p.Type.Nothing, other, _) =>
+                mkCondStmts(other)
+              case (other, p.Type.Nothing, _) =>
+                mkCondStmts(other)
 
               case (
                     p.Type.Struct(_, _),
@@ -810,10 +930,21 @@ object Remapper {
               )
             )
           }
-        case (Nil, Nil, q.Closure(rhs, None)) => ???
+        case (ta, ts, closure: q.Closure) if ts.nonEmpty =>
+          closureDefOf(closure) match {
+            case Some(dd) =>
+              for {
+                (_, c)        <- (c1 !! term).mapTerm(closure)
+                (_ -> tpe, c) <- c.typerAndWitness(closure.tpe)
+                (res, c)      <- invokeClosureDef(c, dd, tpe, ta, ts)
+              } yield (res, c)
+            case None => c1.fail(s"Unapplied closure ${q.safeShow(closure)}")
+          }
+        case (Nil, Nil, closure: q.Closure) =>
+          (p.Expr.Alias(p.Term.Poison(p.Type.FnRef(p.Sym(closure.meth.symbol.fullName)))), c1 !! term).pure
         case _ =>
           c1.fail(
-            s"Unhandled: <${tpeArgs.map(_.repr)}>`$term`(${termArgss}), show=`${term.show}`\nSymbol:\n${term.symbol}"
+            s"Unhandled: <${tpeArgs.map(_.repr)}>`$term`(${termArgss}), show=`${q.safeShow(term)}`\nSymbol:\n${term.symbol}"
           )
       }
     }
