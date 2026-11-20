@@ -1,6 +1,4 @@
 #pragma once
-#include <stdexcept>
-
 #include <jni.h>
 namespace polyregion::generated::registry::Platform {
 
@@ -17,19 +15,17 @@ namespace polyregion::generated::registry::Platform {
 
 static void unregisterMethods(JNIEnv *env) {
   jclass found = env->FindClass("polyregion/jvm/runtime/Platform");
-  if (!found) return env->ExceptionClear();
-  const jint result = env->UnregisterNatives(found);
-  env->DeleteLocalRef(found);
-  if (result != 0) {
-    throw std::logic_error("UnregisterNatives returned non-zero for polyregion/jvm/runtime/Platform");
+  if (!found) {
+    env->ExceptionClear();
+    return;
   }
+  if (env->UnregisterNatives(found) != 0) env->ExceptionClear();
+  env->DeleteLocalRef(found);
 }
 
-static void registerMethods(JNIEnv *env) {
+[[nodiscard]] static bool registerMethods(JNIEnv *env) {
   jclass found = env->FindClass("polyregion/jvm/runtime/Platform");
-  if (!found) {
-    throw std::logic_error("Cannot find class polyregion/jvm/runtime/Platform");
-  }
+  if (!found) return false;
   const static JNINativeMethod methods[10] = {
       {.name = const_cast<char *>("deleteDevicePeer0"),
        .signature = const_cast<char *>("(J)V"),
@@ -59,9 +55,7 @@ static void registerMethods(JNIEnv *env) {
        .fnPtr = reinterpret_cast<void *>(&runtimeProperties0)}};
   const jint result = env->RegisterNatives(found, methods, 10);
   env->DeleteLocalRef(found);
-  if (result != 0) {
-    throw std::logic_error("RegisterNatives returned non-zero for polyregion/jvm/runtime/Platform");
-  }
+  return result == 0;
 }
 
 } // namespace polyregion::generated::registry::Platform

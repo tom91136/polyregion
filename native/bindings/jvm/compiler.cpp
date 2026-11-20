@@ -32,7 +32,7 @@ using namespace gen::registry;
   JNIEnv *env = getEnv(vm);
   if (!env) return JNI_ERR;
   cp::initialise();
-  Compiler::registerMethods(env);
+  if (!Compiler::registerMethods(env)) return JNI_ERR;
   return JNI_VERSION_1_1;
 }
 
@@ -49,24 +49,26 @@ using namespace gen::registry;
 }
 
 static generated::Layout::Instance toJni(JNIEnv *env, const polyast::StructLayout &l) {
-  return gen::Layout::of(env)(env,                                                           //
-                              toJni(env, l.name),                                            //
-                              jlong(l.sizeInBytes),                                          //
-                              jlong(l.alignment),                                            //
-                              toJni(env, l.members, gen::Member::of(env).clazz,              //
-                                    [&](auto &m) {                                           //
-                                      return gen::Member::of(env)(env,                       //
-                                                                  toJni(env, m.name.symbol), //
-                                                                  jlong(m.offsetInBytes),    //
-                                                                  jlong(m.sizeInBytes))      //
-                                          .instance;                                         //
-                                    })                                                       //
-  );                                                                                         //
+  const auto &member = gen::Member::of(env);
+  return gen::Layout::of(env)(env,                                             //
+                              toJni(env, l.name),                              //
+                              jlong(l.sizeInBytes),                            //
+                              jlong(l.alignment),                              //
+                              toJni(env, l.members, member.clazz,              //
+                                    [&](auto &m) {                             //
+                                      return member(env,                       //
+                                                    toJni(env, m.name.symbol), //
+                                                    jlong(m.offsetInBytes),    //
+                                                    jlong(m.sizeInBytes))      //
+                                          .instance;                           //
+                                    })                                         //
+  );                                                                           //
 }
 
 static generated::Event::Instance toJni(JNIEnv *env, const polyast::CompileEvent &e) {
-  return gen::Event::of(env)(env, e.epochMillis, e.elapsedNanos, toJni(env, e.name), toJni(env, e.data),
-                             toJni(env, e.items, gen::Event::of(env).clazz, [&](auto &item) { return toJni(env, item).instance; }));
+  const auto &event = gen::Event::of(env);
+  return event(env, e.epochMillis, e.elapsedNanos, toJni(env, e.name), toJni(env, e.data),
+               toJni(env, e.items, event.clazz, [&](auto &item) { return toJni(env, item).instance; }));
 }
 
 static cp::Options fromJni(JNIEnv *env, jobject options) {

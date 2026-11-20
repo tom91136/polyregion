@@ -41,8 +41,7 @@ static constexpr const char *EX = "polyregion/jvm/runtime/PolyregionRuntimeExcep
   JNIEnv *env = getEnv(vm);
   if (!env) return JNI_ERR;
   rt::init();
-  Platforms::registerMethods(env);
-  Platform::registerMethods(env);
+  if (!Platforms::registerMethods(env) || !Platform::registerMethods(env)) return JNI_ERR;
   return JNI_VERSION_1_1;
 }
 
@@ -77,8 +76,8 @@ static std::shared_ptr<T> findRef(JNIEnv *env, std::unordered_map<jlong, std::sh
 }
 
 static jobjectArray toJni(JNIEnv *env, const std::vector<rt::Property> &xs) {
-  return toJni(env, xs, gen::Property::of(env).clazz,
-               [&](const auto &x) { return gen::Property::of(env)(env, toJni(env, x.first), toJni(env, x.second)).instance; });
+  const auto &property = gen::Property::of(env);
+  return toJni(env, xs, property.clazz, [&](const auto &x) { return property(env, toJni(env, x.first), toJni(env, x.second)).instance; });
 }
 
 void Platforms::deleteAllPeers0(JNIEnv *, jclass) {
@@ -157,9 +156,10 @@ jobjectArray Platform::runtimeProperties0(JNIEnv *env, jclass, jlong nativePeer)
 jobjectArray Platform::devices0(JNIEnv *env, jclass, jlong nativePeer) {
   return wrapBackend(env, EX, [&] {
     auto xs = findRef(env, platforms, nativePeer)->enumerate();
-    return toJni(env, xs, gen::Device::of(env).clazz, [&](auto &device) {
+    const auto &deviceMirror = gen::Device::of(env);
+    return toJni(env, xs, deviceMirror.clazz, [&](auto &device) {
       auto [peer, d] = emplaceRef(devices, std::shared_ptr(std::move(device)));
-      return gen::Device::of(env)(env, peer, d->id(), toJni(env, d->name()), d->sharedAddressSpace()).instance;
+      return deviceMirror(env, peer, d->id(), toJni(env, d->name()), d->sharedAddressSpace()).instance;
     });
   });
 }

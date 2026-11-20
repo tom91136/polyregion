@@ -132,6 +132,7 @@ private[polyregion] object CodeGen {
       s"""#include <jni.h>
          |#include <optional>
          |#include <memory>
+         |#include <stdexcept>
          |#include <vector>
          |namespace polyregion::generated {
          |${headers.mkString("\n")}

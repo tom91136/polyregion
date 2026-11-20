@@ -1,6 +1,4 @@
 #pragma once
-#include <stdexcept>
-
 #include <jni.h>
 namespace polyregion::generated::registry::Platforms {
 
@@ -20,19 +18,17 @@ namespace polyregion::generated::registry::Platforms {
 
 static void unregisterMethods(JNIEnv *env) {
   jclass found = env->FindClass("polyregion/jvm/runtime/Platforms");
-  if (!found) return env->ExceptionClear();
-  const jint result = env->UnregisterNatives(found);
-  env->DeleteLocalRef(found);
-  if (result != 0) {
-    throw std::logic_error("UnregisterNatives returned non-zero for polyregion/jvm/runtime/Platforms");
+  if (!found) {
+    env->ExceptionClear();
+    return;
   }
+  if (env->UnregisterNatives(found) != 0) env->ExceptionClear();
+  env->DeleteLocalRef(found);
 }
 
-static void registerMethods(JNIEnv *env) {
+[[nodiscard]] static bool registerMethods(JNIEnv *env) {
   jclass found = env->FindClass("polyregion/jvm/runtime/Platforms");
-  if (!found) {
-    throw std::logic_error("Cannot find class polyregion/jvm/runtime/Platforms");
-  }
+  if (!found) return false;
   const static JNINativeMethod methods[13] = {{.name = const_cast<char *>("CUDA0"),
                                                .signature = const_cast<char *>("()Lpolyregion/jvm/runtime/Platform;"),
                                                .fnPtr = reinterpret_cast<void *>(&CUDA0)},
@@ -74,9 +70,7 @@ static void registerMethods(JNIEnv *env) {
                                                .fnPtr = reinterpret_cast<void *>(&pointerOfDirectBuffers0)}};
   const jint result = env->RegisterNatives(found, methods, 13);
   env->DeleteLocalRef(found);
-  if (result != 0) {
-    throw std::logic_error("RegisterNatives returned non-zero for polyregion/jvm/runtime/Platforms");
-  }
+  return result == 0;
 }
 
 } // namespace polyregion::generated::registry::Platforms

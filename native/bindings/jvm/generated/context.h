@@ -1,6 +1,4 @@
 #pragma once
-#include <stdexcept>
-
 #include <jni.h>
 namespace polyregion::generated::registry::Context {
 
@@ -33,24 +31,19 @@ namespace polyregion::generated::registry::Context {
 [[maybe_unused]] jboolean sharedAddressSpace0(JNIEnv *env, jclass, jlong context);
 [[maybe_unused]] jlongArray stats0(JNIEnv *env, jclass, jlong context);
 
-thread_local jclass clazz = nullptr;
-
 static void unregisterMethods(JNIEnv *env) {
-  if (!clazz) return;
-  if (env->UnregisterNatives(clazz) != 0) {
-    throw std::logic_error("UnregisterNatives returned non-zero for polyregion/jvm/runtime/Context");
+  jclass found = env->FindClass("polyregion/jvm/runtime/Context");
+  if (!found) {
+    env->ExceptionClear();
+    return;
   }
-  env->DeleteGlobalRef(clazz);
-  clazz = nullptr;
+  if (env->UnregisterNatives(found) != 0) env->ExceptionClear();
+  env->DeleteLocalRef(found);
 }
 
-static void registerMethods(JNIEnv *env) {
-  if (clazz) return;
-  auto *found = env->FindClass("polyregion/jvm/runtime/Context");
-  if (!found) {
-    throw std::logic_error("Cannot find class polyregion/jvm/runtime/Context");
-  }
-  clazz = reinterpret_cast<jclass>(env->NewGlobalRef(found));
+[[nodiscard]] static bool registerMethods(JNIEnv *env) {
+  jclass found = env->FindClass("polyregion/jvm/runtime/Context");
+  if (!found) return false;
   const static JNINativeMethod methods[23] = {
       {.name = const_cast<char *>("address0"),
        .signature = const_cast<char *>("(Ljava/nio/ByteBuffer;)J"),
@@ -109,9 +102,9 @@ static void registerMethods(JNIEnv *env) {
        .signature = const_cast<char *>("(J)Z"),
        .fnPtr = reinterpret_cast<void *>(&sharedAddressSpace0)},
       {.name = const_cast<char *>("stats0"), .signature = const_cast<char *>("(J)[J"), .fnPtr = reinterpret_cast<void *>(&stats0)}};
-  if (env->RegisterNatives(clazz, methods, 23) != 0) {
-    throw std::logic_error("RegisterNatives returned non-zero for polyregion/jvm/runtime/Context");
-  }
+  const jint result = env->RegisterNatives(found, methods, 23);
+  env->DeleteLocalRef(found);
+  return result == 0;
 }
 
 } // namespace polyregion::generated::registry::Context

@@ -9,6 +9,10 @@ ByteBuffer::ByteBuffer(JNIEnv *env, jclass found)
 thread_local std::vector<std::unique_ptr<ByteBuffer>> ByteBuffer::cached = {};
 ByteBuffer &ByteBuffer::of(JNIEnv *env) {
   jclass found = env->FindClass("java/nio/ByteBuffer");
+  if (!found) {
+    env->ExceptionClear();
+    throw std::runtime_error("Cannot find class java/nio/ByteBuffer");
+  }
   for (auto &entry : cached) {
     if (env->IsSameObject(entry->clazz, found)) {
       env->DeleteLocalRef(found);
@@ -21,7 +25,10 @@ ByteBuffer &ByteBuffer::of(JNIEnv *env) {
 }
 void ByteBuffer::drop(JNIEnv *env) {
   jclass found = env->FindClass("java/nio/ByteBuffer");
-  if (!found) return env->ExceptionClear();
+  if (!found) {
+    env->ExceptionClear();
+    return;
+  }
   std::erase_if(cached, [&](auto &entry) {
     if (!env->IsSameObject(entry->clazz, found)) return false;
     env->DeleteGlobalRef(entry->clazz);
@@ -45,6 +52,10 @@ Property::Property(JNIEnv *env, jclass found)
 thread_local std::vector<std::unique_ptr<Property>> Property::cached = {};
 Property &Property::of(JNIEnv *env) {
   jclass found = env->FindClass("polyregion/jvm/runtime/Property");
+  if (!found) {
+    env->ExceptionClear();
+    throw std::runtime_error("Cannot find class polyregion/jvm/runtime/Property");
+  }
   for (auto &entry : cached) {
     if (env->IsSameObject(entry->clazz, found)) {
       env->DeleteLocalRef(found);
@@ -57,7 +68,10 @@ Property &Property::of(JNIEnv *env) {
 }
 void Property::drop(JNIEnv *env) {
   jclass found = env->FindClass("polyregion/jvm/runtime/Property");
-  if (!found) return env->ExceptionClear();
+  if (!found) {
+    env->ExceptionClear();
+    return;
+  }
   std::erase_if(cached, [&](auto &entry) {
     if (!env->IsSameObject(entry->clazz, found)) return false;
     env->DeleteGlobalRef(entry->clazz);
@@ -81,6 +95,10 @@ Dim3::Dim3(JNIEnv *env, jclass found)
 thread_local std::vector<std::unique_ptr<Dim3>> Dim3::cached = {};
 Dim3 &Dim3::of(JNIEnv *env) {
   jclass found = env->FindClass("polyregion/jvm/runtime/Dim3");
+  if (!found) {
+    env->ExceptionClear();
+    throw std::runtime_error("Cannot find class polyregion/jvm/runtime/Dim3");
+  }
   for (auto &entry : cached) {
     if (env->IsSameObject(entry->clazz, found)) {
       env->DeleteLocalRef(found);
@@ -93,7 +111,10 @@ Dim3 &Dim3::of(JNIEnv *env) {
 }
 void Dim3::drop(JNIEnv *env) {
   jclass found = env->FindClass("polyregion/jvm/runtime/Dim3");
-  if (!found) return env->ExceptionClear();
+  if (!found) {
+    env->ExceptionClear();
+    return;
+  }
   std::erase_if(cached, [&](auto &entry) {
     if (!env->IsSameObject(entry->clazz, found)) return false;
     env->DeleteGlobalRef(entry->clazz);
@@ -125,6 +146,10 @@ Policy::Policy(JNIEnv *env, jclass found)
 thread_local std::vector<std::unique_ptr<Policy>> Policy::cached = {};
 Policy &Policy::of(JNIEnv *env) {
   jclass found = env->FindClass("polyregion/jvm/runtime/Policy");
+  if (!found) {
+    env->ExceptionClear();
+    throw std::runtime_error("Cannot find class polyregion/jvm/runtime/Policy");
+  }
   for (auto &entry : cached) {
     if (env->IsSameObject(entry->clazz, found)) {
       env->DeleteLocalRef(found);
@@ -137,7 +162,10 @@ Policy &Policy::of(JNIEnv *env) {
 }
 void Policy::drop(JNIEnv *env) {
   jclass found = env->FindClass("polyregion/jvm/runtime/Policy");
-  if (!found) return env->ExceptionClear();
+  if (!found) {
+    env->ExceptionClear();
+    return;
+  }
   std::erase_if(cached, [&](auto &entry) {
     if (!env->IsSameObject(entry->clazz, found)) return false;
     env->DeleteGlobalRef(entry->clazz);
@@ -162,6 +190,10 @@ Device::Device(JNIEnv *env, jclass found)
 thread_local std::vector<std::unique_ptr<Device>> Device::cached = {};
 Device &Device::of(JNIEnv *env) {
   jclass found = env->FindClass("polyregion/jvm/runtime/Device");
+  if (!found) {
+    env->ExceptionClear();
+    throw std::runtime_error("Cannot find class polyregion/jvm/runtime/Device");
+  }
   for (auto &entry : cached) {
     if (env->IsSameObject(entry->clazz, found)) {
       env->DeleteLocalRef(found);
@@ -174,7 +206,10 @@ Device &Device::of(JNIEnv *env) {
 }
 void Device::drop(JNIEnv *env) {
   jclass found = env->FindClass("polyregion/jvm/runtime/Device");
-  if (!found) return env->ExceptionClear();
+  if (!found) {
+    env->ExceptionClear();
+    return;
+  }
   std::erase_if(cached, [&](auto &entry) {
     if (!env->IsSameObject(entry->clazz, found)) return false;
     env->DeleteGlobalRef(entry->clazz);
@@ -195,6 +230,10 @@ Platform::Platform(JNIEnv *env, jclass found)
 thread_local std::vector<std::unique_ptr<Platform>> Platform::cached = {};
 Platform &Platform::of(JNIEnv *env) {
   jclass found = env->FindClass("polyregion/jvm/runtime/Platform");
+  if (!found) {
+    env->ExceptionClear();
+    throw std::runtime_error("Cannot find class polyregion/jvm/runtime/Platform");
+  }
   for (auto &entry : cached) {
     if (env->IsSameObject(entry->clazz, found)) {
       env->DeleteLocalRef(found);
@@ -207,7 +246,10 @@ Platform &Platform::of(JNIEnv *env) {
 }
 void Platform::drop(JNIEnv *env) {
   jclass found = env->FindClass("polyregion/jvm/runtime/Platform");
-  if (!found) return env->ExceptionClear();
+  if (!found) {
+    env->ExceptionClear();
+    return;
+  }
   std::erase_if(cached, [&](auto &entry) {
     if (!env->IsSameObject(entry->clazz, found)) return false;
     env->DeleteGlobalRef(entry->clazz);
@@ -228,6 +270,10 @@ Event::Event(JNIEnv *env, jclass found)
 thread_local std::vector<std::unique_ptr<Event>> Event::cached = {};
 Event &Event::of(JNIEnv *env) {
   jclass found = env->FindClass("polyregion/jvm/compiler/Event");
+  if (!found) {
+    env->ExceptionClear();
+    throw std::runtime_error("Cannot find class polyregion/jvm/compiler/Event");
+  }
   for (auto &entry : cached) {
     if (env->IsSameObject(entry->clazz, found)) {
       env->DeleteLocalRef(found);
@@ -240,7 +286,10 @@ Event &Event::of(JNIEnv *env) {
 }
 void Event::drop(JNIEnv *env) {
   jclass found = env->FindClass("polyregion/jvm/compiler/Event");
-  if (!found) return env->ExceptionClear();
+  if (!found) {
+    env->ExceptionClear();
+    return;
+  }
   std::erase_if(cached, [&](auto &entry) {
     if (!env->IsSameObject(entry->clazz, found)) return false;
     env->DeleteGlobalRef(entry->clazz);
@@ -262,6 +311,10 @@ Layout::Layout(JNIEnv *env, jclass found)
 thread_local std::vector<std::unique_ptr<Layout>> Layout::cached = {};
 Layout &Layout::of(JNIEnv *env) {
   jclass found = env->FindClass("polyregion/jvm/compiler/Layout");
+  if (!found) {
+    env->ExceptionClear();
+    throw std::runtime_error("Cannot find class polyregion/jvm/compiler/Layout");
+  }
   for (auto &entry : cached) {
     if (env->IsSameObject(entry->clazz, found)) {
       env->DeleteLocalRef(found);
@@ -274,7 +327,10 @@ Layout &Layout::of(JNIEnv *env) {
 }
 void Layout::drop(JNIEnv *env) {
   jclass found = env->FindClass("polyregion/jvm/compiler/Layout");
-  if (!found) return env->ExceptionClear();
+  if (!found) {
+    env->ExceptionClear();
+    return;
+  }
   std::erase_if(cached, [&](auto &entry) {
     if (!env->IsSameObject(entry->clazz, found)) return false;
     env->DeleteGlobalRef(entry->clazz);
@@ -295,6 +351,10 @@ Member::Member(JNIEnv *env, jclass found)
 thread_local std::vector<std::unique_ptr<Member>> Member::cached = {};
 Member &Member::of(JNIEnv *env) {
   jclass found = env->FindClass("polyregion/jvm/compiler/Layout$Member");
+  if (!found) {
+    env->ExceptionClear();
+    throw std::runtime_error("Cannot find class polyregion/jvm/compiler/Layout$Member");
+  }
   for (auto &entry : cached) {
     if (env->IsSameObject(entry->clazz, found)) {
       env->DeleteLocalRef(found);
@@ -307,7 +367,10 @@ Member &Member::of(JNIEnv *env) {
 }
 void Member::drop(JNIEnv *env) {
   jclass found = env->FindClass("polyregion/jvm/compiler/Layout$Member");
-  if (!found) return env->ExceptionClear();
+  if (!found) {
+    env->ExceptionClear();
+    return;
+  }
   std::erase_if(cached, [&](auto &entry) {
     if (!env->IsSameObject(entry->clazz, found)) return false;
     env->DeleteGlobalRef(entry->clazz);
@@ -329,6 +392,10 @@ Options::Options(JNIEnv *env, jclass found)
 thread_local std::vector<std::unique_ptr<Options>> Options::cached = {};
 Options &Options::of(JNIEnv *env) {
   jclass found = env->FindClass("polyregion/jvm/compiler/Options");
+  if (!found) {
+    env->ExceptionClear();
+    throw std::runtime_error("Cannot find class polyregion/jvm/compiler/Options");
+  }
   for (auto &entry : cached) {
     if (env->IsSameObject(entry->clazz, found)) {
       env->DeleteLocalRef(found);
@@ -341,7 +408,10 @@ Options &Options::of(JNIEnv *env) {
 }
 void Options::drop(JNIEnv *env) {
   jclass found = env->FindClass("polyregion/jvm/compiler/Options");
-  if (!found) return env->ExceptionClear();
+  if (!found) {
+    env->ExceptionClear();
+    return;
+  }
   std::erase_if(cached, [&](auto &entry) {
     if (!env->IsSameObject(entry->clazz, found)) return false;
     env->DeleteGlobalRef(entry->clazz);
@@ -364,6 +434,10 @@ Compilation::Compilation(JNIEnv *env, jclass found)
 thread_local std::vector<std::unique_ptr<Compilation>> Compilation::cached = {};
 Compilation &Compilation::of(JNIEnv *env) {
   jclass found = env->FindClass("polyregion/jvm/compiler/Compilation");
+  if (!found) {
+    env->ExceptionClear();
+    throw std::runtime_error("Cannot find class polyregion/jvm/compiler/Compilation");
+  }
   for (auto &entry : cached) {
     if (env->IsSameObject(entry->clazz, found)) {
       env->DeleteLocalRef(found);
@@ -376,7 +450,10 @@ Compilation &Compilation::of(JNIEnv *env) {
 }
 void Compilation::drop(JNIEnv *env) {
   jclass found = env->FindClass("polyregion/jvm/compiler/Compilation");
-  if (!found) return env->ExceptionClear();
+  if (!found) {
+    env->ExceptionClear();
+    return;
+  }
   std::erase_if(cached, [&](auto &entry) {
     if (!env->IsSameObject(entry->clazz, found)) return false;
     env->DeleteGlobalRef(entry->clazz);
@@ -396,6 +473,10 @@ String::String(JNIEnv *env, jclass found) : clazz(reinterpret_cast<jclass>(env->
 thread_local std::vector<std::unique_ptr<String>> String::cached = {};
 String &String::of(JNIEnv *env) {
   jclass found = env->FindClass("java/lang/String");
+  if (!found) {
+    env->ExceptionClear();
+    throw std::runtime_error("Cannot find class java/lang/String");
+  }
   for (auto &entry : cached) {
     if (env->IsSameObject(entry->clazz, found)) {
       env->DeleteLocalRef(found);
@@ -408,7 +489,10 @@ String &String::of(JNIEnv *env) {
 }
 void String::drop(JNIEnv *env) {
   jclass found = env->FindClass("java/lang/String");
-  if (!found) return env->ExceptionClear();
+  if (!found) {
+    env->ExceptionClear();
+    return;
+  }
   std::erase_if(cached, [&](auto &entry) {
     if (!env->IsSameObject(entry->clazz, found)) return false;
     env->DeleteGlobalRef(entry->clazz);
@@ -425,6 +509,10 @@ Runnable::Runnable(JNIEnv *env, jclass found)
 thread_local std::vector<std::unique_ptr<Runnable>> Runnable::cached = {};
 Runnable &Runnable::of(JNIEnv *env) {
   jclass found = env->FindClass("java/lang/Runnable");
+  if (!found) {
+    env->ExceptionClear();
+    throw std::runtime_error("Cannot find class java/lang/Runnable");
+  }
   for (auto &entry : cached) {
     if (env->IsSameObject(entry->clazz, found)) {
       env->DeleteLocalRef(found);
@@ -437,7 +525,10 @@ Runnable &Runnable::of(JNIEnv *env) {
 }
 void Runnable::drop(JNIEnv *env) {
   jclass found = env->FindClass("java/lang/Runnable");
-  if (!found) return env->ExceptionClear();
+  if (!found) {
+    env->ExceptionClear();
+    return;
+  }
   std::erase_if(cached, [&](auto &entry) {
     if (!env->IsSameObject(entry->clazz, found)) return false;
     env->DeleteGlobalRef(entry->clazz);
@@ -454,6 +545,10 @@ File::File(JNIEnv *env, jclass found)
 thread_local std::vector<std::unique_ptr<File>> File::cached = {};
 File &File::of(JNIEnv *env) {
   jclass found = env->FindClass("java/io/File");
+  if (!found) {
+    env->ExceptionClear();
+    throw std::runtime_error("Cannot find class java/io/File");
+  }
   for (auto &entry : cached) {
     if (env->IsSameObject(entry->clazz, found)) {
       env->DeleteLocalRef(found);
@@ -466,7 +561,10 @@ File &File::of(JNIEnv *env) {
 }
 void File::drop(JNIEnv *env) {
   jclass found = env->FindClass("java/io/File");
-  if (!found) return env->ExceptionClear();
+  if (!found) {
+    env->ExceptionClear();
+    return;
+  }
   std::erase_if(cached, [&](auto &entry) {
     if (!env->IsSameObject(entry->clazz, found)) return false;
     env->DeleteGlobalRef(entry->clazz);

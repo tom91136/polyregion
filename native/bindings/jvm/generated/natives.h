@@ -1,6 +1,4 @@
 #pragma once
-#include <stdexcept>
-
 #include <jni.h>
 namespace polyregion::generated::registry::Natives {
 
@@ -10,19 +8,17 @@ namespace polyregion::generated::registry::Natives {
 
 static void unregisterMethods(JNIEnv *env) {
   jclass found = env->FindClass("polyregion/jvm/Natives");
-  if (!found) return env->ExceptionClear();
-  const jint result = env->UnregisterNatives(found);
-  env->DeleteLocalRef(found);
-  if (result != 0) {
-    throw std::logic_error("UnregisterNatives returned non-zero for polyregion/jvm/Natives");
+  if (!found) {
+    env->ExceptionClear();
+    return;
   }
+  if (env->UnregisterNatives(found) != 0) env->ExceptionClear();
+  env->DeleteLocalRef(found);
 }
 
-static void registerMethods(JNIEnv *env) {
+[[nodiscard]] static bool registerMethods(JNIEnv *env) {
   jclass found = env->FindClass("polyregion/jvm/Natives");
-  if (!found) {
-    throw std::logic_error("Cannot find class polyregion/jvm/Natives");
-  }
+  if (!found) return false;
   const static JNINativeMethod methods[3] = {{.name = const_cast<char *>("dynamicLibraryLoad0"),
                                               .signature = const_cast<char *>("(Ljava/lang/String;)J"),
                                               .fnPtr = reinterpret_cast<void *>(&dynamicLibraryLoad0)},
@@ -34,9 +30,7 @@ static void registerMethods(JNIEnv *env) {
                                               .fnPtr = reinterpret_cast<void *>(&registerFilesToDropOnUnload0)}};
   const jint result = env->RegisterNatives(found, methods, 3);
   env->DeleteLocalRef(found);
-  if (result != 0) {
-    throw std::logic_error("RegisterNatives returned non-zero for polyregion/jvm/Natives");
-  }
+  return result == 0;
 }
 
 } // namespace polyregion::generated::registry::Natives

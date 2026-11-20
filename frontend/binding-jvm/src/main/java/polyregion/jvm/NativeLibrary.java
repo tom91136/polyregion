@@ -1,6 +1,7 @@
 package polyregion.jvm;
 
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @SuppressWarnings("unused")
 public final class NativeLibrary implements AutoCloseable {
@@ -11,6 +12,7 @@ public final class NativeLibrary implements AutoCloseable {
 
   public final long handle;
   public final String name;
+  private final AtomicBoolean closed = new AtomicBoolean();
 
   private NativeLibrary(long handle, String name) {
     if (handle == 0) throw new AssertionError("Library handle is NULL(0)");
@@ -27,7 +29,7 @@ public final class NativeLibrary implements AutoCloseable {
 
   @Override
   public void close() {
-    Natives.dynamicLibraryRelease0(handle);
+    if (closed.compareAndSet(false, true)) Natives.dynamicLibraryRelease0(handle);
   }
 
   @Override

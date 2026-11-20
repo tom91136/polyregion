@@ -40,13 +40,17 @@ static JavaVM *CurrentVM = nullptr;
   if (!env) return JNI_ERR;
 #ifndef _WIN32
   // host programs loaded by polyinvoke resolve the polyrt entry points from the global scope
-  if (Dl_info info{}; !dladdr(reinterpret_cast<void *>(&JNI_OnLoad), &info) || !info.dli_fname
-                      || !dlopen(info.dli_fname, RTLD_NOW | RTLD_GLOBAL | RTLD_NOLOAD)) {
-    fprintf(stderr, "polyrt-JNI: cannot promote the library to global scope: %s\n", dlerror());
-    return JNI_ERR;
-  }
+  static const bool promoted = [] {
+    if (Dl_info info{}; !dladdr(reinterpret_cast<void *>(&JNI_OnLoad), &info) || !info.dli_fname
+                        || !dlopen(info.dli_fname, RTLD_NOW | RTLD_GLOBAL | RTLD_NOLOAD)) {
+      fprintf(stderr, "polyrt-JNI: cannot promote the library to global scope: %s\n", dlerror());
+      return false;
+    }
+    return true;
+  }();
+  if (!promoted) return JNI_ERR;
 #endif
-  Context::registerMethods(env);
+  if (!Context::registerMethods(env)) return JNI_ERR;
   return JNI_VERSION_1_1;
 }
 

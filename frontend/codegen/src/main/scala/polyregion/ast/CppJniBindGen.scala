@@ -275,6 +275,10 @@ object CppJniBindGen {
          |thread_local std::vector<std::unique_ptr<$clsName>> $clsName::cached = {};
          |$clsName& $clsName::of(JNIEnv *env) {
          |  jclass found = env->FindClass("$jniName");
+         |  if (!found) {
+         |    env->ExceptionClear();
+         |    throw std::runtime_error("Cannot find class $jniName");
+         |  }
          |  for (auto &entry : cached) {
          |    if (env->IsSameObject(entry->clazz, found)) {
          |      env->DeleteLocalRef(found);
@@ -287,7 +291,10 @@ object CppJniBindGen {
          |}
          |void $clsName::drop(JNIEnv *env){
          |  jclass found = env->FindClass("$jniName");
-         |  if (!found) return env->ExceptionClear();
+         |  if (!found) {
+         |    env->ExceptionClear();
+         |    return;
+         |  }
          |  std::erase_if(cached, [&](auto &entry) {
          |    if (!env->IsSameObject(entry->clazz, found)) return false;
          |    env->DeleteGlobalRef(entry->clazz);
@@ -348,33 +355,28 @@ object CppJniBindGen {
     val header =
       s"""#pragma once
          |#include <jni.h>
-         |#include <stdexcept>
          |namespace polyregion::generated::registry::$clsName {
          |${constants.map(c => s"$c;").mkString("\n")}
          |${prototypes.map(p => s"[[maybe_unused]] $p;").mkString("\n")}
          |
          |static void unregisterMethods(JNIEnv *env) {
          |  jclass found = env->FindClass("$jniName");
-         |  if (!found) return env->ExceptionClear();
-         |  const jint result = env->UnregisterNatives(found);
-         |  env->DeleteLocalRef(found);
-         |  if(result != 0){
-         |    throw std::logic_error("UnregisterNatives returned non-zero for $jniName");
+         |  if (!found) {
+         |    env->ExceptionClear();
+         |    return;
          |  }
+         |  if (env->UnregisterNatives(found) != 0) env->ExceptionClear();
+         |  env->DeleteLocalRef(found);
          |}
          |
-         |static void registerMethods(JNIEnv *env) {
+         |[[nodiscard]] static bool registerMethods(JNIEnv *env) {
          |  jclass found = env->FindClass("$jniName");
-         |  if(!found){
-         |    throw std::logic_error("Cannot find class $jniName");
-         |  }
+         |  if (!found) return false;
          |  const static JNINativeMethod methods[${registerEntries.length}] = {
          |${registerEntries.map("      " + _).mkString(",\n")}};
          |  const jint result = env->RegisterNatives(found, methods, ${registerEntries.length});
          |  env->DeleteLocalRef(found);
-         |  if(result != 0){
-         |    throw std::logic_error("RegisterNatives returned non-zero for $jniName");
-         |  }
+         |  return result == 0;
          |}
          |
          |} // namespace polyregion::generated::registry::$clsName""".stripMargin
