@@ -18,6 +18,8 @@ public final class Compiler implements AutoCloseable {
 
   private static native Layout[] layoutOf0(byte[] structDef, Options options);
 
+  private static native byte[] loadPackage0(String name, String roots, String capabilities);
+
   private final NativeLibrary library;
 
   private Compiler(NativeLibrary library) {
@@ -53,6 +55,10 @@ public final class Compiler implements AutoCloseable {
 
   public Layout[] layoutOf(byte[] structDef, Options options) {
     return layoutOf0(structDef, options);
+  }
+
+  public byte[] loadPackage(String name, String roots, String capabilities) {
+    return loadPackage0(name, roots, capabilities);
   }
 
   @Override

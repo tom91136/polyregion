@@ -30,6 +30,7 @@ target_include_directories(polyc-JNIshim PRIVATE
 target_include_directories(polyc-JNI PRIVATE
 #        .
 #        ../../compiler
+        ../../polyfront
 
         ${JNI_INCLUDE_DIRS})
 target_include_directories(polyinvoke-JNI PRIVATE
@@ -42,7 +43,7 @@ target_include_directories(polyrt-JNI PRIVATE
         ${JNI_INCLUDE_DIRS})
 
 target_link_libraries(polyc-JNIshim PRIVATE ${DL_LIB} PUBLIC polycommon)
-target_link_libraries(polyc-JNI PRIVATE polyc)
+target_link_libraries(polyc-JNI PRIVATE polyc Aspartame::Aspartame zstd::libzstd_static)
 target_link_libraries(polyinvoke-JNI PRIVATE polyinvoke-static Aspartame::Aspartame)
 target_link_libraries(polyrt-JNI PRIVATE polyinvoke-obj polyrt-obj polyreflect-rt Aspartame::Aspartame)
 

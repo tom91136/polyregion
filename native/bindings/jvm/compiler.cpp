@@ -6,8 +6,10 @@
 #include <string>
 #include <type_traits>
 
+#include "aspartame/all.hpp"
 #include "magic_enum/magic_enum.hpp"
 
+#include "polyfront/package.hpp"
 #include "polyregion/env_keys.h"
 
 #include "backend/llvmc.h"
@@ -17,6 +19,7 @@
 
 static constexpr const char *EX = "polyregion/jvm/compiler/PolyregionCompilerException";
 
+using namespace aspartame;
 using namespace polyregion;
 namespace cp = ::compiler;
 namespace ct = ::compiletime;
@@ -110,5 +113,38 @@ jobject Compiler::compile0(JNIEnv *env, jclass, //
                                      toJni(env, c.layouts, gen::Layout::of(env).clazz, [&](auto &l) { return toJni(env, l).instance; }), //
                                      toJni(env, c.messages))                                                                             //
         .instance;
+  });
+}
+
+jbyteArray Compiler::loadPackage0(JNIEnv *env, jclass, jstring name, jstring roots, jstring capabilities) {
+  return wrapException(env, EX, [&] {
+    namespace pkg = polyfront::package;
+    const auto archive = pkg::loadPackage(fromJni(env, name), pkg::splitPackageRoots(fromJni(env, roots)));
+    if (!archive) throw std::runtime_error(archive.errors | mk_string("\n"));
+    std::vector<polyast::Package> selected;
+    for (const auto &declaration : archive.value->interface.declarations) {
+      const auto qualified = polyast::fqcn(declaration.name);
+      if (!archive.value->entriesByDeclaration.count(qualified)) continue;
+      auto headers = pkg::loadPackageHeaders(*archive.value, qualified);
+      if (!headers) throw std::runtime_error(headers.errors | mk_string("\n"));
+      selected.emplace_back(std::move(*headers.value));
+    }
+    const auto merged = pkg::mergeSelections(selected | map([](const auto &x) { return &x; }) | to_vector());
+    const auto headers = merged.empty()
+                             ? polyast::Package(archive.value->interface, polyast::Program({}, {}, {}, polyast::PassPhase::Initial(), {}))
+                             : merged.front();
+    std::unordered_set<std::string> available;
+    for (const auto &capability : fromJni(env, capabilities) ^ split(','))
+      if (!capability.empty()) available.emplace(capability.substr(0, capability.find('@')));
+    std::unordered_set<std::string> implementations;
+    for (const auto &function : headers.program.functions)
+      if (function.implements && function.requiredCapabilities ^ forall([&](const auto &c) { return available.count(c) > 0; }))
+        implementations.emplace(polyast::fqcn(function.decl.name));
+    const auto hydrated = pkg::hydratePackage(*archive.value, headers, implementations);
+    if (!hydrated) throw std::runtime_error(hydrated.errors | mk_string("\n"));
+    const auto bytes = polyast::package_to_msgpack(*hydrated.value);
+    auto *out = env->NewByteArray(jsize(bytes.size()));
+    env->SetByteArrayRegion(out, 0, jsize(bytes.size()), reinterpret_cast<const jbyte *>(bytes.data()));
+    return out;
   });
 }
