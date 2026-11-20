@@ -374,7 +374,8 @@ object compiletime {
                       '{ (b: java.nio.Buffer) =>
                         keepAlive += b; Platforms.pointerOfDirectBuffer(b)
                       },
-                      '{ Platforms.directBufferFromPointer(_, _) }
+                      '{ Platforms.directBufferFromPointer(_, _) },
+                      '{ polyregion.scalalang.Residents.pointerOf($ctx, _) }
                     )
 
                     q.CaseDef(

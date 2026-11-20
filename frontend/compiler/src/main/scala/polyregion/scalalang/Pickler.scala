@@ -214,7 +214,8 @@ object Pickler {
       layouts: Map[p.StructDef, (ct.Layout, Option[polyregion.prism.Prism])],
       reprs: Map[p.StructDef, q.TypeRepr],
       pointerOfBuffer: Expr[ByteBuffer => Long],
-      bufferOfPointer: Expr[(Long, Long) => ByteBuffer]
+      bufferOfPointer: Expr[(Long, Long) => ByteBuffer],
+      residentPointer: Expr[Any => Long]
   ) = {
     given Quotes = q.underlying
 
@@ -361,7 +362,10 @@ object Pickler {
           val memberOffset = Expr(m.offsetInBytes.toInt)
           ((rootAfterPrism, m.tpe): @scala.unchecked) match {
             case ('{ $seq: StdLib.MutableSeq[t] }, p.Type.Ptr(comp, _)) =>
-              val ptr = writeArray[t](seq, comp, ptrMap)
+              val ptr = '{
+                val resident = $residentPointer($root)
+                if (resident != 0L) resident else ${ writeArray[t](seq, comp, ptrMap) }
+              }
               writePrim('buffer, memberOffset, p.Type.IntS64, ptr)
             case (_, p.Type.Struct(name, _)) if lut.get(name).exists(_.members.isEmpty) =>
               // Empty-member struct field (e.g. trait-based mirrors like `Monoid` whose
@@ -490,7 +494,10 @@ object Pickler {
                 ) match {
                   case (Some((_, write)), Some('[t])) =>
                     val seq = write(root.asTerm).asExprOf[MutableSeq[t]]
-                    readArray[t](seq, comp, ptrMap, objMap, memberOffset, 'buffer, mapping)
+                    '{
+                      if ($residentPointer($root) == 0L)
+                        ${ readArray[t](seq, comp, ptrMap, objMap, memberOffset, 'buffer, mapping) }
+                    }
                   case _ => '{ () }
                 }
 
