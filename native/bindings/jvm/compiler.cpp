@@ -73,7 +73,7 @@ static cp::Options fromJni(JNIEnv *env, jobject options) {
   const auto opt = gen::Options::of(env).wrap(env, options);
   const auto targetOrdinal = opt.target(env);
   if (auto target = magic_enum::enum_cast<ct::Target>(targetOrdinal); target) {
-    return {.target = *target, .arch = fromJni(env, opt.arch(env))};
+    return {.target = *target, .arch = fromJni(env, opt.arch(env)), .pipelineSpec = cp::JvmPipelineSpec};
   } else throw std::logic_error("Unknown target value: " + std::to_string(targetOrdinal));
 }
 
