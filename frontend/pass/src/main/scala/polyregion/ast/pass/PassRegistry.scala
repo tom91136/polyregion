@@ -42,6 +42,7 @@ object PassRegistry {
     PassDef.singleton(Intrinsify),
     PassDef.singleton(MonoStruct),
     PassDef.singleton(Specialisation),
+    PassDef.configured(EscapeAnalysis()),
     PassDef.singleton(KernelCaptureFlatten),
     PassDef.configured(OffloadEntryInline()),
     PassDef.configured(SubgroupLower()),
