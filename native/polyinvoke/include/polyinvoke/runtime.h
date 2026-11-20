@@ -351,6 +351,7 @@ template <typename M, typename F> class ModuleStore {
   };
   //  using LoadedModule = std::pair<M, std::unordered_map<std::string, F>>;
   std::unordered_map<std::string, LoadedModule> modules = {};
+  mutable std::shared_mutex mutex;
 
   const char *errorPrefix;
   std::function<M(const std::string &)> load;
@@ -383,6 +384,7 @@ public:
   }
 
   void loadModule(const std::string &name, const std::string &image) {
+    const std::unique_lock lock(mutex);
     if (const auto it = modules.find(name); it != modules.end()) {
       POLYINVOKE_FATAL(errorPrefix, "Module named `%s` was already loaded", name.c_str());
     } else {
@@ -390,14 +392,25 @@ public:
     }
   }
 
-  bool moduleLoaded(const std::string &name) { return modules.find(name) != modules.end(); }
+  bool moduleLoaded(const std::string &name) {
+    const std::shared_lock lock(mutex);
+    return modules.find(name) != modules.end();
+  }
 
   const M *find(const std::string &name) const {
+    const std::shared_lock lock(mutex);
     const auto it = modules.find(name);
     return it == modules.end() ? nullptr : &it->second.first;
   }
 
   F &resolveFunction(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types) {
+    {
+      const std::shared_lock lock(mutex);
+      const auto moduleIt = modules.find(moduleName);
+      if (moduleIt == modules.end()) POLYINVOKE_FATAL(errorPrefix, "No module named `%s` was loaded", moduleName.c_str());
+      if (const auto it = moduleIt->second.second.find(symbol); it != moduleIt->second.second.end()) return it->second;
+    }
+    const std::unique_lock lock(mutex);
     const auto moduleIt = modules.find(moduleName);
     if (moduleIt == modules.end()) POLYINVOKE_FATAL(errorPrefix, "No module named `%s` was loaded", moduleName.c_str());
     auto &[m, fnTable] = moduleIt->second;

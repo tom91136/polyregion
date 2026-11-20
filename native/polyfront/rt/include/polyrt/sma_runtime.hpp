@@ -225,33 +225,57 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT CaptureMarshal *captureMarshal();
 
 #define POLYREGION_SMA_ABI_SYMBOL_CHECK(constName, symbol) static_assert(sizeof(&symbol) > 0, #symbol);
 
+#define POLYREGION_SMA_FOREIGN_GUARD(...)                                                                                                  \
+  if (::polyregion::polyrt::sma::foreignContextActive(__func__)) return __VA_ARGS__
+
 #define POLYREGION_DEFINE_SMA_MIRROR_ABI(allocations)                                                                                      \
   POLYREGION_EXPORT extern "C" uintptr_t polyrt_sma_alloc(const void *local, const size_t sizeInBytes, const int hostReadOnly) {           \
+    POLYREGION_SMA_FOREIGN_GUARD(0);                                                                                                       \
     return (allocations).mirrorAlloc(local, sizeInBytes, hostReadOnly != 0);                                                               \
   }                                                                                                                                        \
-  POLYREGION_EXPORT extern "C" uintptr_t polyrt_sma_ensure(const void *local) { return (allocations).mirrorEnsure(local); }                \
+  POLYREGION_EXPORT extern "C" uintptr_t polyrt_sma_ensure(const void *local) {                                                            \
+    POLYREGION_SMA_FOREIGN_GUARD(0);                                                                                                       \
+    return (allocations).mirrorEnsure(local);                                                                                              \
+  }                                                                                                                                        \
   POLYREGION_EXPORT extern "C" uintptr_t polyrt_sma_ensure_min(const void *local, const uint64_t minSize) {                                \
+    POLYREGION_SMA_FOREIGN_GUARD(0);                                                                                                       \
     return (allocations).mirrorEnsure(local, minSize, true);                                                                               \
   }                                                                                                                                        \
-  POLYREGION_EXPORT extern "C" uint64_t polyrt_sma_pointee_size(const void *local) { return (allocations).mirrorPointeeSize(local); }      \
+  POLYREGION_EXPORT extern "C" uint64_t polyrt_sma_pointee_size(const void *local) {                                                       \
+    POLYREGION_SMA_FOREIGN_GUARD(0);                                                                                                       \
+    return (allocations).mirrorPointeeSize(local);                                                                                         \
+  }                                                                                                                                        \
   POLYREGION_EXPORT extern "C" uintptr_t polyrt_sma_ensure_deep(const void *local, const size_t depth) {                                   \
+    POLYREGION_SMA_FOREIGN_GUARD(0);                                                                                                       \
     return (allocations).mirrorEnsureDeep(local, depth);                                                                                   \
   }                                                                                                                                        \
   POLYREGION_EXPORT extern "C" void polyrt_sma_patch(const uintptr_t remote, const size_t offsetInBytes, const uintptr_t value) {          \
+    POLYREGION_SMA_FOREIGN_GUARD();                                                                                                        \
     (allocations).mirrorPatch(remote, offsetInBytes, value);                                                                               \
   }                                                                                                                                        \
-  POLYREGION_EXPORT extern "C" void polyrt_sma_read_alloc(const void *local) { (allocations).unmirrorReadAlloc(local); }                   \
+  POLYREGION_EXPORT extern "C" void polyrt_sma_read_alloc(const void *local) {                                                             \
+    POLYREGION_SMA_FOREIGN_GUARD();                                                                                                        \
+    (allocations).unmirrorReadAlloc(local);                                                                                                \
+  }                                                                                                                                        \
   POLYREGION_EXPORT extern "C" void polyrt_sma_read_deep(const void *local, const size_t depth) {                                          \
+    POLYREGION_SMA_FOREIGN_GUARD();                                                                                                        \
     (allocations).unmirrorReadDeep(local, depth);                                                                                          \
   }                                                                                                                                        \
-  POLYREGION_EXPORT extern "C" void polyrt_sma_visit_clear(void) { (allocations).unmirrorVisitClear(); }                                   \
+  POLYREGION_EXPORT extern "C" void polyrt_sma_visit_clear(void) {                                                                         \
+    POLYREGION_SMA_FOREIGN_GUARD();                                                                                                        \
+    (allocations).unmirrorVisitClear();                                                                                                    \
+  }                                                                                                                                        \
   static thread_local std::vector<size_t> poolPtrOffsets;                                                                                  \
   POLYREGION_EXPORT extern "C" void polyrt_sma_pool_reset(void) { poolPtrOffsets.clear(); }                                                \
   POLYREGION_EXPORT extern "C" void polyrt_sma_pool_ptr(const uint64_t offsetInBytes) { poolPtrOffsets.push_back(offsetInBytes); }         \
   POLYREGION_EXPORT extern "C" uintptr_t polyrt_sma_mirror_graph(const void *root) {                                                       \
+    POLYREGION_SMA_FOREIGN_GUARD(0);                                                                                                       \
     return (allocations).mirrorGraph(root, poolPtrOffsets.data(), poolPtrOffsets.size());                                                  \
   }                                                                                                                                        \
-  POLYREGION_EXPORT extern "C" void polyrt_sma_read_graph(const void *root) { (allocations).unmirrorReadGraph(root); }                     \
+  POLYREGION_EXPORT extern "C" void polyrt_sma_read_graph(const void *root) {                                                              \
+    POLYREGION_SMA_FOREIGN_GUARD();                                                                                                        \
+    (allocations).unmirrorReadGraph(root);                                                                                                 \
+  }                                                                                                                                        \
   namespace { /* XXX `allocations` is immortal, so a callback that outlives the hook clear still finds live tables */                      \
   ::polyregion::polyrt::sma::CaptureMarshalOf<std::remove_reference_t<decltype(allocations)>> captureMarshalOf{allocations};               \
   struct ReleaseHookRegistrar {                                                                                                            \

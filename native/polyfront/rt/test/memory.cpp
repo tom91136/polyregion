@@ -453,6 +453,73 @@ TEST_CASE("remote launch releases mirrored arguments after a failure") {
   CHECK(context.remoteAllocations.empty());
 }
 
+TEST_CASE("a created context refuses captures only the process mirror can marshal") {
+  WithStubDevice device(false, false);
+  WithStubManagedPlatform platform;
+  StubQueue queue(std::chrono::seconds(1));
+  polyregion::polyrt::ExecutionContext context{polyregion::polyrt::currentPlatform.get(), device.stub, &queue};
+  context.processMarshal = false;
+  std::array<uint8_t, 8> local{};
+  auto hostPointer = reinterpret_cast<uintptr_t>(local.data());
+  const std::array<uint8_t, 1> types{static_cast<uint8_t>(Type::Ptr)};
+  const std::array<void *, 1> arguments{&hostPointer};
+  const std::array<size_t, 1> mirrorSizes{local.size()};
+  const std::array<uint8_t, 1> mirrorKinds{3};
+
+  SECTION("a host pointer is refused") {
+    CHECK_FALSE(polyrt_remote_launch_marshalled(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
+                                                arguments.data(), mirrorSizes.data(), mirrorKinds.data(), nullptr));
+    CHECK(std::string(polyrt_error_message()).find("created context") != std::string::npos);
+    CHECK(queue.invokedTypes.empty());
+  }
+
+  SECTION("a device pointer passes through") {
+    auto remote = remoteAlloc(&context, local.size());
+    const std::array<void *, 1> remoteArguments{&remote};
+    REQUIRE(polyrt_remote_launch_marshalled(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, remoteArguments.size(), types.data(),
+                                            remoteArguments.data(), mirrorSizes.data(), mirrorKinds.data(), nullptr));
+    CHECK(queue.invokedTypes == std::vector{Type::Ptr, Type::Void});
+    REQUIRE(polyrt_remote_free(&context, remote));
+  }
+}
+
+TEST_CASE("mirror tables refuse a transaction on a created context") {
+  WithStubDevice device(false, false);
+  WithStubManagedPlatform platform;
+  StubQueue queue(std::chrono::seconds(1));
+  polyregion::polyrt::ExecutionContext context{polyregion::polyrt::currentPlatform.get(), device.stub, &queue};
+  context.processMarshal = false;
+
+  SECTION("a refusal fails the release that ends the transaction") {
+    CHECK_FALSE(polyregion::polyrt::sma::foreignContextActive("outside"));
+    REQUIRE(polyrt_context_acquire(&context));
+    CHECK(polyregion::polyrt::sma::foreignContextActive("inside"));
+    CHECK(std::string(polyrt_error_message()).find("inside: a created context cannot marshal") != std::string::npos);
+    CHECK_FALSE(polyrt_context_release(&context));
+    CHECK(std::string(polyrt_error_message()).find("created context cannot marshal") != std::string::npos);
+    CHECK_FALSE(polyregion::polyrt::sma::foreignContextActive("after"));
+    REQUIRE(polyrt_context_acquire(&context));
+    CHECK(polyrt_context_release(&context));
+  }
+
+  SECTION("a launch consumes the refusal") {
+    REQUIRE(polyrt_context_acquire(&context));
+    CHECK(polyregion::polyrt::sma::foreignContextActive("inside"));
+    const std::array<uint8_t, 0> types{};
+    const std::array<void *, 0> arguments{};
+    CHECK_FALSE(polyrt_remote_launch(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, 0, types.data(), arguments.data()));
+    CHECK(queue.invokedTypes.empty());
+    CHECK(polyrt_context_release(&context));
+  }
+
+  SECTION("the default marshaller context is never foreign") {
+    context.processMarshal = true;
+    REQUIRE(polyrt_context_acquire(&context));
+    CHECK_FALSE(polyregion::polyrt::sma::foreignContextActive("inside"));
+    REQUIRE(polyrt_context_release(&context));
+  }
+}
+
 TEST_CASE("failed mirror cleanup is retried by the next transaction") {
   WithStubDevice device(false);
   StubQueue queue(std::chrono::seconds(1));

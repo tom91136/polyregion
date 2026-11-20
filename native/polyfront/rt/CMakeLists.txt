@@ -17,8 +17,8 @@ if (APPLE)
 endif ()
 
 
-add_executable(polyrt-tests test/memory.cpp test/device_heap.cpp test/page_guard.cpp test/package_service.cpp test/package_emit.cpp test/select.cpp)
-target_include_directories(polyrt-tests PRIVATE ..)
+add_executable(polyrt-tests test/memory.cpp test/device_heap.cpp test/page_guard.cpp test/package_service.cpp test/package_emit.cpp test/select.cpp test/context.cpp)
+target_include_directories(polyrt-tests PRIVATE .. ${CMAKE_SOURCE_DIR}/polyinvoke/test)
 target_link_libraries(polyrt-tests PRIVATE polyrt-obj polyinvoke-obj polyfront-options polyfront-polyc-client Catch2::Catch2WithMain
                                            Aspartame::Aspartame)
 polyregion_apply_common_options(polyrt-tests)

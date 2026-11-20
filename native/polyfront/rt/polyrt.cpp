@@ -247,6 +247,30 @@ static std::optional<polyregion::compiletime::TargetSpec::ParsedRef> selectPlatf
   return parsed;
 }
 
+static bool testLockEnabled() {
+  const char *const env = std::getenv(polyregion::env::PolyinvokeTestLock);
+  return env && env[0] == '1';
+}
+
+static std::shared_ptr<DeviceLock> sharedDeviceLock(const PhysicalDevice &physical) {
+  static std::mutex mutex;
+  static std::map<std::string, std::weak_ptr<DeviceLock>> locks;
+  const std::scoped_lock guard(mutex);
+  auto &slot = locks[physical.str()];
+  if (auto held = slot.lock()) return held;
+  auto fresh = std::make_shared<DeviceLock>(physical);
+  slot = fresh;
+  return fresh;
+}
+
+static std::chrono::seconds queueTimeout() {
+  auto timeout = std::chrono::seconds(10);
+  if (const char *const env = std::getenv(polyregion::env::PolyrtQueueTimeoutSec); env && env[0]) {
+    if (const auto secs = std::strtol(env, nullptr, 10); secs > 0) timeout = std::chrono::seconds(secs);
+  }
+  return timeout;
+}
+
 void polyregion::polyrt::initialise() {
   static std::once_flag flag;
   std::call_once(flag, [] {
@@ -268,22 +292,16 @@ void polyregion::polyrt::initialise() {
       // Test-only: cross-process lock so ctest -j workers do not race on the same device.
       // Held for process lifetime; the file lock auto-releases on exit.
       if (currentDevice && selectedBackend) {
-        if (const char *const env = std::getenv(polyregion::env::PolyinvokeTestLock); env && env[0] == '1') {
-          static std::optional<polyregion::invoke::DeviceLock> currentDeviceLock;
+        if (testLockEnabled()) {
+          static std::shared_ptr<DeviceLock> currentDeviceLock;
           const auto physical = currentDevice->physicalDevice();
           // No-op for host/CPU devices; GPU backends sharing one physical device serialise.
           log(DebugLevel::Info, "<%s> Acquiring DeviceLock for (%s, %s)", __func__, magic_enum::enum_name(*selectedBackend).data(),
               physical.str().c_str());
-          currentDeviceLock.emplace(physical);
+          currentDeviceLock = sharedDeviceLock(physical);
         }
       }
-      if (currentDevice) {
-        auto timeout = std::chrono::seconds(10);
-        if (const char *const env = std::getenv(polyregion::env::PolyrtQueueTimeoutSec); env && env[0]) {
-          if (const auto secs = std::strtol(env, nullptr, 10); secs > 0) timeout = std::chrono::seconds(secs);
-        }
-        currentQueue = currentDevice->createQueue(timeout);
-      }
+      if (currentDevice) currentQueue = currentDevice->createQueue(queueTimeout());
       // XXX HIP/CUDA/HSA runtimes don't survive explicit teardown during __cxa_finalize. their globals are being destroyed concurrently and
       // the destroy-stream call SIGSEGVs. Just leak it as program is terminating anyway.
       std::atexit([] {
@@ -320,9 +338,45 @@ POLYREGION_EXPORT extern "C" bool polyrt_context_available(void *context, const 
 }
 
 namespace {
+std::shared_mutex &contextRegistryMutex() {
+  static std::shared_mutex mutex;
+  return mutex;
+}
+
+std::vector<polyregion::polyrt::ExecutionContext *> &contextRegistry() {
+  static std::vector<polyregion::polyrt::ExecutionContext *> contexts;
+  return contexts;
+}
+
+constexpr uintptr_t createdHandleTag = 1;
+
+struct CreatedContext {
+  std::shared_ptr<DeviceLock> lock;
+  std::unique_ptr<DeviceQueue> queue;
+  std::unique_ptr<polyregion::polyrt::ExecutionContext> context;
+};
+
+std::map<uintptr_t, CreatedContext> &createdContexts() {
+  static auto *contexts = new std::map<uintptr_t, CreatedContext>();
+  return *contexts;
+}
+
+polyregion::polyrt::ExecutionContext *resolveContext(void *handle) {
+  const auto raw = reinterpret_cast<uintptr_t>(handle);
+  const std::shared_lock lock(contextRegistryMutex());
+  if ((raw & createdHandleTag) != 0) {
+    const auto found = createdContexts().find(raw);
+    return found == createdContexts().end() ? nullptr : found->second.context.get();
+  }
+  for (auto *context : contextRegistry())
+    if (context == handle) return context;
+  return nullptr;
+}
+
 polyregion::polyrt::ExecutionContext &requireContext(void *context, const char *site) {
-  if (auto *value = static_cast<polyregion::polyrt::ExecutionContext *>(context)) return *value;
-  polyregion::polyrt::skipExit(fmt::format("no device: {} has no execution context", site).c_str());
+  if (!context) polyregion::polyrt::skipExit(fmt::format("no device: {} has no execution context", site).c_str());
+  if (auto *value = resolveContext(context)) return *value;
+  throw std::invalid_argument(fmt::format("{}: unknown or released context handle", site));
 }
 
 void forgetTemporaryAllocation(polyregion::polyrt::ExecutionContext &execution, const uintptr_t pointer) {
@@ -369,6 +423,16 @@ void retryPendingCleanups(polyregion::polyrt::ExecutionContext &execution) {
 }
 
 thread_local char runtimeErrorMessage[512]{};
+thread_local std::vector<polyregion::polyrt::ExecutionContext *> activeTransactions;
+thread_local bool foreignMarshalAttempted = false;
+
+constexpr auto foreignMarshalMessage =
+    "a created context cannot marshal pointer-bearing captures: the mirror tables belong to the default context";
+
+void rejectForeignMarshal() {
+  if (!std::exchange(foreignMarshalAttempted, false)) return;
+  throw std::runtime_error(foreignMarshalMessage);
+}
 
 template <class Fn> bool runtimeStatus(const char *operation, Fn &&fn) noexcept {
   runtimeErrorMessage[0] = '\0';
@@ -386,16 +450,6 @@ template <class Fn> bool runtimeStatus(const char *operation, Fn &&fn) noexcept 
 } // namespace
 
 namespace {
-std::mutex &contextRegistryMutex() {
-  static std::mutex mutex;
-  return mutex;
-}
-
-std::vector<polyregion::polyrt::ExecutionContext *> &contextRegistry() {
-  static std::vector<polyregion::polyrt::ExecutionContext *> contexts;
-  return contexts;
-}
-
 PolyrtStats snapshotStats(const polyregion::polyrt::ExecutionContext &execution) {
   const auto &counters = execution.counters;
   const auto &heap = execution.heapCounters;
@@ -415,13 +469,13 @@ PolyrtStats snapshotStats(const polyregion::polyrt::ExecutionContext &execution)
 
 polyregion::polyrt::ExecutionContext::ExecutionContext(Platform *platform, Device *device, DeviceQueue *queue)
     : platform(platform), device(device), queue(queue) {
-  const std::scoped_lock lock(contextRegistryMutex());
+  const std::unique_lock lock(contextRegistryMutex());
   contextRegistry().emplace_back(this);
 }
 
 static polyregion::polyrt::ExecutionContext *contextOf(DeviceQueue &queue) {
   polyregion::polyrt::ExecutionContext *owner = nullptr;
-  const std::scoped_lock lock(contextRegistryMutex());
+  const std::shared_lock lock(contextRegistryMutex());
   for (auto *context : contextRegistry())
     if (context->queue == &queue) owner = context;
   return owner;
@@ -455,13 +509,15 @@ void polyregion::polyrt::copyToHost(DeviceQueue &queue, const uintptr_t src, con
 
 POLYREGION_EXPORT extern "C" bool polyrt_stats(void *context, PolyrtStats *stats) noexcept {
   if (!context || !stats) return false;
-  *stats = snapshotStats(*static_cast<polyregion::polyrt::ExecutionContext *>(context));
+  const auto *execution = resolveContext(context);
+  if (!execution) return false;
+  *stats = snapshotStats(*execution);
   return true;
 }
 
 polyregion::polyrt::ExecutionContext::~ExecutionContext() {
   {
-    const std::scoped_lock registry(contextRegistryMutex());
+    const std::unique_lock registry(contextRegistryMutex());
     std::erase(contextRegistry(), this);
   }
   if (const auto *target = std::getenv(polyregion::env::PolyrtStats); target && *target) {
@@ -478,7 +534,10 @@ polyregion::polyrt::ExecutionContext::~ExecutionContext() {
     }
   }
   const std::unique_lock lock(transaction, std::try_to_lock);
-  if (!lock) return;
+  if (!lock) {
+    log(DebugLevel::Debug, "Context %p is held by another thread, skipping its cleanup", static_cast<void *>(this));
+    return;
+  }
   try {
     retryPendingCleanups(*this);
   } catch (...) {
@@ -491,19 +550,179 @@ polyregion::polyrt::ExecutionContext::~ExecutionContext() {
     }
   }
   errorBlocks.clear();
-  if (heap)
+  if (heap && processMarshal)
     if (auto *marshal = sma::captureMarshal()) marshal->releaseArena();
   heap.reset();
+}
+
+bool polyregion::polyrt::sma::foreignContextActive(const char *site) noexcept {
+  if (activeTransactions.empty() || activeTransactions.back()->processMarshal) return false;
+  foreignMarshalAttempted = true;
+  std::snprintf(runtimeErrorMessage, sizeof(runtimeErrorMessage), "%s: %s", site, foreignMarshalMessage);
+  return true;
+}
+
+namespace {
+struct CatalogueEntry {
+  Backend backend;
+  std::unique_ptr<Platform> platform;
+  std::vector<std::unique_ptr<Device>> devices;
+};
+
+std::mutex &catalogueMutex() {
+  static std::mutex mutex;
+  return mutex;
+}
+
+std::vector<CatalogueEntry> &catalogue() {
+  static auto *entries = [] {
+    auto built = std::make_unique<std::vector<CatalogueEntry>>();
+    for (const auto backend : magic_enum::enum_values<Backend>()) {
+      auto platform = Platform::of(backend);
+      if (const auto *error = std::get_if<std::string>(&platform)) {
+        log(DebugLevel::Debug, "Backend %s is not in the catalogue: %s", magic_enum::enum_name(backend).data(), error->c_str());
+        continue;
+      }
+      auto owned = std::move(std::get<std::unique_ptr<Platform>>(platform));
+      auto devices = owned->enumerate();
+      built->emplace_back(CatalogueEntry{.backend = backend, .platform = std::move(owned), .devices = std::move(devices)});
+    }
+    return built.release();
+  }();
+  return *entries;
+}
+
+CatalogueEntry &platformAt(const int32_t platform) {
+  auto &entries = catalogue();
+  if (platform < 0 || static_cast<size_t>(platform) >= entries.size())
+    throw std::invalid_argument(fmt::format("platform index {} is out of range ({} platforms)", platform, entries.size()));
+  return entries[platform];
+}
+
+Device &deviceAt(CatalogueEntry &entry, const int32_t platform, const int32_t device) {
+  if (device < 0 || static_cast<size_t>(device) >= entry.devices.size())
+    throw std::invalid_argument(
+        fmt::format("device index {} is out of range for platform {} ({} devices)", device, platform, entry.devices.size()));
+  return *entry.devices[device];
+}
+
+template <size_t N> void copyName(char (&out)[N], const std::string &name) { std::snprintf(out, N, "%s", name.c_str()); }
+} // namespace
+
+POLYREGION_EXPORT extern "C" bool polyrt_platform_count(int32_t *count) noexcept {
+  return runtimeStatus(__func__, [&] {
+    if (!count) throw std::invalid_argument("null count pointer");
+    const std::scoped_lock lock(catalogueMutex());
+    *count = static_cast<int32_t>(catalogue().size());
+  });
+}
+
+POLYREGION_EXPORT extern "C" bool polyrt_platform_info(const int32_t platform, PolyrtPlatformInfo *info) noexcept {
+  return runtimeStatus(__func__, [&] {
+    if (!info) throw std::invalid_argument("null info pointer");
+    const std::scoped_lock lock(catalogueMutex());
+    auto &entry = platformAt(platform);
+    *info = {.backend = static_cast<int32_t>(entry.backend),
+             .kind = static_cast<int32_t>(entry.platform->kind()),
+             .deviceCount = static_cast<int32_t>(entry.devices.size()),
+             .name = {}};
+    copyName(info->name, entry.platform->name());
+  });
+}
+
+POLYREGION_EXPORT extern "C" bool polyrt_device_info(const int32_t platform, const int32_t device, PolyrtDeviceInfo *info) noexcept {
+  return runtimeStatus(__func__, [&] {
+    if (!info) throw std::invalid_argument("null info pointer");
+    const std::scoped_lock lock(catalogueMutex());
+    auto &entry = platformAt(platform);
+    auto &target = deviceAt(entry, platform, device);
+    *info = {.backend = static_cast<int32_t>(entry.backend),
+             .platformKind = static_cast<int32_t>(entry.platform->kind()),
+             .moduleFormat = static_cast<int32_t>(target.moduleFormat()),
+             .deviceKind =
+                 static_cast<int32_t>(target.physicalDevice().scheme == PhysicalDevice::Scheme::Host ? polyregion::polyrt::DeviceKind::CPU
+                                                                                                     : polyregion::polyrt::DeviceKind::GPU),
+             .cudaArchitectureMajor = static_cast<int32_t>(target.cudaArchitectureMajor()),
+             .cudaArchitectureMinor = static_cast<int32_t>(target.cudaArchitectureMinor()),
+             .globalMemoryBytes = target.globalMemoryBytes(),
+             .computeUnits = target.computeUnits(),
+             .name = {}};
+    copyName(info->name, target.name());
+  });
+}
+
+POLYREGION_EXPORT extern "C" bool polyrt_context_create(const int32_t platform, const int32_t device, void **context) noexcept {
+  if (context) *context = nullptr;
+  return runtimeStatus(__func__, [&] {
+    if (!context) throw std::invalid_argument("null context pointer");
+    const std::scoped_lock lock(catalogueMutex());
+    auto &entry = platformAt(platform);
+    auto &target = deviceAt(entry, platform, device);
+    auto deviceLock = testLockEnabled() ? sharedDeviceLock(target.physicalDevice()) : nullptr;
+    auto queue = target.createQueue(queueTimeout());
+    auto created = std::make_unique<polyregion::polyrt::ExecutionContext>(entry.platform.get(), &target, queue.get());
+    created->processMarshal = false;
+    static std::atomic<uintptr_t> sequence{0};
+    const auto handle = (++sequence << 4) | createdHandleTag;
+    const std::unique_lock registry(contextRegistryMutex());
+    createdContexts().emplace(handle,
+                              CreatedContext{.lock = std::move(deviceLock), .queue = std::move(queue), .context = std::move(created)});
+    *context = reinterpret_cast<void *>(handle);
+  });
+}
+
+POLYREGION_EXPORT extern "C" bool polyrt_context_destroy(void *context) noexcept {
+  return runtimeStatus(__func__, [&] {
+    const auto handle = reinterpret_cast<uintptr_t>(context);
+    auto *execution = (handle & createdHandleTag) != 0 ? resolveContext(context) : nullptr;
+    if (!execution) throw std::invalid_argument("not a live context returned by polyrt_context_create");
+    if (std::ranges::find(activeTransactions, execution) != activeTransactions.end())
+      throw std::logic_error("the context is held by a transaction on this thread");
+    CreatedContext owned;
+    std::exception_ptr failure;
+    {
+      const std::scoped_lock transaction(execution->transaction);
+      {
+        const std::unique_lock registry(contextRegistryMutex());
+        const auto found = createdContexts().find(handle);
+        owned = std::move(found->second);
+        createdContexts().erase(found);
+      }
+      try {
+        execution->settle();
+      } catch (...) {
+        failure = std::current_exception();
+      }
+      for (const auto &[pointer, allocation] : execution->remoteAllocations) {
+        try {
+          releaseRemote(*execution, pointer);
+        } catch (...) {
+          if (!failure) failure = std::current_exception();
+        }
+      }
+      execution->remoteAllocations.clear();
+      execution->errorBlocks.clear();
+      execution->temporaryAllocationScopes.clear();
+    }
+    owned.context.reset();
+    owned.queue.reset();
+    owned.lock.reset();
+    if (failure) std::rethrow_exception(failure);
+  });
 }
 
 POLYREGION_EXPORT extern "C" bool polyrt_context_acquire(void *context) noexcept {
   return runtimeStatus(__func__, [&] {
     auto &execution = requireContext(context, __func__);
     execution.transaction.lock();
+    const auto depth = execution.temporaryAllocationScopes.size();
     try {
       retryPendingCleanups(execution);
       execution.temporaryAllocationScopes.emplace_back();
+      activeTransactions.emplace_back(&execution);
     } catch (...) {
+      while (execution.temporaryAllocationScopes.size() > depth)
+        execution.temporaryAllocationScopes.pop_back();
       execution.transaction.unlock();
       throw;
     }
@@ -513,10 +732,11 @@ POLYREGION_EXPORT extern "C" bool polyrt_context_acquire(void *context) noexcept
 POLYREGION_EXPORT extern "C" bool polyrt_context_release(void *context) noexcept {
   return runtimeStatus(__func__, [&] {
     auto &execution = requireContext(context, __func__);
-    if (execution.temporaryAllocationScopes.empty()) {
-      throw std::logic_error("polyrt_context_release: no matching acquire");
-    }
+    const auto holder = std::find(activeTransactions.rbegin(), activeTransactions.rend(), &execution);
+    if (holder == activeTransactions.rend()) throw std::logic_error("polyrt_context_release: no matching acquire on this thread");
+    activeTransactions.erase(std::next(holder).base());
     const std::unique_lock transaction(execution.transaction, std::adopt_lock);
+    const auto refused = std::exchange(foreignMarshalAttempted, false);
     const auto temporaries = std::move(execution.temporaryAllocationScopes.back());
     execution.temporaryAllocationScopes.pop_back();
     std::exception_ptr failure;
@@ -533,6 +753,7 @@ POLYREGION_EXPORT extern "C" bool polyrt_context_release(void *context) noexcept
       }
     }
     if (failure) std::rethrow_exception(failure);
+    if (refused) throw std::runtime_error(foreignMarshalMessage);
   });
 }
 
@@ -758,7 +979,6 @@ static bool takesErrorBuffer(const char *moduleName) {
 POLYREGION_EXPORT extern "C" bool polyrt_remote_load(void *context, const char *moduleName, const int32_t kind, const int32_t format,
                                                      const size_t featureCount, const char **features, const size_t imageLength,
                                                      const uint8_t *image) {
-  (void)requireContext(context, __func__);
   const polyregion::runtime::KernelObject object{.kind = static_cast<polyregion::runtime::PlatformKind>(kind),
                                                  .format = static_cast<polyregion::runtime::ModuleFormat>(format),
                                                  .featureCount = featureCount,
@@ -771,7 +991,7 @@ POLYREGION_EXPORT extern "C" bool polyrt_remote_load(void *context, const char *
                                                  .opt = polyregion::compiletime::OptLevel::O3,
                                                  .programLength = 0,
                                                  .program = nullptr};
-  if (!polyregion::polyrt::loadKernelObject(moduleName, object)) return false;
+  if (!polyregion::polyrt::loadKernelObject(requireContext(context, __func__), moduleName, object)) return false;
   if (std::any_of(features, features + featureCount,
                   [](const char *feature) { return std::string_view(feature) == polyregion::conventions::ErrorArg; })) {
     const std::scoped_lock lock(assertingModulesMutex());
@@ -842,6 +1062,7 @@ static void remoteLaunch(void *context, const char *moduleName, const char *kern
                          const size_t gridZ, const size_t blockX, const size_t blockY, const size_t blockZ, const size_t localMemBytes,
                          const size_t argCount, const uint8_t *argTypes, void *const *argPtrs, const int64_t arenaRoot = 0) {
   auto &value = requireContext(context, __func__);
+  rejectForeignMarshal();
   value.counters.launches.fetch_add(1, std::memory_order_relaxed);
   uintptr_t error = takesErrorBuffer(moduleName) ? polyregion::polyrt::acquireErrorBlock(value) : 0;
   try {
@@ -950,6 +1171,7 @@ static void remoteLaunchMarshalled(void *context, const char *moduleName, const 
                                    const polyregion::runtime::TypeLayout *const *layouts) {
   namespace sma = polyregion::polyrt::sma;
   auto &execution = requireContext(context, __func__);
+  rejectForeignMarshal();
   const std::scoped_lock transaction(execution.transaction);
   struct Mirror {
     uintptr_t remote = 0;
@@ -963,7 +1185,8 @@ static void remoteLaunchMarshalled(void *context, const char *moduleName, const 
   const auto marshalling = iota(size_t{0}, argCount) | exists([&](const size_t i) {
                              return mirrorKinds[i] == 3 || (mirrorKinds[i] == 1 && layouts && pointerBearing(layouts[i]));
                            });
-  auto *marshal = !marshalling || hostThreaded || mode == sma::MirrorMode::Off ? nullptr : sma::captureMarshal();
+  const bool foreign = !execution.processMarshal && !hostThreaded && mode != sma::MirrorMode::Off;
+  auto *marshal = !marshalling || hostThreaded || mode == sma::MirrorMode::Off || foreign ? nullptr : sma::captureMarshal();
   std::vector<size_t> mirroredCaptures, ensuredPointers;
   std::optional<size_t> arenaCapture;
   sma::ArenaImage arena{};
@@ -984,6 +1207,7 @@ static void remoteLaunchMarshalled(void *context, const char *moduleName, const 
     if (marshal) marshal->visitClear();
     for (size_t i = 0; i < argCount; ++i) {
       launchArgPtrs[i] = argPtrs[i];
+      if (foreign && mirrorKinds[i] == 1 && pointerBearing(layouts ? layouts[i] : nullptr)) throw std::runtime_error(foreignMarshalMessage);
       if (mirrorKinds[i] != 1 || !marshal || !pointerBearing(layouts ? layouts[i] : nullptr)) continue;
       if (mode == sma::MirrorMode::Arena) {
         if (arenaCapture) throw std::logic_error(fmt::format("{}: launch of {} has more than one arena capture", __func__, kernelName));
@@ -1001,6 +1225,7 @@ static void remoteLaunchMarshalled(void *context, const char *moduleName, const 
       if (launchArgPtrs[i] != argPtrs[i]) continue;
       if (mirrorKinds[i] == 3) {
         const auto pointer = *static_cast<const uintptr_t *>(argPtrs[i]);
+        if (foreign && pointer != 0 && !remoteAllocation(execution, pointer)) throw std::runtime_error(foreignMarshalMessage);
         if (!marshal || pointer == 0 || remoteAllocation(execution, pointer)) continue;
         if (const auto remote = marshal->ensure(reinterpret_cast<const void *>(pointer), mirrorSizes[i])) {
           marshalled[i] = remote;
@@ -1315,15 +1540,25 @@ static bool jitCompileObject(const char *moduleName, const polyregion::runtime::
   return true;
 }
 
-bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelObject &object, const void *capture,
-                                          const TypeLayout *interfaceLayout, std::string *loadedModuleName) {
-  initialise();
+static std::mutex &moduleLoadMutex(const Device *device) {
+  static std::mutex registryMutex;
+  static std::map<const Device *, std::unique_ptr<std::mutex>> mutexes;
+  const std::scoped_lock guard(registryMutex);
+  auto &slot = mutexes[device];
+  if (!slot) slot = std::make_unique<std::mutex>();
+  return *slot;
+}
+
+static bool loadKernelObjectOn(Platform *platform, Device *device, DeviceQueue *queue, const char *moduleName,
+                               const polyregion::runtime::KernelObject &object, const void *capture,
+                               const polyregion::runtime::TypeLayout *interfaceLayout, std::string *loadedModuleName) {
+  using polyregion::polyrt::SkipReasons;
   std::optional<SkipReasons::Device> on;
-  if (currentPlatform && currentDevice)
-    on = SkipReasons::Device{.platform = currentPlatform->name(),
-                             .name = currentDevice->name(),
-                             .kind = std::string(magic_enum::enum_name(currentPlatform->kind())),
-                             .format = std::string(magic_enum::enum_name(currentDevice->moduleFormat()))};
+  if (platform && device)
+    on = SkipReasons::Device{.platform = platform->name(),
+                             .name = device->name(),
+                             .kind = std::string(magic_enum::enum_name(platform->kind())),
+                             .format = std::string(magic_enum::enum_name(device->moduleFormat()))};
   const auto note = [&](const char *outcome, std::vector<std::string> detail = {}) {
     std::vector<std::string> features;
     for (size_t i = 0; i < object.featureCount; ++i)
@@ -1335,37 +1570,37 @@ bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelOb
                                .outcome = outcome,
                                .detail = std::move(detail)});
   };
-  if (!currentPlatform || !currentDevice || !currentQueue) {
+  if (!platform || !device || !queue) {
     note("no-device");
     log(DebugLevel::Info, "No device/queue in %s", __func__);
     return false;
   }
 
-  if (currentPlatform->kind() != object.kind || currentDevice->moduleFormat() != object.format) {
+  if (platform->kind() != object.kind || device->moduleFormat() != object.format) {
     note("format", {std::string(magic_enum::enum_name(object.format))});
     log(DebugLevel::Debug, "Skipping incompatible image: %s [%s] (targeting %s [%s])",
         magic_enum::enum_name(object.kind).data(),   //
         magic_enum::enum_name(object.format).data(), //
-        magic_enum::enum_name(currentPlatform->kind()).data(), magic_enum::enum_name(currentDevice->moduleFormat()).data());
+        magic_enum::enum_name(platform->kind()).data(), magic_enum::enum_name(device->moduleFormat()).data());
     return false;
   }
 
   log(DebugLevel::Debug, "Found compatible image: %s [%s] (targeting %s [%s])",
       magic_enum::enum_name(object.kind).data(),   //
       magic_enum::enum_name(object.format).data(), //
-      magic_enum::enum_name(currentPlatform->kind()).data(), magic_enum::enum_name(currentDevice->moduleFormat()).data());
+      magic_enum::enum_name(platform->kind()).data(), magic_enum::enum_name(device->moduleFormat()).data());
 
   std::vector<std::string> missing;
   for (size_t i = 0; i < object.featureCount; ++i) {
     const std::string_view req(object.features[i]);
     if (!polyregion::runtime::deviceGatedFeature(req)) continue;
-    if (!hasFeature(*currentDevice, req)) {
-      log(DebugLevel::Debug, "Device %s lacks required feature `%s` for module `%s`; skipping", currentDevice->name().c_str(),
+    if (!hasFeature(*device, req)) {
+      log(DebugLevel::Debug, "Device %s lacks required feature `%s` for module `%s`; skipping", device->name().c_str(),
           std::string(req).c_str(), moduleName);
       missing.emplace_back(req);
     }
   }
-  if (lacksRequiredPaging(*currentDevice, currentPlatform->kind())) missing.emplace_back(polyregion::runtime::SystemPagingFeature);
+  if (lacksRequiredPaging(*device, platform->kind())) missing.emplace_back(polyregion::runtime::SystemPagingFeature);
   if (!missing.empty()) {
     note("lacks", std::move(missing));
     return false;
@@ -1377,7 +1612,7 @@ bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelOb
     specStorage = collectSpecConsts(capture, interfaceLayout);
     if (!specStorage.values.empty()) {
       const uint64_t specKey = hashSpecs(specStorage.values);
-      const auto policyKey = fmt::format("{}|{}|{}|{}|{}", moduleName, currentDevice->name(), magic_enum::enum_name(object.target),
+      const auto policyKey = fmt::format("{}|{}|{}|{}|{}", moduleName, device->name(), magic_enum::enum_name(object.target),
                                          object.arch ? object.arch : "", object.pipelineSpec ? object.pipelineSpec : "");
       polyregion::polyrt::JitPolicyChoice choice{};
       {
@@ -1395,7 +1630,8 @@ bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelOb
   }
   if (loadedModuleName) *loadedModuleName = effectiveModuleName;
 
-  if (!currentDevice->moduleLoaded(effectiveModuleName)) {
+  const std::scoped_lock loading(moduleLoadMutex(device));
+  if (!device->moduleLoaded(effectiveModuleName)) {
     std::string image;
     if (object.imageLength > 0 && object.image) {
       image.assign(reinterpret_cast<const char *>(object.image), object.imageLength);
@@ -1417,10 +1653,23 @@ bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelOb
         std::fclose(f);
       }
     }
-    currentDevice->loadModule(effectiveModuleName, image);
+    device->loadModule(effectiveModuleName, image);
   }
   note("loaded");
   return true;
+}
+
+bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelObject &object, const void *capture,
+                                          const TypeLayout *interfaceLayout, std::string *loadedModuleName) {
+  initialise();
+  return loadKernelObjectOn(currentPlatform.get(), currentDevice.get(), currentQueue.get(), moduleName, object, capture, interfaceLayout,
+                            loadedModuleName);
+}
+
+bool polyregion::polyrt::loadKernelObject(ExecutionContext &context, const char *moduleName, const KernelObject &object,
+                                          const void *capture, const TypeLayout *interfaceLayout, std::string *loadedModuleName) {
+  return loadKernelObjectOn(context.platform, context.device, context.queue, moduleName, object, capture, interfaceLayout,
+                            loadedModuleName);
 }
 
 // XXX InterposePass routes every free/delete here, but not every pointer was allocated by us

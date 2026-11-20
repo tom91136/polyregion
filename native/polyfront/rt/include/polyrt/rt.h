@@ -54,6 +54,7 @@ struct ExecutionContext {
   std::map<uintptr_t, RemoteAllocation> remoteAllocations;
   std::vector<std::vector<uintptr_t>> temporaryAllocationScopes;
   std::vector<uintptr_t> errorBlocks;
+  bool processMarshal = true;
 
   struct Counters {
     // NOLINTNEXTLINE(readability-redundant-member-init)
@@ -118,6 +119,12 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT POLYREGION_PRINTF_FORMAT(2, 3) void log(
 POLYREGION_RT_PROTECT POLYREGION_EXPORT bool loadKernelObject(const char *moduleName, const KernelObject &object,
                                                               const void *capture = nullptr, const TypeLayout *interfaceLayout = nullptr,
                                                               std::string *loadedModuleName = nullptr);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT bool loadKernelObject(ExecutionContext &context, const char *moduleName, const KernelObject &object,
+                                                              const void *capture = nullptr, const TypeLayout *interfaceLayout = nullptr,
+                                                              std::string *loadedModuleName = nullptr);
+namespace sma {
+POLYREGION_RT_PROTECT POLYREGION_EXPORT bool foreignContextActive(const char *site) noexcept;
+} // namespace sma
 } // namespace polyregion::polyrt
 
 #undef POLYREGION_PRINTF_FORMAT
@@ -131,6 +138,37 @@ struct PolyrtStats {
   uint64_t launches, arenaLaunches, arenaWindowMoves, d2dCopies, h2dCopies, d2hCopies, waits, remoteMallocs;
   uint64_t heapBytesLive, heapBytesCommitted, heapGrowths;
 };
+
+// names are truncated to the array size
+struct PolyrtPlatformInfo {
+  int32_t backend;
+  int32_t kind;
+  int32_t deviceCount;
+  char name[64];
+};
+
+struct PolyrtDeviceInfo {
+  int32_t backend;
+  int32_t platformKind;
+  int32_t moduleFormat;
+  int32_t deviceKind;
+  int32_t cudaArchitectureMajor;
+  int32_t cudaArchitectureMinor;
+  uint64_t globalMemoryBytes;
+  uint64_t computeUnits;
+  char name[128];
+};
+
+static_assert(sizeof(PolyrtPlatformInfo) == 76 && offsetof(PolyrtPlatformInfo, name) == 12);
+static_assert(sizeof(PolyrtDeviceInfo) == 168 && offsetof(PolyrtDeviceInfo, globalMemoryBytes) == 24
+              && offsetof(PolyrtDeviceInfo, computeUnits) == 32 && offsetof(PolyrtDeviceInfo, name) == 40);
+
+// a handle from polyrt_context_create is freed by polyrt_context_destroy, never polyrt_context_release
+POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_platform_count(int32_t *count) noexcept;
+POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_platform_info(int32_t platform, PolyrtPlatformInfo *info) noexcept;
+POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_device_info(int32_t platform, int32_t device, PolyrtDeviceInfo *info) noexcept;
+POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_context_create(int32_t platform, int32_t device, void **context) noexcept;
+POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_context_destroy(void *context) noexcept;
 
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_context_current();
 POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_stats(void *context, PolyrtStats *stats) noexcept;
