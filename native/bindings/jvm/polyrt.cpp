@@ -87,6 +87,8 @@ void raiseAssert(JNIEnv *env) {
   if (!raised.raised) return;
   if (raised.code == static_cast<uint32_t>(polyregion::invoke::AssertCode::Assert))
     throwGeneric(env, "java/lang/AssertionError", raised.message);
+  else if (raised.code == static_cast<uint32_t>(polyregion::invoke::AssertCode::Arithmetic))
+    throwGeneric(env, "java/lang/ArithmeticException", raised.message);
   else throwGeneric(env, EX, "Device assertion failed (code " + codeName(raised.code) + "): " + raised.message);
 }
 

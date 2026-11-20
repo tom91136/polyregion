@@ -117,6 +117,13 @@ class CudaIntrinsicSuite extends BaseSuite {
     testExpr[Int](java.lang.Math.floorDiv(-7, 3))
     testExpr[Long](java.lang.Math.floorDiv(7L, -3L))
 
+    val zero  = 0
+    val zeroL = 0L
+    testFails("floorDiv by zero")(java.lang.Math.floorDiv(7, zero))
+    testFails("floorMod by zero")(java.lang.Math.floorMod(7, zero))
+    testFails("long floorDiv by zero")(java.lang.Math.floorDiv(7L, zeroL))
+    testFails("long floorMod by zero")(java.lang.Math.floorMod(7L, zeroL))
+
     testExpr[Double](java.lang.Math.signum(e))
     testExpr[Float](java.lang.Math.signum(g))
     testExpr[Int](java.lang.Integer.signum(-12))

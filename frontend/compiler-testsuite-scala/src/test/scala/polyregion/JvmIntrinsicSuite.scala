@@ -1,8 +1,11 @@
 package polyregion
 
+import polyregion.scalalang.*
 import polyregion.scalalang.compiletime.*
 
 import scala.compiletime.*
+import scala.concurrent.Await
+import scala.concurrent.duration.*
 import scala.reflect.ClassTag
 
 class JvmIntrinsicSuite extends BaseSuite {
@@ -142,6 +145,38 @@ class JvmIntrinsicSuite extends BaseSuite {
     testExpr[Boolean](java.lang.Double.isFinite(nd))
     testExpr[Int](java.lang.Math.round(nf))
     testExpr[Long](java.lang.Math.round(nd))
+  }
+
+  private def assertDivByZero(e: ArithmeticException): Unit = assertEquals(e.getMessage, "/ by zero")
+
+  private inline def blockingDivByZero[A](inline f: => A): Unit = {
+    val raised = intercept[ArithmeticException](blocking.Host.aot.task[Config[Target.Host.type, Opt.O2], A](f))
+    assertDivByZero(raised)
+  }
+
+  private inline def futureDivByZero[A](inline f: => A): Unit = {
+    val failed = future.Host.aot.task[Config[Target.Host.type, Opt.O2], A](f)
+    assertDivByZero(intercept[ArithmeticException](Await.result(failed, 30.seconds)))
+  }
+
+  test("floorDiv and floorMod by zero raise ArithmeticException through the blocking adapter") {
+    val zero  = 0
+    val zeroL = 0L
+    blockingDivByZero[Int](java.lang.Math.floorDiv(7, zero))
+    blockingDivByZero[Int](java.lang.Math.floorMod(7, zero))
+    blockingDivByZero[Long](java.lang.Math.floorDiv(7L, zeroL))
+    blockingDivByZero[Long](java.lang.Math.floorMod(7L, zeroL))
+    blockingDivByZero[Int](java.lang.Math.floorMod(7L, zero))
+  }
+
+  test("floorDiv and floorMod by zero fail the future adapter with ArithmeticException") {
+    val zero  = 0
+    val zeroL = 0L
+    futureDivByZero[Int](java.lang.Math.floorDiv(7, zero))
+    futureDivByZero[Int](java.lang.Math.floorMod(7, zero))
+    futureDivByZero[Long](java.lang.Math.floorDiv(7L, zeroL))
+    futureDivByZero[Long](java.lang.Math.floorMod(7L, zeroL))
+    futureDivByZero[Int](java.lang.Math.floorMod(7L, zero))
   }
 
 }

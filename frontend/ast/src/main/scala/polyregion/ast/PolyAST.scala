@@ -865,6 +865,7 @@ object PolyAST {
       case Assert            extends AssertCode(fourCC('A', 'S', 'R', 'T'))
       case RecursionLimit    extends AssertCode(fourCC('R', 'L', 'I', 'M'))
       case Exception         extends AssertCode(fourCC('E', 'X', 'C', 'P'))
+      case Arithmetic        extends AssertCode(fourCC('A', 'R', 'I', 'T'))
       case Unknown(raw: Int) extends AssertCode(raw)
     }
 
@@ -977,7 +978,13 @@ object PolyAST {
     val All: List[Variant] =
       Backend.values.toList ++ Access.values.toList ++ Target.values.toList ++ OptLevel.values.toList ++
         Type.values.toList ++ PlatformKind.values.toList ++ ModuleFormat.values.toList ++
-        List(AssertCode.Error, AssertCode.Assert, AssertCode.RecursionLimit, AssertCode.Exception)
+        List(
+          AssertCode.Error,
+          AssertCode.Assert,
+          AssertCode.RecursionLimit,
+          AssertCode.Exception,
+          AssertCode.Arithmetic
+        )
   }
 
   extension (s: Sym) {

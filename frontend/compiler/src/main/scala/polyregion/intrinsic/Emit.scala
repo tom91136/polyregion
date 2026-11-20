@@ -46,6 +46,11 @@ final class Emit(val params: List[p.Term.Select]) {
 
   def when(cond: p.Term)(onTrue: => Unit): Unit = branch(cond)(onTrue)(())
 
+  def raise(code: p.Enums.AssertCode, message: String): Unit = {
+    val assertion = p.Expr.SpecOp(p.Spec.Assert(p.Term.IntU32Const(code.value), p.Term.StringConst(message)))
+    push(p.Stmt.Var(fresh(p.Type.Unit0), Some(assertion)))
+  }
+
   def real(t: p.Type, v: Double): p.Term = t match {
     case p.Type.Float32 => p.Term.Float32Const(v.toFloat)
     case p.Type.Float64 => p.Term.Float64Const(v)

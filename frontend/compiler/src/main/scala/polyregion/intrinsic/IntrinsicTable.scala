@@ -86,19 +86,23 @@ object IntrinsicTable {
     val t      = x.tpe
     val zero   = b.const(t, 0)
     val result = b.variable(p.Expr.Alias(zero))
-    b.branch(b.eq(y, b.const(t, -1))) {
-      if (!remainder) b.set(result, p.Expr.Alias(b.wrapNeg(x)))
+    b.branch(b.eq(y, zero)) {
+      b.raise(p.Enums.AssertCode.Arithmetic, "/ by zero")
     } {
-      if (remainder) {
-        val r      = b.rem(x, y)
-        val adjust = b.both(b.neq(r, zero), b.lt(b.xor(r, y), zero))
-        b.set(result, p.Expr.Alias(r))
-        b.when(adjust)(b.set(result, intr(p.Intr.Add(r, y, t))))
-      } else {
-        val q      = b.div(x, y)
-        val adjust = b.both(b.lt(b.xor(x, y), zero), b.neq(b.mul(q, y), x))
-        b.set(result, p.Expr.Alias(q))
-        b.when(adjust)(b.set(result, intr(p.Intr.Sub(q, b.const(t, 1), t))))
+      b.branch(b.eq(y, b.const(t, -1))) {
+        if (!remainder) b.set(result, p.Expr.Alias(b.wrapNeg(x)))
+      } {
+        if (remainder) {
+          val r      = b.rem(x, y)
+          val adjust = b.both(b.neq(r, zero), b.lt(b.xor(r, y), zero))
+          b.set(result, p.Expr.Alias(r))
+          b.when(adjust)(b.set(result, intr(p.Intr.Add(r, y, t))))
+        } else {
+          val q      = b.div(x, y)
+          val adjust = b.both(b.lt(b.xor(x, y), zero), b.neq(b.mul(q, y), x))
+          b.set(result, p.Expr.Alias(q))
+          b.when(adjust)(b.set(result, intr(p.Intr.Sub(q, b.const(t, 1), t))))
+        }
       }
     }
     result
