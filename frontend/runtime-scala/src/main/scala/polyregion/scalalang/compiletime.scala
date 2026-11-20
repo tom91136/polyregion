@@ -2,7 +2,9 @@ package polyregion.scalalang
 
 import cats.syntax.all.*
 import polyregion.ast.{PolyAST as p, *}
+import polyregion.jvm.twin.Marshal
 import polyregion.jvm.{compiler as ct, runtime as rt}
+import polyregion.twin.TwinLayouts
 import polyregion.prism.StdLib
 import polyregion.scalalang as srt
 
@@ -107,6 +109,16 @@ object compiletime {
                 opt = Opt.valueOf(TypeRepr.of[opt].termSymbol.name).value
               ) :: Nil).success
             } else s"Target type `${vendorTpe}` != ${cpTargetTpe} ".fail
+          case AppliedType(_, List(ConstantType(StringConstant(arch)))) =>
+            val target = TypeRepr.of[target].widenTermRefByName.dealias
+            val vendor = target.memberType(target.typeSymbol.typeMember("Arch")).dealias
+            if (vendor <:< TypeRepr.of[ct.Target])
+              (ReifiedConfig(
+                target = ct.Target.valueOf(vendor.termSymbol.name),
+                arch = arch,
+                opt = Opt.valueOf(TypeRepr.of[opt].termSymbol.name).value
+              ) :: Nil).success
+            else s"Target type `${vendor}` != ${TypeRepr.of[ct.Target]} ".fail
           case bad => s"Target type `${bad}` does not contain a String constant refinement or has illegal bounds".fail
         }
       case '[x *: xs] =>
@@ -326,8 +338,7 @@ object compiletime {
 
         lazy val modules = $modulesExpr
 
-        // keeps direct ByteBuffers alive through the launch, the pickled structs hold only their addresses
-        val keepAlive = scala.collection.mutable.ArrayBuffer.empty[Any]
+        val marshal = Marshal($ctx.queue, null, Platforms.directBufferFromPointer(_, _))
 
         val outcome: Either[Throwable, Unit] =
           try {
@@ -346,8 +357,6 @@ object compiletime {
                   .allocate(${ Expr(captureTpeSizes.sum) })
                   .order(ByteOrder.nativeOrder)
 
-              val ptrMap = scala.collection.mutable.Map[Any, Long]()
-
               ${
 
                 val lut         = prog.defs.map(s => s.name -> s).toMap
@@ -358,7 +367,7 @@ object compiletime {
                     val layouts0 = configLayouts.map(l => p.Sym(l.name) -> l).toMap
 
                     val layouts = prog.defs.flatMap { sd =>
-                      layouts0.get(sd.name).map(layout => sd -> (layout, prismRefs.get(sd.name)))
+                      layouts0.get(sd.name).map(layout => sd -> (TwinLayouts.of(sd, layout), prismRefs.get(sd.name)))
                     }.toMap
                     val allReprsInCaptures = capturesWithStructDefs
                       .collect { case (_, Some(sdef), term) =>
@@ -371,10 +380,6 @@ object compiletime {
                       lut,
                       layouts,
                       allReprsInCaptures,
-                      '{ (b: java.nio.Buffer) =>
-                        keepAlive += b; Platforms.pointerOfDirectBuffer(b)
-                      },
-                      '{ Platforms.directBufferFromPointer(_, _) },
                       '{ polyregion.scalalang.Residents.pointerOf($ctx, _) }
                     )
 
@@ -387,7 +392,7 @@ object compiletime {
                           ${
                             bindWrite(
                               0,
-                              write(_, _, 'ptrMap),
+                              write(_, _, 'marshal),
                               'fnValues,
                               capturesWithStructDefs
                             )
@@ -406,18 +411,17 @@ object compiletime {
                             fnValues.array,
                             rt.Policy($dim)
                           )
+                          marshal.sync()
 
                           if (sys.env.contains(Env.PolyregionDebug))
                             println("Kernel completed, tid=" + Thread.currentThread.getId + " cb=" + cb_)
-
-                          val objMap = scala.collection.mutable.Map[Long, Any]()
 
                           try {
                             ${
                               bindRead(
                                 0,
-                                read(_, _, _, 'ptrMap, 'objMap),
-                                update(_, _, _, 'ptrMap, 'objMap),
+                                read(_, _, _, 'marshal),
+                                update(_, _, _, 'marshal),
                                 'fnValues,
                                 capturesWithStructDefs
                               )
@@ -438,9 +442,13 @@ object compiletime {
             }
           } catch {
             case e: Throwable => Left(e)
-          } finally keepAlive.clear()
+          }
 
-        cb_(outcome)
+        val released =
+          try { marshal.close(); Right(()) }
+          catch { case e: Throwable => Left(e) }
+
+        cb_(if (outcome.isLeft) outcome else released)
       }
       given q.Printer[q.Tree] = q.Printer.TreeAnsiCode
       debug("Code=" + code.asTerm.show)
