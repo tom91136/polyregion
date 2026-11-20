@@ -50,13 +50,13 @@ trait BaseSuite extends munit.FunSuite {
       import polyregion.scalalang.blocking.Host
       val latch = CountDownLatch(1)
       polyregion.scalalang.compiletime.offload0[Config[Target.Host.type, Opt.O2]](
-        Host.underlying.createQueue(DefaultQueueCapacity),
+        Host.context,
         {
           case Left(e)   => throw e
           case Right(()) => latch.countDown()
         }
       ) { f; () }
-      latch.await(5, TimeUnit.SECONDS)
+      assert(latch.await(5, TimeUnit.SECONDS))
   }
 
   inline def offload1[A](using inline target: AssertTarget)(inline f: => A): A = target match {
@@ -67,13 +67,13 @@ trait BaseSuite extends munit.FunSuite {
       val r     = scala.collection.mutable.ListBuffer[A](null.asInstanceOf[A])
       val latch = CountDownLatch(1)
       polyregion.scalalang.compiletime.offload0[Config[Target.Host.type, Opt.O2]](
-        Host.underlying.createQueue(DefaultQueueCapacity),
+        Host.context,
         {
           case Left(e)   => throw e
           case Right(()) => latch.countDown()
         }
       ) { r(0) = f; () }
-      latch.await(5, TimeUnit.SECONDS)
+      assert(latch.await(5, TimeUnit.SECONDS))
       r(0)
   }
 

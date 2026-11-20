@@ -4,6 +4,7 @@ import polyregion.jvm.{compiler as cp, runtime as rt}
 
 import scala.compiletime.constValue
 
+// invoked exactly once, possibly on the launching thread before the launch returns
 type Callback[A] = Either[Throwable, A] => Unit
 
 enum Opt(val value: cp.Opt) {

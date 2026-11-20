@@ -125,48 +125,48 @@ object compiletime {
     case Right(x) => x
   }
 
-  inline def offload0[C](inline queue: rt.Device.Queue, inline cb: Callback[Unit])(inline f: Any): Unit =
-    ${ generate0[C]('queue, 'f, 'cb, jit = false) }
-  inline def offloadJit0[C](inline queue: rt.Device.Queue, inline cb: Callback[Unit])(inline f: Any): Unit =
-    ${ generate0[C]('queue, 'f, 'cb, jit = true) }
+  inline def offload0[C](inline ctx: rt.Context, inline cb: Callback[Unit])(inline f: Any): Unit =
+    ${ generate0[C]('ctx, 'f, 'cb, jit = false) }
+  inline def offloadJit0[C](inline ctx: rt.Context, inline cb: Callback[Unit])(inline f: Any): Unit =
+    ${ generate0[C]('ctx, 'f, 'cb, jit = true) }
   private def generate0[C: Type](using
       q: Quotes
-  )(queue: Expr[rt.Device.Queue], f: Expr[Any], cb: Expr[Callback[Unit]], jit: Boolean) = checked(for {
+  )(ctx: Expr[rt.Context], f: Expr[Any], cb: Expr[Callback[Unit]], jit: Boolean) = checked(for {
     cs   <- reifyConfigFromTpe[C]()
-    expr <- generate(using Quoted(q))(cs, queue, f, '{ rt.Dim3(1, 1, 1) }, cb, jit)
+    expr <- generate(using Quoted(q))(cs, ctx, f, '{ rt.Dim3(1, 1, 1) }, cb, jit)
   } yield expr)
 
-  inline def offload1[C](inline queue: rt.Device.Queue, inline rangeX: Range, inline cb: Callback[Unit])(
+  inline def offload1[C](inline ctx: rt.Context, inline rangeX: Range, inline cb: Callback[Unit])(
       inline f: Any
-  ): Unit = ${ generate1[C]('queue, 'f, 'rangeX, 'cb, jit = false) }
-  inline def offloadJit1[C](inline queue: rt.Device.Queue, inline rangeX: Range, inline cb: Callback[Unit])(
+  ): Unit = ${ generate1[C]('ctx, 'f, 'rangeX, 'cb, jit = false) }
+  inline def offloadJit1[C](inline ctx: rt.Context, inline rangeX: Range, inline cb: Callback[Unit])(
       inline f: Any
-  ): Unit = ${ generate1[C]('queue, 'f, 'rangeX, 'cb, jit = true) }
+  ): Unit = ${ generate1[C]('ctx, 'f, 'rangeX, 'cb, jit = true) }
   private def generate1[C: Type](using
       q: Quotes
-  )(queue: Expr[rt.Device.Queue], f: Expr[Any], rangeX: Expr[Range], cb: Expr[Callback[Unit]], jit: Boolean) = checked(
+  )(ctx: Expr[rt.Context], f: Expr[Any], rangeX: Expr[Range], cb: Expr[Callback[Unit]], jit: Boolean) = checked(
     for {
       cs   <- reifyConfigFromTpe[C]()
-      expr <- generate(using Quoted(q))(cs, queue, f, '{ rt.Dim3($rangeX.size, 1, 1) }, cb, jit)
+      expr <- generate(using Quoted(q))(cs, ctx, f, '{ rt.Dim3($rangeX.size, 1, 1) }, cb, jit)
     } yield expr
   )
 
   inline def offload2[C](
-      inline queue: rt.Device.Queue,
+      inline ctx: rt.Context,
       inline rangeX: Range,
       inline rangeY: Range,
       inline cb: Callback[Unit]
-  )(inline f: Any): Unit = ${ generate2[C]('queue, 'f, 'rangeX, 'rangeY, 'cb, jit = false) }
+  )(inline f: Any): Unit = ${ generate2[C]('ctx, 'f, 'rangeX, 'rangeY, 'cb, jit = false) }
   inline def offloadJit2[C](
-      inline queue: rt.Device.Queue,
+      inline ctx: rt.Context,
       inline rangeX: Range,
       inline rangeY: Range,
       inline cb: Callback[Unit]
-  )(inline f: Any): Unit = ${ generate2[C]('queue, 'f, 'rangeX, 'rangeY, 'cb, jit = true) }
+  )(inline f: Any): Unit = ${ generate2[C]('ctx, 'f, 'rangeX, 'rangeY, 'cb, jit = true) }
   private def generate2[C: Type](using
       q: Quotes
   )(
-      queue: Expr[rt.Device.Queue],
+      ctx: Expr[rt.Context],
       f: Expr[Any],
       rangeX: Expr[Range],
       rangeY: Expr[Range],
@@ -175,27 +175,27 @@ object compiletime {
   ) =
     checked(for {
       cs   <- reifyConfigFromTpe[C]()
-      expr <- generate(using Quoted(q))(cs, queue, f, '{ rt.Dim3($rangeX.size, $rangeY.size, 1) }, cb, jit)
+      expr <- generate(using Quoted(q))(cs, ctx, f, '{ rt.Dim3($rangeX.size, $rangeY.size, 1) }, cb, jit)
     } yield expr)
 
   inline def offload3[C](
-      inline queue: rt.Device.Queue,
+      inline ctx: rt.Context,
       inline rangeX: Range,
       inline rangeY: Range,
       inline rangeZ: Range,
       inline cb: Callback[Unit]
-  )(inline f: Any): Unit = ${ generate3[C]('queue, 'f, 'rangeX, 'rangeY, 'rangeZ, 'cb, jit = false) }
+  )(inline f: Any): Unit = ${ generate3[C]('ctx, 'f, 'rangeX, 'rangeY, 'rangeZ, 'cb, jit = false) }
   inline def offloadJit3[C](
-      inline queue: rt.Device.Queue,
+      inline ctx: rt.Context,
       inline rangeX: Range,
       inline rangeY: Range,
       inline rangeZ: Range,
       inline cb: Callback[Unit]
-  )(inline f: Any): Unit = ${ generate3[C]('queue, 'f, 'rangeX, 'rangeY, 'rangeZ, 'cb, jit = true) }
+  )(inline f: Any): Unit = ${ generate3[C]('ctx, 'f, 'rangeX, 'rangeY, 'rangeZ, 'cb, jit = true) }
   private def generate3[C: Type](using
       q: Quotes
   )(
-      queue: Expr[rt.Device.Queue],
+      ctx: Expr[rt.Context],
       f: Expr[Any],
       rangeX: Expr[Range],
       rangeY: Expr[Range],
@@ -204,7 +204,7 @@ object compiletime {
       jit: Boolean
   ) = checked(for {
     cs   <- reifyConfigFromTpe[C]()
-    expr <- generate(using Quoted(q))(cs, queue, f, '{ rt.Dim3($rangeX.size, $rangeY.size, $rangeZ.size) }, cb, jit)
+    expr <- generate(using Quoted(q))(cs, ctx, f, '{ rt.Dim3($rangeX.size, $rangeY.size, $rangeZ.size) }, cb, jit)
   } yield expr)
 
   private val ProgramCounter = AtomicLong(0)
@@ -213,7 +213,7 @@ object compiletime {
       q: Quoted
   )(
       configs: List[ReifiedConfig],
-      queue: Expr[rt.Device.Queue],
+      ctx: Expr[rt.Context],
       f: Expr[Any],
       dim: Expr[rt.Dim3],
       cb: Expr[Callback[Unit]],
@@ -289,40 +289,33 @@ object compiletime {
         tpe.value -> tpe.sizeInBytes
       }.unzip
 
-      val tidTpeOrdinal = Pickler.tpeAsRuntimeTpe(p.Type.IntS64).value
-      val tidTpeSize    = Pickler.tpeAsRuntimeTpe(p.Type.IntS64).sizeInBytes
-
-      val returnTpeOrdinal = Pickler.tpeAsRuntimeTpe(entry.rtn).value
-      val returnTpeSize    = Pickler.tpeAsRuntimeTpe(entry.rtn).sizeInBytes
-
       debug(s"Prog defs: ${prog.defs}")
 
-      val modulesExpr: Expr[Array[(String, Set[String], Array[Byte])]] =
+      val modulesExpr: Expr[Array[rt.ModuleImage]] =
         if (jit) {
           val serialisedAstExpr = Expr(serialisedAst)
-          val jitConfigs = Expr(configs.map { config =>
-            (s"${config.arch}@${config.opt}(${config.target})", config.target.name, config.arch, config.opt.value)
-          })
+          val jitConfigs        = Expr(configs.map(config => (config.target.name, config.arch, config.opt.value)))
           '{
             val jitCompiler = ct.Compiler.create()
             val ast         = $serialisedAstExpr
-            $jitConfigs.map { case (name, targetName, arch, opt) =>
-              val comp =
-                jitCompiler.compile(ast, emitAssembly = false, ct.Options.of(ct.Target.valueOf(targetName), arch), opt)
-              (name, comp.features.toSet, comp.program)
+            $jitConfigs.map { case (targetName, arch, opt) =>
+              val target = ct.Target.valueOf(targetName)
+              val comp   = jitCompiler.compile(ast, emitAssembly = false, ct.Options.of(target, arch), opt)
+              rt.ModuleImage($moduleName, target, comp.features, comp.program)
             }.toArray
           }
         } else
           '{
-            Array[(String, Set[String], Array[Byte])](${
+            Array[rt.ModuleImage](${
               Varargs(compilations.map { (config, compilation) =>
-                Expr(
-                  (
-                    s"${config.arch}@${config.opt}(${config.target})",
-                    Set(compilation.features*),
-                    compilation.program
+                '{
+                  rt.ModuleImage(
+                    $moduleName,
+                    ct.Target.valueOf(${ Expr(config.target.name) }),
+                    ${ Expr(compilation.features.toList) }.toArray,
+                    ${ Expr(compilation.program) }
                   )
-                )
+                }
               })
             }*)
           }
@@ -331,110 +324,88 @@ object compiletime {
 
         val cb_ : Callback[Unit] = $cb
 
-        // Validate device features support this code object.
-        val miss      = ArrayBuffer[(String, Set[String])]()
-        val available = Set($queue.device.features()*)
-
         lazy val modules = $modulesExpr
 
-        var found = -1
-        var i     = 0
-        while (i < modules.length && found == -1) {
-          val (name, required, _) = modules(i)
-          val missing             = required -- available
-          if (missing.isEmpty) found = i
-          else miss += ((name, missing))
-          i += 1
-        }
-        if (found == -1) {
-          cb_(
-            Left(
-              new java.lang.RuntimeException(
-                s"Device (${$queue.device.name}) with features `${available.mkString(",")}` does not meet the requirement for any of the following binaries: ${miss
-                    .map((config, missing) => s"$config (missing ${missing.mkString(",")})")
-                    .mkString(",")} "
-              )
-            )
-          )
-        } else {
+        // keeps direct ByteBuffers alive through the launch, the pickled structs hold only their addresses
+        val keepAlive = scala.collection.mutable.ArrayBuffer.empty[Any]
 
-          // We got everything, load the code object
-          if (! $queue.device.moduleLoaded($moduleName)) {
-            $queue.device.loadModule($moduleName, modules(found)._3)
-          }
-
-          // Allocate parameter and return type ordinals and value buffers
-          val fnTpeOrdinals = ${ Expr((tidTpeOrdinal +: captureTpeOrdinals :+ returnTpeOrdinal).toArray) }
-          var fnValues =
-            ByteBuffer
-              .allocate(${ Expr(tidTpeSize + captureTpeSizes.sum + returnTpeSize) })
-              .order(ByteOrder.nativeOrder)
-
-          val ptrMap = scala.collection.mutable.Map[Any, Long]()
-          // Keeps direct ByteBuffers alive through kernel execution. Pickler-allocated buffers
-          // are referenced only by their native pointers in fnValues; without this list they
-          // could be GC'd while the kernel is still running, leading to use-after-free SEGVs
-          // when post-callback unpickling reads from the (now dangling) pointers.
-          val keepAlive = scala.collection.mutable.ArrayBuffer.empty[Any]
-
-          ${
-
-            val lut         = prog.defs.map(s => s.name -> s).toMap
-            val lutWithRefs = lut.map((s, sd) => s -> (sd, prismRefs.get(s)))
-            q.Match(
-              'found.asTerm,
-              perConfigLayouts.zipWithIndex.map { case ((config, configLayouts), i) =>
-                val layouts0 = configLayouts.map(l => p.Sym(l.name) -> l).toMap
-
-                val layouts = prog.defs.flatMap { sd =>
-                  layouts0.get(sd.name).map(layout => sd -> (layout, prismRefs.get(sd.name)))
-                }.toMap
-                val allReprsInCaptures = capturesWithStructDefs
-                  .collect { case (_, Some(sdef), term) =>
-                    Pickler.deriveAllRepr(lutWithRefs, sdef, term.tpe)
-                  }
-                  .reduceLeftOption(_ ++ _)
-                  .getOrElse(Map.empty)
-
-                val (defs, write, read, update) = Pickler.generateAll(
-                  lut,
-                  layouts,
-                  allReprsInCaptures,
-                  '{ (b: java.nio.Buffer) =>
-                    keepAlive += b; Platforms.pointerOfDirectBuffer(b)
-                  },
-                  '{ Platforms.directBufferFromPointer(_, _) }
+        val outcome: Either[Throwable, Unit] =
+          try {
+            val found = $ctx.select(modules)
+            if (found == -1)
+              Left(
+                new java.lang.RuntimeException(
+                  s"The context does not accept any of the following binaries: ${modules.map(_.target).mkString(",")}"
                 )
+              )
+            else {
 
-                q.CaseDef(
-                  q.Literal(q.IntConstant(i)),
-                  None,
-                  q.Block(
-                    defs,
-                    '{
-                      ${
-                        bindWrite(
-                          tidTpeSize,
-                          write(_, _, 'ptrMap),
-                          'fnValues,
-                          queue,
-                          capturesWithStructDefs
-                        )
-                      }
+              val fnTpeOrdinals = ${ Expr(captureTpeOrdinals.toArray) }
+              var fnValues =
+                ByteBuffer
+                  .allocate(${ Expr(captureTpeSizes.sum) })
+                  .order(ByteOrder.nativeOrder)
 
-                      if (sys.env.contains(Env.PolyregionDebug)) {
-                        println("Dispatch tid=" + Thread.currentThread.getId)
-                        println(s"fnTpeOrdinals=${fnTpeOrdinals.toList}")
-                        println(s"fnValues.array=0x${fnValues.array.map(byte => f"$byte%02x").mkString(" ")}")
+              val ptrMap = scala.collection.mutable.Map[Any, Long]()
+
+              ${
+
+                val lut         = prog.defs.map(s => s.name -> s).toMap
+                val lutWithRefs = lut.map((s, sd) => s -> (sd, prismRefs.get(s)))
+                q.Match(
+                  'found.asTerm,
+                  perConfigLayouts.zipWithIndex.map { case ((config, configLayouts), i) =>
+                    val layouts0 = configLayouts.map(l => p.Sym(l.name) -> l).toMap
+
+                    val layouts = prog.defs.flatMap { sd =>
+                      layouts0.get(sd.name).map(layout => sd -> (layout, prismRefs.get(sd.name)))
+                    }.toMap
+                    val allReprsInCaptures = capturesWithStructDefs
+                      .collect { case (_, Some(sdef), term) =>
+                        Pickler.deriveAllRepr(lutWithRefs, sdef, term.tpe)
                       }
-                      // Dispatch.
-                      $queue.enqueueInvokeAsync(
-                        $moduleName,
-                        $fnName,
-                        fnTpeOrdinals,
-                        fnValues.array,
-                        rt.Policy($dim),
-                        { () =>
+                      .reduceLeftOption(_ ++ _)
+                      .getOrElse(Map.empty)
+
+                    val (defs, write, read, update) = Pickler.generateAll(
+                      lut,
+                      layouts,
+                      allReprsInCaptures,
+                      '{ (b: java.nio.Buffer) =>
+                        keepAlive += b; Platforms.pointerOfDirectBuffer(b)
+                      },
+                      '{ Platforms.directBufferFromPointer(_, _) }
+                    )
+
+                    q.CaseDef(
+                      q.Literal(q.IntConstant(i)),
+                      None,
+                      q.Block(
+                        defs,
+                        '{
+                          ${
+                            bindWrite(
+                              0,
+                              write(_, _, 'ptrMap),
+                              'fnValues,
+                              capturesWithStructDefs
+                            )
+                          }
+
+                          if (sys.env.contains(Env.PolyregionDebug)) {
+                            println("Dispatch tid=" + Thread.currentThread.getId)
+                            println(s"fnTpeOrdinals=${fnTpeOrdinals.toList}")
+                            println(s"fnValues.array=0x${fnValues.array.map(byte => f"$byte%02x").mkString(" ")}")
+                          }
+                          $ctx.launch(
+                            Array(modules(found)),
+                            $moduleName,
+                            $fnName,
+                            fnTpeOrdinals,
+                            fnValues.array,
+                            rt.Policy($dim)
+                          )
+
                           if (sys.env.contains(Env.PolyregionDebug))
                             println("Kernel completed, tid=" + Thread.currentThread.getId + " cb=" + cb_)
 
@@ -442,48 +413,33 @@ object compiletime {
 
                           try {
                             ${
-                              // Varargs(capturesWithStructDefs.map { case (named, maybeSdef, term) =>
                               bindRead(
-                                tidTpeSize,
+                                0,
                                 read(_, _, _, 'ptrMap, 'objMap),
                                 update(_, _, _, 'ptrMap, 'objMap),
                                 'fnValues,
-                                queue,
                                 capturesWithStructDefs
                               )
-                              // })
                             }
                             if (sys.env.contains(Env.PolyregionDebug)) println("Restore complete")
-                            cb_(Right(()))
+                            Right(())
                           } catch {
-                            case e: Throwable =>
-                              e.printStackTrace()
-                              cb_(Left(Exception("Cannot sync", e)))
+                            case e: Throwable => Left(Exception("Cannot sync", e))
                           }
 
-                          // Reference keepAlive here to ensure it's captured by the callback closure
-                          // and stays reachable until the kernel completes.
-                          keepAlive.clear()
-                          ()
-
-                          // // $queue.syncAll(() => cb_(Right(())))
-                          // try $queue.syncAll(() => cb_(Right(())))
-                          // catch {
-                          //   case e: Throwable =>
-                          //     e.printStackTrace()
-                          //   // cb_(Left(new Exception("Cannot sync",e)))
-                          // }
-                        }
+                        }.asTerm
                       )
+                    )
+                  } :+ q.CaseDef(q.Wildcard(), None, '{ ??? }.asTerm)
+                ).asExprOf[Either[Throwable, Unit]]
+              }
 
-                    }.asTerm
-                  )
-                )
-              } :+ q.CaseDef(q.Wildcard(), None, '{ ??? }.asTerm)
-            ).asExprOf[Unit]
-          }
+            }
+          } catch {
+            case e: Throwable => Left(e)
+          } finally keepAlive.clear()
 
-        }
+        cb_(outcome)
       }
       given q.Printer[q.Tree] = q.Printer.TreeAnsiCode
       debug("Code=" + code.asTerm.show)
@@ -516,7 +472,6 @@ object compiletime {
       offset: Int,
       write: (p.Sym, Expr[Any]) => Expr[Long],
       target: Expr[ByteBuffer],
-      queue: Expr[rt.Device.Queue],
       capturesWithStructDefs: List[(p.Named, Option[p.StructDef], q.Term)]
   ) = {
     given Quotes = q.underlying
@@ -567,7 +522,6 @@ object compiletime {
       read: (p.Sym, Expr[Any], Expr[Long]) => Expr[Any],
       update: (p.Sym, Expr[Any], Expr[Long]) => Expr[Unit],
       target: Expr[ByteBuffer],
-      queue: Expr[rt.Device.Queue],
       capturesWithStructDefs: List[(p.Named, Option[p.StructDef], q.Term)]
   ) = {
     given Quotes = q.underlying
