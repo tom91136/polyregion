@@ -9,6 +9,10 @@
   #include <csignal>
   #include <cstddef>
   #include <mutex>
+
+  #include <dlfcn.h>
+
+  #include "polyrt/page_guard.hpp"
 #endif
 
 #include "jni.h"
@@ -86,7 +90,12 @@ class SignalGuard {
     std::mutex mutex;
     size_t active = 0;
     struct sigaction trusted[COUNT]{};
+    struct sigaction fallthrough[COUNT]{};
   };
+
+  static bool same(const struct sigaction &a, const struct sigaction &b) {
+    return a.sa_handler == b.sa_handler && a.sa_flags == b.sa_flags;
+  }
 
   static State &state() {
     static State s;
@@ -98,19 +107,29 @@ public:
     auto &s = state();
     const std::scoped_lock lock(s.mutex);
     if (s.active++ == 0)
-      for (size_t i = 0; i < COUNT; ++i)
+      for (size_t i = 0; i < COUNT; ++i) {
         sigaction(SIGNALS[i], nullptr, &s.trusted[i]);
+        s.fallthrough[i] = polyregion::polyrt::guard::owns(s.trusted[i])
+                               ? polyregion::polyrt::guard::prior(SIGNALS[i]).value_or(s.trusted[i])
+                               : s.trusted[i];
+      }
   }
   SignalGuard(const SignalGuard &) = delete;
   SignalGuard &operator=(const SignalGuard &) = delete;
   ~SignalGuard() {
+    namespace guard = polyregion::polyrt::guard;
     auto &s = state();
     const std::scoped_lock lock(s.mutex);
     for (size_t i = 0; i < COUNT; ++i) {
+      const auto &saved = s.trusted[i];
       struct sigaction current{};
-      if (sigaction(SIGNALS[i], nullptr, &current) == 0
-          && (current.sa_handler != s.trusted[i].sa_handler || current.sa_flags != s.trusted[i].sa_flags))
-        sigaction(SIGNALS[i], &s.trusted[i], nullptr);
+      if (sigaction(SIGNALS[i], nullptr, &current) != 0) continue;
+      if (guard::owns(current)) {
+        if (const auto prior = guard::prior(SIGNALS[i]); prior && !same(*prior, s.fallthrough[i]))
+          guard::reinstate(SIGNALS[i], s.fallthrough[i]);
+      } else if (!same(current, saved) && (guard::owns(saved) || !guard::reinstate(SIGNALS[i], saved))) {
+        sigaction(SIGNALS[i], &saved, nullptr);
+      }
     }
     --s.active;
   }
@@ -118,6 +137,14 @@ public:
 #else
 struct SignalGuard {};
 #endif
+
+static bool libjsigLoaded() {
+#ifndef _WIN32
+  return dlsym(RTLD_DEFAULT, "JVM_get_signal_action") != nullptr;
+#else
+  return false;
+#endif
+}
 
 template <typename F> static auto wrapBackend(JNIEnv *env, const std::string &exceptionClass, F &&f) {
   const SignalGuard guard;

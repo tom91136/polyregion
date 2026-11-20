@@ -25,17 +25,20 @@ add_library(polyrt-JNI SHARED polyrt.cpp)
 
 target_include_directories(polyc-JNIshim PRIVATE
         ../../include
+        ../../polyfront/rt/include
 
         ${JNI_INCLUDE_DIRS})
 target_include_directories(polyc-JNI PRIVATE
 #        .
 #        ../../compiler
         ../../polyfront
+        ../../polyfront/rt/include
 
         ${JNI_INCLUDE_DIRS})
 target_include_directories(polyinvoke-JNI PRIVATE
 #        .
 #        ../../runtime
+        ../../polyfront/rt/include
 
         ${JNI_INCLUDE_DIRS})
 

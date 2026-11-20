@@ -2,7 +2,7 @@ package polyregion
 
 import java.io.File
 import java.lang.management.ManagementFactory
-import java.nio.file.Path
+import java.nio.file.{Files, Path}
 import scala.jdk.CollectionConverters.*
 
 object ChildJvm {
@@ -20,15 +20,19 @@ object ChildJvm {
       .mkString(File.pathSeparator)
 
   def run(main: String, env: Map[String, String]): (Int, String) = {
-    val java     = Path.of(System.getProperty("java.home"), "bin", "java").toString
-    val jvmFlags = ManagementFactory.getRuntimeMXBean.getInputArguments.asScala.filterNot(_.startsWith("-agentlib"))
-    val command  = List(java) ++ jvmFlags ++ List("-cp", classpath, main)
-    val builder  = new ProcessBuilder(command.asJava).redirectErrorStream(true)
+    val java      = Path.of(System.getProperty("java.home"), "bin", "java").toString
+    val jvmFlags  = ManagementFactory.getRuntimeMXBean.getInputArguments.asScala.filterNot(_.startsWith("-agentlib"))
+    val errorFile = Files.createTempFile("hs_err", ".log")
+    val command =
+      List(java) ++ jvmFlags ++ List(s"-XX:ErrorFile=$errorFile", "-XX:-CreateCoredumpOnCrash", "-cp", classpath, main)
+    val builder = new ProcessBuilder(command.asJava).redirectErrorStream(true)
     builder.environment().remove("POLYRT_PLATFORM")
     env.foreach((k, v) => builder.environment().put(k, v))
     val process = builder.start()
     val output  = new String(process.getInputStream.readAllBytes())
-    (process.waitFor(), output)
+    val code    = process.waitFor()
+    Files.deleteIfExists(errorFile)
+    (code, output)
   }
 
   def pocl(): Map[String, String] = {

@@ -22,6 +22,7 @@ namespace polyregion::generated::registry::Context {
 [[maybe_unused]] void launch0(JNIEnv *env, jclass, jlong context, jobjectArray imageNames, jbyteArray imageTargets,
                               jobjectArray imageFeatures, jobjectArray images, jstring moduleName, jstring kernel, jbyteArray argTypes,
                               jbyteArray argData, jlongArray dims);
+[[maybe_unused]] jboolean libjsigLoaded0(JNIEnv *env, jclass);
 [[maybe_unused]] void loadHostProgram0(JNIEnv *env, jclass, jstring name, jbyteArray image);
 [[maybe_unused]] jlong malloc0(JNIEnv *env, jclass, jlong context, jlong bytes);
 [[maybe_unused]] jint platformCount0(JNIEnv *env, jclass);
@@ -50,7 +51,7 @@ static void registerMethods(JNIEnv *env) {
     throw std::logic_error("Cannot find class polyregion/jvm/runtime/Context");
   }
   clazz = reinterpret_cast<jclass>(env->NewGlobalRef(found));
-  const static JNINativeMethod methods[22] = {
+  const static JNINativeMethod methods[23] = {
       {.name = const_cast<char *>("address0"),
        .signature = const_cast<char *>("(Ljava/nio/ByteBuffer;)J"),
        .fnPtr = reinterpret_cast<void *>(&address0)},
@@ -85,6 +86,9 @@ static void registerMethods(JNIEnv *env) {
       {.name = const_cast<char *>("launch0"),
        .signature = const_cast<char *>("(J[Ljava/lang/String;[B[[Ljava/lang/String;[[BLjava/lang/String;Ljava/lang/String;[B[B[J)V"),
        .fnPtr = reinterpret_cast<void *>(&launch0)},
+      {.name = const_cast<char *>("libjsigLoaded0"),
+       .signature = const_cast<char *>("()Z"),
+       .fnPtr = reinterpret_cast<void *>(&libjsigLoaded0)},
       {.name = const_cast<char *>("loadHostProgram0"),
        .signature = const_cast<char *>("(Ljava/lang/String;[B)V"),
        .fnPtr = reinterpret_cast<void *>(&loadHostProgram0)},
@@ -105,7 +109,7 @@ static void registerMethods(JNIEnv *env) {
        .signature = const_cast<char *>("(J)Z"),
        .fnPtr = reinterpret_cast<void *>(&sharedAddressSpace0)},
       {.name = const_cast<char *>("stats0"), .signature = const_cast<char *>("(J)[J"), .fnPtr = reinterpret_cast<void *>(&stats0)}};
-  if (env->RegisterNatives(clazz, methods, 22) != 0) {
+  if (env->RegisterNatives(clazz, methods, 23) != 0) {
     throw std::logic_error("RegisterNatives returned non-zero for polyregion/jvm/runtime/Context");
   }
 }

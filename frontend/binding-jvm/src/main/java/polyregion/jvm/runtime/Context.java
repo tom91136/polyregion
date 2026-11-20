@@ -49,6 +49,8 @@ public final class Context implements AutoCloseable {
 
   static native long[] stats0(long context);
 
+  static native boolean libjsigLoaded0();
+
   static native int select0(
       long context,
       String[] imageNames,
@@ -122,6 +124,11 @@ public final class Context implements AutoCloseable {
   private Context(long handle, boolean owned) {
     this.handle = handle;
     this.owned = owned;
+  }
+
+  public static boolean libjsigLoaded() {
+    ensureLoaded();
+    return libjsigLoaded0();
   }
 
   public static PlatformInfo[] platforms() {

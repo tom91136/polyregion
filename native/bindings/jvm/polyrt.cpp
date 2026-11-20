@@ -275,6 +275,8 @@ void Context::destroy0(JNIEnv *env, jclass, jlong context) {
   wrapBackend(env, EX, [&] { check(polyrt_context_destroy(toHandle(context))); });
 }
 
+jboolean Context::libjsigLoaded0(JNIEnv *, jclass) { return static_cast<jboolean>(libjsigLoaded()); }
+
 jlong Context::current0(JNIEnv *env, jclass) {
   return wrapException(env, EX, [&] { return fromHandle(polyrt_context_current()); });
 }

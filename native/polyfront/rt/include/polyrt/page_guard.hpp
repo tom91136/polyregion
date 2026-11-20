@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <optional>
 #include <thread>
 
@@ -281,9 +282,18 @@ struct Chain {
 };
 
 inline Chain segvChain{}, busChain{};
+inline std::mutex installMutex;
 inline Chain &chain(const int signal) { return signal == SIGBUS ? busChain : segvChain; }
 
 inline void onFault(int signal, siginfo_t *info, void *context);
+
+inline struct sigaction faultAction() {
+  struct sigaction action{};
+  action.sa_sigaction = onFault;
+  action.sa_flags = SA_SIGINFO | SA_ONSTACK;
+  sigemptyset(&action.sa_mask);
+  return action;
+}
 
 inline std::array<std::atomic<uintptr_t>, MaxRequests> forwarders{};
 
@@ -341,6 +351,10 @@ inline void onFault(const int signal, siginfo_t *info, void *context) {
 
 } // namespace details
 
+#ifndef _WIN32
+inline bool owns(const struct sigaction &action) { return (action.sa_flags & SA_SIGINFO) && action.sa_sigaction == details::onFault; }
+#endif
+
 // Registers [begin, end) as guarded; faults outside every registered range never reach the resolver.
 inline std::optional<size_t> track(const uintptr_t begin, const uintptr_t end) {
   for (size_t i = 0; i < details::MaxRanges; ++i) {
@@ -372,6 +386,7 @@ inline void untrack(const size_t slot) {
 // Resolves faults on tracked pages through `h`, called on the resolver thread; declined faults go to whatever handler was
 // installed before. Re-asserts itself when something else has since taken over the signal. Callers serialise.
 inline void install(const FaultHandler h) {
+  const std::scoped_lock lock(details::installMutex);
   details::handler.store(h, std::memory_order_release);
   static const bool started = (details::startResolver(), true);
 #ifdef _WIN32
@@ -380,11 +395,8 @@ inline void install(const FaultHandler h) {
   for (const int signal : {SIGSEGV, SIGBUS}) {
     struct sigaction current{};
     sigaction(signal, nullptr, &current);
-    if ((current.sa_flags & SA_SIGINFO) && current.sa_sigaction == details::onFault) continue;
-    struct sigaction action{};
-    action.sa_sigaction = details::onFault;
-    action.sa_flags = SA_SIGINFO | SA_ONSTACK;
-    sigemptyset(&action.sa_mask);
+    if (owns(current)) continue;
+    const auto action = details::faultAction();
     auto &c = details::chain(signal);
     const int next = 1 - c.current.load(std::memory_order_relaxed);
     sigaction(signal, &action, &c.slots[next]);
@@ -393,5 +405,29 @@ inline void install(const FaultHandler h) {
 #endif
   (void)started;
 }
+
+#ifndef _WIN32
+// Where declined faults go while the guard handles `signal`; empty when the guard is not installed or does not handle it.
+inline std::optional<struct sigaction> prior(const int signal) {
+  const std::scoped_lock lock(details::installMutex);
+  if (!details::handler.load(std::memory_order_acquire) || (signal != SIGSEGV && signal != SIGBUS)) return std::nullopt;
+  const auto &c = details::chain(signal);
+  return c.slots[c.current.load(std::memory_order_acquire)];
+}
+
+// Puts the guard back over `prior`, which becomes where declined faults go, in one step so no fault sees neither. False when
+// the guard is not installed or does not handle `signal`.
+inline bool reinstate(const int signal, const struct sigaction &prior) {
+  const std::scoped_lock lock(details::installMutex);
+  if (!details::handler.load(std::memory_order_acquire) || (signal != SIGSEGV && signal != SIGBUS)) return false;
+  const auto action = details::faultAction();
+  auto &c = details::chain(signal);
+  const int next = 1 - c.current.load(std::memory_order_relaxed);
+  c.slots[next] = prior;
+  c.current.store(next, std::memory_order_release);
+  sigaction(signal, &action, nullptr);
+  return true;
+}
+#endif
 
 } // namespace polyregion::polyrt::guard
