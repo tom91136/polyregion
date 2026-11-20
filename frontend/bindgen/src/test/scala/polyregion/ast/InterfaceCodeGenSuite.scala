@@ -718,4 +718,207 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
       ).getMessage.contains("reserved")
     )
   }
+
+  private val regionContext = RegionConfig("polyregion.jvm.runtime.Context")
+  private val regionJava    = JavaConfig("polyregion", "Offload", Some(regionContext))
+  private val regionScala   = ScalaConfig("polyregion", "offload", Some(regionContext))
+  private val regionCpp     = CppRegionConfig("polyregion::offload", List("polystl/algorithm_impl.h"))
+
+  private val contextSource =
+    """package polyregion.jvm.runtime;
+      |
+      |public final class Context {}
+      |""".stripMargin
+
+  test("C++ core header adds a context overload per declaration only when asked") {
+    val plain = InterfaceCodeGen.cppHeader(Core.interfaceDef)
+    assert(!plain.contains("polyregion_interface_context"))
+    assert(!plain.contains("void *context"))
+
+    val withContext = InterfaceCodeGen.cppHeader(Core.interfaceDef, true)
+    assertEquals("""polyregion_interface_context""".r.findAllIn(withContext).size, 2 * 1)
+    assert(withContext.contains("inline void for_each(void *context, std::int64_t n, Body body)"))
+    assert(withContext.contains("POLYREGION_POLYREGION_CORE_IMPLEMENT(for_each, context, n, body);"))
+    assert(
+      withContext.contains(
+        "inline T transform_reduce(void *context, std::int64_t n, T init, Map map, Combine combine)"
+      )
+    )
+    assert(
+      withContext.contains("POLYREGION_POLYREGION_CORE_IMPLEMENT(transform_reduce, context, n, init, map, combine);")
+    )
+    assertEquals("""polyregion_interface:polyregion.core:polyregion.core.for_each""".r.findAllIn(withContext).size, 2)
+  }
+
+  test("C++ context overloads reject a declaration that already has a context parameter") {
+    val clash = count.copy(
+      name = p.Sym("example.clash"),
+      args = List(p.Arg(p.Named("context", p.Type.IntS64)))
+    )
+    val error = intercept[IllegalArgumentException](
+      InterfaceCodeGen.cppHeader(p.Interface(p.Sym("example"), List(clash)), true)
+    )
+    assert(error.getMessage.contains("context"))
+  }
+
+  test("C++ region header wraps the core interface with context, linearised and task forms") {
+    val header = InterfaceCodeGen.cppRegionHeader(Core.interfaceDef, regionCpp)
+    assert(header.contains("namespace polyregion::offload {"))
+    assert(header.contains("#include \"polystl/algorithm_impl.h\""))
+    assert(header.contains("polyrt_context_create"))
+    assert(header.contains("::polyregion::core::for_each(n, body);"))
+    assert(header.contains("::polyregion::core::for_each(context.handle(), n, body);"))
+    assert(header.contains("inline void for_each(const Context &context, std::int64_t n, Body body)"))
+    assert(header.contains("inline void for_each(std::int64_t n0, std::int64_t n1, std::int64_t n2, Body body)"))
+    assert(header.contains("return ::polyregion::core::transform_reduce(n, init, map, combine);"))
+    assert(header.contains("inline void task(const Context &context, Body body)"))
+    assert(header.forall(_ < 128))
+    assertEquals(header, InterfaceCodeGen.cppRegionHeader(Core.interfaceDef, regionCpp))
+  }
+
+  test("Scala region projection overloads every stub with a context and adds linearised sugar") {
+    val source = InterfaceCodeGen.scalaObject(Core.interfaceDef, regionScala)
+    assert(source.contains("def for_each(n: Long, body: Long => Unit): Unit ="))
+    assert(
+      source.contains("def for_each(context: polyregion.jvm.runtime.Context, n: Long, body: Long => Unit): Unit =")
+    )
+    assert(
+      source.contains(
+        "def transform_reduce[T](\n      context: polyregion.jvm.runtime.Context,\n      n: Long,\n      init: T"
+      )
+    )
+    assertEquals("""@compileTimeOnly""".r.findAllIn(source).size, 4)
+    assert(source.contains("inline def for_each(n0: Long, n1: Long, inline body: (Long, Long) => Unit): Unit ="))
+    assert(source.contains("body(i / n1, i % n1)"))
+    assert(source.contains("body(i / (n1 * n2), i / n2 % n1, i % n2)"))
+    assert(source.contains("inline def task(inline body: () => Unit): Unit ="))
+    assert(
+      !InterfaceCodeGen.scalaObject(Core.interfaceDef, ScalaConfig("polyregion", "offload")).contains("inline def")
+    )
+  }
+
+  test("Java region projection compiles for Java 8 and resolves context overloads with implicit lambdas") {
+    val caller =
+      """package polyregion;
+        |
+        |import polyregion.jvm.runtime.Context;
+        |
+        |public final class Caller {
+        |  public static String run(Context ctx) {
+        |    Offload.for_each(8L, i -> { });
+        |    Offload.for_each(ctx, 8L, i -> { });
+        |    long a = Offload.transform_reduce(8L, 0L, i -> i, (l, r) -> l + r);
+        |    int b = Offload.transform_reduce(8L, 0, i -> (int) i, (l, r) -> l + r);
+        |    double c = Offload.transform_reduce(ctx, 8L, 0.0, i -> i, (l, r) -> l + r);
+        |    float d = Offload.transform_reduce(ctx, 8L, 0.0f, i -> i, (l, r) -> l + r);
+        |    return a + " " + b + " " + c + " " + d;
+        |  }
+        |}
+        |""".stripMargin
+    val errors = javac(
+      Map(
+        "polyregion/javalang/Interface.java"  -> annotationSource,
+        "polyregion/jvm/runtime/Context.java" -> contextSource,
+        "polyregion/Offload.java"             -> InterfaceCodeGen.javaClass(Core.interfaceDef, regionJava),
+        "polyregion/Caller.java"              -> caller,
+        "polyregion/OffloadSurface.java" -> InterfaceCodeGen.javaSurface(
+          Core.interfaceDef,
+          regionJava,
+          "OffloadSurface"
+        )
+      )
+    )
+    assertEquals(errors, "")
+  }
+
+  test("Java region projection without a region config has no context overloads") {
+    val source = InterfaceCodeGen.javaClass(Core.interfaceDef, JavaConfig("polyregion", "Offload"))
+    assert(!source.contains("Context"))
+    val withRegion = InterfaceCodeGen.javaClass(Core.interfaceDef, regionJava)
+    assertEquals("""@Interface""".r.findAllIn(withRegion).size, 2 * (1 + 4))
+  }
+
+  test("Scala region surface calls every overload and sugar form") {
+    val surface = InterfaceCodeGen.scalaSurface(Core.interfaceDef, regionScala, "OffloadSurface")
+    assert(surface.contains("InterfaceSurfaceCheck.erase"))
+    assert(surface.contains("offload.for_each(context, 0L, (arg0: Long) => ())"))
+    assert(
+      surface.contains("offload.transform_reduce(0L, 0.0, (arg0: Long) => 0.0, (arg0: Double, arg1: Double) => 0.0)")
+    )
+    assert(surface.contains("offload.for_each(0L, 0L, 0L, (arg0: Long, arg1: Long, arg2: Long) => ())"))
+    assert(surface.contains("offload.task(context, () => ())"))
+  }
+
+  private def evaluate(expression: String, env: Map[String, Long]): Long = {
+    val tokens         = "[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[()*/%]".r.findAllIn(expression).toList
+    var rest           = tokens
+    def next(): String = { val head = rest.head; rest = rest.tail; head }
+    def atom(): Long = next() match {
+      case "("                           => val value = product(); next(); value
+      case number if number.head.isDigit => number.toLong
+      case name                          => env(name)
+    }
+    def product(): Long = {
+      var value = atom()
+      while (rest.headOption.exists(Set("*", "/", "%"))) next() match {
+        case "*" => value *= atom()
+        case "/" => value /= atom()
+        case _   => value %= atom()
+      }
+      value
+    }
+    product()
+  }
+
+  test("linearised indices recover the row-major coordinates of every flat index") {
+    for {
+      rank <- InterfaceCodeGenSupport.Ranks
+      dims <- List(List(2L, 3L, 4L), List(5L, 1L, 3L), List(1L, 7L, 2L)).map(_.take(rank))
+    } {
+      val names       = InterfaceCodeGenSupport.extents(rank)
+      val expressions = InterfaceCodeGenSupport.linearisedIndices(rank, "i")
+      (0L until dims.product).foreach { flat =>
+        val actual   = expressions.map(evaluate(_, names.zip(dims).toMap + ("i" -> flat)))
+        val expected = dims.indices.map(axis => flat / dims.drop(axis + 1).product % dims(axis)).toList
+        assertEquals(actual, expected, s"rank $rank dims $dims flat $flat")
+      }
+    }
+  }
+
+  test("region projections check the extent product and reject reserved parameter names") {
+    assert(
+      InterfaceCodeGen
+        .scalaObject(Core.interfaceDef, regionScala)
+        .contains("Math.multiplyExact(Math.multiplyExact(n0, n1), n2)")
+    )
+    assert(
+      InterfaceCodeGen
+        .cppRegionHeader(Core.interfaceDef, regionCpp)
+        .contains("detail::extent(detail::extent(n0, n1), n2)")
+    )
+    List("i", "n0", "n2", "context").foreach { name =>
+      val clash = p.FunctionDecl(
+        p.Sym("example.clash"),
+        Nil,
+        None,
+        List(
+          p.Arg(p.Named("n", p.Type.IntS64)),
+          p.Arg(p.Named(name, p.Type.IntS64)),
+          p.Arg(p.Named("body", p.Type.Exec(Nil, List(p.Type.IntS64), p.Type.Unit0)))
+        ),
+        Nil,
+        Nil,
+        p.Type.Unit0,
+        p.Function.Affinity.Host
+      )
+      val region = p.Interface(p.Sym("example"), List(clash))
+      assert(
+        intercept[IllegalArgumentException](InterfaceCodeGen.scalaObject(region, regionScala)).getMessage.contains(name)
+      )
+      assert(
+        intercept[IllegalArgumentException](InterfaceCodeGen.cppRegionHeader(region, regionCpp)).getMessage
+          .contains(name)
+      )
+    }
+  }
 }

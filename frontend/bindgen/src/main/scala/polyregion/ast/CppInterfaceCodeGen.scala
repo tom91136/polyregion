@@ -94,15 +94,15 @@ private[ast] object CppInterfaceCodeGen {
     "xor_eq"
   )
 
-  private def identifier(value: String, what: String): String = {
+  private[ast] def identifier(value: String, what: String): String = {
     targetIdentifier(value, s"C++ $what", Keywords)
     if (value.startsWith("_")) fail(s"C++ $what identifier `$value` is reserved") else value
   }
 
-  private def pascalCase(name: String): String =
+  private[ast] def pascalCase(name: String): String =
     name.split('_').iterator.filter(_.nonEmpty).map(word => word.head.toUpper +: word.tail).mkString
 
-  private def tpe(value: p.Type): String = value match {
+  private[ast] def tpe(value: p.Type): String = value match {
     case p.Type.Float16           => fail("Float16 has no exact C++17 interfaceDef projection")
     case p.Type.Float32           => "float"
     case p.Type.Float64           => "double"
@@ -156,7 +156,8 @@ private[ast] object CppInterfaceCodeGen {
       annotationMacro: String,
       fallbackMacro: String,
       implementationMacro: String,
-      decl: p.FunctionDecl
+      decl: p.FunctionDecl,
+      withContext: Boolean
   ): String = {
     decl.rtn match {
       case p.Type.Ptr(_, _) | p.Type.Arr(_, _, _) => fail(s"interface return type is not supported yet: ${decl.rtn}")
@@ -168,24 +169,26 @@ private[ast] object CppInterfaceCodeGen {
     val templates = decl.tpeVars.map(variable => s"class ${variable.name}") ++ callableTemplates
     if (templates.distinct.size != templates.size)
       fail(s"declaration `${decl.name.fqn.mkString(".")}` has colliding C++ template parameters")
-    val template  = if (templates.nonEmpty) s"template <${templates.mkString(", ")}> //\n" else ""
-    val forwarded = (decl.name.last :: decl.args.map(_.named.symbol)).mkString(", ")
+    val template   = if (templates.nonEmpty) s"template <${templates.mkString(", ")}> //\n" else ""
+    val contextArg = Option.when(withContext)(ContextParameter).toList
+    val forwarded  = (decl.name.last :: (contextArg ++ decl.args.map(_.named.symbol))).mkString(", ")
     val body = (decl.args.flatMap(callableCheck) :+ s"$implementationMacro($forwarded);")
       .map(s => s"  $s")
       .mkString("\n")
-    s"""$template$annotationMacro("${marker(interfaceDef, decl)}") $fallbackMacro //
-       |inline ${tpe(
-        decl.rtn
-      )} ${decl.name.last}(${decl.args
-        .map(parameter)
-        .mkString(", ")}) {
+    val parameters = contextArg.map(name => s"void *$name") ++ decl.args.map(parameter)
+    val markers =
+      s"""$annotationMacro("${marker(interfaceDef, decl)}")""" +
+        (if (withContext) s""" $annotationMacro("$ContextMarker")""" else "")
+    s"""$template$markers $fallbackMacro //
+       |inline ${tpe(decl.rtn)} ${decl.name.last}(${parameters.mkString(", ")}) {
        |$body
        |}""".stripMargin
   }
 
-  def apply(interfaceDef: p.Interface): String = {
+  def apply(interfaceDef: p.Interface, contextOverloads: Boolean): String = {
     val decls = declarations(interfaceDef)
     validatePortableOverloads(decls, "C++")
+    if (contextOverloads) validateContextName(decls)
     interfaceDef.name.fqn.foreach(identifier(_, "namespace"))
     decls.foreach { decl =>
       identifier(decl.name.last, "function")
@@ -199,8 +202,12 @@ private[ast] object CppInterfaceCodeGen {
     val annotationMacro     = s"${macroPrefix}_ANNOTATE"
     val implementationMacro = s"${macroPrefix}_IMPLEMENT"
     val fallbackMacro       = s"${macroPrefix}_FALLBACK"
-    val body =
-      decls.map(declaration(interfaceDef, annotationMacro, fallbackMacro, implementationMacro, _)).mkString("\n\n")
+    val body = decls
+      .flatMap(decl => (false :: Option.when(contextOverloads)(true).toList).map(withContext => (decl, withContext)))
+      .map((decl, withContext) =>
+        declaration(interfaceDef, annotationMacro, fallbackMacro, implementationMacro, decl, withContext)
+      )
+      .mkString("\n\n")
     s"""#pragma once
        |
        |#include <cstdint>

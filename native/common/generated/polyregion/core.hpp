@@ -30,6 +30,14 @@ POLYREGION_POLYREGION_CORE_ANNOTATE("polyregion_interface:polyregion.core:polyre
   POLYREGION_POLYREGION_CORE_IMPLEMENT(for_each, n, body);
 }
 
+template <class Body> //
+POLYREGION_POLYREGION_CORE_ANNOTATE("polyregion_interface:polyregion.core:polyregion.core.for_each")
+    POLYREGION_POLYREGION_CORE_ANNOTATE("polyregion_interface_context") POLYREGION_POLYREGION_CORE_FALLBACK //
+    inline void for_each(void *context, std::int64_t n, Body body) {
+  static_assert(std::is_same_v<std::invoke_result_t<Body &, const std::int64_t &>, void>, "callable signature mismatch");
+  POLYREGION_POLYREGION_CORE_IMPLEMENT(for_each, context, n, body);
+}
+
 template <class T, class Map, class Combine> //
 POLYREGION_POLYREGION_CORE_ANNOTATE("polyregion_interface:polyregion.core:polyregion.core.transform_reduce")
     POLYREGION_POLYREGION_CORE_FALLBACK //
@@ -37,6 +45,15 @@ POLYREGION_POLYREGION_CORE_ANNOTATE("polyregion_interface:polyregion.core:polyre
   static_assert(std::is_same_v<std::invoke_result_t<Map &, const std::int64_t &>, T>, "callable signature mismatch");
   static_assert(std::is_same_v<std::invoke_result_t<Combine &, const T &, const T &>, T>, "callable signature mismatch");
   POLYREGION_POLYREGION_CORE_IMPLEMENT(transform_reduce, n, init, map, combine);
+}
+
+template <class T, class Map, class Combine> //
+POLYREGION_POLYREGION_CORE_ANNOTATE("polyregion_interface:polyregion.core:polyregion.core.transform_reduce")
+    POLYREGION_POLYREGION_CORE_ANNOTATE("polyregion_interface_context") POLYREGION_POLYREGION_CORE_FALLBACK //
+    inline T transform_reduce(void *context, std::int64_t n, T init, Map map, Combine combine) {
+  static_assert(std::is_same_v<std::invoke_result_t<Map &, const std::int64_t &>, T>, "callable signature mismatch");
+  static_assert(std::is_same_v<std::invoke_result_t<Combine &, const T &, const T &>, T>, "callable signature mismatch");
+  POLYREGION_POLYREGION_CORE_IMPLEMENT(transform_reduce, context, n, init, map, combine);
 }
 
 } // namespace polyregion::core

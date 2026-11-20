@@ -3,8 +3,10 @@ package polyregion.ast
 import polyregion.ast.PolyAST as p
 
 final case class FortranConfig(moduleName: String)
-final case class ScalaConfig(packageName: String, objectName: String)
-final case class JavaConfig(packageName: String, className: String)
+final case class RegionConfig(contextType: String)
+final case class CppRegionConfig(namespaceName: String, includes: List[String])
+final case class ScalaConfig(packageName: String, objectName: String, region: Option[RegionConfig] = None)
+final case class JavaConfig(packageName: String, className: String, region: Option[RegionConfig] = None)
 
 private[ast] object InterfaceCodeGenSupport {
 
@@ -54,7 +56,54 @@ private[ast] object InterfaceCodeGenSupport {
     sorted
   }
 
+  val Ranks            = List(2, 3)
+  val ContextParameter = "context"
+  val LinearIndex      = "i"
+
+  private def reject(decls: List[p.FunctionDecl], reserved: List[String]): Unit =
+    decls.foreach { decl =>
+      decl.args.map(_.named.symbol).find(reserved.contains).foreach { name =>
+        fail(
+          s"declaration `${decl.name.fqn.mkString(".")}` has a parameter named `$name`, which the projection reserves"
+        )
+      }
+    }
+
+  def validateContextName(decls: List[p.FunctionDecl]): Unit = reject(decls, List(ContextParameter))
+
+  def validateRegionNames(decls: List[p.FunctionDecl]): Unit =
+    reject(decls, ContextParameter :: LinearIndex :: extents(Ranks.max))
+
+  def isIndexCallable(tpe: p.Type): Boolean = tpe match {
+    case p.Type.Exec(Nil, List(p.Type.IntS64), _) => true
+    case _                                        => false
+  }
+
+  def isIndexed(decl: p.FunctionDecl): Boolean =
+    decl.args.headOption.exists(_.named.tpe == p.Type.IntS64) && decl.args.exists(arg => isIndexCallable(arg.named.tpe))
+
+  def isTask(decl: p.FunctionDecl): Boolean = decl.rtn == p.Type.Unit0 && (decl.args.map(_.named.tpe) match {
+    case List(p.Type.IntS64, callable) => isIndexCallable(callable)
+    case _                             => false
+  })
+
+  def extents(rank: Int): List[String] = List.tabulate(rank)(axis => s"n$axis")
+
+  def linearisedIndices(rank: Int, linear: String): List[String] = {
+    val dims = extents(rank)
+    dims.indices.toList.map { axis =>
+      val stride = dims.drop(axis + 1)
+      val quot = stride match {
+        case Nil        => linear
+        case List(only) => s"$linear / $only"
+        case several    => s"$linear / (${several.mkString(" * ")})"
+      }
+      if (axis == 0) quot else s"$quot % ${dims(axis)}"
+    }
+  }
+
   val FallbackMarker = "polyregion_interface_fallback"
+  val ContextMarker  = "polyregion_interface_context"
 
   def interfaceIdentity(interfaceDef: p.Interface, decl: p.FunctionDecl): String =
     List(interfaceDef.name.fqn.mkString("."), decl.name.fqn.mkString(".")).mkString(":")

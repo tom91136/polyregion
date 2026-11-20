@@ -17,6 +17,7 @@ foreach (TARGET polystl polystl-static)
             include/polystl/algorithm_impl.h
             include/polystl/intrinsics.h
             include/polystl/polystl.h
+            include/polyregion/offload.hpp
             include/execution
             include/execution.impl
     )

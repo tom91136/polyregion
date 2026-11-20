@@ -153,7 +153,7 @@ test-bindgen:
     cd frontend && {{ sbt }} 'bindgen/testFull'
 
 _codegen-format:
-    find native/polyast/generated native/bindings/jvm/generated native/common/generated \
+    find native/polyast/generated native/bindings/jvm/generated native/common/generated polystl/include/polyregion \
         -type f \( -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.h' -o -name '*.hpp' \) -print0 \
         | xargs -0 -r "$(just _clang-format)" -i
 
@@ -161,9 +161,9 @@ _codegen-diff:
     #!/usr/bin/env bash
     set -euo pipefail
     # `git diff` does not report newly generated, untracked outputs.
-    untracked=$(git ls-files --others --exclude-standard -- native/polyast/generated native/bindings/jvm/generated native/common/generated native/polyc/generated native/polyc/include/polyregion/polypass.h frontend/compiler/src/main/scala/polyregion/scalalang/generated/PolyASTWireSchema.scala frontend/binding-jvm/src/main/java/polyregion/jvm)
+    untracked=$(git ls-files --others --exclude-standard -- native/polyast/generated native/bindings/jvm/generated native/common/generated native/polyc/generated native/polyc/include/polyregion/polypass.h frontend/compiler/src/main/scala/polyregion/scalalang/generated/PolyASTWireSchema.scala frontend/binding-jvm/src/main/java/polyregion/jvm polystl/include/polyregion frontend/runtime-java/src/main/java/polyregion/Offload.java frontend/runtime-java/src/test/java/polyregion/OffloadSurface.java frontend/runtime-scala/src/main/scala/polyregion/offload.scala frontend/runtime-scala/src/test/scala/polyregion/OffloadSurface.scala)
     [ -z "$untracked" ] || { echo "untracked generated files:" >&2; echo "$untracked" >&2; exit 1; }
-    git diff --exit-code -- native/polyast/generated native/bindings/jvm/generated native/common/generated native/polyc/generated native/polyc/include/polyregion/polypass.h frontend/compiler/src/main/scala/polyregion/scalalang/generated/PolyASTWireSchema.scala frontend/binding-jvm/src/main/java/polyregion/jvm
+    git diff --exit-code -- native/polyast/generated native/bindings/jvm/generated native/common/generated native/polyc/generated native/polyc/include/polyregion/polypass.h frontend/compiler/src/main/scala/polyregion/scalalang/generated/PolyASTWireSchema.scala frontend/binding-jvm/src/main/java/polyregion/jvm polystl/include/polyregion frontend/runtime-java/src/main/java/polyregion/Offload.java frontend/runtime-java/src/test/java/polyregion/OffloadSurface.java frontend/runtime-scala/src/main/scala/polyregion/offload.scala frontend/runtime-scala/src/test/scala/polyregion/OffloadSurface.scala
 
 # === Pass bundles ===
 

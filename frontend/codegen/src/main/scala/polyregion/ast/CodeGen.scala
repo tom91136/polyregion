@@ -468,11 +468,29 @@ private[polyregion] object CodeGen {
     println("Done")
   }
 
+  private val regionContext = RegionConfig("polyregion.jvm.runtime.Context")
+  private val regionCpp     = CppRegionConfig("polyregion::offload", List("polystl/algorithm_impl.h"))
+  private val regionJava    = JavaConfig("polyregion", "Offload", Some(regionContext))
+  private val regionScala   = ScalaConfig("polyregion", "offload", Some(regionContext))
+
   private def writeCoreInterface(): Unit = {
-    val target = Paths.get("../native/common/generated/polyregion/core.hpp").toAbsolutePath.normalize
-    println(s"Writing the core interface to $target")
-    Files.createDirectories(target.getParent)
-    overwrite(target)(InterfaceCodeGen.cppHeader(Core.interfaceDef))
+    val outputs = List(
+      "../native/common/generated/polyregion/core.hpp" -> InterfaceCodeGen.cppHeader(Core.interfaceDef, true),
+      "../polystl/include/polyregion/offload.hpp" -> InterfaceCodeGen.cppRegionHeader(Core.interfaceDef, regionCpp),
+      "runtime-java/src/main/java/polyregion/Offload.java" -> InterfaceCodeGen.javaClass(Core.interfaceDef, regionJava),
+      "runtime-java/src/test/java/polyregion/OffloadSurface.java" ->
+        InterfaceCodeGen.javaSurface(Core.interfaceDef, regionJava, "OffloadSurface"),
+      "runtime-scala/src/main/scala/polyregion/offload.scala" -> InterfaceCodeGen
+        .scalaObject(Core.interfaceDef, regionScala),
+      "runtime-scala/src/test/scala/polyregion/OffloadSurface.scala" ->
+        InterfaceCodeGen.scalaSurface(Core.interfaceDef, regionScala, "OffloadSurface")
+    )
+    outputs.foreach { (path, source) =>
+      val target = Paths.get(path).toAbsolutePath.normalize
+      println(s"Writing the core projection to $target")
+      Files.createDirectories(target.getParent)
+      overwrite(target)(source)
+    }
     println("Done")
   }
 

@@ -190,15 +190,22 @@ private[ast] object JavaInterfaceCodeGen {
 
   private final case class Stub(source: String, callables: List[Callable])
 
-  private def stub(interfaceDef: p.Interface, decl: p.FunctionDecl, assignment: Assignment): Stub = {
+  private def stub(
+      interfaceDef: p.Interface,
+      decl: p.FunctionDecl,
+      assignment: Assignment,
+      context: Option[String]
+  ): Stub = {
     val scalarOnly = classify(decl)
     val typeParams = decl.tpeVars.map(_.name).filter(assignment(_) == Choice.Ref) match {
       case Nil   => ""
       case names => names.mkString("<", ", ", "> ")
     }
     val parameters = decl.args.map(arg => parameter(assignment, scalarOnly, arg.named.tpe) -> arg.named.symbol)
-    val rendered   = parameters.map { case ((tpe, _), name) => s"$tpe $name" }
-    val prefix     = s"  public static $typeParams${result(assignment, decl.rtn)} ${decl.name.last}("
+    val rendered = context.map(tpe => s"$tpe $ContextParameter").toList ++ parameters.map { case ((tpe, _), name) =>
+      s"$tpe $name"
+    }
+    val prefix = s"  public static $typeParams${result(assignment, decl.rtn)} ${decl.name.last}("
     val signature = {
       val inline = s"$prefix${rendered.mkString(", ")}) {"
       if (inline.length <= 100) inline
@@ -233,6 +240,7 @@ private[ast] object JavaInterfaceCodeGen {
     identifier(config.className, "class")
     val decls = declarations(interfaceDef)
     validatePortableOverloads(decls, "Java")
+    if (config.region.nonEmpty) validateContextName(decls)
     decls.foreach { decl =>
       identifier(decl.name.last, "method")
       decl.tpeVars.foreach(variable => identifier(variable.name, "type variable"))
@@ -244,8 +252,15 @@ private[ast] object JavaInterfaceCodeGen {
 
   def overloadCount(decl: p.FunctionDecl): Int = assignments(decl).size
 
+  private def contexts(config: JavaConfig): List[Option[String]] =
+    None :: config.region.map(region => Some(region.contextType)).toList
+
   def apply(interfaceDef: p.Interface, config: JavaConfig): String = {
-    val stubs  = validated(interfaceDef, config).flatMap(decl => assignments(decl).map(stub(interfaceDef, decl, _)))
+    val stubs = for {
+      decl       <- validated(interfaceDef, config)
+      assignment <- assignments(decl)
+      context    <- contexts(config)
+    } yield stub(interfaceDef, decl, assignment, context)
     val shapes = stubs.flatMap(_.callables.map(_.shape)).distinct.sortBy(_.name).map(functionalInterface)
     val body   = (shapes ++ stubs.map(_.source)).mkString("\n\n")
     s"""package ${config.packageName};
@@ -297,22 +312,28 @@ private[ast] object JavaInterfaceCodeGen {
   def surface(interfaceDef: p.Interface, config: JavaConfig, className: String): String = {
     val decls = validated(interfaceDef, config)
     identifier(className, "class")
-    val calls = decls.flatMap { decl =>
-      assignments(decl).map { assignment =>
-        val profile = decl.tpeVars.map { variable =>
-          val shown = assignment(variable.name) match {
-            case Choice.Primitive(prim) => prim.name
-            case Choice.Ref             => "Value"
-          }
-          s"${variable.name}=$shown"
+    val calls = for {
+      decl       <- decls
+      assignment <- assignments(decl)
+      context    <- contexts(config)
+    } yield {
+      val profile = decl.tpeVars.map { variable =>
+        val shown = assignment(variable.name) match {
+          case Choice.Primitive(prim) => prim.name
+          case Choice.Ref             => "Value"
         }
-        val comment = s"    // ${decl.name.last}${if (profile.isEmpty) "" else profile.mkString(": ", ", ", "")}\n"
-        val args    = decl.args.map(arg => surfaceArgument(assignment, arg.named.tpe))
-        val prefix  = s"    ${config.className}.${decl.name.last}("
-        val inline  = s"$prefix${args.mkString(", ")});"
-        comment + (if (inline.length <= 100) inline else s"$prefix\n${args.map("        " + _).mkString(",\n")});")
+        s"${variable.name}=$shown"
       }
+      val label   = (profile ++ context.map(_ => ContextParameter)).mkString(": ")
+      val comment = s"    // ${decl.name.last}${if (label.isEmpty) "" else s": $label"}\n"
+      val args =
+        context.map(_ => ContextParameter).toList ++ decl.args.map(arg => surfaceArgument(assignment, arg.named.tpe))
+      val prefix = s"    ${config.className}.${decl.name.last}("
+      val inline = s"$prefix${args.mkString(", ")});"
+      comment + (if (inline.length <= 100) inline else s"$prefix\n${args.map("        " + _).mkString(",\n")});")
     }
+    val contextDeclaration =
+      config.region.fold("")(region => s"    ${region.contextType} $ContextParameter = null;\n")
     s"""package ${config.packageName};
        |
        |public final class $className {
@@ -326,7 +347,7 @@ private[ast] object JavaInterfaceCodeGen {
        |    float[] floats = new float[n];
        |    double[] doubles = new double[n];
        |    Value[] values = new Value[n];
-       |
+       |$contextDeclaration
        |${calls.mkString("\n\n")}
        |  }
        |}
