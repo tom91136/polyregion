@@ -67,9 +67,9 @@ class BytecodeDiagnosticSuite extends munit.FunSuite {
     val desc = net.bytebuddy.jar.asm.Type.getMethodDescriptor(m)
     BytecodeRemapper.lowerWithCalls(bytes, "calls", desc) match {
       case Left(e) => fail(e.getMessage)
-      case Right((fn, callees)) =>
-        assertEquals(callees, List(MethodRef("Unsupported", "helper", "(I)I")))
-        assert(fn.repr.contains("&Unsupported.helper"), fn.repr)
+      case Right(lowered) =>
+        assertEquals(lowered.calls, List(MethodRef("Unsupported", "helper", "(I)I")))
+        assert(lowered.fn.repr.contains("&Unsupported.helper"), lowered.fn.repr)
     }
   }
 

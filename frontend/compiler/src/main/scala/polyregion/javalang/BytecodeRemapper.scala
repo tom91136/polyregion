@@ -8,6 +8,7 @@ import org.jetbrains.java.decompiler.modules.decompiler.exps.*
 import org.jetbrains.java.decompiler.modules.decompiler.stats.*
 import org.jetbrains.java.decompiler.struct.gen.{CodeType, MethodDescriptor, VarType}
 import polyregion.ast.{PolyAST as p, *}
+import polyregion.intrinsic.IntrinsicTable
 
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
@@ -132,6 +133,7 @@ object BytecodeRemapper {
     private val ids = Iterator.from(0)
     val declared    = mutable.LinkedHashMap.empty[String, p.Named]
     val calls       = mutable.LinkedHashSet.empty[MethodRef]
+    val helpers     = mutable.ListBuffer.empty[p.Function]
 
     private val jmp: p.Term.Select = p.Term.Select(p.Named("#jmp", p.Type.IntS32), Nil, p.Type.IntS32)
 
@@ -198,9 +200,16 @@ object BytecodeRemapper {
           rtn    <- typeOf(md.ret)
           args   <- i.getLstParameters.asScala.toList.traverse(expr(_, buf))
           lowered = args.zip(params).map((a, t) => coerce(buf, a, t))
-          call = Intrinsics.lookup(MethodRef(owner, i.getName, i.getStringDescriptor), lowered, rtn).getOrElse {
-            calls += MethodRef(owner, i.getName, i.getStringDescriptor)
-            p.Expr.Invoke(p.Type.FnRef(symbolOf(owner, i.getName)), Nil, None, lowered, rtn)
+          callee  = MethodRef(owner, i.getName, i.getStringDescriptor)
+          call <- Natives.resolve(callee, lowered) match {
+            case Some(Right(IntrinsicTable.Resolved.Inline(expr))) => expr.success
+            case Some(Right(IntrinsicTable.Resolved.Call(fn, invoke))) =>
+              helpers += fn
+              invoke.success
+            case Some(Left(e)) => Left(e)
+            case None =>
+              calls += callee
+              p.Expr.Invoke(p.Type.FnRef(symbolOf(owner, i.getName)), Nil, None, lowered, rtn).success
           }
         } yield bind(buf, call)
       }
@@ -610,13 +619,15 @@ object BytecodeRemapper {
     } yield v
 
   def lower(classBytes: Array[Byte], name: String, desc: String): Result[p.Function] =
-    lowerWithCalls(classBytes, name, desc).map(_._1)
+    lowerWithCalls(classBytes, name, desc).map(_.fn)
 
-  // the second component is every static callee the body invokes that no intrinsic covers
-  def lowerWithCalls(classBytes: Array[Byte], name: String, desc: String): Result[(p.Function, List[MethodRef])] =
+  // calls are the static callees no intrinsic covers, helpers the table functions the body invokes
+  case class Lowered(fn: p.Function, calls: List[MethodRef], helpers: List[p.Function])
+
+  def lowerWithCalls(classBytes: Array[Byte], name: String, desc: String): Result[Lowered] =
     Vineflower.structure(classBytes, name, desc)(lowerMethod(_, name))
 
-  private def lowerMethod(m: Vineflower.Method, name: String): Result[(p.Function, List[MethodRef])] = for {
+  private def lowerMethod(m: Vineflower.Method, name: String): Result[Lowered] = for {
     owner    <- m.cl.qualifiedName.replace('/', '.').success
     isStati  <- m.mt.hasModifier(CodeConstants.ACC_STATIC).success
     slotVars <- varsOf(m.root).success
@@ -679,7 +690,7 @@ object BytecodeRemapper {
       fpMode = p.Function.FpMode.Relaxed,
       convention = p.CallConvention.RegularCall
     )
-    (fn, lowerer.calls.toList)
+    Lowered(fn, lowerer.calls.toList, lowerer.helpers.toList)
   }
 
   private def words(t: p.Type): Int = t match {

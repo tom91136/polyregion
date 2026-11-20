@@ -3,6 +3,7 @@ package polyregion.javalang
 import cats.syntax.all.*
 import org.jetbrains.java.decompiler.struct.gen.MethodDescriptor
 import polyregion.ast.{PolyAST as p, *}
+import polyregion.intrinsic.IntrinsicTable
 
 import scala.annotation.tailrec
 
@@ -59,7 +60,7 @@ object BytecodeResolver {
     )
   }
 
-  def lowerRef(ref: MethodRef, bytesOf: ClassBytes): Result[(p.Function, List[MethodRef])] =
+  def lowerRef(ref: MethodRef, bytesOf: ClassBytes): Result[BytecodeRemapper.Lowered] =
     bytesOf(ref.owner)
       .failIfEmpty(s"No class file for `${ref.owner}` while lowering `${ref.repr}`")
       .flatMap(BytecodeRemapper.lowerWithCalls(_, ref.name, ref.desc))
@@ -68,12 +69,12 @@ object BytecodeResolver {
   def resolve(roots: List[MethodRef], bytesOf: ClassBytes): Result[List[p.Function]] = {
     @tailrec def go(todo: List[MethodRef], seen: Set[MethodRef], acc: List[p.Function]): Result[List[p.Function]] =
       todo match {
-        case Nil                      => acc.reverse.success
+        case Nil                      => IntrinsicTable.dedupe(acc.reverse).success
         case ref :: rest if seen(ref) => go(rest, seen, acc)
         case ref :: rest =>
           lowerRef(ref, bytesOf) match {
-            case Left(e)              => Left(e)
-            case Right((fn, callees)) => go(rest ::: callees, seen + ref, fn :: acc)
+            case Left(e)        => Left(e)
+            case Right(lowered) => go(rest ::: lowered.calls, seen + ref, lowered.helpers.reverse ::: lowered.fn :: acc)
           }
       }
     go(roots, Set.empty, Nil)

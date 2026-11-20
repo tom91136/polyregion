@@ -5,7 +5,7 @@ import polyregion.ast.Traversal.*
 import polyregion.ast.pass.*
 import polyregion.ast.{PolyAST as p, *, given}
 import polyregion.intrinsic.IntrinsicTable
-import polyregion.javalang.{BytecodeResolver, Intrinsics}
+import polyregion.javalang.{BytecodeResolver, Natives}
 import polyregion.prism.{Prism, PrismTables}
 
 import java.nio.file.Paths
@@ -135,7 +135,7 @@ object Compiler {
           owner <- BytecodeResolver.locate(sym.owner.fullName.stripSuffix("$"), bytes)
           ref   <- BytecodeResolver.descriptorFor(owner, sym.name, signature.args, signature.rtn, bytes)
           lowered <-
-            if (Intrinsics.covers(ref)) Nil.success
+            if (Natives.covered(ref)) Nil.success
             else BytecodeResolver.resolve(List(ref), bytes)
         } yield lowered match {
           case plain :: _ if plain.name != target.calleeName =>

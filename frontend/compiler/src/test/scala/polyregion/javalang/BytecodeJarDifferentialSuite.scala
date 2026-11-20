@@ -67,13 +67,12 @@ class BytecodeJarDifferentialSuite extends munit.FunSuite {
         try Census.methodsOf(bytes)
         catch { case _: Throwable => Nil }
       ms.filter((n, d, _) => eligible(n, d)).foreach { (name, desc, access) =>
-        val lowered = BytecodeRemapper
-          .lowerWithCalls(bytes, name, desc)
-          .flatMap((fn, calls) => BytecodeResolver.resolve(calls, classes).map(fn -> _))
-        lowered.foreach { (fn, callees) =>
-          resolve(owner, name, desc, (access & Opcodes.ACC_STATIC) != 0).foreach { (m, r) =>
-            out += Candidate(owner, name, desc, fn, callees, m, r)
-          }
+        BytecodeResolver.resolve(List(MethodRef(owner, name, desc)), classes).foreach {
+          case fn :: callees =>
+            resolve(owner, name, desc, (access & Opcodes.ACC_STATIC) != 0).foreach { (m, r) =>
+              out += Candidate(owner, name, desc, fn, callees, m, r)
+            }
+          case Nil => ()
         }
       }
     }

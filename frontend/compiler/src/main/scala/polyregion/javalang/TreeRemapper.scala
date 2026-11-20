@@ -7,6 +7,7 @@ import com.sun.tools.javac.code.Symbol as JSymbol
 import com.sun.tools.javac.processing.JavacProcessingEnvironment
 import com.sun.tools.javac.tree.JCTree
 import polyregion.ast.{PolyAST as p, *}
+import polyregion.intrinsic.IntrinsicTable
 
 import javax.annotation.processing.ProcessingEnvironment
 import javax.lang.model.`type`.{ArrayType, DeclaredType, TypeKind, TypeMirror}
@@ -38,6 +39,7 @@ object TreeRemapper {
   ) {
     val fnSyms        = mutable.LinkedHashSet.empty[JSymbol.MethodSymbol]
     val bytecodeRoots = mutable.LinkedHashSet.empty[MethodRef]
+    val nativeFns     = mutable.LinkedHashSet.empty[p.Function]
 
     def treeOf(sym: JSymbol.MethodSymbol): Option[MethodTree] =
       localTrees.get(sym).orElse(methodTable.get(fullName(sym))).filter(bodied(_))
@@ -948,13 +950,18 @@ object TreeRemapper {
     case other                  => other.toString
   }
 
-  private def intrinsicOf(
-      deps: DepCollector,
-      sym: JSymbol.MethodSymbol,
-      args: List[p.Term],
-      rtn: p.Type
-  ): Option[p.Expr] =
-    Option.when(sym.isStatic)(Intrinsics.lookup(calleeOf(deps, sym), args, rtn)).flatten
+  private def intrinsicOf(deps: DepCollector, sym: JSymbol.MethodSymbol, args: List[p.Term]): Option[Result[p.Expr]] =
+    Option
+      .when(sym.isStatic)(Natives.resolve(calleeOf(deps, sym), args))
+      .flatten
+      .map(
+        _.map {
+          case IntrinsicTable.Resolved.Inline(expr) => expr
+          case IntrinsicTable.Resolved.Call(fn, invoke) =>
+            deps.nativeFns += fn
+            invoke
+        }
+      )
 
   private def calleeOf(deps: DepCollector, sym: JSymbol.MethodSymbol): MethodRef =
     MethodRef(binaryOwnerName(deps, sym), sym.name.toString, descriptorOf(deps, sym))
@@ -1103,8 +1110,8 @@ object TreeRemapper {
       .flatMap { terms =>
         impl.asType.getParameterTypes.asScala.toList.traverse(JavaTyper.typer).flatMap { paramTpes =>
           val args = if (paramTpes.size == terms.size) terms.zip(paramTpes).map(coerce(scope, buf, _, _)) else terms
-          intrinsicOf(scope.deps, impl, args, rtn) match {
-            case Some(e) => e.success
+          intrinsicOf(scope.deps, impl, args) match {
+            case Some(e) => e
             case None if isUserMethod(impl) =>
               scope.deps.fnSyms += impl
               scope.calls += impl
@@ -1546,8 +1553,7 @@ object TreeRemapper {
       }
       argLengths = lowered.map(_._2)
       args       = if (paramTpes.size == raw.size) raw.zip(paramTpes).map(coerce(scope, buf, _, _)) else raw
-      intrinsic  = intrinsicOf(scope.deps, sym, args, rtn)
-      e <- intrinsic.fold(invokeOf(scope, buf, sym, recv, args, argLengths, rtn))(_.success)
+      e <- intrinsicOf(scope.deps, sym, args).getOrElse(invokeOf(scope, buf, sym, recv, args, argLengths, rtn))
     } yield e
 
   private def invokeOf(
@@ -2229,7 +2235,7 @@ object TreeRemapper {
       (entryFn, statics) = entryAndStatics
       sourceFns   <- compileTransitive(trees, deps, entrySym, plan = plan)
       bytecodeFns <- BytecodeResolver.resolve(deps.bytecodeRoots.toList, deps.classBytes)
-      depFns = sourceFns ++ bytecodeFns
+      depFns = IntrinsicTable.dedupe(sourceFns ++ bytecodeFns ++ deps.nativeFns.toList)
       signatureStructs <- structSyms(entryFn :: depFns).flatTraverse { sym =>
         val fqn = sym.fqn.mkString(".")
         classTable.get(fqn) match {
