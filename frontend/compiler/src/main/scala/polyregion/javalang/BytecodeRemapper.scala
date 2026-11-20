@@ -17,10 +17,6 @@ object BytecodeRemapper {
 
   private val Global = p.Type.Space.Global
 
-  case class Ref(owner: String, name: String, desc: String) {
-    def repr: String = s"$owner.$name$desc"
-  }
-
   def symbolOf(owner: String, name: String): p.Sym = p.Sym(s"$owner.$name")
 
   private def nameOf(t: VarType): String =
@@ -135,7 +131,7 @@ object BytecodeRemapper {
 
     private val ids = Iterator.from(0)
     val declared    = mutable.LinkedHashMap.empty[String, p.Named]
-    val calls       = mutable.LinkedHashSet.empty[Ref]
+    val calls       = mutable.LinkedHashSet.empty[MethodRef]
 
     private val jmp: p.Term.Select = p.Term.Select(p.Named("#jmp", p.Type.IntS32), Nil, p.Type.IntS32)
 
@@ -202,8 +198,8 @@ object BytecodeRemapper {
           rtn    <- typeOf(md.ret)
           args   <- i.getLstParameters.asScala.toList.traverse(expr(_, buf))
           lowered = args.zip(params).map((a, t) => coerce(buf, a, t))
-          call = Intrinsics.lookup(owner, i.getName, i.getStringDescriptor, lowered, rtn).getOrElse {
-            calls += Ref(owner, i.getName, i.getStringDescriptor)
+          call = Intrinsics.lookup(MethodRef(owner, i.getName, i.getStringDescriptor), lowered, rtn).getOrElse {
+            calls += MethodRef(owner, i.getName, i.getStringDescriptor)
             p.Expr.Invoke(p.Type.FnRef(symbolOf(owner, i.getName)), Nil, None, lowered, rtn)
           }
         } yield bind(buf, call)
@@ -617,10 +613,10 @@ object BytecodeRemapper {
     lowerWithCalls(classBytes, name, desc).map(_._1)
 
   // the second component is every static callee the body invokes that no intrinsic covers
-  def lowerWithCalls(classBytes: Array[Byte], name: String, desc: String): Result[(p.Function, List[Ref])] =
+  def lowerWithCalls(classBytes: Array[Byte], name: String, desc: String): Result[(p.Function, List[MethodRef])] =
     Vineflower.structure(classBytes, name, desc)(lowerMethod(_, name))
 
-  private def lowerMethod(m: Vineflower.Method, name: String): Result[(p.Function, List[Ref])] = for {
+  private def lowerMethod(m: Vineflower.Method, name: String): Result[(p.Function, List[MethodRef])] = for {
     owner    <- m.cl.qualifiedName.replace('/', '.').success
     isStati  <- m.mt.hasModifier(CodeConstants.ACC_STATIC).success
     slotVars <- varsOf(m.root).success

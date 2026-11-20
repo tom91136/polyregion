@@ -18,6 +18,11 @@ object Remapper {
     sym.flags.is(q.Flags.Lazy) && sym.owner.isClassDef
   }
 
+  private def isJavaStatic(using q: Quoted)(sym: q.Symbol): Boolean = {
+    val flags = sym.flags
+    flags.is(q.Flags.JavaDefined) && flags.is(q.Flags.JavaStatic) && sym.isDefDef
+  }
+
   private def fullyApplyGenExec(exec: p.Type.Exec, tpeArgs: List[p.Type]): p.Type.Exec = {
     val tpeTable = exec.tpeVars.map(_.name).zip(tpeArgs).toMap
     // Recurse fully so type vars nested inside Struct args, Ptr components, or curried inner Execs
@@ -513,7 +518,7 @@ object Remapper {
           }
         } yield (instance, c.::=(stmts*))
       case (sym, _, _) => // Anything else is a normal invoke.
-        if (receiver.isEmpty)
+        if (receiver.isEmpty && !isJavaStatic(sym))
           throw RuntimeException("Why is recv empty???")
 
         val receiverTpeArgs = receiver.map(_.tpe).fold(Nil) {
@@ -702,6 +707,12 @@ object Remapper {
               } yield (invoke, c))
             } else None
 
+          // a Java static method belongs to no instance, so it never takes its class's module as a receiver
+          def handleJavaStatic(ref: q.Ref) = {
+            val sym = ref.symbol
+            Option.when(isJavaStatic(sym))(invokeOrSelect(c)(sym, None)("not a value".fail))
+          }
+
           val refSym = refTpe.typeSymbol
 
           // First, we check if the ident's symbol is an object.
@@ -730,6 +741,7 @@ object Remapper {
                 val local    = p.Named(name, localTpe)
 
                 handleThisRef(ident, local)
+                  .orElse(handleJavaStatic(ident))
                   .orElse(handleObjectSelect(ident, local))
                   .getOrElse {
                     def synthesiseSelectOnMethodWithReceiver(classSym: q.Symbol) =
@@ -807,6 +819,7 @@ object Remapper {
               case select @ q.Select(root, name) => // we have qualifiers before the actual name
                 val named = p.Named(name, tpe)
                 handleThisRef(select, named)
+                  .orElse(handleJavaStatic(select))
                   .orElse(handleObjectSelect(select, named))
                   .orElse(
                     Option(root)

@@ -68,7 +68,7 @@ class BytecodeDiagnosticSuite extends munit.FunSuite {
     BytecodeRemapper.lowerWithCalls(bytes, "calls", desc) match {
       case Left(e) => fail(e.getMessage)
       case Right((fn, callees)) =>
-        assertEquals(callees, List(BytecodeRemapper.Ref("Unsupported", "helper", "(I)I")))
+        assertEquals(callees, List(MethodRef("Unsupported", "helper", "(I)I")))
         assert(fn.repr.contains("&Unsupported.helper"), fn.repr)
     }
   }

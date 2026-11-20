@@ -5,6 +5,7 @@ import polyregion.ast.Traversal.*
 import polyregion.ast.pass.*
 import polyregion.ast.{PolyAST as p, *, given}
 import polyregion.intrinsic.IntrinsicTable
+import polyregion.javalang.{BytecodeResolver, Intrinsics}
 import polyregion.prism.{Prism, PrismTables}
 
 import java.nio.file.Paths
@@ -115,6 +116,35 @@ object Compiler {
       }
   }
 
+  // a Java static method has no TASTy, so the bytecode tier lowers it from its class file unless an intrinsic covers it
+  private def bytecodeFallback(using
+      q: Quoted
+  )(
+      sym: q.Symbol,
+      defDef: q.DefDef,
+      target: p.Expr.Invoke
+  ): Option[Result[List[p.Function]]] = {
+    val flags = sym.flags
+    Option
+      .when(flags.is(q.Flags.JavaDefined) && flags.is(q.Flags.JavaStatic))(deriveSignature(defDef).toOption)
+      .flatten
+      .filter(sig => (sig.rtn :: sig.args).forall(BytecodeResolver.lowerable))
+      .map { signature =>
+        val bytes = BytecodeResolver.loaderClasses(getClass.getClassLoader, ClassLoader.getSystemClassLoader)
+        for {
+          owner <- BytecodeResolver.locate(sym.owner.fullName.stripSuffix("$"), bytes)
+          ref   <- BytecodeResolver.descriptorFor(owner, sym.name, signature.args, signature.rtn, bytes)
+          lowered <-
+            if (Intrinsics.covers(ref)) Nil.success
+            else BytecodeResolver.resolve(List(ref), bytes)
+        } yield lowered match {
+          case plain :: _ if plain.name != target.calleeName =>
+            BytecodeResolver.callableAs(plain, target.calleeName, None) :: lowered
+          case _ => lowered
+        }
+      }
+  }
+
   def compileAllDependencies(using
       q: Quoted
   )(
@@ -207,21 +237,16 @@ object Compiler {
                               )
                               (xs, depss, clsDepss, moduleSymDepss).success
                             case None if actualDefDef.rhs.isEmpty =>
-                              log.info(
-                                s"No implementation: ${target.repr} (${actualSym.flags.show}); ${actualSym.hashCode()}",
-                                fnLut.keys.map(r => s"Candidate: ${r.repr}").toList*
-                              )
-
-                              // if (actualDefDef.symbol.flags.is(q.Flags.Abstract)) {
-
-                              // } else {
-                              (
-                                xs,
-                                depss,
-                                clsDepss,
-                                moduleSymDepss
-                              ).success
-                            // }
+                              bytecodeFallback(actualSym, actualDefDef, target) match {
+                                case Some(lowered) =>
+                                  lowered.map(fs => (fs ::: xs, depss, clsDepss, moduleSymDepss))
+                                case None =>
+                                  log.info(
+                                    s"No implementation: ${target.repr} (${actualSym.flags.show}); ${actualSym.hashCode()}",
+                                    fnLut.keys.map(r => s"Candidate: ${r.repr}").toList*
+                                  )
+                                  (xs, depss, clsDepss, moduleSymDepss).success
+                              }
 
                             case None =>
                               // see if function is already there

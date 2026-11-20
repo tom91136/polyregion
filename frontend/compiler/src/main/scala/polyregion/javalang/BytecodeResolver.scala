@@ -3,7 +3,6 @@ package polyregion.javalang
 import cats.syntax.all.*
 import org.jetbrains.java.decompiler.struct.gen.MethodDescriptor
 import polyregion.ast.{PolyAST as p, *}
-import polyregion.javalang.BytecodeRemapper.Ref
 
 import scala.annotation.tailrec
 
@@ -11,6 +10,14 @@ import scala.annotation.tailrec
 object BytecodeResolver {
 
   type ClassBytes = String => Option[Array[Byte]]
+
+  @tailrec def lowerable(t: p.Type): Boolean = t match {
+    case p.Type.Ptr(component, _) => lowerable(component)
+    case p.Type.Bool1 | p.Type.IntS8 | p.Type.IntS16 | p.Type.IntU16 | p.Type.IntS32 | p.Type.IntS64 | p.Type.Float32 |
+        p.Type.Float64 | p.Type.Unit0 =>
+      true
+    case _ => false
+  }
 
   def classFile(owner: String): String = s"${owner.replace('.', '/')}.class"
 
@@ -31,11 +38,11 @@ object BytecodeResolver {
   def locate(dotted: String, bytesOf: ClassBytes): Result[String] = {
     val parts = dotted.split('.').toList
     val candidates =
-      (0 until parts.size).map(k => (parts.dropRight(k).mkString(".") +: parts.takeRight(k)).mkString("$"))
+      parts.indices.map(k => (parts.dropRight(k).mkString(".") +: parts.takeRight(k)).mkString("$"))
     candidates.find(bytesOf(_).isDefined).failIfEmpty(s"No class file for `$dotted`")
   }
 
-  // the Scala frontend calls a static method through its class's module value, so the entry keeps that receiver unused
+  // the Scala frontend names a static method after its Scala symbol, which a nested call from the bytecode does not share
   def callableAs(plain: p.Function, name: p.Sym, receiver: Option[p.Type]): p.Function = {
     val args = plain.args.map(a => p.Term.Select(a.named, Nil, a.named.tpe))
     val call = p.Expr.Invoke(p.Type.FnRef(plain.name), Nil, None, args, plain.rtn)
@@ -52,27 +59,34 @@ object BytecodeResolver {
     )
   }
 
-  def lowerRef(ref: Ref, bytesOf: ClassBytes): Result[(p.Function, List[Ref])] =
+  def lowerRef(ref: MethodRef, bytesOf: ClassBytes): Result[(p.Function, List[MethodRef])] =
     bytesOf(ref.owner)
       .failIfEmpty(s"No class file for `${ref.owner}` while lowering `${ref.repr}`")
       .flatMap(BytecodeRemapper.lowerWithCalls(_, ref.name, ref.desc))
       .leftMap(e => CompilerException(s"Cannot lower `${ref.repr}` from its class file: ${e.getMessage}", e))
 
-  def resolve(roots: List[Ref], bytesOf: ClassBytes): Result[List[p.Function]] = {
-    @tailrec def go(todo: List[Ref], seen: Set[Ref], acc: List[p.Function]): Result[List[p.Function]] = todo match {
-      case Nil                      => acc.reverse.success
-      case ref :: rest if seen(ref) => go(rest, seen, acc)
-      case ref :: rest =>
-        lowerRef(ref, bytesOf) match {
-          case Left(e)              => Left(e)
-          case Right((fn, callees)) => go(rest ::: callees, seen + ref, fn :: acc)
-        }
-    }
+  def resolve(roots: List[MethodRef], bytesOf: ClassBytes): Result[List[p.Function]] = {
+    @tailrec def go(todo: List[MethodRef], seen: Set[MethodRef], acc: List[p.Function]): Result[List[p.Function]] =
+      todo match {
+        case Nil                      => acc.reverse.success
+        case ref :: rest if seen(ref) => go(rest, seen, acc)
+        case ref :: rest =>
+          lowerRef(ref, bytesOf) match {
+            case Left(e)              => Left(e)
+            case Right((fn, callees)) => go(rest ::: callees, seen + ref, fn :: acc)
+          }
+      }
     go(roots, Set.empty, Nil)
   }
 
   // the Scala frontend knows a callee by its lowered signature rather than by a JVM descriptor
-  def descriptorFor(owner: String, name: String, params: List[p.Type], rtn: p.Type, bytesOf: ClassBytes): Result[Ref] =
+  def descriptorFor(
+      owner: String,
+      name: String,
+      params: List[p.Type],
+      rtn: p.Type,
+      bytesOf: ClassBytes
+  ): Result[MethodRef] =
     for {
       bytes <- bytesOf(owner).failIfEmpty(s"No class file for `$owner` while resolving `$name`")
       all   <- Vineflower.staticDescriptors(bytes, name)
@@ -88,5 +102,5 @@ object BytecodeResolver {
             s"${rtn.repr}; its static overloads are ${all.mkString(", ")}").fail
         case many => s"`$owner.$name` is ambiguous for ${many.mkString(", ")}".fail
       }
-    } yield Ref(owner, name, desc)
+    } yield MethodRef(owner, name, desc)
 }

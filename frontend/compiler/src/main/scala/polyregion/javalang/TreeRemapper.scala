@@ -37,7 +37,7 @@ object TreeRemapper {
       val classBytes: BytecodeResolver.ClassBytes
   ) {
     val fnSyms        = mutable.LinkedHashSet.empty[JSymbol.MethodSymbol]
-    val bytecodeRoots = mutable.LinkedHashSet.empty[BytecodeRemapper.Ref]
+    val bytecodeRoots = mutable.LinkedHashSet.empty[MethodRef]
 
     def treeOf(sym: JSymbol.MethodSymbol): Option[MethodTree] =
       localTrees.get(sym).orElse(methodTable.get(fullName(sym))).filter(bodied(_))
@@ -923,7 +923,10 @@ object TreeRemapper {
     def one(t: TypeMirror): String = deps.types.erasure(t) match {
       case a: ArrayType => s"[${one(a.getComponentType)}"
       case d: DeclaredType =>
-        s"L${deps.elements.getBinaryName(d.asElement.asInstanceOf[TypeElement]).toString.replace('.', '/')};"
+        d.asElement match {
+          case c: TypeElement => s"L${deps.elements.getBinaryName(c).toString.replace('.', '/')};"
+          case _              => "V"
+        }
       case other =>
         other.getKind match {
           case TypeKind.BOOLEAN => "Z"
@@ -951,9 +954,10 @@ object TreeRemapper {
       args: List[p.Term],
       rtn: p.Type
   ): Option[p.Expr] =
-    Option
-      .when(sym.isStatic)(Intrinsics.lookup(ownerName(sym), sym.name.toString, descriptorOf(deps, sym), args, rtn))
-      .flatten
+    Option.when(sym.isStatic)(Intrinsics.lookup(calleeOf(deps, sym), args, rtn)).flatten
+
+  private def calleeOf(deps: DepCollector, sym: JSymbol.MethodSymbol): MethodRef =
+    MethodRef(binaryOwnerName(deps, sym), sym.name.toString, descriptorOf(deps, sym))
 
   private def isBytecodeCallee(deps: DepCollector, sym: JSymbol.MethodSymbol): Boolean =
     sym.isStatic && !sym.getModifiers.contains(Modifier.ABSTRACT) && deps.treeOf(sym).isEmpty
@@ -964,7 +968,7 @@ object TreeRemapper {
       args: List[p.Term],
       rtn: p.Type
   ): p.Expr = {
-    val ref = BytecodeRemapper.Ref(binaryOwnerName(deps, sym), sym.name.toString, descriptorOf(deps, sym))
+    val ref = calleeOf(deps, sym)
     deps.bytecodeRoots += ref
     p.Expr.Invoke(p.Type.FnRef(BytecodeRemapper.symbolOf(ref.owner, ref.name)), Nil, None, args, rtn)
   }

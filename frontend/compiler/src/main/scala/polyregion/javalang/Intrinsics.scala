@@ -1,7 +1,7 @@
 package polyregion.javalang
 
 import org.jetbrains.java.decompiler.struct.gen.MethodDescriptor
-import polyregion.ast.{PolyAST as p, *}
+import polyregion.ast.PolyAST as p
 
 object Intrinsics {
 
@@ -35,15 +35,15 @@ object Intrinsics {
   private val Binary = Set("pow", "atan2", "hypot", "min", "max")
 
   // the one seam shared by the tree and bytecode tiers, a miss sends the callee on to the bytecode resolver
-  def covers(owner: String, name: String, desc: String): Boolean =
-    MathOwners.contains(owner) && (MethodDescriptor.parseDescriptor(desc).params.length match {
-      case 1 => Unary.contains(name)
-      case 2 => Binary.contains(name)
+  def covers(callee: MethodRef): Boolean =
+    MathOwners.contains(callee.owner) && (MethodDescriptor.parseDescriptor(callee.desc).params.length match {
+      case 1 => Unary.contains(callee.name)
+      case 2 => Binary.contains(callee.name)
       case _ => false
     })
 
-  def lookup(owner: String, name: String, desc: String, args: List[p.Term], rtn: p.Type): Option[p.Expr] =
-    if (covers(owner, name, desc)) math(name, args, rtn) else None
+  def lookup(callee: MethodRef, args: List[p.Term], rtn: p.Type): Option[p.Expr] =
+    if (covers(callee)) math(callee.name, args, rtn) else None
 
   private def math(name: String, args: List[p.Term], rtn: p.Type): Option[p.Expr] = {
     def m(x: p.Math): Option[p.Expr]    = Some(p.Expr.MathOp(x))

@@ -8,7 +8,7 @@ receiver's concrete class is observed at run time, can still be offloaded.
 `Vineflower.scala` and `BytecodeRemapper.scala` implement everything under "Supported subset".
 Everything under "Not yet built" is design only. The frontend lowers methods over primitives and
 primitive arrays, is differentially tested against the JVM on both javac and scalac output, and is
-not wired into the annotation processor.
+wired into both frontends as the fallback resolver for a callee with no javac tree and no TASTy.
 
 ## Supported subset
 
@@ -43,6 +43,22 @@ Two places where the JVM's semantics are reproduced exactly, because getting the
   distances undefined while the JVM specifies the mask.
 - `>>>` is lowered as a cast to `IntU32`/`IntU64`, a `BZSR`, and a cast back, so the sign bit cannot
   be dragged into the result.
+
+- Static calls. A call to a static method is lowered to an `Invoke` of `owner.name`, and the callee is
+  lowered from its own class file in turn (`BytecodeResolver.resolve` walks the closure, deduplicated by
+  owner, name and descriptor). Overloads share a symbol and differ by signature.
+- Intrinsics win. `Intrinsics.lookup` is consulted before a call is recorded, so `Math.sqrt` and friends
+  become `MathOp`s instead of being lowered from their native bodies. It is the single seam for the
+  descriptor-keyed table.
+
+## Resolver wiring
+
+- `javalang`: `TreeRemapper.directCall` sends a static callee with no tree in `localTrees` or `methodTable`
+  to `BytecodeResolver`. Class bytes come from javac's class path file manager, then from the running JDK.
+- `scalalang`: a Java static method (`JavaDefined` and `JavaStatic`) is invoked without its class's module as
+  a receiver, and `Compiler.bytecodeFallback` lowers it when its signature is primitives and primitive arrays.
+  The class is found through the macro class loader. Signatures with other types keep their previous path.
+- A refusal names the method and the construct: ``Cannot lower `Owner.m(I)I` from its class file: Unsupported `throw`...``.
 
 ## Getting the tree out of Vineflower
 
@@ -149,7 +165,7 @@ Every refusal names the construct in the user's vocabulary, not as an opcode num
 | Construct | Diagnostic |
 | --- | --- |
 | instance method using `this` | ``` `Owner.m` is not static and uses its receiver; instance methods need a receiver struct ``` |
-| call | ``` Unsupported call `Owner.callee(I)I` ``` |
+| non-static call | ``` Unsupported call `Owner.callee(I)I` ``` |
 | field access | ``` Unsupported field access `Owner.field` ``` |
 | allocation | ``` Unsupported array allocation of `int[]` ``` |
 | `xs.length` | ``` Unsupported `length` of an array; PolyRegion carries array lengths as separate arguments ``` |
