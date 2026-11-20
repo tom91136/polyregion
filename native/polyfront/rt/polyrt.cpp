@@ -772,6 +772,19 @@ POLYREGION_EXPORT void polyrt_context_acquire_or_throw(void *context) {
 POLYREGION_EXPORT void polyrt_context_release_or_throw(void *context) {
   if (!polyrt_context_release(context)) throw std::runtime_error(polyrt_error_message());
 }
+
+POLYREGION_EXPORT void polyrt_context_fallback(void *context, const char *site) {
+  auto &execution = requireContext(context, __func__);
+  if (execution.device->physicalDevice().scheme == PhysicalDevice::Scheme::Host) {
+    log(DebugLevel::Debug, "<%s> Explicit host context, running the interface fallback", site);
+    return;
+  }
+  std::fprintf(stderr,
+               "[PolyRT] %s: no kernel image matches device `%s` of platform `%s`; an explicit context never runs the host fallback\n",
+               site, execution.device->name().c_str(), execution.platform->name().c_str());
+  std::fflush(stderr);
+  std::abort();
+}
 POLYREGION_EXPORT extern "C" size_t polyrt_device_max_threads_per_block(void *context) {
   return requireContext(context, __func__).device->maxThreadsPerBlock();
 }

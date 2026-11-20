@@ -213,6 +213,7 @@ struct Failure {
 constexpr static auto offloadFunctionName = "__polyregion_offload__";
 constexpr static llvm::StringLiteral interfaceAnnotation = "polyregion_interface:";
 constexpr static llvm::StringLiteral interfaceFallbackAnnotation = "polyregion_interface_fallback";
+constexpr static llvm::StringLiteral interfaceContextAnnotation = "polyregion_interface_context";
 constexpr static llvm::StringLiteral hostAlgorithmAnnotation = "polystl_host_algorithm";
 constexpr static llvm::StringLiteral hostFallbackAnnotation = "polystl_host_fallback";
 
@@ -247,6 +248,15 @@ static bool hasInterfaceFallback(const clang::FunctionDecl *decl) {
            const auto *annotation = llvm::dyn_cast<clang::AnnotateAttr>(attr);
            return annotation && annotation->getAnnotation() == interfaceFallbackAnnotation;
          });
+}
+
+static size_t interfaceContextParameters(const clang::FunctionDecl *decl) {
+  return decl->attrs() | exists([](const auto *attr) {
+           const auto *annotation = llvm::dyn_cast<clang::AnnotateAttr>(attr);
+           return annotation && annotation->getAnnotation() == interfaceContextAnnotation;
+         })
+             ? 1
+             : 0;
 }
 
 struct HostFallbackCallFinder final : clang::RecursiveASTVisitor<HostFallbackCallFinder> {
@@ -318,7 +328,7 @@ static void reportHostAlgorithms(clang::ASTContext &context, clang::DiagnosticsE
 static Vector<const clang::FunctionDecl *> interfaceCallableIdentities(const InterfaceSite &site) {
   Vector<const clang::FunctionDecl *> identities;
   identities.reserve(site.call->getNumArgs());
-  for (size_t i = 0; i < site.call->getNumArgs(); ++i) {
+  for (size_t i = interfaceContextParameters(site.callee); i < site.call->getNumArgs(); ++i) {
     const auto *argument = site.call->getArg(i)->IgnoreUnlessSpelledInSource();
     const auto *record = argument->getType()->getAsCXXRecordDecl();
     const clang::FunctionDecl *callable = nullptr;
@@ -372,7 +382,8 @@ static std::optional<PreparedInterfaceCall> prepareInterfaceCall(const clang::Co
   Remapper::RemapContext context;
   std::vector<Type::Any> argumentTypes;
   std::vector<ProgramTypeSize> typeSizes;
-  for (const auto *parameter : site.callee->parameters()) {
+  const auto leading = interfaceContextParameters(site.callee);
+  for (const auto *parameter : site.callee->parameters().drop_front(leading)) {
     const auto type = remapper.handleType(parameter->getType(), context);
     argumentTypes.emplace_back(type);
     const auto sized = parameter->getType()->isPointerType() ? parameter->getType()->getPointeeType() : parameter->getType();
@@ -381,7 +392,7 @@ static std::optional<PreparedInterfaceCall> prepareInterfaceCall(const clang::Co
     if (!sizeKey.is<Type::Nothing>() && sizeInBytes > 0) typeSizes.emplace_back(sizeKey, sizeInBytes);
   }
   std::unordered_set<std::string> boundCallables;
-  for (size_t i = 0; i < site.call->getNumArgs(); ++i) {
+  for (size_t i = leading; i < site.call->getNumArgs(); ++i) {
     const auto *argument = site.call->getArg(i)->IgnoreUnlessSpelledInSource();
     const auto *record = argument->getType()->getAsCXXRecordDecl();
     const clang::FunctionDecl *callable = nullptr;
@@ -422,7 +433,7 @@ static std::optional<PreparedInterfaceCall> prepareInterfaceCall(const clang::Co
                                                               return select.root.symbol == conventions::ThisReceiver;
                                                             })));
     function->decl = function->decl.withArgs(args).withReceiver(stateful ? receiver : Opt<Arg>{}).withAffinity(FunctionAffinity::Host());
-    argumentTypes[i] = stateful ? remapper.handleType(argument->getType(), context) : Type::FnRef(function->decl.name).widen();
+    argumentTypes[i - leading] = stateful ? remapper.handleType(argument->getType(), context) : Type::FnRef(function->decl.name).widen();
   }
   const auto returnType = remapper.handleType(site.callee->getReturnType(), context);
   if (!site.callee->getReturnType()->isVoidType())
@@ -484,14 +495,15 @@ static void materializeInterfaceCall(const clang::CompilerInstance &CI, clang::A
   auto &S = CI.getSema();
   std::vector<clang::QualType> entryTypes;
   std::vector<clang::Expr *> entryArgs;
-  auto *contextFn = mkExternCFn(C, "polyrt_context_current", C.VoidPtrTy, {});
-  auto *contextArg = mkCall(C, contextFn, {});
+  const auto leading = interfaceContextParameters(site.callee);
+  auto *contextArg =
+      leading ? mkLoad(C, site.callee->getParamDecl(0)) : mkCall(C, mkExternCFn(C, "polyrt_context_current", C.VoidPtrTy, {}), {});
   entryTypes.emplace_back(C.VoidPtrTy);
   entryArgs.emplace_back(contextArg);
   clang::VarDecl *resultDecl = nullptr;
   for (size_t index = 0; index < argumentTypes.size(); ++index) {
     if (program::importArgumentMode(argumentTypes[index]) == program::ImportArgumentMode::OmittedCallable) continue;
-    auto *parameter = site.callee->getParamDecl(index);
+    auto *parameter = site.callee->getParamDecl(index + leading);
     if (program::importArgumentMode(argumentTypes[index]) == program::ImportArgumentMode::DirectPointer) {
       entryTypes.emplace_back(parameter->getType());
       entryArgs.emplace_back(mkLoad(C, parameter));
@@ -590,8 +602,11 @@ static void materializeInterfaceCall(const clang::CompilerInstance &CI, clang::A
     if (!fallback) chain = clang::CompoundStmt::Create(C, requireAllLoaded(order.back()), {}, {}, {});
     else {
       auto *remoteFallback = mkExternCFn(C, "polyrt_remote_fallback", C.VoidTy, {constCharStarTy(C)});
-      const std::vector<clang::Stmt *> miss{
-          mkCall(C, remoteFallback, {mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, site.declaration))})};
+      // the explicit-context fallback body decides per context, so the process-wide policy is not consulted
+      const std::vector<clang::Stmt *> miss =
+          leading ? std::vector<clang::Stmt *>{}
+                  : std::vector<clang::Stmt *>{
+                        mkCall(C, remoteFallback, {mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, site.declaration))})};
       chain = clang::CompoundStmt::Create(C, miss, {}, {}, {});
     }
     for (const auto group : order ^ reverse()) {

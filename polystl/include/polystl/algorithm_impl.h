@@ -255,8 +255,22 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
 
 template <class Body> void core_for_each(int64_t n, Body body) { parallel_for(n, body); }
 
+template <class Body> [[clang::annotate("polystl_host_fallback")]] void core_for_each(void *context, int64_t n, Body body) {
+  polyrt_context_fallback(context, "polyregion.core.for_each");
+  for (int64_t i = 0; i < n; ++i)
+    body(i);
+}
+
 template <class T, class Map, class Combine> T core_transform_reduce(int64_t n, T init, Map map, Combine combine) {
   return parallel_reduce(n, init, map, combine);
+}
+
+template <class T, class Map, class Combine>
+[[clang::annotate("polystl_host_fallback")]] T core_transform_reduce(void *context, int64_t n, T init, Map map, Combine combine) {
+  polyrt_context_fallback(context, "polyregion.core.transform_reduce");
+  for (int64_t i = 0; i < n; ++i)
+    init = combine(init, map(i));
+  return init;
 }
 
 } // namespace polyregion::polystl::details

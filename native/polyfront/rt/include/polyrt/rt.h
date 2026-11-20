@@ -132,6 +132,8 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT bool foreignContextActive(const char *si
 
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_context_acquire_or_throw(void *context);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_context_release_or_throw(void *context);
+// returns for a host device and aborts with a message for any other: an explicit context never silently runs the host fallback
+POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_context_fallback(void *context, const char *site);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_record_operator_new(size_t size);
 
 extern "C" {
