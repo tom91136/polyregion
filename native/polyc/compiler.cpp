@@ -808,7 +808,10 @@ polyast::CompileResult compiler::emit(Staged staged, const compiletime::OptLevel
   auto &effective = *staged.program;
   polyast::CompileResult c = mkBackend()->compileProgram(effective, opt);
   if (staged.hadEntry && !effective.entry) throw std::logic_error("pipeline removed the Program entry");
-  if (effective.entry) c.entryArgs = effective.entry->decl.args ^ map([](const auto &a) { return a.named; });
+  if (effective.entry) {
+    const auto &decl = effective.entry->decl;
+    c.entryArgs = decl.moduleCaptures ^ concat(decl.termCaptures) ^ concat(decl.args) ^ map([](const auto &a) { return a.named; });
+  }
   if (c.entryArgs ^ exists([](const auto &arg) { return arg.symbol == conventions::ErrorArg; }))
     c.features.emplace_back(conventions::ErrorArg);
   for (const auto &entry : effective.metadata)

@@ -285,6 +285,18 @@ class StructuredExitSuite extends munit.FunSuite {
     assertEquals(decode(vm, err), (p.Enums.AssertCode.Assert.value, "from helper"))
   }
 
+  test("the error buffer leads the module captures, term captures, and arguments of an entry") {
+    val capture = p.Arg(named("capture", p.Type.Ptr(i32, p.Type.Space.Global)))
+    def order(out: p.Program) =
+      (out.entry.moduleCaptures ::: out.entry.required.termCaptures ::: out.entry.args).map(_.named.symbol)
+    val body       = List(assertStmt(), ret)
+    val withModule = StructuredExit(program(entry(moduleCaptures = List(capture), body = body)), NoopLog)
+    val withTerm   = StructuredExit(program(entry(termCaptures = List(capture), body = body)), NoopLog)
+    val withArgs   = StructuredExit(program(entry(args = List(capture), body = body)), NoopLog)
+    val expected   = List(p.Conventions.ErrorArg, capture.named.symbol)
+    List(withModule, withTerm, withArgs).foreach(out => assertEquals(order(out), expected))
+  }
+
   test("an assertion after a handled raise is not caught by an enclosing catch-all") {
     val inner = p.Stmt.Try(
       List(raise(p.Term.IntS32Const(7), "int")),

@@ -970,20 +970,29 @@ object StructuredExit extends ProgramPass {
               .toList
         }
         val epilogue = if (e.body.exists(flow.escapes)) drain ::: List(p.Stmt.Return(p.Expr.Alias(sentinel))) else Nil
-        val args = exit match {
+        val decl = exit match {
           case Exit.Buffer =>
             log.info(s"${e.signatureKey}: lowered ${tags.size} raised type(s) to a structured drain + error buffer")
             val needsError =
               e.body.exists(flow.mayExit) || e.body.exists(flow.escapes) || e.body.exists(flow.reportsRaise)
-            if (!needsError || e.args.exists(_.named.symbol == ErrorSym)) e.args
-            else p.Arg(p.Named(ErrorSym, ErrorPtr)) +: e.args
+            if (!needsError || (e.moduleCaptures ::: e.termCaptures ::: e.args).exists(_.named.symbol == ErrorSym))
+              e.decl
+            else withLeadingError(e.decl)
           case Exit.Report(propagates) =>
             log.info(s"${e.signatureKey}: lowered ${tags.size} raised type(s) to a structured drain + runtime report")
-            if (propagates) e.args :+ p.Arg(raisedArg) else e.args
+            e.decl.remapArgs(if (propagates) e.args :+ p.Arg(raisedArg) else e.args)
         }
-        e.copy(decl = e.decl.remapArgs(args), body = decls ::: lowered ::: epilogue)
+        e.copy(decl = decl, body = decls ::: lowered ::: epilogue)
       }
     }
+  }
+
+  // backends order kernel parameters as moduleCaptures, termCaptures, args and the launch passes the error block first
+  private def withLeadingError(decl: p.FunctionDecl): p.FunctionDecl = {
+    val error = p.Arg(p.Named(ErrorSym, ErrorPtr))
+    if (decl.moduleCaptures.nonEmpty) decl.copy(moduleCaptures = error +: decl.moduleCaptures)
+    else if (decl.termCaptures.nonEmpty) decl.copy(termCaptures = error +: decl.termCaptures)
+    else decl.remapArgs(error +: decl.args)
   }
 
   private def lowerEntry(program: p.Program, log: Log): p.Program =
