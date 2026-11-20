@@ -4,6 +4,7 @@ import cats.syntax.all.*
 import polyregion.ast.Traversal.*
 import polyregion.ast.pass.*
 import polyregion.ast.{PolyAST as p, *, given}
+import polyregion.intrinsic.IntrinsicTable
 import polyregion.prism.PrismTables
 
 import java.nio.file.Paths
@@ -870,7 +871,7 @@ object Compiler {
 
     unopt = p.Program(
       Some(rootFn0),
-      abstractFnsWithAssertBody ::: allRootDependentFns0 ::: resolvedFunctions0,
+      IntrinsicTable.dedupe(abstractFnsWithAssertBody ::: allRootDependentFns0 ::: resolvedFunctions0),
       ((rootDependentStructs ++ allRootDependentStructs).toList ++ dispatchAnonStructDefs).distinct
     )
     _ = log.info(

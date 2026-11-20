@@ -4,6 +4,7 @@ import cats.data.EitherT
 import cats.syntax.all.*
 import polyregion.ast.Traversal.*
 import polyregion.ast.{PolyAST as p, *, given}
+import polyregion.intrinsic.IntrinsicTable
 
 import scala.annotation.tailrec
 
@@ -290,9 +291,41 @@ object Remapper {
         (selectExpr(Nil, named), c0).success
     }
 
+    private def intrinsicCall(
+        ref: q.Ref,
+        termArgss: List[List[p.Expr]]
+    ): Option[Result[(p.Expr, q.RemapContext)]] = {
+      val args = termArgss.flatten.collect { case p.Expr.Alias(t) => t }
+      JvmDescriptor.keyOf(ref.symbol).flatMap { key =>
+        IntrinsicTable.resolve(key, args).filter(_ => args.size == termArgss.flatten.size) match {
+          case Some(IntrinsicTable.Resolved.Inline(expr)) =>
+            val named = c.named(expr.tpe)
+            Some((selectExpr(Nil, named), c.down(ref) ::= p.Stmt.Var(named, Some(expr))).success)
+          case Some(IntrinsicTable.Resolved.Call(fn, invoke)) =>
+            val named = c.named(invoke.tpe)
+            Some(
+              (
+                selectExpr(Nil, named),
+                c.down(ref).updateDeps(_.witness(fn)) ::= p.Stmt.Var(named, Some(invoke))
+              ).success
+            )
+          case None if IntrinsicTable.CoveredOwners.contains(key.owner) =>
+            Some(s"unsupported JVM intrinsic ${key.repr}".fail)
+          case None => None
+        }
+      }
+    }
+
     // The general idea is that idents are either used as-is or it goes through a series of type/term applications (e.g `{ foo.fn[A](b)(c) }`).
     // We collect the types and term lists in `mapTerm` and then fully apply it here.
     private def mapRef0(
+        ref: q.Ref,
+        tpeArgs: List[p.Type],
+        termArgss: List[List[p.Expr]]
+    ): Result[(p.Expr, q.RemapContext)] =
+      c.intrinsicCall(ref, termArgss).getOrElse(c.mapRef1(ref, tpeArgs, termArgss))
+
+    private def mapRef1(
         ref: q.Ref,
         tpeArgs: List[p.Type],
         termArgss: List[List[p.Expr]]

@@ -32,8 +32,8 @@ object StdLib {
   }
 
   class RichInt(val x: Int) {
-    def min(that: Int)         = intrinsics.min(x, that)
-    def max(that: Int)         = intrinsics.max(x, that)
+    def min(that: Int)         = java.lang.Math.min(x, that)
+    def max(that: Int)         = java.lang.Math.max(x, that)
     def until(end: Int): Range = new Range(x, end, 1)
   }
 
@@ -44,102 +44,6 @@ object StdLib {
   class Predef {
     def intWrapper(x: Int): RichInt                      = RichInt(x)
     def intArrayOps(xs: scala.Array[Int]): ArrayOps[Int] = new ArrayOps[Int](xs)
-  }
-
-  object math {
-
-    // TODO mirror fields as well
-    val E: Double  = 2.7182818284590452354
-    val Pi: Double = 3.14159265358979323846
-
-    def sin(x: Double): Double  = intrinsics.sin(x)
-    def cos(x: Double): Double  = intrinsics.cos(x)
-    def tan(x: Double): Double  = intrinsics.tan(x)
-    def asin(x: Double): Double = intrinsics.asin(x)
-    def acos(x: Double): Double = intrinsics.acos(x)
-    def atan(x: Double): Double = intrinsics.atan(x)
-
-    def toRadians(x: Double): Double = x * 0.017453292519943295
-    def toDegrees(x: Double): Double = x * 57.29577951308232
-
-    def atan2(y: Double, x: Double): Double = intrinsics.atan2(y, x)
-    def hypot(x: Double, y: Double): Double = intrinsics.hypot(x, y)
-    def ceil(x: Double): Double             = intrinsics.ceil(x)
-    def floor(x: Double): Double            = intrinsics.floor(x)
-    def rint(x: Double): Double             = intrinsics.rint(x)
-
-    def round(x: Long): Long   = x
-    def round(x: Float): Int   = intrinsics.round[Float, Int](x)
-    def round(x: Double): Long = intrinsics.round[Double, Long](x)
-
-    def abs(x: Int): Int       = intrinsics.abs(x)
-    def abs(x: Long): Long     = intrinsics.abs(x)
-    def abs(x: Float): Float   = intrinsics.abs(x)
-    def abs(x: Double): Double = intrinsics.abs(x)
-
-    def max(x: Int, y: Int): Int          = intrinsics.max(x, y)
-    def max(x: Long, y: Long): Long       = intrinsics.max(x, y)
-    def max(x: Float, y: Float): Float    = intrinsics.max(x, y)
-    def max(x: Double, y: Double): Double = intrinsics.max(x, y)
-
-    def min(x: Int, y: Int): Int          = intrinsics.min(x, y)
-    def min(x: Long, y: Long): Long       = intrinsics.min(x, y)
-    def min(x: Float, y: Float): Float    = intrinsics.min(x, y)
-    def min(x: Double, y: Double): Double = intrinsics.min(x, y)
-
-    def signum(x: Int): Int       = intrinsics.signum(x)
-    def signum(x: Long): Long     = intrinsics.signum(x)
-    def signum(x: Float): Float   = intrinsics.signum(x)
-    def signum(x: Double): Double = intrinsics.signum(x)
-
-    // // def floorDiv(x: Int, y: Int): Int                       = intrinsics.floorDiv(x, y)
-    // // def floorDiv(x: Long, y: Long): Long                    = intrinsics.floorDiv(x, y)
-    // // def floorMod(x: Int, y: Int): Int                       = intrinsics.floorMod(x, y)
-    // // def floorMod(x: Long, y: Long): Long                    = intrinsics.floorMod(x, y)
-    // // def copySign(magnitude: Double, sign: Double): Double   = intrinsics.copySign(magnitude, sign)
-    // // def copySign(magnitude: Float, sign: Float): Float      = intrinsics.copySign(magnitude, sign)
-    // // def nextAfter(start: Double, direction: Double): Double = intrinsics.nextAfter(start, direction)
-    // // def nextAfter(start: Float, direction: Double): Float   = intrinsics.nextAfter(start, direction)
-    // // def nextUp(d: Double): Double                           = intrinsics.nextUp(d)
-    // // def nextUp(f: Float): Float                             = intrinsics.nextUp(f)
-    // // def nextDown(d: Double): Double                         = intrinsics.nextDown(d)
-    // // def nextDown(f: Float): Float                           = intrinsics.nextDown(f)
-    // // def scalb(d: Double, scaleFactor: Int): Double          = intrinsics.scalb(d, scaleFactor)
-    // // def scalb(f: Float, scaleFactor: Int): Float            = intrinsics.scalb(f, scaleFactor)
-
-    def sqrt(x: Double): Double           = intrinsics.sqrt(x)
-    def cbrt(x: Double): Double           = intrinsics.cbrt(x)
-    def pow(x: Double, y: Double): Double = intrinsics.pow(x, y)
-    def exp(x: Double): Double            = intrinsics.exp(x)
-    def expm1(x: Double): Double          = intrinsics.expm1(x)
-
-    // // def getExponent(f: Float): Int                          = intrinsics.getExponent(f)
-    // // def getExponent(d: Double): Int                         = intrinsics.getExponent(d)
-
-    def log(x: Double): Double   = intrinsics.log(x)
-    def log1p(x: Double): Double = intrinsics.log1p(x)
-    def log10(x: Double): Double = intrinsics.log10(x)
-    def sinh(x: Double): Double  = intrinsics.sinh(x)
-    def cosh(x: Double): Double  = intrinsics.cosh(x)
-    def tanh(x: Double): Double  = intrinsics.tanh(x)
-
-    // def ulp(x: Double): Double                              = intrinsics.ulp(x)
-    // def ulp(x: Float): Float                                = intrinsics.ulp(x)
-    // def IEEEremainder(x: Double, y: Double): Double         = intrinsics.IEEEremainder(x, y)
-    // def addExact(x: Int, y: Int): Int                       = intrinsics.addExact(x, y)
-    // def addExact(x: Long, y: Long): Long                    = intrinsics.addExact(x, y)
-    // def subtractExact(x: Int, y: Int): Int                  = intrinsics.subtractExact(x, y)
-    // def subtractExact(x: Long, y: Long): Long               = intrinsics.subtractExact(x, y)
-    // def multiplyExact(x: Int, y: Int): Int                  = intrinsics.multiplyExact(x, y)
-    // def multiplyExact(x: Long, y: Long): Long               = intrinsics.multiplyExact(x, y)
-    // def incrementExact(x: Int): Int                         = intrinsics.incrementExact(x)
-    // def incrementExact(x: Long)                             = intrinsics.incrementExact(x)
-    // def decrementExact(x: Int)                              = intrinsics.decrementExact(x)
-    // def decrementExact(x: Long)                             = intrinsics.decrementExact(x)
-    // def negateExact(x: Int)                                 = intrinsics.negateExact(x)
-    // def negateExact(x: Long)                                = intrinsics.negateExact(x)
-    // def toIntExact(x: Long): Int                            = intrinsics.toIntExact(x)
-
   }
 
 //   object Array {
@@ -351,18 +255,7 @@ object StdLib {
         { case (_ @ given Quotes, _) => '{ Predef() } },
         { case (_ @ given Quotes, _) => '{ scala.Predef } },
         { case (_ @ given Quotes, x, _) => '{ () } }
-      ),
-      witness[scala.math.package$, math.type](
-        { case (_ @ given Quotes, _) => '{ math } },
-        { case (_ @ given Quotes, bad) =>
-          '{ throw RuntimeException(s"Prism assert: cannot restore object ${$bad}") }
-        },
-        { case (_ @ given Quotes, x, _) => '{ () } }
       )
-      // Note: a `java.lang.Math` mirror would be useful for `import java.lang.Math.*; sin(x)`,
-      // but `witness[java.lang.Math.type, ...]` doesn't compile — `Math` is a Java class, not a
-      // Scala module, so it has no `.type` value. A proper fix would need a different binding
-      // pathway (raw symbol lookup) in `derivePackedMirrorsImpl`.
     )
   )
 
