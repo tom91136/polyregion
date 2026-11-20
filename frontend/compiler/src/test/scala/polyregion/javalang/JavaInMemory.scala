@@ -1,5 +1,7 @@
 package polyregion.javalang
 
+import polyregion.javalang.Interop.absent
+
 import java.io.ByteArrayOutputStream
 import java.net.URI
 import javax.tools.*
@@ -8,7 +10,7 @@ import scala.jdk.CollectionConverters.*
 
 object JavaInMemory {
 
-  private final class Source(name: String, code: String)
+  private class Source(name: String, code: String)
       extends SimpleJavaFileObject(
         URI.create(s"string:///${name.replace('.', '/')}.java"),
         JavaFileObject.Kind.SOURCE
@@ -16,18 +18,28 @@ object JavaInMemory {
     override def getCharContent(ignoreEncodingErrors: Boolean): CharSequence = code
   }
 
-  private final class Output(name: String)
+  private class Output(name: String)
       extends SimpleJavaFileObject(URI.create(s"bytes:///$name"), JavaFileObject.Kind.CLASS) {
-    private val buf                                        = new ByteArrayOutputStream
+    private val buf                                        = ByteArrayOutputStream()
     override def openOutputStream(): ByteArrayOutputStream = buf
     def bytes: Array[Byte]                                 = buf.toByteArray
   }
 
-  final class Loaded(val classes: Map[String, Array[Byte]]) extends ClassLoader(JavaInMemory.getClass.getClassLoader) {
+  private class Manager(delegate: JavaFileManager, outputs: mutable.Map[String, Output])
+      extends ForwardingJavaFileManager[JavaFileManager](delegate) {
+    override def getJavaFileForOutput(
+        location: JavaFileManager.Location,
+        name: String,
+        kind: JavaFileObject.Kind,
+        sibling: FileObject
+    ): JavaFileObject = outputs.getOrElseUpdate(name, Output(name))
+  }
+
+  class Loaded(val classes: Map[String, Array[Byte]]) extends ClassLoader(JavaInMemory.getClass.getClassLoader) {
     override def findClass(name: String): Class[?] =
       classes.get(name) match {
         case Some(bs) => defineClass(name, bs, 0, bs.length)
-        case None     => throw new ClassNotFoundException(name)
+        case None     => throw ClassNotFoundException(name)
       }
     def bytesOf(name: String): Array[Byte] =
       classes.getOrElse(name, sys.error(s"javac produced no class `$name`, only ${classes.keys.mkString(", ")}"))
@@ -38,27 +50,20 @@ object JavaInMemory {
 
   def compile(className: String, code: String, options: List[String] = DefaultOptions): Loaded = {
     val javac = ToolProvider.getSystemJavaCompiler
-    require(javac != null, "no system Java compiler; the tests need a JDK rather than a JRE")
-    val outputs = mutable.LinkedHashMap.empty[String, Output]
-    val manager = new ForwardingJavaFileManager[JavaFileManager](javac.getStandardFileManager(null, null, null)) {
-      override def getJavaFileForOutput(
-          location: JavaFileManager.Location,
-          name: String,
-          kind: JavaFileObject.Kind,
-          sibling: FileObject
-      ): JavaFileObject = outputs.getOrElseUpdate(name, new Output(name))
-    }
-    val diagnostics = new DiagnosticCollector[JavaFileObject]
+    require(Option(javac).isDefined, "no system Java compiler; the tests need a JDK rather than a JRE")
+    val outputs     = mutable.LinkedHashMap.empty[String, Output]
+    val manager     = Manager(javac.getStandardFileManager(absent, absent, absent), outputs)
+    val diagnostics = DiagnosticCollector[JavaFileObject]()
     val task = javac.getTask(
-      null,
+      absent,
       manager,
       diagnostics,
       options.asJava,
-      null,
-      List[JavaFileObject](new Source(className, code)).asJava
+      absent,
+      List[JavaFileObject](Source(className, code)).asJava
     )
     if (!task.call())
       sys.error(diagnostics.getDiagnostics.asScala.map(_.toString).mkString("javac failed:\n", "\n", ""))
-    new Loaded(outputs.map((k, v) => k -> v.bytes).toMap)
+    Loaded(outputs.map((k, v) => k -> v.bytes).toMap)
   }
 }

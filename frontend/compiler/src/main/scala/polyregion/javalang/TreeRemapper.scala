@@ -8,57 +8,59 @@ import com.sun.tools.javac.tree.JCTree
 import polyregion.ast.{PolyAST as p, *}
 
 import javax.annotation.processing.ProcessingEnvironment
-import javax.lang.model.`type`.{DeclaredType, TypeKind, TypeMirror}
+import javax.lang.model.`type`.{ArrayType, DeclaredType, TypeKind, TypeMirror}
 import javax.lang.model.element.{ElementKind, Modifier, TypeElement}
 import javax.lang.model.util.{Elements, Types}
+import scala.annotation.tailrec
+import scala.collection.immutable.ListSet
 import scala.collection.mutable
-import scala.collection.mutable.ListBuffer
 import scala.jdk.CollectionConverters.*
 
 object TreeRemapper {
 
   import polyregion.ast.Env.debug
 
-  final class DepCollector(
+  private case class Plan(
+      statics: Map[JSymbol.MethodSymbol, List[JSymbol.VarSymbol]],
+      lengths: Map[JSymbol.MethodSymbol, List[Int]]
+  )
+
+  private class DepCollector(
       val localTrees: Map[JSymbol.MethodSymbol, MethodTree],
       val methodTable: Map[String, MethodTree],
       val classTable: Map[String, TypeElement],
       val elements: Elements,
-      val types: Types
+      val types: Types,
+      val capturedClosures: Map[JSymbol, Closure]
   ) {
-    val fnSyms = mutable.LinkedHashSet[JSymbol.MethodSymbol]()
+    val fnSyms = mutable.LinkedHashSet.empty[JSymbol.MethodSymbol]
 
     def treeOf(sym: JSymbol.MethodSymbol): Option[MethodTree] =
-      localTrees.get(sym).orElse(methodTable.get(fullName(sym))).filter(t => t != null && t.getBody != null)
+      localTrees.get(sym).orElse(methodTable.get(fullName(sym))).filter(bodied(_))
 
     // javac adds synthetic constructor params, so a call site may name a different symbol than the declaration
     def ctorOf(owner: JSymbol.ClassSymbol, arity: Int): Option[MethodTree] =
       localTrees.collectFirst {
-        case (s, t)
-            if s.owner == owner && s.name.toString == "<init>" && t != null && t.getBody != null &&
-              t.getParameters.size == arity =>
+        case (s, t) if s.owner == owner && s.name.toString == "<init>" && bodied(t) && t.getParameters.size == arity =>
           t
       }
 
-    val tagOf                    = mutable.LinkedHashMap[String, Int]()
-    val taggedTypes              = mutable.LinkedHashSet[String]()
+    val tagOf                    = mutable.LinkedHashMap.empty[String, Int]
+    val taggedTypes              = mutable.LinkedHashSet.empty[String]
     def tagFor(fqn: String): Int = tagOf.getOrElseUpdate(fqn, tagOf.size)
 
-    val witnessed = mutable.LinkedHashSet[TypeElement]()
+    val witnessed = mutable.LinkedHashSet.empty[TypeElement]
 
-    val directStatics = mutable.LinkedHashMap[JSymbol.MethodSymbol, List[JSymbol.VarSymbol]]()
-    val callees       = mutable.LinkedHashMap[JSymbol.MethodSymbol, List[JSymbol.MethodSymbol]]()
-    var staticParams: Map[JSymbol.MethodSymbol, List[JSymbol.VarSymbol]] = Map.empty
+    val directStatics = mutable.LinkedHashMap.empty[JSymbol.MethodSymbol, List[JSymbol.VarSymbol]]
+    val callees       = mutable.LinkedHashMap.empty[JSymbol.MethodSymbol, List[JSymbol.MethodSymbol]]
 
     // Ptr drops a Java array's length, so a callee measuring an array parameter takes the count alongside it
-    val measuredParams = mutable.LinkedHashMap[JSymbol.MethodSymbol, mutable.LinkedHashSet[Int]]()
-    val lengthFlows    = mutable.LinkedHashMap[JSymbol.MethodSymbol, ListBuffer[(JSymbol.MethodSymbol, Int, Int)]]()
-    var lengthParams: Map[JSymbol.MethodSymbol, List[Int]] = Map.empty
-
-    var capturedClosures: Map[JSymbol, Closure] = Map.empty
+    val measuredParams = mutable.LinkedHashMap.empty[JSymbol.MethodSymbol, mutable.LinkedHashSet[Int]]
+    val lengthFlows =
+      mutable.LinkedHashMap.empty[JSymbol.MethodSymbol, mutable.ListBuffer[(JSymbol.MethodSymbol, Int, Int)]]
   }
 
-  final case class Closure(impl: JSymbol.MethodSymbol, captures: List[Either[p.Term, Closure]])
+  case class Closure(impl: JSymbol.MethodSymbol, captures: List[Either[p.Term, Closure]])
 
   enum Capture {
     case Arg(index: Int)
@@ -73,35 +75,46 @@ object TreeRemapper {
     case PerRow(lens: p.Term)
   }
 
-  final case class Region(program: p.Program, captures: List[Capture], tags: Map[String, Int])
+  case class Region(program: p.Program, captures: List[Capture], tags: Map[String, Int])
 
-  final case class LoopCtx(
+  case class LoopCtx(
       update: List[ExpressionStatementTree],
       reeval: List[p.Stmt],
       viaLabel: Option[LabelCtx] = None
   )
 
-  final case class LabelCtx(name: String, brk: p.Term.Select, cnt: p.Term.Select)
+  case class LabelCtx(name: String, brk: p.Term.Select, cnt: p.Term.Select)
 
-  final class Scope(val deps: DepCollector, val isEntry: Boolean, val planned: Boolean = true) {
-    private var counter                     = 0
-    val locals                              = mutable.Map[JSymbol, p.Named]()
-    val paramOf                             = mutable.Map[JSymbol, Int]()
-    val measured                            = mutable.LinkedHashSet[Int]()
-    val argFlows                            = ListBuffer[(JSymbol.MethodSymbol, Int, Int)]()
-    val arrayLengths                        = mutable.Map[JSymbol, p.Term]()
-    val rowLengths                          = mutable.Map[JSymbol, RowLength]()
-    var pendingArrayLength: Option[p.Term]  = None
-    var pendingRowLength: Option[RowLength] = None
-    val staticFields                        = mutable.LinkedHashMap[JSymbol.VarSymbol, p.Named]()
-    val calls                               = mutable.LinkedHashSet[JSymbol.MethodSymbol]()
-    var thisOpt: Option[p.Named]            = None
-    var rtnType: p.Type                     = p.Type.Unit0
-    def fresh(tpe: p.Type): p.Named         = { val n = p.Named(s"_v$counter", tpe); counter += 1; n }
+  private class Scope(
+      val deps: DepCollector,
+      val isEntry: Boolean,
+      val plan: Option[Plan],
+      val rtnType: p.Type,
+      receiver: Option[p.Named]
+  ) {
+    private val ids                 = Iterator.from(0)
+    val locals                      = mutable.Map.empty[JSymbol, p.Named]
+    val paramOf                     = mutable.Map.empty[JSymbol, Int]
+    val measured                    = mutable.LinkedHashSet.empty[Int]
+    val argFlows                    = mutable.ListBuffer.empty[(JSymbol.MethodSymbol, Int, Int)]
+    val arrayLengths                = mutable.Map.empty[JSymbol, p.Term]
+    val rowLengths                  = mutable.Map.empty[JSymbol, RowLength]
+    val newArrayLengths             = mutable.Map.empty[Tree, p.Term]
+    val newRowLengths               = mutable.Map.empty[Tree, RowLength]
+    val staticFields                = mutable.LinkedHashMap.empty[JSymbol.VarSymbol, p.Named]
+    val calls                       = mutable.LinkedHashSet.empty[JSymbol.MethodSymbol]
+    def fresh(tpe: p.Type): p.Named = p.Named(s"_v${ids.next()}", tpe)
+    def planned: Boolean            = plan.isDefined
 
-    val closures = mutable.Map[JSymbol, Closure]()
+    def staticParamsOf(sym: JSymbol.MethodSymbol): List[JSymbol.VarSymbol] =
+      plan.fold(Nil)(_.statics.getOrElse(sym, Nil))
 
-    private val inlining                             = mutable.Set[JSymbol.MethodSymbol]()
+    def lengthParamsOf(sym: JSymbol.MethodSymbol): List[Int] =
+      plan.fold(Nil)(_.lengths.getOrElse(sym, Nil))
+
+    val closures = mutable.Map.empty[JSymbol, Closure]
+
+    private val inlining                             = mutable.Set.empty[JSymbol.MethodSymbol]
     def isInlining(s: JSymbol.MethodSymbol): Boolean = inlining.contains(s)
     def whileInlining[A](s: JSymbol.MethodSymbol)(f: => A): A = {
       inlining += s
@@ -109,43 +122,41 @@ object TreeRemapper {
       finally inlining -= s
     }
 
+    private val receivers        = mutable.Stack(receiver)
+    def thisOpt: Option[p.Named] = receivers.head
     def withThis[A](named: Option[p.Named])(f: => A): A = {
-      val saved = thisOpt
-      thisOpt = named
+      receivers.push(named)
       try f
-      finally thisOpt = saved
+      finally receivers.pop()
     }
 
     // Java scopes nest and PolyAST bodies do not, so disjoint `for (int i ...)` loops would trip the verifier
-    private val names = mutable.Set[String]()
-    def uniqueName(base: String): String =
-      if (names.add(base)) base
-      else {
-        var i         = 1
-        var candidate = s"$base$$$i"
-        while (!names.add(candidate)) { i += 1; candidate = s"$base$$$i" }
-        candidate
-      }
+    private val names = mutable.Set.empty[String]
+    def uniqueName(base: String): String = {
+      @tailrec def go(candidate: String, i: Int): String =
+        if (names.add(candidate)) candidate else go(s"$base$$$i", i + 1)
+      go(base, 1)
+    }
 
-    private val loops                  = mutable.Stack[LoopCtx]()
+    private val loops                  = mutable.Stack.empty[LoopCtx]
     def enclosingLoop: Option[LoopCtx] = loops.headOption
     def loopDepth: Int                 = loops.size
-    def inLoop[A](ctx: LoopCtx)(f: => A): A = {
+    def inLoop(ctx: LoopCtx)(f: => Result[Unit]): Result[Unit] = {
       loops.push(ctx)
       try f
       finally loops.pop()
     }
 
-    private val labels                           = mutable.Stack[LabelCtx]()
+    private val labels                           = mutable.Stack.empty[LabelCtx]
     def activeLabels: List[LabelCtx]             = labels.toList
     def labelled(name: String): Option[LabelCtx] = labels.find(_.name == name)
-    def withLabel[A](ctx: LabelCtx)(f: => A): A = {
+    def withLabel(ctx: LabelCtx)(f: => Result[Unit]): Result[Unit] = {
       labels.push(ctx)
       try f
       finally labels.pop()
     }
 
-    private val yields                               = mutable.Stack[(p.Term.Select, Int)]()
+    private val yields                               = mutable.Stack.empty[(p.Term.Select, Int)]
     def enclosingYield: Option[(p.Term.Select, Int)] = yields.headOption
     def withYieldTarget[A](target: p.Term.Select)(f: => A): A = {
       yields.push((target, loops.size))
@@ -154,11 +165,14 @@ object TreeRemapper {
     }
   }
 
-  private def jcType(t: Tree): TypeMirror = t.asInstanceOf[JCTree].`type`
+  private def jcType(t: Tree): TypeMirror = t match {
+    case jc: JCTree => jc.`type`
+  }
 
-  private def declaredName(m: TypeMirror): String =
-    if (m == null || m.getKind != TypeKind.DECLARED) ""
-    else m.asInstanceOf[DeclaredType].asElement.asInstanceOf[TypeElement].getQualifiedName.toString
+  private def declaredName(m: TypeMirror): String = Option(m)
+    .collect { case d: DeclaredType if d.getKind == TypeKind.DECLARED => d.asElement }
+    .collect { case e: TypeElement => e.getQualifiedName.toString }
+    .getOrElse("")
 
   private def isStringTpe(m: TypeMirror): Boolean = declaredName(m) == "java.lang.String"
 
@@ -172,12 +186,30 @@ object TreeRemapper {
       s"Unsupported `AssertionError` detail `${xs.mkString(", ")}`; only a literal travels to the device".fail
   }
 
-  private def symOf(t: Tree): JSymbol = t match {
-    case i: JCTree.JCIdent        => i.sym
-    case f: JCTree.JCFieldAccess  => f.sym
-    case v: JCTree.JCVariableDecl => v.sym
-    case _                        => null
+  private def symOf(t: Tree): Option[JSymbol] = t match {
+    case i: JCTree.JCIdent        => Option(i.sym)
+    case f: JCTree.JCFieldAccess  => Option(f.sym)
+    case v: JCTree.JCVariableDecl => Option(v.sym)
+    case _                        => None
   }
+
+  @tailrec private def unparenthesised(t: Tree): Tree = t match {
+    case par: ParenthesizedTree => unparenthesised(par.getExpression)
+    case other                  => other
+  }
+
+  private def methodSymOf(t: Tree): Result[JSymbol.MethodSymbol] =
+    symOf(t).collect { case m: JSymbol.MethodSymbol => m }.failIfEmpty(s"`$t` does not name a method")
+
+  private def methodDeclSym(m: MethodTree): JSymbol.MethodSymbol = m match {
+    case d: JCTree.JCMethodDecl => d.sym
+  }
+
+  private def declOf(v: VariableTree): JSymbol = v match {
+    case d: JCTree.JCVariableDecl => d.sym
+  }
+
+  private def bodied(t: MethodTree): Boolean = Option(t).flatMap(m => Option(m.getBody)).isDefined
 
   private def ownerName(sym: JSymbol): String = sym.owner match {
     case c: JSymbol.ClassSymbol => JavaTyper.structName(c)
@@ -197,17 +229,14 @@ object TreeRemapper {
 
   // LambdaToMethod runs before GENERATE, so a lambda is an invokedynamic whose bootstrap args name the impl method
   private def dynamicSym(mi: MethodInvocationTree): Option[JSymbol.DynamicMethodSymbol] =
-    symOf(mi.getMethodSelect) match {
-      case d: JSymbol.DynamicMethodSymbol => Some(d)
-      case _                              => None
-    }
+    symOf(mi.getMethodSelect).collect { case d: JSymbol.DynamicMethodSymbol => d }
 
   private def metafactoryImpl(d: JSymbol.DynamicMethodSymbol): Option[JSymbol.MethodSymbol] = {
     val bsm     = Option(d.bsm).map(_.baseSymbol())
     val bsmName = bsm.fold("")(_.name.toString)
     val isFactory = bsm.exists(b => ownerName(b) == MetafactoryOwner) &&
       (bsmName == "metafactory" || bsmName == "altMetafactory")
-    if (!isFactory || d.staticArgs == null || d.staticArgs.length < 2) None
+    if (!isFactory || Option(d.staticArgs).forall(_.length < 2)) None
     else
       d.staticArgs(1) match {
         case h: JSymbol.MethodHandleSymbol =>
@@ -219,7 +248,7 @@ object TreeRemapper {
       }
   }
 
-  private def bind(scope: Scope, buf: ListBuffer[p.Stmt], e: p.Expr): p.Term = e match {
+  private def bind(scope: Scope, buf: mutable.ListBuffer[p.Stmt], e: p.Expr): p.Term = e match {
     case p.Expr.Alias(t) => t
     case other =>
       val n = scope.fresh(other.tpe)
@@ -242,18 +271,17 @@ object TreeRemapper {
     case other          => s"Cannot synthesise a unit value for ${other.repr}".fail
   }
 
-  private def literal(l: LiteralTree): Result[p.Expr] = l.getKind match {
-    case Tree.Kind.INT_LITERAL     => p.Expr.Alias(p.Term.IntS32Const(l.getValue.asInstanceOf[Int])).success
-    case Tree.Kind.LONG_LITERAL    => p.Expr.Alias(p.Term.IntS64Const(l.getValue.asInstanceOf[Long])).success
-    case Tree.Kind.FLOAT_LITERAL   => p.Expr.Alias(p.Term.Float32Const(l.getValue.asInstanceOf[Float])).success
-    case Tree.Kind.DOUBLE_LITERAL  => p.Expr.Alias(p.Term.Float64Const(l.getValue.asInstanceOf[Double])).success
-    case Tree.Kind.BOOLEAN_LITERAL => p.Expr.Alias(p.Term.Bool1Const(l.getValue.asInstanceOf[Boolean])).success
-    case Tree.Kind.CHAR_LITERAL =>
-      p.Expr.Alias(p.Term.IntU16Const(l.getValue.asInstanceOf[Character].charValue)).success
-    case Tree.Kind.NULL_LITERAL => JavaTyper.typer(jcType(l)).map(tpe => p.Expr.Alias(p.Term.Poison(tpe)))
-    case Tree.Kind.STRING_LITERAL =>
+  private def literal(l: LiteralTree): Result[p.Expr] = (l.getKind, l.getValue) match {
+    case (Tree.Kind.INT_LITERAL, v: Int)         => p.Expr.Alias(p.Term.IntS32Const(v)).success
+    case (Tree.Kind.LONG_LITERAL, v: Long)       => p.Expr.Alias(p.Term.IntS64Const(v)).success
+    case (Tree.Kind.FLOAT_LITERAL, v: Float)     => p.Expr.Alias(p.Term.Float32Const(v)).success
+    case (Tree.Kind.DOUBLE_LITERAL, v: Double)   => p.Expr.Alias(p.Term.Float64Const(v)).success
+    case (Tree.Kind.BOOLEAN_LITERAL, v: Boolean) => p.Expr.Alias(p.Term.Bool1Const(v)).success
+    case (Tree.Kind.CHAR_LITERAL, v: Char)       => p.Expr.Alias(p.Term.IntU16Const(v)).success
+    case (Tree.Kind.NULL_LITERAL, _) => JavaTyper.typer(jcType(l)).map(tpe => p.Expr.Alias(p.Term.Poison(tpe)))
+    case (Tree.Kind.STRING_LITERAL, _) =>
       "Unsupported `String` literal; PolyRegion has no device-side String".fail
-    case other => s"Unsupported literal kind $other".fail
+    case (other, _) => s"Unsupported literal kind $other".fail
   }
 
   // JLS 5.6.2, PolyAST has no implicit conversions
@@ -263,7 +291,7 @@ object TreeRemapper {
     else if (l == p.Type.IntS64 || r == p.Type.IntS64) p.Type.IntS64
     else p.Type.IntS32
 
-  private def coerce(scope: Scope, buf: ListBuffer[p.Stmt], t: p.Term, target: p.Type): p.Term = t.tpe match {
+  private def coerce(scope: Scope, buf: mutable.ListBuffer[p.Stmt], t: p.Term, target: p.Type): p.Term = t.tpe match {
     case same if same == target                                            => t
     case p.Type.Ptr(pointee @ p.Type.Struct(_, _), _) if pointee == target => t
     case _                                                                 => bind(scope, buf, p.Expr.Cast(t, target))
@@ -288,7 +316,7 @@ object TreeRemapper {
   }
 
   // objects are passed by reference so that a callee writing a field is seen by its caller
-  private def byReference(scope: Scope, buf: ListBuffer[p.Stmt], t: p.Term): p.Term = t match {
+  private def byReference(scope: Scope, buf: mutable.ListBuffer[p.Stmt], t: p.Term): p.Term = t match {
     case sel @ p.Term.Select(_, _, p.Type.Struct(_, _)) =>
       val space = sel.root.tpe match {
         case p.Type.Ptr(_, s) => s
@@ -300,9 +328,10 @@ object TreeRemapper {
 
   private def isBoolean(t: p.Type): Boolean = t == p.Type.Bool1
 
-  private def isArrayOfArrays(m: TypeMirror): Boolean =
-    m.getKind == TypeKind.ARRAY &&
-      m.asInstanceOf[javax.lang.model.`type`.ArrayType].getComponentType.getKind == TypeKind.ARRAY
+  private def isArrayOfArrays(m: TypeMirror): Boolean = m match {
+    case a: ArrayType => a.getKind == TypeKind.ARRAY && a.getComponentType.getKind == TypeKind.ARRAY
+    case _            => false
+  }
 
   private def isScalar(t: p.Type): Boolean = t match {
     case p.Type.Bool1 | p.Type.IntS8 | p.Type.IntS16 | p.Type.IntU16 | p.Type.IntS32 | p.Type.IntS64 | p.Type.Float32 |
@@ -311,32 +340,23 @@ object TreeRemapper {
     case _ => false
   }
 
-  private def staticFieldOf(t: Tree): Option[JSymbol.VarSymbol] = symOf(t) match {
-    case v: JSymbol.VarSymbol if v.isStatic && v.owner.isInstanceOf[JSymbol.ClassSymbol] => Some(v)
-    case _                                                                               => None
+  private def staticFieldOf(t: Tree): Option[JSymbol.VarSymbol] = symOf(t).collect {
+    case v: JSymbol.VarSymbol if v.isStatic && v.owner.isInstanceOf[JSymbol.ClassSymbol] => v
   }
 
-  private def constOf(c: Any, tpe: p.Type): Result[p.Expr] = {
-    def num(f: Number => p.Term): Result[p.Expr] = c match {
-      case n: Number => p.Expr.Alias(f(n)).success
-      case other     => s"Cannot lower constant `$other` as ${tpe.repr}".fail
-    }
-    tpe match {
-      case p.Type.Bool1   => num(n => p.Term.Bool1Const(n.intValue != 0))
-      case p.Type.IntS8   => num(n => p.Term.IntS8Const(n.byteValue))
-      case p.Type.IntS16  => num(n => p.Term.IntS16Const(n.shortValue))
-      case p.Type.IntU16  => num(n => p.Term.IntU16Const(n.intValue.toChar))
-      case p.Type.IntS32  => num(n => p.Term.IntS32Const(n.intValue))
-      case p.Type.IntS64  => num(n => p.Term.IntS64Const(n.longValue))
-      case p.Type.Float32 => num(n => p.Term.Float32Const(n.floatValue))
-      case p.Type.Float64 => num(n => p.Term.Float64Const(n.doubleValue))
-      case other          => s"Unsupported constant of type ${other.repr}".fail
-    }
+  private def constOf(c: Any, tpe: p.Type): Result[p.Expr] = Scalar.constant(tpe) match {
+    case None => s"Unsupported constant of type ${tpe.repr}".fail
+    case Some(lower) =>
+      Scalar.of(c) match {
+        case Some(n) => p.Expr.Alias(lower(n)).success
+        case None    => s"Cannot lower constant `$c` as ${tpe.repr}".fail
+      }
   }
 
-  private def isEnumType(m: TypeMirror): Boolean =
-    m.getKind == TypeKind.DECLARED &&
-      m.asInstanceOf[DeclaredType].asElement.getKind == ElementKind.ENUM
+  private def isEnumType(m: TypeMirror): Boolean = m match {
+    case d: DeclaredType => d.getKind == TypeKind.DECLARED && d.asElement.getKind == ElementKind.ENUM
+    case _               => false
+  }
 
   private def enumOrdinal(v: JSymbol.VarSymbol): Result[Int] = v.owner match {
     case c: JSymbol.ClassSymbol =>
@@ -367,7 +387,7 @@ object TreeRemapper {
     }
 
   private def staticArgsFor(scope: Scope, sym: JSymbol.MethodSymbol): Result[List[p.Term]] =
-    scope.deps.staticParams.getOrElse(sym, Nil).traverse { v =>
+    scope.staticParamsOf(sym).traverse { v =>
       scope.staticFields
         .get(v)
         .map(n => p.Term.Select(n, Nil, n.tpe): p.Term)
@@ -379,7 +399,7 @@ object TreeRemapper {
       sym: JSymbol.MethodSymbol,
       argLengths: List[Option[p.Term]]
   ): Result[List[p.Term]] =
-    scope.deps.lengthParams.getOrElse(sym, Nil).traverse { i =>
+    scope.lengthParamsOf(sym).traverse { i =>
       argLengths
         .lift(i)
         .flatten
@@ -401,43 +421,53 @@ object TreeRemapper {
           }
       }
 
+  private case class ImplCall(
+      impl: JSymbol.MethodSymbol,
+      recv: Option[p.Term],
+      values: List[Either[p.Term, Closure]],
+      rtn: p.Type
+  )
+
+  private case class Dispatch(sym: JSymbol.MethodSymbol, recv: p.Term, args: List[p.Term], rtn: p.Type)
+
   private enum Lvalue {
     case Slot(sel: p.Term.Select)
     case Elem(ptr: p.Term.Select, idx: p.Term, comp: p.Type)
+
+    def tpe: p.Type = this match {
+      case Slot(sel)     => sel.tpe
+      case Elem(_, _, c) => c
+    }
+
+    def write(buf: mutable.ListBuffer[p.Stmt], v: p.Term): Unit = this match {
+      case Slot(sel)       => buf += p.Stmt.Mut(sel, p.Expr.Alias(v))
+      case Elem(ptr, i, _) => buf += p.Stmt.Update(ptr, i, v)
+    }
   }
 
-  private def lvalueType(lv: Lvalue): p.Type = lv match {
-    case Lvalue.Slot(sel)     => sel.tpe
-    case Lvalue.Elem(_, _, c) => c
-  }
-
-  private def readLvalue(scope: Scope, buf: ListBuffer[p.Stmt], lv: Lvalue): p.Term = lv match {
+  private def readLvalue(scope: Scope, buf: mutable.ListBuffer[p.Stmt], lv: Lvalue): p.Term = lv match {
     case Lvalue.Slot(sel)       => sel
     case Lvalue.Elem(ptr, i, c) => bind(scope, buf, p.Expr.Index(ptr, i, c))
   }
 
-  private def writeLvalue(buf: ListBuffer[p.Stmt], lv: Lvalue, v: p.Term): Unit = lv match {
-    case Lvalue.Slot(sel)       => buf += p.Stmt.Mut(sel, p.Expr.Alias(v))
-    case Lvalue.Elem(ptr, i, _) => buf += p.Stmt.Update(ptr, i, v)
-  }
-
   // no intermediate copies: binding an `xs[i]` of struct type copies it and the store would miss the array
-  private def selectPath(scope: Scope, buf: ListBuffer[p.Stmt], t: ExpressionTree): Result[p.Term.Select] = t match {
-    case aa: ArrayAccessTree =>
-      for {
-        base <- selectPath(scope, buf, aa.getExpression)
-        idx  <- mapExpr(scope, buf, aa.getIndex).map(bind(scope, buf, _))
-        comp <- JavaTyper.typer(jcType(aa))
-      } yield p.Term.Select(base.root, base.steps :+ p.PathStep.IndexDyn(idx), comp)
-    case fa: MemberSelectTree if staticFieldOf(fa).isEmpty =>
-      for {
-        base <- selectPath(scope, buf, fa.getExpression)
-        tpe  <- JavaTyper.typer(jcType(fa))
-      } yield fieldOf(base, fa.getIdentifier.toString, tpe)
-    case other => mapExpr(scope, buf, other).map(bind(scope, buf, _)).flatMap(x => asSelect(p.Expr.Alias(x)))
-  }
+  private def selectPath(scope: Scope, buf: mutable.ListBuffer[p.Stmt], t: ExpressionTree): Result[p.Term.Select] =
+    t match {
+      case aa: ArrayAccessTree =>
+        for {
+          base <- selectPath(scope, buf, aa.getExpression)
+          idx  <- mapExpr(scope, buf, aa.getIndex).map(bind(scope, buf, _))
+          comp <- JavaTyper.typer(jcType(aa))
+        } yield p.Term.Select(base.root, base.steps :+ p.PathStep.IndexDyn(idx), comp)
+      case fa: MemberSelectTree if staticFieldOf(fa).isEmpty =>
+        for {
+          base <- selectPath(scope, buf, fa.getExpression)
+          tpe  <- JavaTyper.typer(jcType(fa))
+        } yield fieldOf(base, fa.getIdentifier.toString, tpe)
+      case other => mapExpr(scope, buf, other).map(bind(scope, buf, _)).flatMap(x => asSelect(p.Expr.Alias(x)))
+    }
 
-  private def lvalue(scope: Scope, buf: ListBuffer[p.Stmt], t: ExpressionTree): Result[Lvalue] = t match {
+  private def lvalue(scope: Scope, buf: mutable.ListBuffer[p.Stmt], t: ExpressionTree): Result[Lvalue] = t match {
     case aa: ArrayAccessTree =>
       for {
         arr  <- mapExpr(scope, buf, aa.getExpression).map(bind(scope, buf, _)).flatMap(t => asSelect(p.Expr.Alias(t)))
@@ -446,7 +476,7 @@ object TreeRemapper {
       } yield Lvalue.Elem(arr, idx, comp)
     case _ =>
       staticFieldOf(t) match {
-        case Some(v) if v.getConstValue == null =>
+        case Some(v) if Option(v.getConstValue).isEmpty =>
           staticSlot(scope, v).map((n, tpe) => Lvalue.Elem(p.Term.Select(n, Nil, n.tpe), p.Term.IntS32Const(0), tpe))
         case Some(v) => s"Cannot assign to the compile-time constant `${fullName(v)}`".fail
         case None    => selectPath(scope, buf, t).map(Lvalue.Slot(_))
@@ -467,7 +497,7 @@ object TreeRemapper {
   // reference == is identity, which PolyAST only expresses over integers, so both sides become addresses
   private def referenceCompare(
       scope: Scope,
-      buf: ListBuffer[p.Stmt],
+      buf: mutable.ListBuffer[p.Stmt],
       l: p.Term,
       r: p.Term
   ): Result[(p.Term, p.Term)] = for {
@@ -480,7 +510,7 @@ object TreeRemapper {
 
   private def promoteOperands(
       scope: Scope,
-      buf: ListBuffer[p.Stmt],
+      buf: mutable.ListBuffer[p.Stmt],
       kind: Tree.Kind,
       l: p.Term,
       r: p.Term,
@@ -528,13 +558,13 @@ object TreeRemapper {
     }
   }
 
-  private def arrayLength(scope: Scope, buf: ListBuffer[p.Stmt], t: ExpressionTree): Result[p.Term] =
-    scope.arrayLengths.get(symOf(t)) match {
+  private def arrayLength(scope: Scope, buf: mutable.ListBuffer[p.Stmt], t: ExpressionTree): Result[p.Term] =
+    symOf(t).flatMap(scope.arrayLengths.get) match {
       case Some(len) => len.success
       case None =>
         val row = t match {
           case aa: ArrayAccessTree =>
-            scope.rowLengths.get(symOf(aa.getExpression)).map {
+            symOf(aa.getExpression).flatMap(scope.rowLengths.get).map {
               case RowLength.Uniform(len) => len.success
               case RowLength.PerRow(lens) =>
                 mapExpr(scope, buf, aa.getIndex)
@@ -544,7 +574,7 @@ object TreeRemapper {
         }
         row
           .orElse(
-            scope.paramOf.get(symOf(t)).filterNot(_ => scope.planned).map { i =>
+            symOf(t).flatMap(scope.paramOf.get).filterNot(_ => scope.planned).map { i =>
               scope.measured += i
               (p.Term.IntS32Const(0): p.Term).success
             }
@@ -555,7 +585,7 @@ object TreeRemapper {
           )
     }
 
-  private def mapExpr(scope: Scope, buf: ListBuffer[p.Stmt], t: ExpressionTree): Result[p.Expr] = t match {
+  private def mapExpr(scope: Scope, buf: mutable.ListBuffer[p.Stmt], t: ExpressionTree): Result[p.Expr] = t match {
     case l: LiteralTree         => literal(l)
     case par: ParenthesizedTree => mapExpr(scope, buf, par.getExpression)
     case id: IdentifierTree     => ident(scope, id)
@@ -584,7 +614,7 @@ object TreeRemapper {
         resSel: p.Term.Select = p.Term.Select(res, Nil, p.Type.Bool1)
         _                     = buf += p.Stmt.Var(res, Some(p.Expr.Alias(l)), isMutable = true)
         guard                 = if (isAnd) resSel else bind(scope, buf, p.Expr.IntrOp(p.Intr.LogicNot(resSel)))
-        rhsBuf                = ListBuffer.empty[p.Stmt]
+        rhsBuf                = mutable.ListBuffer.empty[p.Stmt]
         r <- mapExpr(scope, rhsBuf, b.getRightOperand).map(bind(scope, rhsBuf, _))
         _ = rhsBuf += p.Stmt.Mut(resSel, p.Expr.Alias(r))
         _ = buf += p.Stmt.Cond(guard, rhsBuf.toList, Nil)
@@ -613,7 +643,7 @@ object TreeRemapper {
           val dims = na.getDimensions.asScala.toList
           Option(na.getInitializers).map(_.asScala.toList) match {
             case Some(inits) =>
-              scope.pendingArrayLength = Some(p.Term.IntS32Const(inits.size))
+              scope.newArrayLengths.put(na, p.Term.IntS32Const(inits.size))
               val slot = bind(scope, buf, p.Expr.Alloc(comp, p.Term.IntS32Const(inits.size), space, p.Region.Opaque))
               asSelect(p.Expr.Alias(slot)).flatMap { sel =>
                 inits.zipWithIndex
@@ -631,11 +661,11 @@ object TreeRemapper {
                 .flatMap {
                   case Nil => s"Array creation needs at least one dimension, got `$na`".fail
                   case len :: Nil =>
-                    scope.pendingArrayLength = Some(len)
+                    scope.newArrayLengths.put(na, len)
                     allocZeroed(scope, buf, comp, space, len).map(p.Expr.Alias(_))
                   case len :: rest =>
-                    scope.pendingArrayLength = Some(len)
-                    scope.pendingRowLength = Some(RowLength.Uniform(rest.head))
+                    scope.newArrayLengths.put(na, len)
+                    scope.newRowLengths.put(na, RowLength.Uniform(rest.head))
                     allocRows(scope, buf, comp, space, len, rest).map(p.Expr.Alias(_))
                 }
           }
@@ -645,7 +675,7 @@ object TreeRemapper {
     case a: AssignmentTree          => assign(scope, buf, a)
     case ca: CompoundAssignmentTree => compoundAssign(scope, buf, ca)
     case mi: MethodInvocationTree   => invoke(scope, buf, mi)
-    case nc: NewClassTree           => construct(scope, buf, nc)
+    case nc: JCTree.JCNewClass      => construct(scope, buf, nc)
     case _: InstanceOfTree =>
       "Unsupported `instanceof`; PolyRegion has no device heap to carry a runtime type".fail
     // a pattern instanceof is a binding expression with no public kind, asking for it raises an assertion
@@ -658,26 +688,26 @@ object TreeRemapper {
 
   private def ident(scope: Scope, id: IdentifierTree): Result[p.Expr] = {
     val sym = symOf(id)
-    scope.locals.get(sym) match {
+    sym.flatMap(scope.locals.get) match {
       case Some(named) => selectExpr(Nil, named).success
       case None =>
         if (id.getName.toString == "this")
           scope.thisOpt.map(selectExpr(Nil, _)).failIfEmpty("`this` referenced outside an instance method")
         else
           (sym, scope.thisOpt) match {
-            case (v: JSymbol.VarSymbol, _) if v.isStatic && v.owner.isInstanceOf[JSymbol.ClassSymbol] =>
+            case (Some(v: JSymbol.VarSymbol), _) if v.isStatic && v.owner.isInstanceOf[JSymbol.ClassSymbol] =>
               staticRead(scope, v)
-            case (v: JSymbol.VarSymbol, Some(self)) if !v.isStatic && v.owner.isInstanceOf[JSymbol.ClassSymbol] =>
+            case (Some(v: JSymbol.VarSymbol), Some(self)) if !v.isStatic && v.owner.isInstanceOf[JSymbol.ClassSymbol] =>
               JavaTyper
                 .typer(jcType(id))
                 .map(tpe => p.Expr.Alias(fieldOf(selectTerm(Nil, self), id.getName.toString, tpe)))
             // TODO module-style references
-            case _ => s"Unresolved identifier `${id.getName}` (symbol $sym)".fail
+            case _ => s"Unresolved identifier `${id.getName}` (symbol ${sym.getOrElse("null")})".fail
           }
     }
   }
 
-  private def unary(scope: Scope, buf: ListBuffer[p.Stmt], u: UnaryTree): Result[p.Expr] = {
+  private def unary(scope: Scope, buf: mutable.ListBuffer[p.Stmt], u: UnaryTree): Result[p.Expr] = {
     val isInc    = u.getKind == Tree.Kind.PREFIX_INCREMENT || u.getKind == Tree.Kind.POSTFIX_INCREMENT
     val isPrefix = u.getKind == Tree.Kind.PREFIX_INCREMENT || u.getKind == Tree.Kind.PREFIX_DECREMENT
     // x++ yields the old value, so spill it before the store
@@ -694,9 +724,9 @@ object TreeRemapper {
       for {
         lv <- lvalue(scope, buf, u.getExpression)
         old = spill(readLvalue(scope, buf, lv))
-        next <- step(old, lvalueType(lv))
+        next <- step(old, lv.tpe)
       } yield {
-        writeLvalue(buf, lv, next)
+        lv.write(buf, next)
         p.Expr.Alias(if (isPrefix) next else old)
       }
     u.getKind match {
@@ -724,36 +754,40 @@ object TreeRemapper {
     }
   }
 
-  private def ternary(scope: Scope, buf: ListBuffer[p.Stmt], c: ConditionalExpressionTree): Result[p.Expr] =
+  private def ternary(scope: Scope, buf: mutable.ListBuffer[p.Stmt], c: ConditionalExpressionTree): Result[p.Expr] =
     for {
       cond <- mapExpr(scope, buf, c.getCondition).map(bind(scope, buf, _))
       tpe  <- JavaTyper.typer(jcType(c))
       result  = scope.fresh(tpe)
       _       = buf += p.Stmt.Var(result, None, isMutable = true)
-      thenBuf = ListBuffer.empty[p.Stmt]
+      thenBuf = mutable.ListBuffer.empty[p.Stmt]
       tThen <- mapExpr(scope, thenBuf, c.getTrueExpression).map(bind(scope, thenBuf, _))
       _       = thenBuf += p.Stmt.Mut(selectTerm(Nil, result), p.Expr.Alias(coerce(scope, thenBuf, tThen, tpe)))
-      elseBuf = ListBuffer.empty[p.Stmt]
+      elseBuf = mutable.ListBuffer.empty[p.Stmt]
       tElse <- mapExpr(scope, elseBuf, c.getFalseExpression).map(bind(scope, elseBuf, _))
       _ = elseBuf += p.Stmt.Mut(selectTerm(Nil, result), p.Expr.Alias(coerce(scope, elseBuf, tElse, tpe)))
       _ = buf += p.Stmt.Cond(cond, thenBuf.toList, elseBuf.toList)
     } yield selectExpr(Nil, result)
 
-  private def assign(scope: Scope, buf: ListBuffer[p.Stmt], a: AssignmentTree): Result[p.Expr] =
+  private def assign(scope: Scope, buf: mutable.ListBuffer[p.Stmt], a: AssignmentTree): Result[p.Expr] =
     for {
       lv  <- lvalue(scope, buf, a.getVariable)
       rhs <- mapExpr(scope, buf, a.getExpression).map(bind(scope, buf, _))
-      _ <- (lvalueType(lv), rhs.tpe) match {
+      _ <- (lv.tpe, rhs.tpe) match {
         case (l: p.Type.Struct, r: p.Type.Struct) if l != r =>
           s"Cannot assign a ${r.repr} to a ${l.repr}: an object here is stored by value".fail
         case _ => ().success
       }
     } yield {
-      writeLvalue(buf, lv, coerce(scope, buf, rhs, lvalueType(lv)))
+      lv.write(buf, coerce(scope, buf, rhs, lv.tpe))
       p.Expr.Alias(p.Term.Unit0Const)
     }
 
-  private def compoundAssign(scope: Scope, buf: ListBuffer[p.Stmt], ca: CompoundAssignmentTree): Result[p.Expr] = {
+  private def compoundAssign(
+      scope: Scope,
+      buf: mutable.ListBuffer[p.Stmt],
+      ca: CompoundAssignmentTree
+  ): Result[p.Expr] = {
     val binKind = ca.getKind match {
       case Tree.Kind.PLUS_ASSIGNMENT                 => Tree.Kind.PLUS
       case Tree.Kind.MINUS_ASSIGNMENT                => Tree.Kind.MINUS
@@ -780,9 +814,9 @@ object TreeRemapper {
 
     for {
       lv <- lvalue(scope, buf, ca.getVariable)
-      v  <- combine(readLvalue(scope, buf, lv), lvalueType(lv))
+      v  <- combine(readLvalue(scope, buf, lv), lv.tpe)
     } yield {
-      writeLvalue(buf, lv, v)
+      lv.write(buf, v)
       p.Expr.Alias(p.Term.Unit0Const)
     }
   }
@@ -808,12 +842,16 @@ object TreeRemapper {
     "doubleValue"
   )
 
-  private def boxIdentity(scope: Scope, buf: ListBuffer[p.Stmt], mi: MethodInvocationTree): Option[Result[p.Expr]] =
+  private def boxIdentity(
+      scope: Scope,
+      buf: mutable.ListBuffer[p.Stmt],
+      mi: MethodInvocationTree
+  ): Option[Result[p.Expr]] =
     mi.getMethodSelect match {
       case fa: MemberSelectTree =>
-        val sym   = fa.asInstanceOf[JCTree.JCFieldAccess].sym
-        val name  = Option(sym).fold("")(_.name.toString)
-        val owner = Option(sym).map(ownerName)
+        val sym   = symOf(fa)
+        val name  = sym.fold("")(_.name.toString)
+        val owner = sym.map(ownerName(_))
         if (name == "valueOf" && owner.exists(boxTypes.contains) && mi.getArguments.size == 1)
           Some(mapExpr(scope, buf, mi.getArguments.get(0)))
         else if (unboxMethods.contains(name) && owner.exists(boxTypes.contains))
@@ -843,8 +881,8 @@ object TreeRemapper {
     case other          => s"No zero for ${other.repr}".fail
   }
 
-  private def countedLoop(scope: Scope, buf: ListBuffer[p.Stmt], len: p.Term)(
-      fill: (ListBuffer[p.Stmt], p.Term.Select) => Result[Unit]
+  private def countedLoop(scope: Scope, buf: mutable.ListBuffer[p.Stmt], len: p.Term)(
+      fill: (mutable.ListBuffer[p.Stmt], p.Term.Select) => Result[Unit]
   ): Result[Unit] = {
     val idx                    = scope.fresh(p.Type.IntS32)
     val idxSel: p.Term.Select  = p.Term.Select(idx, Nil, p.Type.IntS32)
@@ -852,7 +890,7 @@ object TreeRemapper {
     val moreSel: p.Term.Select = p.Term.Select(more, Nil, p.Type.Bool1)
     buf += p.Stmt.Var(idx, Some(p.Expr.Alias(p.Term.IntS32Const(0))), isMutable = true)
     buf += p.Stmt.Var(more, Some(p.Expr.IntrOp(p.Intr.LogicLt(idxSel, len))), isMutable = true)
-    val bodyBuf = ListBuffer.empty[p.Stmt]
+    val bodyBuf = mutable.ListBuffer.empty[p.Stmt]
     fill(bodyBuf, idxSel).map { _ =>
       bodyBuf += p.Stmt.Mut(idxSel, p.Expr.IntrOp(p.Intr.Add(idxSel, p.Term.IntS32Const(1), p.Type.IntS32)))
       bodyBuf += p.Stmt.Mut(moreSel, p.Expr.IntrOp(p.Intr.LogicLt(idxSel, len)))
@@ -864,7 +902,7 @@ object TreeRemapper {
   // new T[n] is zero-filled in Java but Alloc is not
   private def allocZeroed(
       scope: Scope,
-      buf: ListBuffer[p.Stmt],
+      buf: mutable.ListBuffer[p.Stmt],
       comp: p.Type,
       space: p.Type.Space,
       len: p.Term
@@ -914,38 +952,43 @@ object TreeRemapper {
   }
 
   // closureOf lowers captured arguments as it goes, so it cannot serve as a predicate
+  @tailrec
   private def isClosureTree(scope: Scope, t: ExpressionTree): Boolean = t match {
     case par: ParenthesizedTree   => isClosureTree(scope, par.getExpression)
     case tc: TypeCastTree         => isClosureTree(scope, tc.getExpression)
-    case id: IdentifierTree       => scope.closures.contains(symOf(id))
-    case mi: MethodInvocationTree => dynamicSym(mi).flatMap(metafactoryImpl).isDefined
+    case id: IdentifierTree       => symOf(id).exists(scope.closures.contains)
+    case mi: MethodInvocationTree => dynamicSym(mi).flatMap(metafactoryImpl(_)).isDefined
     case _                        => false
   }
 
+  @tailrec
   private def closureOf(
       scope: Scope,
-      buf: ListBuffer[p.Stmt],
+      buf: mutable.ListBuffer[p.Stmt],
       t: ExpressionTree
   ): Option[Result[Closure]] = t match {
     case par: ParenthesizedTree => closureOf(scope, buf, par.getExpression)
     case tc: TypeCastTree       => closureOf(scope, buf, tc.getExpression)
-    case id: IdentifierTree     => scope.closures.get(symOf(id)).map(_.success)
+    case id: IdentifierTree     => symOf(id).flatMap(scope.closures.get).map(_.success)
     case mi: MethodInvocationTree =>
-      dynamicSym(mi).flatMap(metafactoryImpl).map { impl =>
+      dynamicSym(mi).flatMap(metafactoryImpl(_)).map { impl =>
         argValues(scope, buf, mi.getArguments.asScala.toList).map(Closure(impl, _))
       }
     case _ => None
   }
 
   // no implementation is visible for a functional value made outside the region, the JVM spins its class at run time
-  private def capturedClosures(deps: DepCollector, entry: MethodTree): Map[JSymbol, Closure] = {
-    val entrySym = entry.asInstanceOf[JCTree.JCMethodDecl].sym
+  private def capturedClosures(
+      localTrees: Map[JSymbol.MethodSymbol, MethodTree],
+      entry: MethodTree
+  ): Map[JSymbol, Closure] = {
+    val entrySym = methodDeclSym(entry)
     // $deserializeLambda$ holds a second call site per lambda, unrelated to where the value was made
-    val trees = deps.localTrees.values.filter(_.getName.toString != "$deserializeLambda$").toList
+    val trees = localTrees.values.filter(_.getName.toString != "$deserializeLambda$").toList
     val sites = trees.flatMap { m =>
       LambdaOutliner.collectTree(m) {
-        case mi: MethodInvocationTree if dynamicSym(mi).flatMap(metafactoryImpl).contains(entrySym) => mi :: Nil
-        case _                                                                                      => Nil
+        case mi: MethodInvocationTree if dynamicSym(mi).flatMap(metafactoryImpl(_)).contains(entrySym) => mi :: Nil
+        case _                                                                                         => Nil
       }
     }
     sites match {
@@ -957,7 +1000,7 @@ object TreeRemapper {
           params
             .zip(actuals)
             .flatMap {
-              case (param, id: IdentifierTree) => soleClosureWrite(trees, symOf(id)).map(symOf(param) -> _)
+              case (param, id: IdentifierTree) => symOf(id).flatMap(soleClosureWrite(trees, _)).map(declOf(param) -> _)
               case _                           => None
             }
             .toMap
@@ -970,21 +1013,21 @@ object TreeRemapper {
     else {
       val writes = trees.flatMap { m =>
         LambdaOutliner.collectTree(m) {
-          case d: VariableTree if symOf(d) == v               => Option(d.getInitializer).toList
-          case a: AssignmentTree if symOf(a.getVariable) == v => a.getExpression :: Nil
-          case _                                              => Nil
+          case d: VariableTree if declOf(d) == v                     => Option(d.getInitializer).toList
+          case a: AssignmentTree if symOf(a.getVariable).contains(v) => a.getExpression :: Nil
+          case _                                                     => Nil
         }
       }
       writes match {
         case (mi: MethodInvocationTree) :: Nil if mi.getArguments.isEmpty =>
-          dynamicSym(mi).flatMap(metafactoryImpl).map(Closure(_, Nil))
+          dynamicSym(mi).flatMap(metafactoryImpl(_)).map(Closure(_, Nil))
         case _ => None
       }
     }
 
   private def argValues(
       scope: Scope,
-      buf: ListBuffer[p.Stmt],
+      buf: mutable.ListBuffer[p.Stmt],
       args: List[? <: ExpressionTree]
   ): Result[List[Either[p.Term, Closure]]] = args.traverse { a =>
     closureOf(scope, buf, a) match {
@@ -995,7 +1038,7 @@ object TreeRemapper {
 
   private def applyClosure(
       scope: Scope,
-      buf: ListBuffer[p.Stmt],
+      buf: mutable.ListBuffer[p.Stmt],
       cl: Closure,
       samArgs: List[Either[p.Term, Closure]]
   ): Result[p.Expr] = {
@@ -1012,8 +1055,8 @@ object TreeRemapper {
           }
       (recv, rest) = recvAndValues
       e <- scope.deps.treeOf(impl) match {
-        case Some(tree) => inlineImpl(scope, buf, impl, tree, recv, rest, rtn)
-        case None       => callImpl(scope, buf, impl, recv, rest, rtn)
+        case Some(tree) => inlineImpl(scope, buf, ImplCall(impl, recv, rest, rtn), tree)
+        case None       => callImpl(scope, buf, ImplCall(impl, recv, rest, rtn))
       }
     } yield {
       val named = scope.fresh(rtn)
@@ -1024,18 +1067,16 @@ object TreeRemapper {
 
   private def callImpl(
       scope: Scope,
-      buf: ListBuffer[p.Stmt],
-      impl: JSymbol.MethodSymbol,
-      recv: Option[p.Term],
-      values: List[Either[p.Term, Closure]],
-      rtn: p.Type
-  ): Result[p.Expr] =
+      buf: mutable.ListBuffer[p.Stmt],
+      call: ImplCall
+  ): Result[p.Expr] = {
+    import call.*
     values
       .traverse {
         case Left(t) => t.success
-        case Right(c) =>
+        case Right(_) =>
           (s"`${fullName(impl)}` backs a functional value that closes over another functional " +
-            s"value, but its body is not available to inline").fail
+            "value, but its body is not available to inline").fail
       }
       .flatMap { terms =>
         impl.asType.getParameterTypes.asScala.toList.traverse(JavaTyper.typer).flatMap { paramTpes =>
@@ -1058,27 +1099,28 @@ object TreeRemapper {
           } else s"Cannot lower a functional value backed by `${fullName(impl)}`, which has no body to inline".fail
         }
       }
+  }
 
   private def bindInlineParams(
       scope: Scope,
-      buf: ListBuffer[p.Stmt],
+      buf: mutable.ListBuffer[p.Stmt],
       params: List[? <: VariableTree],
       values: List[Either[p.Term, Closure]]
   ): Result[Unit] = params.zip(values).traverse_ {
-    case (v, Right(c)) => scope.closures.put(symOf(v), c); ().success
+    case (v, Right(c)) => scope.closures.put(declOf(v), c); ().success
     case (v, Left(t)) =>
       JavaTyper.typer(jcType(v)).map { declared =>
         val tpe   = if (referent(t.tpe) == declared) t.tpe else declared
         val named = p.Named(scope.uniqueName(v.getName.toString), tpe)
         buf += p.Stmt.Var(named, Some(p.Expr.Alias(coerce(scope, buf, t, tpe))), isMutable = true)
-        scope.locals.put(symOf(v), named)
+        scope.locals.put(declOf(v), named)
         ()
       }
   }
 
   private def inlineBody(
       scope: Scope,
-      buf: ListBuffer[p.Stmt],
+      buf: mutable.ListBuffer[p.Stmt],
       sym: JSymbol.MethodSymbol,
       tree: MethodTree,
       values: List[Either[p.Term, Closure]],
@@ -1115,28 +1157,28 @@ object TreeRemapper {
 
   private def inlineImpl(
       scope: Scope,
-      buf: ListBuffer[p.Stmt],
-      impl: JSymbol.MethodSymbol,
-      tree: MethodTree,
-      recv: Option[p.Term],
-      values: List[Either[p.Term, Closure]],
-      rtn: p.Type
-  ): Result[p.Expr] = inlineBody(
-    scope,
-    buf,
-    impl,
-    tree,
-    values,
-    rtn,
-    s"Functional value backed by `${fullName(impl)}` closes over itself",
-    "the functional value",
-    s"Cannot inline `${fullName(impl)}`: a functional value's body may only return from its last statement"
-  ) {
-    recv.traverse { r =>
-      asSelect(p.Expr.Alias(r)).map { _ =>
-        val n = p.Named(scope.uniqueName("this$"), r.tpe)
-        buf += p.Stmt.Var(n, Some(p.Expr.Alias(r)))
-        n
+      buf: mutable.ListBuffer[p.Stmt],
+      call: ImplCall,
+      tree: MethodTree
+  ): Result[p.Expr] = {
+    import call.*
+    inlineBody(
+      scope,
+      buf,
+      impl,
+      tree,
+      values,
+      rtn,
+      s"Functional value backed by `${fullName(impl)}` closes over itself",
+      "the functional value",
+      s"Cannot inline `${fullName(impl)}`: a functional value's body may only return from its last statement"
+    ) {
+      recv.traverse { r =>
+        asSelect(p.Expr.Alias(r)).map { _ =>
+          val n = p.Named(scope.uniqueName("this$"), r.tpe)
+          buf += p.Stmt.Var(n, Some(p.Expr.Alias(r)))
+          n
+        }
       }
     }
   }
@@ -1144,7 +1186,7 @@ object TreeRemapper {
   // structs hold their own members only, so an inherited method cannot be called against a subclass struct
   private def inlineInherited(
       scope: Scope,
-      buf: ListBuffer[p.Stmt],
+      buf: mutable.ListBuffer[p.Stmt],
       sym: JSymbol.MethodSymbol,
       tree: MethodTree,
       self: p.Named,
@@ -1165,13 +1207,11 @@ object TreeRemapper {
 
   private def inheritedCall(
       scope: Scope,
-      buf: ListBuffer[p.Stmt],
-      sym: JSymbol.MethodSymbol,
-      cls: JSymbol.ClassSymbol,
-      recv: p.Term,
-      args: List[p.Term],
-      rtn: p.Type
+      buf: mutable.ListBuffer[p.Stmt],
+      d: Dispatch,
+      cls: JSymbol.ClassSymbol
   ): Result[p.Expr] = {
+    import d.*
     val target  = overrideIn(scope, cls, sym).getOrElse(sym)
     val refused = s"Cannot call `${fullName(sym)}` on `${cls.flatName}` allocated in the region"
     (recv, scope.deps.treeOf(target)) match {
@@ -1188,7 +1228,7 @@ object TreeRemapper {
 
   private def zeroFields(
       scope: Scope,
-      buf: ListBuffer[p.Stmt],
+      buf: mutable.ListBuffer[p.Stmt],
       elem: TypeElement,
       root: p.Named,
       path: List[p.PathStep] = Nil
@@ -1218,17 +1258,16 @@ object TreeRemapper {
       }
     }
 
-  private def construct(scope: Scope, buf: ListBuffer[p.Stmt], nc: NewClassTree): Result[p.Expr] = {
-    val jc = nc.asInstanceOf[JCTree.JCNewClass]
+  private def construct(scope: Scope, buf: mutable.ListBuffer[p.Stmt], jc: JCTree.JCNewClass): Result[p.Expr] =
     for {
-      tpe <- JavaTyper.typer(jcType(nc))
+      tpe <- JavaTyper.typer(jcType(jc))
       struct <- tpe match {
         case s: p.Type.Struct => s.success
         case other            => s"Cannot allocate ${other.repr} with `new`".fail
       }
       ctor <- Option(jc.constructor)
         .collect { case m: JSymbol.MethodSymbol => m }
-        .failIfEmpty(s"`$nc` names no resolved constructor")
+        .failIfEmpty(s"`$jc` names no resolved constructor")
       elem <- (ctor.owner match {
         case c: JSymbol.ClassSymbol => Some(c)
         case _                      => None
@@ -1245,10 +1284,9 @@ object TreeRemapper {
       _ <- zeroFields(scope, buf, elem, self)
       _ <- inlineCtor(scope, buf, ctor, tree, self, args)
     } yield selectExpr(Nil, self)
-  }
 
   private def superFieldsOf(scope: Scope, elem: JSymbol.ClassSymbol): Result[Unit] =
-    Option(elem.getSuperclass).map(scope.deps.types.asElement).collect { case c: TypeElement => c } match {
+    Option(elem.getSuperclass).map(scope.deps.types.asElement(_)).collect { case c: TypeElement => c } match {
       case Some(sup) if JavaTyper.instanceFields(sup).nonEmpty =>
         (s"Cannot allocate `${elem.flatName}`: its supertype `${sup.getQualifiedName}` carries instance " +
           s"state (${JavaTyper.instanceFields(sup).map(_.getSimpleName).mkString(", ")}), " +
@@ -1258,7 +1296,7 @@ object TreeRemapper {
 
   private def inlineCtor(
       scope: Scope,
-      buf: ListBuffer[p.Stmt],
+      buf: mutable.ListBuffer[p.Stmt],
       ctor: JSymbol.MethodSymbol,
       tree: MethodTree,
       self: p.Named,
@@ -1278,7 +1316,7 @@ object TreeRemapper {
       }
   }
 
-  private def samCall(scope: Scope, buf: ListBuffer[p.Stmt], mi: MethodInvocationTree): Option[Result[p.Expr]] =
+  private def samCall(scope: Scope, buf: mutable.ListBuffer[p.Stmt], mi: MethodInvocationTree): Option[Result[p.Expr]] =
     mi.getMethodSelect match {
       case fa: MemberSelectTree =>
         closureOf(scope, buf, fa.getExpression).map { clr =>
@@ -1291,7 +1329,7 @@ object TreeRemapper {
       case _ => None
     }
 
-  private def invoke(scope: Scope, buf: ListBuffer[p.Stmt], mi: MethodInvocationTree): Result[p.Expr] =
+  private def invoke(scope: Scope, buf: mutable.ListBuffer[p.Stmt], mi: MethodInvocationTree): Result[p.Expr] =
     dynamicSym(mi) match {
       case Some(d) if metafactoryImpl(d).isDefined =>
         ("A functional value has no device representation, so it only lowers where it is called " +
@@ -1332,66 +1370,66 @@ object TreeRemapper {
 
   private def emitDispatch(
       scope: Scope,
-      buf: ListBuffer[p.Stmt],
-      sym: JSymbol.MethodSymbol,
-      recv: p.Term,
-      args: List[p.Term],
-      argLengths: List[Option[p.Term]],
-      rtn: p.Type
-  ): Result[p.Expr] = for {
-    self <- asSelect(p.Expr.Alias(byReference(scope, buf, recv)))
-    refArgs = args.map(byReference(scope, buf, _))
-    candidates <- implementationsOf(scope.deps, sym)
-    _ <-
-      if (candidates.nonEmpty) ().success
-      else
-        (s"Cannot devirtualise `${fullName(sym)}`: this compilation sees no class implementing it, " +
-          "so there is nothing to compile into the kernel").fail
-    // every arm shares the abstract receiver, so an implementation reading its own state would use the wrong offsets
-    receivers = sym.owner match {
-      case c: JSymbol.ClassSymbol => c :: candidates.map(_._1)
-      case _                      => candidates.map(_._1)
-    }
-    _ <- receivers.traverse_ { c =>
-      val fields = JavaTyper.instanceFields(c)
-      if (fields.isEmpty) ().success
-      else
-        (s"Cannot devirtualise `${fullName(sym)}`: `${c.getSimpleName}` carries instance state " +
-          s"(${fields.map(_.getSimpleName).mkString(", ")}), and only stateless implementations can " +
-          "share the abstract receiver's layout").fail
-    }
-    _                        = scope.deps.taggedTypes += ownerName(sym)
-    result                   = scope.fresh(rtn)
-    resultSel: p.Term.Select = p.Term.Select(result, Nil, rtn)
-    _                        = if (rtn != p.Type.Unit0) buf += p.Stmt.Var(result, None, isMutable = true)
-    tag = bind(
-      scope,
-      buf,
-      p.Expr.Alias(fieldOf(self, JavaTyper.TagMember, p.Type.IntS32))
-    )
-    _ <- candidates.traverse_ { (cls, impl) =>
-      val fqn = cls.getQualifiedName.toString
-      scope.deps.taggedTypes += fqn
-      scope.deps.fnSyms += impl
-      scope.calls += impl
-      val hit    = bind(scope, buf, p.Expr.IntrOp(p.Intr.LogicEq(tag, p.Term.IntS32Const(scope.deps.tagFor(fqn)))))
-      val armBuf = ListBuffer.empty[p.Stmt]
-      (lengthArgsFor(scope, impl, argLengths), staticArgsFor(scope, impl)).mapN { (ls, ss) =>
-        val armSelf = self.tpe match {
-          case p.Type.Ptr(_, space) =>
-            val target = p.Type.Ptr(p.Type.Struct(p.Sym(JavaTyper.structName(cls)), Nil), space)
-            bind(scope, armBuf, p.Expr.Cast(self, target))
-          case _ => self
-        }
-        val call = p.Expr.Invoke(p.Type.FnRef(p.Sym(fullName(impl))), Nil, Some(armSelf), refArgs ++ ls ++ ss, rtn)
-
-        if (rtn == p.Type.Unit0) armBuf += p.Stmt.Var(scope.fresh(rtn), Some(call))
-        else armBuf += p.Stmt.Mut(resultSel, call)
-        buf += p.Stmt.Cond(hit, armBuf.toList, Nil)
-        ()
+      buf: mutable.ListBuffer[p.Stmt],
+      d: Dispatch,
+      argLengths: List[Option[p.Term]]
+  ): Result[p.Expr] = {
+    import d.*
+    for {
+      self <- asSelect(p.Expr.Alias(byReference(scope, buf, recv)))
+      refArgs = args.map(byReference(scope, buf, _))
+      candidates <- implementationsOf(scope.deps, sym)
+      _ <-
+        if (candidates.nonEmpty) ().success
+        else
+          (s"Cannot devirtualise `${fullName(sym)}`: this compilation sees no class implementing it, " +
+            "so there is nothing to compile into the kernel").fail
+      // every arm shares the abstract receiver, so an implementation reading its own state would use the wrong offsets
+      receivers = sym.owner match {
+        case c: JSymbol.ClassSymbol => c :: candidates.map(_._1)
+        case _                      => candidates.map(_._1)
       }
-    }
-  } yield p.Expr.Alias(if (rtn == p.Type.Unit0) p.Term.Unit0Const else resultSel)
+      _ <- receivers.traverse_ { c =>
+        val fields = JavaTyper.instanceFields(c)
+        if (fields.isEmpty) ().success
+        else
+          (s"Cannot devirtualise `${fullName(sym)}`: `${c.getSimpleName}` carries instance state " +
+            s"(${fields.map(_.getSimpleName).mkString(", ")}), and only stateless implementations can " +
+            "share the abstract receiver's layout").fail
+      }
+      _                        = scope.deps.taggedTypes += ownerName(sym)
+      result                   = scope.fresh(rtn)
+      resultSel: p.Term.Select = p.Term.Select(result, Nil, rtn)
+      _                        = if (rtn != p.Type.Unit0) buf += p.Stmt.Var(result, None, isMutable = true)
+      tag = bind(
+        scope,
+        buf,
+        p.Expr.Alias(fieldOf(self, JavaTyper.TagMember, p.Type.IntS32))
+      )
+      _ <- candidates.traverse_ { (cls, impl) =>
+        val fqn = cls.getQualifiedName.toString
+        scope.deps.taggedTypes += fqn
+        scope.deps.fnSyms += impl
+        scope.calls += impl
+        val hit    = bind(scope, buf, p.Expr.IntrOp(p.Intr.LogicEq(tag, p.Term.IntS32Const(scope.deps.tagFor(fqn)))))
+        val armBuf = mutable.ListBuffer.empty[p.Stmt]
+        (lengthArgsFor(scope, impl, argLengths), staticArgsFor(scope, impl)).mapN { (ls, ss) =>
+          val armSelf = self.tpe match {
+            case p.Type.Ptr(_, space) =>
+              val target = p.Type.Ptr(p.Type.Struct(p.Sym(JavaTyper.structName(cls)), Nil), space)
+              bind(scope, armBuf, p.Expr.Cast(self, target))
+            case _ => self
+          }
+          val call = p.Expr.Invoke(p.Type.FnRef(p.Sym(fullName(impl))), Nil, Some(armSelf), refArgs ++ ls ++ ss, rtn)
+
+          if (rtn == p.Type.Unit0) armBuf += p.Stmt.Var(scope.fresh(rtn), Some(call))
+          else armBuf += p.Stmt.Mut(resultSel, call)
+          buf += p.Stmt.Cond(hit, armBuf.toList, Nil)
+          ()
+        }
+      }
+    } yield p.Expr.Alias(if (rtn == p.Type.Unit0) p.Term.Unit0Const else resultSel)
+  }
 
   private def regionAllocated(scope: Scope, tpe: p.Type): Option[JSymbol.ClassSymbol] = referent(tpe) match {
     case p.Type.Struct(name, _) =>
@@ -1411,21 +1449,23 @@ object TreeRemapper {
         m
     }
 
-  private def plainInvoke(scope: Scope, buf: ListBuffer[p.Stmt], mi: MethodInvocationTree): Result[p.Expr] =
+  private def plainInvoke(scope: Scope, buf: mutable.ListBuffer[p.Stmt], mi: MethodInvocationTree): Result[p.Expr] =
     boxIdentity(scope, buf, mi).getOrElse {
       for {
         symAndRecv <- mi.getMethodSelect match {
           case fa: MemberSelectTree =>
-            val msym = fa.asInstanceOf[JCTree.JCFieldAccess].sym.asInstanceOf[JSymbol.MethodSymbol]
-            if (msym.isStatic) (msym, Option.empty[p.Term]).success
-            else mapExpr(scope, buf, fa.getExpression).map(r => (msym, Some(bind(scope, buf, r))))
+            methodSymOf(fa).flatMap { msym =>
+              if (msym.isStatic) (msym, Option.empty[p.Term]).success
+              else mapExpr(scope, buf, fa.getExpression).map(r => (msym, Option(bind(scope, buf, r))))
+            }
           case id: IdentifierTree =>
-            val msym = id.asInstanceOf[JCTree.JCIdent].sym.asInstanceOf[JSymbol.MethodSymbol]
-            if (msym.isStatic) (msym, Option.empty[p.Term]).success
-            else
-              scope.thisOpt
-                .map(self => (msym, Some(selectTerm(Nil, self): p.Term)))
-                .failIfEmpty(s"Cannot resolve receiver for `${id.getName}` outside an instance method")
+            methodSymOf(id).flatMap { msym =>
+              if (msym.isStatic) (msym, Option.empty[p.Term]).success
+              else
+                scope.thisOpt
+                  .map(self => (msym, Option(selectTerm(Nil, self): p.Term)))
+                  .failIfEmpty(s"Cannot resolve receiver for `${id.getName}` outside an instance method")
+            }
           case other => s"Unsupported method selector ${other.getKind}".fail
         }
         (sym, recv) = symAndRecv
@@ -1443,14 +1483,14 @@ object TreeRemapper {
 
   private def closureCall(
       scope: Scope,
-      buf: ListBuffer[p.Stmt],
+      buf: mutable.ListBuffer[p.Stmt],
       sym: JSymbol.MethodSymbol,
       recv: Option[p.Term],
       argTrees: List[? <: ExpressionTree],
       rtn: p.Type
   ): Result[p.Expr] = scope.deps.treeOf(sym) match {
     case Some(tree) =>
-      argValues(scope, buf, argTrees).flatMap(vs => inlineImpl(scope, buf, sym, tree, recv, vs, rtn))
+      argValues(scope, buf, argTrees).flatMap(vs => inlineImpl(scope, buf, ImplCall(sym, recv, vs, rtn), tree))
     case None =>
       (s"`${fullName(sym)}` is handed a functional value, which has no device representation, and " +
         "its body is not available to lower into the call site").fail
@@ -1458,7 +1498,7 @@ object TreeRemapper {
 
   private def directCall(
       scope: Scope,
-      buf: ListBuffer[p.Stmt],
+      buf: mutable.ListBuffer[p.Stmt],
       mi: MethodInvocationTree,
       sym: JSymbol.MethodSymbol,
       recv: Option[p.Term],
@@ -1468,18 +1508,16 @@ object TreeRemapper {
       paramTpes <- sym.asType.getParameterTypes.asScala.toList.traverse(JavaTyper.typer)
       argTrees = mi.getArguments.asScala.toList
       lowered <- argTrees.traverse { a =>
-        scope.pendingArrayLength = None
         mapExpr(scope, buf, a).map { e =>
-          val len = Option(symOf(a))
+          val len = symOf(a)
             .flatMap(scope.arrayLengths.get)
-            .orElse(a match { case _: NewArrayTree => scope.pendingArrayLength; case _ => None })
+            .orElse(a match { case _: NewArrayTree => scope.newArrayLengths.get(a); case _ => None })
           (bind(scope, buf, e), len)
         }
       }
-      _   = scope.pendingArrayLength = None
       raw = lowered.map(_._1)
       _ = argTrees.zipWithIndex.foreach { (a, i) =>
-        Option(symOf(a)).flatMap(scope.paramOf.get).foreach(j => scope.argFlows += ((sym, i, j)))
+        symOf(a).flatMap(scope.paramOf.get).foreach(j => scope.argFlows += ((sym, i, j)))
       }
       argLengths = lowered.map(_._2)
       args       = if (paramTpes.size == raw.size) raw.zip(paramTpes).map(coerce(scope, buf, _, _)) else raw
@@ -1512,11 +1550,11 @@ object TreeRemapper {
                     )
                   )
                 }
-            case None => emitDispatch(scope, buf, sym, recv.get, args, argLengths, rtn)
+            case None => emitDispatch(scope, buf, Dispatch(sym, recv.get, args, rtn), argLengths)
           }
         else
           recv.flatMap(r => regionAllocated(scope, r.tpe)).filter(_ != sym.owner) match {
-            case Some(cls) => inheritedCall(scope, buf, sym, cls, recv.get, args, rtn)
+            case Some(cls) => inheritedCall(scope, buf, Dispatch(sym, recv.get, args, rtn), cls)
             case None =>
               val receiverTpeArgs =
                 recv.map(r => referent(r.tpe)).collect { case p.Type.Struct(_, ts) => ts }.getOrElse(Nil)
@@ -1530,19 +1568,17 @@ object TreeRemapper {
           }
     } yield e
 
-  private def mapStmt(scope: Scope, buf: ListBuffer[p.Stmt], t: StatementTree): Result[Unit] = t match {
+  private def mapStmt(scope: Scope, buf: mutable.ListBuffer[p.Stmt], t: StatementTree): Result[Unit] = t match {
     case b: BlockTree => b.getStatements.asScala.toList.traverse_(mapStmt(scope, buf, _))
     case v: VariableTree if Option(v.getInitializer).exists(isClosureTree(scope, _)) =>
       closureOf(scope, buf, v.getInitializer).get.map { c =>
-        scope.closures.put(symOf(v), c)
+        scope.closures.put(declOf(v), c)
         ()
       }
     case v: VariableTree =>
       for {
         declared <- JavaTyper.typer(jcType(v))
-        _ = scope.pendingArrayLength = None
-        _ = scope.pendingRowLength = None
-        value <- Option(v.getInitializer).traverse(mapExpr(scope, buf, _).map(bind(scope, buf, _)))
+        value    <- Option(v.getInitializer).traverse(mapExpr(scope, buf, _).map(bind(scope, buf, _)))
         // a local declared at a supertype but built with new keeps the concrete type, widening drops its fields
         tpe = (declared, value.map(_.tpe)) match {
           case (p.Type.Struct(_, _), Some(actual @ p.Type.Struct(_, _))) => actual
@@ -1551,29 +1587,27 @@ object TreeRemapper {
           case _ => declared
         }
         named = p.Named(scope.uniqueName(v.getName.toString), tpe)
-        _     = scope.locals.put(symOf(v), named)
+        _     = scope.locals.put(declOf(v), named)
         init  = value.map(t => p.Expr.Alias(coerce(scope, buf, t, tpe)))
         // aliasing keeps the length: enhanced-for binds the subject to a local before measuring it
-        aliased = Option(v.getInitializer).flatMap(e => Option(symOf(e)))
+        aliased = Option(v.getInitializer).flatMap(symOf(_))
         _ = aliased
           .flatMap(scope.arrayLengths.get)
-          .orElse(scope.pendingArrayLength)
-          .foreach(scope.arrayLengths.put(symOf(v), _))
+          .orElse(Option(v.getInitializer).map(unparenthesised(_)).flatMap(scope.newArrayLengths.get))
+          .foreach(scope.arrayLengths.put(declOf(v), _))
         _ = aliased
           .flatMap(scope.rowLengths.get)
-          .orElse(scope.pendingRowLength)
-          .foreach(scope.rowLengths.put(symOf(v), _))
-        _ = aliased.flatMap(scope.paramOf.get).foreach(scope.paramOf.put(symOf(v), _))
-        _ = scope.pendingArrayLength = None
-        _ = scope.pendingRowLength = None
+          .orElse(Option(v.getInitializer).map(unparenthesised(_)).flatMap(scope.newRowLengths.get))
+          .foreach(scope.rowLengths.put(declOf(v), _))
+        _ = aliased.flatMap(scope.paramOf.get).foreach(scope.paramOf.put(declOf(v), _))
       } yield { buf += p.Stmt.Var(named, init, isMutable = true); () }
     case e: ExpressionStatementTree => mapExpr(scope, buf, e.getExpression).map(_ => ())
     case i: IfTree =>
       for {
         cond <- mapExpr(scope, buf, i.getCondition).map(bind(scope, buf, _))
-        thenBuf = ListBuffer.empty[p.Stmt]
+        thenBuf = mutable.ListBuffer.empty[p.Stmt]
         _ <- mapStmt(scope, thenBuf, i.getThenStatement)
-        elseBuf = ListBuffer.empty[p.Stmt]
+        elseBuf = mutable.ListBuffer.empty[p.Stmt]
         _ <- Option(i.getElseStatement).traverse(mapStmt(scope, elseBuf, _))
       } yield { buf += p.Stmt.Cond(cond, thenBuf.toList, elseBuf.toList); () }
     case w: WhileLoopTree => emitWhile(scope, buf, Option(w.getCondition), List(w.getStatement), Nil)
@@ -1675,7 +1709,7 @@ object TreeRemapper {
 
   private def allocRows(
       scope: Scope,
-      buf: ListBuffer[p.Stmt],
+      buf: mutable.ListBuffer[p.Stmt],
       comp: p.Type,
       space: p.Type.Space,
       len: p.Term,
@@ -1701,7 +1735,7 @@ object TreeRemapper {
     case other => s"Cannot allocate rows of ${other.repr}".fail
   }
 
-  private def propagateLabels(scope: Scope, buf: ListBuffer[p.Stmt]): Unit =
+  private def propagateLabels(scope: Scope, buf: mutable.ListBuffer[p.Stmt]): Unit =
     scope.activeLabels.foreach { l =>
       val escaping = bind(scope, buf, p.Expr.IntrOp(p.Intr.LogicOr(l.brk, l.cnt)))
       buf += p.Stmt.Cond(escaping, List(p.Stmt.Break), Nil)
@@ -1718,7 +1752,7 @@ object TreeRemapper {
   }
 
   private def condAnf(scope: Scope, cond: Option[ExpressionTree]): Result[(p.Term, List[p.Stmt], List[p.Stmt])] = {
-    val condBuf = ListBuffer.empty[p.Stmt]
+    val condBuf = mutable.ListBuffer.empty[p.Stmt]
     val term = cond match {
       case Some(c) => mapExpr(scope, condBuf, c).map(bind(scope, condBuf, _))
       case None    => (p.Term.Bool1Const(true): p.Term).success
@@ -1735,14 +1769,14 @@ object TreeRemapper {
 
   private def emitWhile(
       scope: Scope,
-      buf: ListBuffer[p.Stmt],
+      buf: mutable.ListBuffer[p.Stmt],
       cond: Option[ExpressionTree],
       body: List[StatementTree],
       update: List[ExpressionStatementTree]
   ): Result[Unit] = for {
     anf <- condAnf(scope, cond)
     (condTerm, hoisted, reeval) = anf
-    bodyBuf                     = ListBuffer.empty[p.Stmt]
+    bodyBuf                     = mutable.ListBuffer.empty[p.Stmt]
     _ <- scope.inLoop(LoopCtx(update, reeval)) {
       for {
         _ <- body.traverse_(mapStmt(scope, bodyBuf, _))
@@ -1757,7 +1791,7 @@ object TreeRemapper {
     ()
   }
 
-  private def emitLabelled(scope: Scope, buf: ListBuffer[p.Stmt], l: LabeledStatementTree): Result[Unit] = {
+  private def emitLabelled(scope: Scope, buf: mutable.ListBuffer[p.Stmt], l: LabeledStatementTree): Result[Unit] = {
     val brkN               = scope.fresh(p.Type.Bool1)
     val cntN               = scope.fresh(p.Type.Bool1)
     val brk: p.Term.Select = p.Term.Select(brkN, Nil, p.Type.Bool1)
@@ -1773,7 +1807,7 @@ object TreeRemapper {
           _ <- emitLabelledLoop(scope, buf, ctx, Option(f.getCondition), f.getStatement, f.getUpdate.asScala.toList)
         } yield ()
       case other =>
-        val bodyBuf = ListBuffer.empty[p.Stmt]
+        val bodyBuf = mutable.ListBuffer.empty[p.Stmt]
         scope.withLabel(ctx)(mapStmt(scope, bodyBuf, other)).map { _ =>
           buf ++= runOnce(scope, bodyBuf.toList)
           propagateLabels(scope, buf)
@@ -1784,7 +1818,7 @@ object TreeRemapper {
 
   private def emitLabelledLoop(
       scope: Scope,
-      buf: ListBuffer[p.Stmt],
+      buf: mutable.ListBuffer[p.Stmt],
       ctx: LabelCtx,
       cond: Option[ExpressionTree],
       body: StatementTree,
@@ -1792,14 +1826,14 @@ object TreeRemapper {
   ): Result[Unit] = for {
     anf <- condAnf(scope, cond)
     (condTerm, hoisted, reeval) = anf
-    bodyBuf                     = ListBuffer.empty[p.Stmt]
+    bodyBuf                     = mutable.ListBuffer.empty[p.Stmt]
     _ <- scope.withLabel(ctx) {
       scope.inLoop(LoopCtx(update, reeval, Some(ctx)))(mapStmt(scope, bodyBuf, body))
     }
-    updBuf = ListBuffer.empty[p.Stmt]
+    updBuf = mutable.ListBuffer.empty[p.Stmt]
     _ <- scope.inLoop(LoopCtx(update, reeval))(update.traverse_(mapStmt(scope, updBuf, _)))
   } yield {
-    val escapeBuf = ListBuffer.empty[p.Stmt]
+    val escapeBuf = mutable.ListBuffer.empty[p.Stmt]
     propagateLabels(scope, escapeBuf)
     val wrapped = (p.Stmt.Mut(ctx.cnt, p.Expr.Alias(p.Term.Bool1Const(false))) ::
       runOnce(scope, bodyBuf.toList)) :+ p.Stmt.Cond(ctx.brk, List(p.Stmt.Break), Nil)
@@ -1810,14 +1844,14 @@ object TreeRemapper {
     ()
   }
 
-  private def emitDoWhile(scope: Scope, buf: ListBuffer[p.Stmt], d: DoWhileLoopTree): Result[Unit] = {
+  private def emitDoWhile(scope: Scope, buf: mutable.ListBuffer[p.Stmt], d: DoWhileLoopTree): Result[Unit] = {
     val flag                   = scope.fresh(p.Type.Bool1)
     val flagSel: p.Term.Select = p.Term.Select(flag, Nil, p.Type.Bool1)
     for {
       anf <- condAnf(scope, Some(d.getCondition))
       (condTerm, hoisted, reeval) = anf
       tail                        = reeval :+ p.Stmt.Mut(flagSel, p.Expr.Alias(condTerm))
-      bodyBuf                     = ListBuffer.empty[p.Stmt]
+      bodyBuf                     = mutable.ListBuffer.empty[p.Stmt]
       _ <- scope.inLoop(LoopCtx(Nil, tail))(mapStmt(scope, bodyBuf, d.getStatement))
     } yield {
       buf += p.Stmt.Var(flag, Some(p.Expr.Alias(p.Term.Bool1Const(true))), isMutable = true)
@@ -1830,7 +1864,7 @@ object TreeRemapper {
 
   private def caseGuards(
       scope: Scope,
-      buf: ListBuffer[p.Stmt],
+      buf: mutable.ListBuffer[p.Stmt],
       selector: p.Term,
       cases: List[CaseTree]
   ): Result[(Map[CaseTree, p.Term], p.Term)] =
@@ -1854,7 +1888,7 @@ object TreeRemapper {
   // no jump table: a run-once loop walks the cases behind a started flag, which gives colon-form fall-through
   private def emitCases(
       scope: Scope,
-      buf: ListBuffer[p.Stmt],
+      buf: mutable.ListBuffer[p.Stmt],
       selector: p.Term,
       cases: List[CaseTree],
       result: Option[p.Term.Select]
@@ -1864,11 +1898,11 @@ object TreeRemapper {
     started                   = scope.fresh(p.Type.Bool1)
     startedSel: p.Term.Select = p.Term.Select(started, Nil, p.Type.Bool1)
     setStarted                = p.Stmt.Mut(startedSel, p.Expr.Alias(p.Term.Bool1Const(true)))
-    bodyBuf                   = ListBuffer.empty[p.Stmt]
+    bodyBuf                   = mutable.ListBuffer.empty[p.Stmt]
     _ = bodyBuf += p.Stmt.Var(started, Some(p.Expr.Alias(p.Term.Bool1Const(false))), isMutable = true)
     _ <- cases.traverse_ { c =>
       bodyBuf += p.Stmt.Cond(matchOf.getOrElse(c, noMatch), List(setStarted), Nil)
-      val armBuf = ListBuffer.empty[p.Stmt]
+      val armBuf = mutable.ListBuffer.empty[p.Stmt]
       val lowered =
         if (c.getCaseKind == CaseTree.CaseKind.RULE)
           lowerArm(scope, armBuf, c.getBody, result).map { _ =>
@@ -1888,7 +1922,7 @@ object TreeRemapper {
 
   private def lowerArm(
       scope: Scope,
-      buf: ListBuffer[p.Stmt],
+      buf: mutable.ListBuffer[p.Stmt],
       body: Tree,
       result: Option[p.Term.Select]
   ): Result[Unit] = (body, result) match {
@@ -1903,7 +1937,7 @@ object TreeRemapper {
     case (other, _)                => s"Unsupported switch arm `$other`".fail
   }
 
-  private def switchExpression(scope: Scope, buf: ListBuffer[p.Stmt], s: SwitchExpressionTree): Result[p.Expr] =
+  private def switchExpression(scope: Scope, buf: mutable.ListBuffer[p.Stmt], s: SwitchExpressionTree): Result[p.Expr] =
     for {
       tpe      <- JavaTyper.typer(jcType(s))
       selector <- mapExpr(scope, buf, s.getExpression).map(bind(scope, buf, _))
@@ -1915,7 +1949,7 @@ object TreeRemapper {
       )
     } yield p.Expr.Alias(resultSel)
 
-  private def emitSwitch(scope: Scope, buf: ListBuffer[p.Stmt], s: SwitchTree): Result[Unit] =
+  private def emitSwitch(scope: Scope, buf: mutable.ListBuffer[p.Stmt], s: SwitchTree): Result[Unit] =
     for {
       selector <- mapExpr(scope, buf, s.getExpression).map(bind(scope, buf, _))
       _        <- emitCases(scope, buf, selector, s.getCases.asScala.toList, None)
@@ -1923,65 +1957,90 @@ object TreeRemapper {
 
   private def passed(isEntry: Boolean, tpe: p.Type): p.Type = if (isEntry) tpe else referenceTo(tpe)
 
-  def compileMethod(
-      env: ProcessingEnvironment,
-      trees: Trees,
+  private enum Role {
+    case Entry
+    case Callee
+  }
+
+  private def compileMethod(
       m: MethodTree,
       deps: DepCollector,
+      role: Role,
+      plan: Option[Plan]
+  ): Result[(p.Function, List[JSymbol.VarSymbol])] = m match {
+    case md: JCTree.JCMethodDecl =>
+      JavaTyper.typer(md.sym.getReturnType).flatMap(compileBody(md, deps, role == Role.Entry, plan, _))
+  }
+
+  private def compileBody(
+      md: JCTree.JCMethodDecl,
+      deps: DepCollector,
       isEntry: Boolean,
-      planned: Boolean
+      plan: Option[Plan],
+      rtn: p.Type
   ): Result[(p.Function, List[JSymbol.VarSymbol])] = {
-    val md    = m.asInstanceOf[JCTree.JCMethodDecl]
-    val scope = new Scope(deps, isEntry, planned)
     val receiver =
       if (md.sym.isStatic) None
       else
         Some(p.Arg(p.Named("this", passed(isEntry, p.Type.Struct(p.Sym(ownerName(md.sym)), Nil)))))
-    receiver.foreach(r => scope.thisOpt = Some(r.named))
+    val scope  = Scope(deps, isEntry, plan, rtn, receiver.map(_.named))
+    val params = md.getParameters.asScala.toVector
     for {
-      declared <- m.getParameters.asScala.toList.zipWithIndex.traverse { (v, i) =>
-        deps.capturedClosures.get(symOf(v)).filter(_ => isEntry) match {
-          case Some(c) => scope.closures.put(symOf(v), c); Option.empty[p.Arg].success
-          case None =>
-            JavaTyper.typer(jcType(v)).map(passed(isEntry, _)).map { tpe =>
-              val named = p.Named(scope.uniqueName(v.getName.toString), tpe)
-              scope.locals.put(symOf(v), named)
-              scope.paramOf.put(symOf(v), i)
-              Some(p.Arg(named))
-            }
+      typed <- params.toList.traverse { v =>
+        deps.capturedClosures.get(declOf(v)).filter(_ => isEntry) match {
+          case Some(c) => (Left(c): Either[Closure, p.Type]).success
+          case None    => JavaTyper.typer(jcType(v)).map(tpe => Right(passed(isEntry, tpe)))
         }
       }
-      args = declared.flatten
-      staticArgs <- deps.staticParams.getOrElse(md.sym, Nil).traverse { v =>
-        JavaTyper.typer(v.asType).map { tpe =>
+      args = {
+        val out = mutable.ListBuffer.empty[p.Arg]
+        params.zip(typed).zipWithIndex.foreach {
+          case ((v, Left(c)), _) => scope.closures.put(declOf(v), c)
+          case ((v, Right(tpe)), i) =>
+            val named = p.Named(scope.uniqueName(v.getName.toString), tpe)
+            scope.locals.put(declOf(v), named)
+            scope.paramOf.put(declOf(v), i)
+            out += p.Arg(named)
+        }
+        out.toList
+      }
+      staticTypes <- scope.staticParamsOf(md.sym).traverse(v => JavaTyper.typer(v.asType).map(v -> _))
+      staticArgs = {
+        val out = mutable.ListBuffer.empty[p.Arg]
+        staticTypes.foreach { (v, tpe) =>
           val named = p.Named(s"#static${scope.staticFields.size}", p.Type.Ptr(tpe, p.Type.Space.Global))
           scope.staticFields.put(v, named)
-          p.Arg(named)
+          out += p.Arg(named)
         }
+        out.toList
       }
-      params = m.getParameters.asScala.toVector
       lengths =
         if (isEntry) params.zipWithIndex.collect { case (v, i) if jcType(v).getKind == TypeKind.ARRAY => (v, i) }
-        else deps.lengthParams.getOrElse(md.sym, Nil).map(i => (params(i), i))
-      lengthArgs = lengths.map { (v, i) =>
-        val named = p.Named(s"#len$i", p.Type.IntS32)
-        scope.arrayLengths.put(symOf(v), p.Term.Select(named, Nil, p.Type.IntS32))
-        p.Arg(named)
+        else scope.lengthParamsOf(md.sym).map(i => (params(i), i))
+      lengthArgs = {
+        val out = mutable.ListBuffer.empty[p.Arg]
+        lengths.foreach { (v, i) =>
+          val named = p.Named(s"#len$i", p.Type.IntS32)
+          scope.arrayLengths.put(declOf(v), p.Term.Select(named, Nil, p.Type.IntS32))
+          out += p.Arg(named)
+        }
+        out.toList
       }
       rowLengthTpe = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global)
-      rowLengths =
-        if (!isEntry) Nil
-        else
-          params.zipWithIndex.collect {
-            case (v, i) if isArrayOfArrays(jcType(v)) =>
+      rowLengths = {
+        val out = mutable.ListBuffer.empty[(Int, p.Arg)]
+        if (isEntry)
+          params.zipWithIndex.foreach { (v, i) =>
+            if (isArrayOfArrays(jcType(v))) {
               val named = p.Named(s"#rowlen$i", rowLengthTpe)
-              scope.rowLengths.put(symOf(v), RowLength.PerRow(p.Term.Select(named, Nil, named.tpe)))
-              (i, p.Arg(named))
+              scope.rowLengths.put(declOf(v), RowLength.PerRow(p.Term.Select(named, Nil, named.tpe)))
+              out += ((i, p.Arg(named)))
+            }
           }
-      rtn <- JavaTyper.typer(md.sym.getReturnType)
-      _   = scope.rtnType = rtn
-      buf = ListBuffer.empty[p.Stmt]
-      _ <- Option(m.getBody).traverse_(b => mapStmt(scope, buf, b))
+        out.toList
+      }
+      buf = mutable.ListBuffer.empty[p.Stmt]
+      _ <- Option(md.getBody).traverse_(b => mapStmt(scope, buf, b))
       body = buf.lastOption match {
         case Some(p.Stmt.Return(_))   => buf.toList
         case _ if rtn == p.Type.Unit0 => buf.toList :+ p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
@@ -2018,111 +2077,103 @@ object TreeRemapper {
 
   // TODO overloads collapse on fullName
   private def compileTransitive(
-      env: ProcessingEnvironment,
       trees: Trees,
       deps: DepCollector,
       entrySym: JSymbol.MethodSymbol,
-      planned: Boolean
+      plan: Option[Plan]
   ): Result[List[p.Function]] = {
-    val compiled                 = mutable.LinkedHashMap[JSymbol.MethodSymbol, p.Function]()
-    val seen                     = mutable.Set[JSymbol.MethodSymbol](entrySym)
-    var error: Option[Throwable] = None
-    var progress                 = true
     // GENERATE-phase trees are already lowered so getTree is null, callees resolve from methodTable
     def calleeTree(sym: JSymbol.MethodSymbol): Option[MethodTree] =
       deps.treeOf(sym).orElse(Option(trees.getTree(sym)).collect { case mt: MethodTree => mt })
-    while (progress && error.isEmpty) {
-      val pending = deps.fnSyms.toList.filterNot(seen.contains)
-      if (pending.isEmpty) progress = false
-      else
-        pending.foreach { sym =>
-          if (error.isEmpty && !seen.contains(sym)) {
-            seen += sym
-            calleeTree(sym).filter(_ != null) match {
-              case Some(mt) if mt.getBody != null =>
-                compileMethod(env, trees, mt, deps, isEntry = false, planned = planned) match {
-                  case Right((fn, _)) => compiled.put(sym, fn)
-                  case Left(e)        => error = Some(e)
-                }
-              case _ => debug(s"[PolyAST] skip dependency (no reachable body): ${fullName(sym)}")
-            }
+    @tailrec def go(seen: Set[JSymbol.MethodSymbol], compiled: List[p.Function]): Result[List[p.Function]] =
+      deps.fnSyms.find(!seen(_)) match {
+        case None => compiled.reverse.success
+        case Some(sym) =>
+          calleeTree(sym).filter(bodied(_)) match {
+            case Some(mt) =>
+              compileMethod(mt, deps, Role.Callee, plan) match {
+                case Right((fn, _)) => go(seen + sym, fn :: compiled)
+                case Left(e)        => Left(e)
+              }
+            case None =>
+              debug(s"[PolyAST] skip dependency (no reachable body): ${fullName(sym)}")
+              go(seen + sym, compiled)
           }
-        }
-    }
-    error.toLeft(compiled.values.toList)
+      }
+    go(Set(entrySym), Nil)
   }
 
   // TODO collect struct refs nested in bodies too
   private def structSyms(fns: List[p.Function]): List[p.Sym] = {
     def sig(fn: p.Function) =
       (fn.receiver.toList ++ fn.args ++ fn.moduleCaptures ++ fn.termCaptures).map(_.named.tpe) :+ fn.rtn
-    fns.flatMap(sig).flatMap(JavaTyper.structSyms).distinct
+    fns.flatMap(sig(_)).flatMap(JavaTyper.structSyms).distinct
   }
 
   private def saturate[A, B: Ordering](
-      seed: IterableOnce[(JSymbol.MethodSymbol, IterableOnce[A])]
-  )(grow: mutable.LinkedHashMap[JSymbol.MethodSymbol, mutable.LinkedHashSet[A]] => Boolean)(
+      seed: Iterable[(JSymbol.MethodSymbol, Iterable[A])]
+  )(grow: Map[JSymbol.MethodSymbol, ListSet[A]] => Map[JSymbol.MethodSymbol, ListSet[A]])(
       key: A => B
   ): Map[JSymbol.MethodSymbol, List[A]] = {
-    val acc = mutable.LinkedHashMap[JSymbol.MethodSymbol, mutable.LinkedHashSet[A]]()
-    seed.iterator.foreach((f, as) => acc.getOrElseUpdate(f, mutable.LinkedHashSet()) ++= as)
-    while (grow(acc)) ()
-    acc.map((f, as) => f -> as.toList.sortBy(key)).toMap
+    @tailrec def fix(acc: Map[JSymbol.MethodSymbol, ListSet[A]]): Map[JSymbol.MethodSymbol, ListSet[A]] = {
+      val next = grow(acc)
+      if (next == acc) acc else fix(next)
+    }
+    val start = seed.foldLeft(Map.empty[JSymbol.MethodSymbol, ListSet[A]]) { case (acc, (f, as)) =>
+      acc.updated(f, acc.getOrElse(f, ListSet.empty[A]) ++ as)
+    }
+    fix(start).map((f, as) => f -> as.toList.sortBy(key))
   }
 
   // only the entry can grow a capture, so a function touching a static takes the buffer as a parameter its caller forwards
-  private def planStatics(deps: DepCollector): Unit =
-    deps.staticParams = saturate(
+  private def planStatics(deps: DepCollector): Map[JSymbol.MethodSymbol, List[JSymbol.VarSymbol]] =
+    saturate(
       (deps.directStatics.keys ++ deps.callees.keys).map(f => f -> deps.directStatics.getOrElse(f, Nil))
     ) { reaches =>
-      var changed = false
-      reaches.keys.toList.foreach { f =>
-        deps.callees.getOrElse(f, Nil).foreach { g =>
-          reaches.get(g).foreach { gs =>
-            val fs = reaches(f)
-            if (!gs.subsetOf(fs)) { fs ++= gs; changed = true }
-          }
-        }
+      reaches.map { (f, fs) =>
+        f -> deps.callees.getOrElse(f, Nil).foldLeft(fs)((acc, g) => acc ++ reaches.getOrElse(g, ListSet.empty))
       }
-      changed
-    }(fullName)
+    }(fullName(_))
 
-  private def planLengths(deps: DepCollector): Unit =
-    deps.lengthParams = saturate(deps.measuredParams) { needs =>
-      var changed = false
-      deps.lengthFlows.foreach { (caller, flows) =>
-        flows.foreach { (callee, calleeIdx, callerIdx) =>
-          if (needs.get(callee).exists(_.contains(calleeIdx))) {
-            val cs = needs.getOrElseUpdate(caller, mutable.LinkedHashSet())
-            if (!cs.contains(callerIdx)) { cs += callerIdx; changed = true }
-          }
+  private def planLengths(deps: DepCollector): Map[JSymbol.MethodSymbol, List[Int]] =
+    saturate(deps.measuredParams) { needs =>
+      deps.lengthFlows.foldLeft(needs) { case (outer, (caller, flows)) =>
+        flows.foldLeft(outer) { case (acc, (callee, calleeIdx, callerIdx)) =>
+          if (acc.get(callee).exists(_.contains(calleeIdx)))
+            acc.updated(caller, acc.getOrElse(caller, ListSet.empty[Int]) + callerIdx)
+          else acc
         }
       }
-      changed
     }(identity)
 
-  def compileRegion(
+  case class Sources(
       env: ProcessingEnvironment,
       trees: Trees,
       classTable: Map[String, TypeElement],
       methodTable: Map[String, MethodTree],
-      localTrees: Map[JSymbol.MethodSymbol, MethodTree],
-      entry: MethodTree
-  ): Result[Region] = {
-    val deps =
-      new DepCollector(localTrees, methodTable, classTable, env.getElementUtils, env.getTypeUtils)
-    val entrySym = entry.asInstanceOf[JCTree.JCMethodDecl].sym
+      localTrees: Map[JSymbol.MethodSymbol, MethodTree]
+  )
+
+  def compileRegion(sources: Sources, entry: MethodTree): Result[Region] = {
+    import sources.*
+    val entrySym = methodDeclSym(entry)
     val params   = entry.getParameters.asScala.toList
-    deps.capturedClosures = capturedClosures(deps, entry)
+    val deps = DepCollector(
+      localTrees,
+      methodTable,
+      classTable,
+      env.getElementUtils,
+      env.getTypeUtils,
+      capturedClosures(localTrees, entry)
+    )
     for {
       // exploratory lowering, discarded: learns the call graph and statics needed to size signatures
-      _ <- compileMethod(env, trees, entry, deps, isEntry = true, planned = false)
-      _ <- compileTransitive(env, trees, deps, entrySym, planned = false)
-      _ = planStatics(deps)
-      _ = planLengths(deps)
-      entryAndStatics <- compileMethod(env, trees, entry, deps, isEntry = true, planned = true)
+      _ <- compileMethod(entry, deps, Role.Entry, None)
+      _ <- compileTransitive(trees, deps, entrySym, plan = None)
+      plan = Some(Plan(planStatics(deps), planLengths(deps)))
+      entryAndStatics <- compileMethod(entry, deps, Role.Entry, plan)
       (entryFn, statics) = entryAndStatics
-      depFns <- compileTransitive(env, trees, deps, entrySym, planned = true)
+      depFns <- compileTransitive(trees, deps, entrySym, plan = plan)
       signatureStructs <- structSyms(entryFn :: depFns).flatTraverse { sym =>
         val fqn = sym.fqn.mkString(".")
         classTable.get(fqn) match {
@@ -2138,7 +2189,7 @@ object TreeRemapper {
       captures =
         (if (shift == 1) List(Capture.Receiver) else Nil) ++
           params.zipWithIndex.collect {
-            case (v, i) if !deps.capturedClosures.contains(symOf(v)) => Capture.Arg(i + shift)
+            case (v, i) if !deps.capturedClosures.contains(declOf(v)) => Capture.Arg(i + shift)
           } ++
           params.zipWithIndex.collect {
             case (v, i) if jcType(v).getKind == TypeKind.ARRAY => Capture.Length(i + shift)

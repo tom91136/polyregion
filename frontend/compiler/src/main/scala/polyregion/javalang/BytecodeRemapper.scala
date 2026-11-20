@@ -10,7 +10,6 @@ import org.jetbrains.java.decompiler.struct.gen.{CodeType, VarType}
 import polyregion.ast.{PolyAST as p, *}
 
 import scala.collection.mutable
-import scala.collection.mutable.ListBuffer
 import scala.jdk.CollectionConverters.*
 
 // lowers a Vineflower Statement/Exprent tree to PolyAST, see BYTECODE.md
@@ -19,7 +18,7 @@ object BytecodeRemapper {
   private val Global = p.Type.Space.Global
 
   private def nameOf(t: VarType): String =
-    if (t.`type` == CodeType.OBJECT && t.value != null) t.value.replace('/', '.') else String.valueOf(t)
+    Option(t.value).filter(_ => t.`type` == CodeType.OBJECT).fold(String.valueOf(t))(_.replace('/', '.'))
 
   def typeOf(t: VarType): Result[p.Type] = {
     val base = t.`type` match {
@@ -70,7 +69,7 @@ object BytecodeRemapper {
 
   private def stats(s: Statement): List[Statement] = s.getStats.asScala.toList
 
-  private def descend(s: Statement): List[Statement] = s :: stats(s).flatMap(descend)
+  private def descend(s: Statement): List[Statement] = s :: stats(s).flatMap(descend(_))
 
   private def isJump(e: StatEdge): Boolean =
     e.explicit && e.getType != StatEdge.TYPE_REGULAR && !e.getDestination.isInstanceOf[DummyExitStatement]
@@ -83,7 +82,7 @@ object BytecodeRemapper {
 
   // PolyAST's Break only leaves the innermost loop, so a non-loop statement that jumps close on becomes a run-once block
   private def needsBlock(s: Statement): Boolean =
-    !s.isInstanceOf[DoStatement] && s.getLabelEdges.asScala.exists(isJump)
+    !s.isInstanceOf[DoStatement] && s.getLabelEdges.asScala.exists(isJump(_))
 
   // for and do..while run their condition and increment after the body, so continues route through the jump register
   private def hasTail(d: DoStatement): Boolean =
@@ -101,7 +100,7 @@ object BytecodeRemapper {
         case f: IfStatement => List(Option(f.getIfEdge), Option(f.getElseEdge)).flatten
         case _              => Nil
       }
-      (exitEdge(s).toList ::: ifEdges).filter(isJump)
+      (exitEdge(s).toList ::: ifEdges).filter(isJump(_))
     }
     def go(s: Statement, ctx: List[Wrap]): Boolean = {
       val ctxInner = s match {
@@ -118,22 +117,22 @@ object BytecodeRemapper {
       stats(s).exists(go(_, ctxInner)) ||
       (s match {
         case f: IfStatement =>
-          List(Option(f.getIfEdge), Option(f.getElseEdge)).flatten.filter(isJump).exists(!fits(_, ctxInner))
+          List(Option(f.getIfEdge), Option(f.getElseEdge)).flatten.filter(isJump(_)).exists(!fits(_, ctxInner))
         case _ => false
       }) ||
-      exitEdge(s).filter(isJump).exists(!fits(_, ctx))
+      exitEdge(s).filter(isJump(_)).exists(!fits(_, ctx))
     }
     go(root, Nil)
   }
 
-  private final class Lowerer(rtn: p.Type, register: Boolean) {
+  private class Lowerer(rtn: p.Type, register: Boolean) {
 
-    private var counter = 0
-    val declared        = mutable.LinkedHashMap.empty[String, p.Named]
+    private val ids = Iterator.from(0)
+    val declared    = mutable.LinkedHashMap.empty[String, p.Named]
 
     private val jmp: p.Term.Select = p.Term.Select(p.Named("#jmp", p.Type.IntS32), Nil, p.Type.IntS32)
 
-    def fresh(t: p.Type): p.Named = { val n = p.Named(s"#v$counter", t); counter += 1; n }
+    def fresh(t: p.Type): p.Named = p.Named(s"#v${ids.next()}", t)
 
     private def declare(symbol: String, t: p.Type): p.Named = declared.getOrElseUpdate(symbol, p.Named(symbol, t))
 
@@ -142,7 +141,7 @@ object BytecodeRemapper {
       p.Term.Select(n, Nil, t)
     }
 
-    def bind(buf: ListBuffer[p.Stmt], e: p.Expr): p.Term = e match {
+    def bind(buf: mutable.ListBuffer[p.Stmt], e: p.Expr): p.Term = e match {
       case p.Expr.Alias(t) => t
       case other =>
         val n = fresh(other.tpe)
@@ -150,11 +149,11 @@ object BytecodeRemapper {
         p.Term.Select(n, Nil, n.tpe)
     }
 
-    def coerce(buf: ListBuffer[p.Stmt], t: p.Term, target: p.Type): p.Term =
+    def coerce(buf: mutable.ListBuffer[p.Stmt], t: p.Term, target: p.Type): p.Term =
       if (t.tpe == target) t else bind(buf, p.Expr.Cast(t, target))
 
     // bind folds an alias away, which is wrong for a value read out of a slot about to be written
-    private def snapshot(buf: ListBuffer[p.Stmt], t: p.Term): p.Term = t match {
+    private def snapshot(buf: mutable.ListBuffer[p.Stmt], t: p.Term): p.Term = t match {
       case p.Term.Select(_, _, _) =>
         val n = fresh(t.tpe)
         buf += p.Stmt.Var(n, Some(p.Expr.Alias(t)))
@@ -166,25 +165,21 @@ object BytecodeRemapper {
       typeOf(v.getVarType).map(t => slot(v.getIndex, v.getVersion, t))
 
     private def constOf(c: ConstExprent): Result[p.Term] = {
-      def num: Result[java.lang.Number] = c.getValue match {
-        case n: java.lang.Number  => n.success
-        case b: java.lang.Boolean => java.lang.Integer.valueOf(if (b.booleanValue) 1 else 0).success
-        case _: java.lang.String  => "Unsupported `String` constant; PolyRegion has no device-side String".fail
-        case null                 => "Unsupported `null` constant; PolyRegion has no device heap".fail
-        case other                => s"Unsupported constant `${other.getClass.getName}`".fail
+      def num: Result[Scalar] = Option(c.getValue: Any) match {
+        case Some(b: Boolean) => Scalar.I(if (b) 1 else 0).success
+        case Some(_: String)  => "Unsupported `String` constant; PolyRegion has no device-side String".fail
+        case None             => "Unsupported `null` constant; PolyRegion has no device heap".fail
+        case Some(other) =>
+          Scalar.of(other) match {
+            case Some(n) => n.success
+            case None    => s"Unsupported constant `${other.getClass.getName}`".fail
+          }
       }
       typeOf(c.getConstType).flatMap { t =>
         num.flatMap(v =>
-          t match {
-            case p.Type.Bool1   => p.Term.Bool1Const(v.intValue != 0).success
-            case p.Type.IntS8   => p.Term.IntS8Const(v.byteValue).success
-            case p.Type.IntS16  => p.Term.IntS16Const(v.shortValue).success
-            case p.Type.IntU16  => p.Term.IntU16Const(v.intValue.toChar).success
-            case p.Type.IntS32  => p.Term.IntS32Const(v.intValue).success
-            case p.Type.IntS64  => p.Term.IntS64Const(v.longValue).success
-            case p.Type.Float32 => p.Term.Float32Const(v.floatValue).success
-            case p.Type.Float64 => p.Term.Float64Const(v.doubleValue).success
-            case other          => s"Unsupported constant of type `${other.repr}`".fail
+          Scalar.constant(t) match {
+            case Some(lower) => lower(v).success
+            case None        => s"Unsupported constant of type `${t.repr}`".fail
           }
         )
       }
@@ -203,7 +198,7 @@ object BytecodeRemapper {
       case other => s"Unsupported expression `${other.getClass.getSimpleName}`".fail
     }
 
-    private def arrayParts(a: ArrayExprent, buf: ListBuffer[p.Stmt]): Result[(p.Term.Select, p.Term, p.Type)] =
+    private def arrayParts(a: ArrayExprent, buf: mutable.ListBuffer[p.Stmt]): Result[(p.Term.Select, p.Term, p.Type)] =
       for {
         arr <- expr(a.getArray, buf)
         idx <- expr(a.getIndex, buf)
@@ -218,7 +213,7 @@ object BytecodeRemapper {
       } yield (sel, coerce(buf, idx, p.Type.IntS32), comp)
 
     // `unordered` is what the l and g compare forms report for a NaN operand
-    private def threeWay(a: p.Term, b: p.Term, unordered: Int, buf: ListBuffer[p.Stmt]): p.Term = {
+    private def threeWay(a: p.Term, b: p.Term, unordered: Int, buf: mutable.ListBuffer[p.Stmt]): p.Term = {
       val r                  = fresh(p.Type.IntS32)
       val sel: p.Term.Select = p.Term.Select(r, Nil, p.Type.IntS32)
       buf += p.Stmt.Var(r, Some(p.Expr.Alias(p.Term.IntS32Const(unordered))), isMutable = true)
@@ -242,7 +237,7 @@ object BytecodeRemapper {
       sel
     }
 
-    private def binary(f: FunctionExprent, buf: ListBuffer[p.Stmt]): Result[p.Term] = {
+    private def binary(f: FunctionExprent, buf: mutable.ListBuffer[p.Stmt]): Result[p.Term] = {
       val ops = f.getLstOperands
       for {
         a <- expr(ops.get(0), buf)
@@ -252,7 +247,7 @@ object BytecodeRemapper {
     }
 
     // the JVM masks a shift distance to the operand width, C and LLVM leave the wider case undefined
-    private def shift(t: p.Type, by: p.Term, logical: Boolean, a: p.Term, buf: ListBuffer[p.Stmt])(
+    private def shift(t: p.Type, by: p.Term, logical: Boolean, a: p.Term, buf: mutable.ListBuffer[p.Stmt])(
         op: (p.Term, p.Term, p.Type) => p.Intr
     ): p.Term = {
       val mask   = if (t == p.Type.IntS64) 63 else 31
@@ -264,7 +259,7 @@ object BytecodeRemapper {
       coerce(buf, bind(buf, r), t)
     }
 
-    private def apply(ft: FunctionType, a: p.Term, b: p.Term, buf: ListBuffer[p.Stmt]): Result[p.Term] = {
+    private def apply(ft: FunctionType, a: p.Term, b: p.Term, buf: mutable.ListBuffer[p.Stmt]): Result[p.Term] = {
       def arith(op: (p.Term, p.Term, p.Type) => p.Intr): Result[p.Term] = promote(a.tpe, b.tpe).map { t =>
         bind(buf, p.Expr.IntrOp(op(coerce(buf, a, t), coerce(buf, b, t), t)))
       }
@@ -312,9 +307,9 @@ object BytecodeRemapper {
     private def unify(a: p.Type, b: p.Type): Result[p.Type] =
       if (a == b) a.success else promote(a, b)
 
-    private def shortCircuit(f: FunctionExprent, buf: ListBuffer[p.Stmt]): Result[p.Term] = {
+    private def shortCircuit(f: FunctionExprent, buf: mutable.ListBuffer[p.Stmt]): Result[p.Term] = {
       val ops = f.getLstOperands
-      val rhs = ListBuffer.empty[p.Stmt]
+      val rhs = mutable.ListBuffer.empty[p.Stmt]
       for {
         a <- expr(ops.get(0), buf)
         b <- expr(ops.get(1), rhs)
@@ -330,10 +325,10 @@ object BytecodeRemapper {
       }
     }
 
-    private def ternary(f: FunctionExprent, buf: ListBuffer[p.Stmt]): Result[p.Term] = {
+    private def ternary(f: FunctionExprent, buf: mutable.ListBuffer[p.Stmt]): Result[p.Term] = {
       val ops = f.getLstOperands
-      val tb  = ListBuffer.empty[p.Stmt]
-      val fb  = ListBuffer.empty[p.Stmt]
+      val tb  = mutable.ListBuffer.empty[p.Stmt]
+      val fb  = mutable.ListBuffer.empty[p.Stmt]
       for {
         c <- expr(ops.get(0), buf)
         t <- expr(ops.get(1), tb)
@@ -351,11 +346,11 @@ object BytecodeRemapper {
     }
 
     // `i++` in value position keeps the old value, so every intermediate lands in a temporary
-    private def step(f: FunctionExprent, buf: ListBuffer[p.Stmt], wantValue: Boolean): Result[p.Term] = {
+    private def step(f: FunctionExprent, buf: mutable.ListBuffer[p.Stmt], wantValue: Boolean): Result[p.Term] = {
       val target    = f.getLstOperands.get(0)
       val increment = f.getFuncType == FunctionType.IPP || f.getFuncType == FunctionType.PPI
       val post      = f.getFuncType == FunctionType.IPP || f.getFuncType == FunctionType.IMM
-      def update(read: p.Term, write: (p.Term, ListBuffer[p.Stmt]) => Unit): Result[p.Term] = {
+      def update(read: p.Term, write: (p.Term, mutable.ListBuffer[p.Stmt]) => Unit): Result[p.Term] = {
         val t = widen(read.tpe)
         oneOf(t).map { one =>
           val before  = if (wantValue && post) snapshot(buf, read) else read
@@ -378,7 +373,7 @@ object BytecodeRemapper {
       }
     }
 
-    private def function(f: FunctionExprent, buf: ListBuffer[p.Stmt]): Result[p.Term] = f.getFuncType match {
+    private def function(f: FunctionExprent, buf: mutable.ListBuffer[p.Stmt]): Result[p.Term] = f.getFuncType match {
       case FunctionType.BOOLEAN_AND | FunctionType.BOOLEAN_OR => shortCircuit(f, buf)
       case FunctionType.TERNARY                               => ternary(f, buf)
       case ft if ft.isPPMM                                    => step(f, buf, wantValue = true)
@@ -401,7 +396,7 @@ object BytecodeRemapper {
           a <- expr(f.getLstOperands.get(0), buf)
           t <- typeOf(f.getLstOperands.get(1).getExprType)
         } yield coerce(buf, a, t)
-      case ft if ft.castType != null =>
+      case ft if Option(ft.castType).isDefined =>
         for {
           a <- expr(f.getLstOperands.get(0), buf)
           t <- typeOf(ft.castType)
@@ -413,7 +408,7 @@ object BytecodeRemapper {
       case _                       => binary(f, buf)
     }
 
-    def expr(e: Exprent, buf: ListBuffer[p.Stmt]): Result[p.Term] = e match {
+    def expr(e: Exprent, buf: mutable.ListBuffer[p.Stmt]): Result[p.Term] = e match {
       case v: VarExprent      => varOf(v)
       case c: ConstExprent    => constOf(c)
       case f: FunctionExprent => function(f, buf)
@@ -423,7 +418,7 @@ object BytecodeRemapper {
       case other                => unsupported(other)
     }
 
-    private def assign(a: AssignmentExprent, buf: ListBuffer[p.Stmt]): Result[p.Term] = {
+    private def assign(a: AssignmentExprent, buf: mutable.ListBuffer[p.Stmt]): Result[p.Term] = {
       def value(current: p.Term): Result[p.Term] =
         expr(a.getRight, buf).flatMap { r =>
           Option(a.getCondType).fold(r.success)(ft => apply(ft, current, r, buf))
@@ -433,7 +428,7 @@ object BytecodeRemapper {
           for {
             sel <- varOf(v)
             // Java evaluates the target of a compound assignment before the right hand side
-            r <- value(if (a.getCondType == null) sel else snapshot(buf, sel))
+            r <- value(if (Option(a.getCondType).isEmpty) sel else snapshot(buf, sel))
           } yield {
             val stored = coerce(buf, r, sel.tpe)
             buf += p.Stmt.Mut(sel, p.Expr.Alias(stored))
@@ -453,7 +448,7 @@ object BytecodeRemapper {
       }
     }
 
-    def effect(e: Exprent, buf: ListBuffer[p.Stmt]): Result[Unit] = e match {
+    def effect(e: Exprent, buf: mutable.ListBuffer[p.Stmt]): Result[Unit] = e match {
       case a: AssignmentExprent                       => assign(a, buf).map(_ => ())
       case f: FunctionExprent if f.getFuncType.isPPMM => step(f, buf, wantValue = false).map(_ => ())
       case _: VarExprent                              => ().success
@@ -473,14 +468,14 @@ object BytecodeRemapper {
     private def set(v: Int): p.Stmt = p.Stmt.Mut(jmp, p.Expr.Alias(p.Term.IntS32Const(v)))
 
     // a labelled block is spelled `while (once) { once = false; ... }`, the only thing Break can leave
-    private def runOnce(buf: ListBuffer[p.Stmt], body: List[p.Stmt]): Unit = {
+    private def runOnce(buf: mutable.ListBuffer[p.Stmt], body: List[p.Stmt]): Unit = {
       val once               = fresh(p.Type.Bool1)
       val sel: p.Term.Select = p.Term.Select(once, Nil, p.Type.Bool1)
       buf += p.Stmt.Var(once, Some(p.Expr.Alias(p.Term.Bool1Const(true))), isMutable = true)
       buf += p.Stmt.While(sel, p.Stmt.Mut(sel, p.Expr.Alias(p.Term.Bool1Const(false))) :: body)
     }
 
-    private def arrive(buf: ListBuffer[p.Stmt], id: Int, outer: Boolean): Unit = {
+    private def arrive(buf: mutable.ListBuffer[p.Stmt], id: Int, outer: Boolean): Unit = {
       val inFlight = bind(buf, p.Expr.IntrOp(p.Intr.LogicNeq(jmp, p.Term.IntS32Const(0))))
       val mine     = bind(buf, p.Expr.IntrOp(p.Intr.LogicEq(jmp, p.Term.IntS32Const(id))))
       buf += p.Stmt.Cond(inFlight, List(p.Stmt.Cond(mine, List(set(0)), if (outer) List(p.Stmt.Break) else Nil)), Nil)
@@ -501,17 +496,17 @@ object BytecodeRemapper {
       }
 
     private def after(s: Statement, ctx: List[Wrap]): Result[List[p.Stmt]] =
-      exitEdge(s).filter(isJump).fold(List.empty[p.Stmt].success)(jump(_, ctx))
+      exitEdge(s).filter(isJump(_)).fold(List.empty[p.Stmt].success)(jump(_, ctx))
 
     private def sequence(xs: List[Statement], ctx: List[Wrap]): Result[List[p.Stmt]] =
       xs.traverse(x => statement(x, ctx).map2(after(x, ctx))(_ ++ _)).map(_.flatten)
 
     private def loop(d: DoStatement, ctx: List[Wrap]): Result[List[p.Stmt]] = {
-      val head = ListBuffer.empty[p.Stmt]
-      val tail = ListBuffer.empty[p.Stmt]
-      val exit = ListBuffer.empty[p.Stmt]
+      val head = mutable.ListBuffer.empty[p.Stmt]
+      val tail = mutable.ListBuffer.empty[p.Stmt]
+      val exit = mutable.ListBuffer.empty[p.Stmt]
       val kind = d.getLooptype
-      def test(buf: ListBuffer[p.Stmt]): Result[Unit] = Option(d.getConditionExprent) match {
+      def test(buf: mutable.ListBuffer[p.Stmt]): Result[Unit] = Option(d.getConditionExprent) match {
         case None => ().success
         case Some(c) =>
           expr(c, buf).map { t =>
@@ -526,13 +521,10 @@ object BytecodeRemapper {
         _    <- if (kind == DoStatement.Type.DO_WHILE) test(tail) else ().success
         _    <- Option(d.getIncExprent).fold(().success)(effect(_, tail))
       } yield {
-        val inner = ListBuffer.empty[p.Stmt]
+        val inner = mutable.ListBuffer.empty[p.Stmt]
         inner ++= head
         if (!register) inner ++= body
-        else {
-          runOnce(inner, body)
-          arrive(inner, contId(d.id), outer = true)
-        }
+        else { runOnce(inner, body); arrive(inner, contId(d.id), outer = true) }
         inner ++= tail
         exit += p.Stmt.While(p.Term.Bool1Const(true), inner.toList)
         if (register) arrive(exit, blkId(d.id), ctx.nonEmpty)
@@ -541,11 +533,13 @@ object BytecodeRemapper {
     }
 
     private def branch(f: IfStatement, ctx: List[Wrap]): Result[List[p.Stmt]] = {
-      val buf = ListBuffer.empty[p.Stmt]
+      val buf = mutable.ListBuffer.empty[p.Stmt]
       def side(body: Statement, edge: StatEdge): Result[List[p.Stmt]] =
-        if (body != null) statement(body, ctx).map2(after(body, ctx))(_ ++ _)
-        else if (edge != null && isJump(edge)) jump(edge, ctx)
-        else Nil.success
+        (Option(body), Option(edge)) match {
+          case (Some(b), _)                 => statement(b, ctx).map2(after(b, ctx))(_ ++ _)
+          case (None, Some(e)) if isJump(e) => jump(e, ctx)
+          case _                            => Nil.success
+        }
       for {
         head <- statement(f.getFirst, ctx)
         cond <- Option(f.getHeadexprent).failIfEmpty("Vineflower left an `if` without a condition")
@@ -555,7 +549,7 @@ object BytecodeRemapper {
       } yield head ++ (buf += p.Stmt.Cond(coerce(buf, c, p.Type.Bool1), t, e)).toList
     }
 
-    private def block(s: Statement, buf: ListBuffer[p.Stmt]): Result[Unit] =
+    private def block(s: Statement, buf: mutable.ListBuffer[p.Stmt]): Result[Unit] =
       Option(s.getExprents).fold(().success)(_.asScala.toList.traverse_(effect(_, buf)))
 
     private def body(s: Statement, ctx: List[Wrap]): Result[List[p.Stmt]] = s match {
@@ -564,7 +558,7 @@ object BytecodeRemapper {
       case f: IfStatement       => branch(f, ctx)
       case q: SequenceStatement => sequence(stats(q), ctx)
       case b: BasicBlockStatement =>
-        val buf = ListBuffer.empty[p.Stmt]
+        val buf = mutable.ListBuffer.empty[p.Stmt]
         block(b, buf).map(_ => buf.toList)
       case _: SwitchStatement       => "Unsupported `switch`".fail
       case _: CatchStatement        => "Unsupported `try`/`catch`; PolyRegion kernels cannot throw".fail
@@ -579,7 +573,7 @@ object BytecodeRemapper {
       if (!needsBlock(s)) body(s, ctx)
       else
         body(s, Wrap.Blk(s.id) :: ctx).map { inner =>
-          val buf = ListBuffer.empty[p.Stmt]
+          val buf = mutable.ListBuffer.empty[p.Stmt]
           runOnce(buf, inner)
           if (register) arrive(buf, blkId(s.id), ctx.nonEmpty)
           buf.toList
@@ -606,9 +600,9 @@ object BytecodeRemapper {
         s"`$owner.$name` is not static and uses its receiver; instance methods need a receiver struct".fail
       else ().success
     rtn      <- typeOf(m.md.ret)
-    argTypes <- m.md.params.toList.traverse(typeOf)
+    argTypes <- m.md.params.toList.traverse(typeOf(_))
     register = needsRegister(m.root)
-    lowerer  = new Lowerer(rtn, register)
+    lowerer  = Lowerer(rtn, register)
     base     = if (isStati) 0 else 1
     slots = argTypes
       .foldLeft((List.empty[(Int, p.Type)], base)) { case ((acc, at), t) => ((at, t) :: acc, at + words(t)) }
@@ -630,7 +624,7 @@ object BytecodeRemapper {
       val src                = p.Term.Select(arg.named, Nil, arg.named.tpe)
       p.Stmt.Mut(target, if (target.tpe == src.tpe) p.Expr.Alias(src) else p.Expr.Cast(src, target.tpe))
     }
-    val prologue = ListBuffer.empty[p.Stmt]
+    val prologue = mutable.ListBuffer.empty[p.Stmt]
     if (register)
       prologue += p.Stmt.Var(
         p.Named("#jmp", p.Type.IntS32),

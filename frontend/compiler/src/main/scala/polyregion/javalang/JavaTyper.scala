@@ -35,10 +35,10 @@ object JavaTyper {
   }
 
   def structSyms(t: p.Type): List[p.Sym] = t match {
-    case p.Type.Struct(n, args) => n :: args.flatMap(structSyms)
+    case p.Type.Struct(n, args) => n :: args.flatMap(structSyms(_))
     case p.Type.Ptr(c, _)       => structSyms(c)
     case p.Type.Arr(c, _, _)    => structSyms(c)
-    case p.Type.Exec(_, as, r)  => as.flatMap(structSyms) ++ structSyms(r)
+    case p.Type.Exec(_, as, r)  => as.flatMap(structSyms(_)) ++ structSyms(r)
     case _                      => Nil
   }
 
@@ -72,23 +72,37 @@ object JavaTyper {
     case TypeKind.VOID    => p.Type.Unit0.success
     case TypeKind.NULL    => p.Type.Nothing.success
     case TypeKind.ARRAY =>
-      typer(m.asInstanceOf[ArrayType].getComponentType).map(p.Type.Ptr(_, p.Type.Space.Global))
-    case TypeKind.DECLARED =>
-      val elem = m.asInstanceOf[DeclaredType].asElement.asInstanceOf[TypeElement]
-      elem.getQualifiedName.toString match {
-        case "java.lang.Boolean"                   => p.Type.Bool1.success
-        case "java.lang.Byte"                      => p.Type.IntS8.success
-        case "java.lang.Short"                     => p.Type.IntS16.success
-        case "java.lang.Integer"                   => p.Type.IntS32.success
-        case "java.lang.Long"                      => p.Type.IntS64.success
-        case "java.lang.Character"                 => p.Type.IntU16.success
-        case "java.lang.Float"                     => p.Type.Float32.success
-        case "java.lang.Double"                    => p.Type.Float64.success
-        case "java.lang.Void"                      => p.Type.Unit0.success
-        case _ if elem.getKind == ElementKind.ENUM => enumAsOrdinal(elem)
-        // TODO carry type arguments through once generic structs are supported
-        case _ => p.Type.Struct(p.Sym(structName(elem)), Nil).success
+      m match {
+        case array: ArrayType => typer(array.getComponentType).map(p.Type.Ptr(_, p.Type.Space.Global))
+        case _                => unlowerable(m)
       }
-    case other => s"Cannot lower Java type `$m` (kind=$other)".fail
+    case TypeKind.DECLARED =>
+      m match {
+        case declared: DeclaredType =>
+          declared.asElement match {
+            case elem: TypeElement => declaredType(elem)
+            case _                 => unlowerable(m)
+          }
+        case _ => unlowerable(m)
+      }
+    case _ => unlowerable(m)
   }
+
+  private def unlowerable(m: TypeMirror): Result[p.Type] = s"Cannot lower Java type `$m` (kind=${m.getKind})".fail
+
+  private def declaredType(elem: TypeElement): Result[p.Type] =
+    elem.getQualifiedName.toString match {
+      case "java.lang.Boolean"                   => p.Type.Bool1.success
+      case "java.lang.Byte"                      => p.Type.IntS8.success
+      case "java.lang.Short"                     => p.Type.IntS16.success
+      case "java.lang.Integer"                   => p.Type.IntS32.success
+      case "java.lang.Long"                      => p.Type.IntS64.success
+      case "java.lang.Character"                 => p.Type.IntU16.success
+      case "java.lang.Float"                     => p.Type.Float32.success
+      case "java.lang.Double"                    => p.Type.Float64.success
+      case "java.lang.Void"                      => p.Type.Unit0.success
+      case _ if elem.getKind == ElementKind.ENUM => enumAsOrdinal(elem)
+      // TODO carry type arguments through once generic structs are supported
+      case _ => p.Type.Struct(p.Sym(structName(elem)), Nil).success
+    }
 }

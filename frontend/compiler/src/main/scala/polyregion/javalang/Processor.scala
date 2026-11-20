@@ -18,6 +18,7 @@ import javax.tools.{Diagnostic, JavaFileObject, StandardLocation}
 import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
+import sun.misc.Unsafe
 
 object Processor {
 
@@ -38,15 +39,15 @@ object Processor {
     "com.sun.tools.javac.api"
   )
 
-  private def getUnsafe = try {
-    val theUnsafe = classOf[sun.misc.Unsafe].getDeclaredField("theUnsafe")
+  private def getUnsafe: Result[Unsafe] = Either.catchNonFatal {
+    val theUnsafe = classOf[Unsafe].getDeclaredField("theUnsafe")
     theUnsafe.setAccessible(true)
-    theUnsafe.get(null).asInstanceOf[sun.misc.Unsafe]
-  } catch { case _: Exception => null }
+    classOf[Unsafe].cast(theUnsafe.get(classOf[Unsafe]))
+  }
 
-  @tailrec def traverseUp[A <: AccessibleObject](cls: Class[?])(f: Class[?] => A): Option[A] = cls match {
-    case null => None
-    case x =>
+  @tailrec def traverseUp[A <: AccessibleObject](cls: Class[?])(f: Class[?] => A): Option[A] = Option(cls) match {
+    case None => None
+    case Some(x) =>
       try {
         val ao = Option(f(x))
         ao.foreach(_.setAccessible(true))
@@ -59,23 +60,23 @@ object Processor {
   def getMethod(c: Class[?], mName: String, parameterTypes: Class[?]*): Method =
     traverseUp(c)(c => c.getDeclaredMethod(mName, parameterTypes*)).get
 
-  private def getOwnModule = try {
+  private def getOwnModule: Result[Object] = Either.catchNonFatal {
     val m = getMethod(classOf[Class[?]], "getModule")
     m.invoke(classOf[Processor])
-  } catch { case _: Exception => null }
+  }
 
   // reflective so a JDK without modules exits through the catch rather than failing to link
-  private def getJdkCompilerModule = try {
+  private def getJdkCompilerModule: Result[Object] = Either.catchNonFatal {
     val cModuleLayer = Class.forName("java.lang.ModuleLayer")
     val mBoot        = cModuleLayer.getDeclaredMethod("boot")
-    val bootLayer    = mBoot.invoke(null)
+    val bootLayer    = mBoot.invoke(cModuleLayer)
     val cOptional    = Class.forName("java.util.Optional")
     val mFindModule  = cModuleLayer.getDeclaredMethod("findModule", classOf[String])
     val oCompilerO   = mFindModule.invoke(bootLayer, "jdk.compiler")
     cOptional.getDeclaredMethod("get").invoke(oCompilerO)
-  } catch { case _: Exception => null }
+  }
 
-  private def getFirstFieldOffset(unsafe: sun.misc.Unsafe) = try
+  private def getFirstFieldOffset(unsafe: Unsafe) = try
     unsafe.objectFieldOffset(classOf[__UnsafeObject].getDeclaredField("first"))
   catch { case e @ (_: NoSuchFieldException | _: SecurityException) => throw RuntimeException(e) }
 
@@ -86,23 +87,25 @@ object Processor {
   def addOpens(packages: Seq[String]): Result[Unit] = findCls("java.lang.Module") match {
     case None => ().success
     case Some(mod) =>
-      val unsafe            = getUnsafe
-      val jdkCompilerModule = getJdkCompilerModule
-      val ownModule         = getOwnModule
-      Either.catchNonFatal {
-        val m                = mod.getDeclaredMethod("implAddOpens", classOf[String], mod)
-        val firstFieldOffset = getFirstFieldOffset(unsafe)
-        unsafe.putBooleanVolatile(m, firstFieldOffset, true)
-        packages.foreach(m.invoke(jdkCompilerModule, _, ownModule))
-      }
+      for {
+        unsafe            <- getUnsafe
+        jdkCompilerModule <- getJdkCompilerModule
+        ownModule         <- getOwnModule
+        _ <- Either.catchNonFatal {
+          val m                = mod.getDeclaredMethod("implAddOpens", classOf[String], mod)
+          val firstFieldOffset = getFirstFieldOffset(unsafe)
+          unsafe.putBooleanVolatile(m, firstFieldOffset, true)
+          packages.foreach(m.invoke(jdkCompilerModule, _, ownModule))
+        }
+      } yield ()
   }
 }
 
 class Processor extends AbstractProcessor {
   import polyregion.ast.Env.debug
 
-  private val symbolTable = mutable.Map[String, TypeElement]()
-  private val methodTable = mutable.Map[String, MethodTree]()
+  private val symbolTable = mutable.Map.empty[String, TypeElement]
+  private val methodTable = mutable.Map.empty[String, MethodTree]
 
   private def deferErrors: Boolean =
     processingEnv.getOptions.getOrDefault(Processor.DeferErrorsOption, "false") == "true"
@@ -126,14 +129,122 @@ class Processor extends AbstractProcessor {
 
   override def getSupportedSourceVersion: SourceVersion = SourceVersion.latestSupported
 
+  private def declaredMethods(cu: CompilationUnitTree): List[(MethodSymbol, MethodTree)] = collectTree(cu) {
+    case m: JCTree.JCMethodDecl => Option(m.sym).map(_ -> m).toList
+    case _                      => Nil
+  }
+
+  private class RegionListener(trees: Trees) extends TaskListener {
+
+    private val markerClosures = Set("polyregion.javalang.OffloadRunnable", "polyregion.javalang.OffloadFunction")
+
+    private val visited = mutable.Set.empty[JavaFileObject]
+
+    private val pool = mutable.Set.empty[MethodTree]
+
+    private val generated = mutable.Set.empty[String]
+
+    // a local class is lifted out of the unit by GENERATE, so its members are caught while still nested
+    private val nestedTrees = mutable.Map.empty[MethodSymbol, MethodTree]
+
+    override def started(e: TaskEvent): Unit = {
+      debug(s"[STARTED]  =>  $e $visited")
+      (e.getKind, Option(e.getCompilationUnit), e.getSourceFile) match {
+
+        // compile at the start of GENERATE, the tree is gone by the time it finishes
+        case (TaskEvent.Kind.GENERATE, Some(cu), file) if !visited.contains(file) =>
+          visited += file
+
+          val reflector = LambdaOutliner.Reflector(symbolTable.toMap, methodTable.toMap)
+
+          // bodies javac synthesises after processing (a lambda's impl method) are invisible to `methodTable`
+          val localTrees = guard {
+            Either.catchNonFatal(declaredMethods(cu).toMap)
+          }.getOrElse(Map.empty[MethodSymbol, MethodTree]) ++ nestedTrees
+
+          // javac throws on some post-Lower nodes (`LetExpr is not part of a public API`), which would abort every region in the file
+          val xs = guard {
+            LambdaOutliner.extractDeserializeLambdaMethods(markerClosures, cu).flatMap { xs =>
+              xs.traverse((invokeFn, meta) =>
+                LambdaOutliner.findMethod(reflector, cu, invokeFn, meta).map(m => meta.implCls -> m)
+              )
+            }
+          } match {
+            case Right(value) => value
+            case Left(x) =>
+              if (!deferErrors) throw x
+              processingEnv.getMessager.printMessage(
+                Diagnostic.Kind.WARNING,
+                s"[PolyRegion] Cannot outline regions in ${e.getSourceFile.getName}: $x"
+              )
+              Nil
+          }
+
+          debug(
+            s">>>> Closures for ${e.getTypeElement}\n" + xs
+              .map { case (cls, m) => s"  ->  ${m.getName.toString.padTo(30, ' ')} @ $cls${m.toString}" }
+              .mkString("\n")
+          )
+
+          xs.filterNot(x => pool.contains(x._2)).foreach { case (cls: String, x: MethodTree) =>
+            pool += x
+
+            val pkg  = "polyregion.$gen$"
+            val name = s"${cls.replace('.', '$')}$$${x.getName}"
+            val fqcn = s"$pkg.$name"
+            if (generated.contains(fqcn)) debug(s"Skip already generated $fqcn")
+            else {
+              debug(s"Write $fqcn")
+              guard(
+                Offloader.compile(
+                  TreeRemapper.Sources(processingEnv, trees, symbolTable.toMap, methodTable.toMap, localTrees),
+                  x,
+                  fqcn
+                )
+              ) match {
+                case Left(failure) =>
+                  val reason = s"[PolyRegion] Cannot offload $cls.${x.getName}: ${failure.getMessage}"
+                  debug(failure)
+                  if (!deferErrors) processingEnv.getMessager.printMessage(Diagnostic.Kind.ERROR, reason)
+                  else
+                    Offloader.unsupported(fqcn, reason) match {
+                      case Right(stub) =>
+                        processingEnv.getMessager.printMessage(Diagnostic.Kind.WARNING, reason)
+                        writeClass(processingEnv, pkg, name, stub.bytes)
+                        generated += fqcn
+                      case Left(stubError) =>
+                        processingEnv.getMessager
+                          .printMessage(Diagnostic.Kind.ERROR, s"$reason (and the stub failed: $stubError)")
+                    }
+                case Right(exe) =>
+                  writeClass(processingEnv, pkg, name, exe.bytes)
+                  generated += fqcn
+              }
+            }
+
+          }
+
+        case _ =>
+      }
+
+    }
+
+    override def finished(e: TaskEvent): Unit = {
+      debug(s"[  ENDED]  =>  $e")
+      (e.getKind, Option(e.getCompilationUnit)) match {
+        case (TaskEvent.Kind.ANALYZE, Some(cu)) =>
+          guard(Either.catchNonFatal(declaredMethods(cu).foreach(nestedTrees += _)))
+          ()
+        case _ =>
+      }
+    }
+  }
+
   override def init(processingEnv: ProcessingEnvironment): Unit = {
     super.init(processingEnv)
     processingEnv.getMessager.printMessage(Diagnostic.Kind.NOTE, "Entered processor")
 
     debug(getClass.getClassLoader)
-
-    val markerClosures =
-      Set("polyregion.javalang.OffloadRunnable", "polyregion.javalang.OffloadFunction")
 
     (for {
       _ <- addOpens(Processor.javacPackages).adaptError(e => RuntimeException("Unable to add opens at runtime", e))
@@ -143,117 +254,7 @@ class Processor extends AbstractProcessor {
       trees <- Either
         .catchNonFatal(Trees.instance(processingEnv))
         .adaptError(e => RuntimeException("Unable to obtain an instance of Trees", e))
-    } yield {
-
-      val visited = mutable.Set[JavaFileObject]()
-
-      val pool = mutable.Set[MethodTree]()
-
-      val generated = mutable.Set[String]()
-
-      // a local class is lifted out of the unit by GENERATE, so its members are caught while still nested
-      val nestedTrees = mutable.Map[MethodSymbol, MethodTree]()
-
-      tasks.addTaskListener(new TaskListener {
-        override def started(e: TaskEvent): Unit = {
-          debug(s"[STARTED]  =>  ${e} ${visited}")
-          (e.getKind, e.getCompilationUnit, e.getSourceFile) match {
-
-            // compile at the start of GENERATE, the tree is gone by the time it finishes
-            case (TaskEvent.Kind.GENERATE, cu, file) if cu != null && !visited.contains(file) =>
-              visited += file
-
-              val reflector = LambdaOutliner.Reflector(symbolTable.toMap, methodTable.toMap)
-
-              // bodies javac synthesises after processing (a lambda's impl method) are invisible to `methodTable`
-              val localTrees = guard {
-                Either.catchNonFatal(collectTree(cu) {
-                  case m: JCTree.JCMethodDecl if m.sym != null => (m.sym -> m) :: Nil
-                  case _                                       => Nil
-                }.toMap)
-              }.getOrElse(Map.empty[MethodSymbol, MethodTree]) ++ nestedTrees
-
-              // javac throws on some post-Lower nodes (`LetExpr is not part of a public API`), which would abort every region in the file
-              val xs = guard {
-                LambdaOutliner.extractDeserializeLambdaMethods(reflector, markerClosures, cu).flatMap { xs =>
-                  xs.traverse((invokeFn, meta) =>
-                    LambdaOutliner.findMethod(reflector, cu, invokeFn, meta).map(m => meta.implCls -> m)
-                  )
-                }
-              } match {
-                case Right(value) => value
-                case Left(x) =>
-                  if (!deferErrors) throw x
-                  processingEnv.getMessager.printMessage(
-                    Diagnostic.Kind.WARNING,
-                    s"[PolyRegion] Cannot outline regions in ${e.getSourceFile.getName}: $x"
-                  )
-                  Nil
-              }
-
-              debug(
-                s">>>> Closures for ${e.getTypeElement}\n" + xs
-                  .map { case (cls, m) => s"  ->  ${m.getName.toString.padTo(30, ' ')} @ $cls${m.toString}" }
-                  .mkString("\n")
-              )
-
-              xs.filterNot(x => pool.contains(x._2)).foreach { case (cls: String, x: MethodTree) =>
-                pool += x
-
-                val pkg  = s"polyregion.$$gen$$"
-                val name = s"${cls.replace('.', '$')}$$${x.getName}"
-                val fqcn = s"$pkg.$name"
-                if (generated.contains(fqcn)) debug(s"Skip already generated ${fqcn}")
-                else {
-                  debug(s"Write ${fqcn}")
-                  guard(
-                    Offloader
-                      .compile(processingEnv, trees, symbolTable.toMap, methodTable.toMap, localTrees, x, fqcn)
-                  ) match {
-                    case Left(e) =>
-                      val reason = s"[PolyRegion] Cannot offload ${cls}.${x.getName}: ${e.getMessage}"
-                      debug(e)
-                      if (!deferErrors) processingEnv.getMessager.printMessage(Diagnostic.Kind.ERROR, reason)
-                      else
-                        Offloader.unsupported(fqcn, reason) match {
-                          case Right(stub) =>
-                            processingEnv.getMessager.printMessage(Diagnostic.Kind.WARNING, reason)
-                            writeClass(processingEnv, pkg, name, stub.bytes)
-                            generated += fqcn
-                          case Left(stubError) =>
-                            processingEnv.getMessager
-                              .printMessage(Diagnostic.Kind.ERROR, s"$reason (and the stub failed: $stubError)")
-                        }
-                    case Right(exe) =>
-                      writeClass(processingEnv, pkg, name, exe.bytes)
-                      generated += fqcn
-                  }
-                }
-
-              }
-
-            case _ =>
-          }
-
-        }
-
-        override def finished(e: TaskEvent): Unit = {
-          debug(s"[  ENDED]  =>  ${e}")
-          e.getKind match {
-            case TaskEvent.Kind.ANALYZE if e.getCompilationUnit != null =>
-              guard {
-                Either.catchNonFatal(collectTree(e.getCompilationUnit) {
-                  case m: JCTree.JCMethodDecl if m.sym != null => (m.sym -> m) :: Nil
-                  case _                                       => Nil
-                }.foreach(nestedTrees += _))
-              }
-              ()
-            case _ =>
-          }
-        }
-
-      })
-    }) match {
+    } yield tasks.addTaskListener(RegionListener(trees))) match {
       case Right(()) =>
       case Left(e) =>
         e.printStackTrace()
@@ -267,9 +268,9 @@ class Processor extends AbstractProcessor {
     @tailrec def collectDeclaredElements(xs: List[Element], acc: List[TypeElement] = Nil): List[TypeElement] =
       xs match {
         case Nil => acc
-        case (x: TypeElement) :: xs =>
-          collectDeclaredElements(x.getEnclosedElements.asScala.toList ::: xs, x :: acc)
-        case _ :: xs => collectDeclaredElements(xs, acc)
+        case (x: TypeElement) :: rest =>
+          collectDeclaredElements(x.getEnclosedElements.asScala.toList ::: rest, x :: acc)
+        case _ :: rest => collectDeclaredElements(rest, acc)
       }
 
     val classes = collectDeclaredElements(roundEnv.getRootElements.asScala.toList)

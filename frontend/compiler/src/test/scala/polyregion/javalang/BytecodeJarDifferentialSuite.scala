@@ -1,7 +1,7 @@
 package polyregion.javalang
 
 import net.bytebuddy.jar.asm.{Opcodes, Type as AsmType}
-import polyregion.ast.{PolyAST as p, *}
+import polyregion.ast.PolyAST as p
 
 import scala.util.Random
 
@@ -18,16 +18,16 @@ class BytecodeJarDifferentialSuite extends munit.FunSuite {
   private def eligible(name: String, desc: String): Boolean =
     name != "<init>" && name != "<clinit>" && {
       val args = AsmType.getArgumentTypes(desc)
-      args.nonEmpty && args.length <= 4 && args.forall(scalar) && scalar(AsmType.getReturnType(desc))
+      args.nonEmpty && args.length <= 4 && args.forall(scalar(_)) && scalar(AsmType.getReturnType(desc))
     }
 
-  private final case class Candidate(
+  private case class Candidate(
       owner: String,
       name: String,
       desc: String,
       fn: p.Function,
       method: java.lang.reflect.Method,
-      receiver: Object
+      receiver: Option[Object]
   ) {
     override def toString: String = s"$owner.$name$desc"
   }
@@ -37,14 +37,14 @@ class BytecodeJarDifferentialSuite extends munit.FunSuite {
       name: String,
       desc: String,
       static: Boolean
-  ): Option[(java.lang.reflect.Method, Object)] =
+  ): Option[(java.lang.reflect.Method, Option[Object])] =
     try {
       val cls = Class.forName(owner, false, getClass.getClassLoader)
       val m   = cls.getDeclaredMethods.find(m => m.getName == name && AsmType.getMethodDescriptor(m) == desc)
-      val receiver =
-        if (static) Some(null: Object)
+      val receiver: Option[Option[Object]] =
+        if (static) Some(None)
         else
-          try Some(cls.getField("MODULE$").get(null))
+          try Some(Some(cls.getField("MODULE$").get(cls)))
           catch { case _: Throwable => None }
       m.zip(receiver)
     } catch { case _: Throwable => None }
@@ -71,7 +71,7 @@ class BytecodeJarDifferentialSuite extends munit.FunSuite {
     out.result().sortBy(_.toString)
   }
 
-  private val rng = new Random(Census.Seed)
+  private val rng = Random(Census.Seed)
 
   // no infinity: PolyRegion takes the target's d2i, not Java's saturating one
   // XXX narrow pools are written as ints because RedundantParens turns `(-1).toByte` into an Int
@@ -107,57 +107,58 @@ class BytecodeJarDifferentialSuite extends munit.FunSuite {
     else List.fill(count)(pools.map(ps => ps(rng.nextInt(ps.size))))
   }
 
-  private final case class Outcome(checked: Int, skipped: Int, disagreed: List[String])
+  private case class Outcome(checked: Int, skipped: Int, disagreed: List[String])
+
+  private enum Verdict {
+    case Skipped
+    case Agreed
+    case Disagreed(report: String)
+  }
+
+  private def compare(c: Candidate, args: List[Any]): Verdict = {
+    val expected =
+      try Right(Differential.invoke(c.method, c.receiver, args).result)
+      catch { case e: Throwable => Left(e) }
+    expected match {
+      // the JVM throws where PolyRegion leaves the result undefined, so the input says nothing
+      case Left(_) => Verdict.Skipped
+      case Right(e) =>
+        val where = s"$c(${args.map(Differential.render(_)).mkString(", ")})"
+        val actual =
+          try Right(Differential.interpret(c.fn, args).result)
+          catch { case t: Throwable => Left(t) }
+        actual match {
+          case Left(t) => Verdict.Disagreed(s"$where: jvm=${Differential.render(e)} interpreter threw $t")
+          case Right(a) =>
+            val same = (e, a) match {
+              case (x: Double, y: Double) => java.lang.Double.compare(x, y) == 0
+              case (x, y)                 => Differential.render(x) == Differential.render(y)
+            }
+            if (same) Verdict.Agreed
+            else Verdict.Disagreed(s"$where: jvm=${Differential.render(e)} interpreter=${Differential.render(a)}")
+        }
+    }
+  }
 
   private def exercise(c: Candidate): Outcome = {
-    var checked   = 0
-    var skipped   = 0
-    val disagreed = List.newBuilder[String]
-    argSets(c.desc, 512).foreach { args =>
-      val expected =
-        try Right(Differential.invoke(c.method, c.receiver, args)._1)
-        catch { case e: Throwable => Left(e) }
-      expected match {
-        // the JVM throws where PolyRegion leaves the result undefined, so the input says nothing
-        case Left(_) => skipped += 1
-        case Right(e) =>
-          checked += 1
-          val where = s"$c(${args.map(Differential.render).mkString(", ")})"
-          val actual =
-            try Right(Differential.interpret(c.fn, args)._1)
-            catch { case t: Throwable => Left(t) }
-          actual match {
-            case Left(t) => disagreed += s"$where: jvm=${Differential.render(e)} interpreter threw $t"
-            case Right(a) =>
-              val same = (e, a) match {
-                case (x: java.lang.Double, y: Double) => java.lang.Double.compare(x.doubleValue, y) == 0
-                case (x, y)                           => Differential.render(x) == Differential.render(y)
-              }
-              if (!same) disagreed += s"$where: jvm=${Differential.render(e)} interpreter=${Differential.render(a)}"
-          }
-      }
-    }
-    Outcome(checked, skipped, disagreed.result())
+    val verdicts = argSets(c.desc, 512).map(compare(c, _))
+    Outcome(
+      verdicts.count(_ != Verdict.Skipped),
+      verdicts.count(_ == Verdict.Skipped),
+      verdicts.collect { case Verdict.Disagreed(report) => report }
+    )
   }
 
   private def differential(name: String, marker: Class[?], floor: Int): Unit =
     test(s"executable methods discovered in $name agree with the JVM") {
       val corpus     = Census.Corpus(name, Census.locate(marker))
       val candidates = discover(corpus)
-      var checked    = 0
-      var skipped    = 0
-      var abandoned  = List.empty[String]
-      val disagreed  = List.newBuilder[String]
-      candidates.foreach { c =>
-        Census.bounded(30_000L)(exercise(c)) match {
-          case None => abandoned = c.toString :: abandoned
-          case Some(o) =>
-            checked += o.checked
-            skipped += o.skipped
-            disagreed ++= o.disagreed
-        }
-      }
-      val bad = disagreed.result()
+      val results    = candidates.map(c => c -> Census.bounded(30_000L)(exercise(c)))
+      val outcomes   = results.collect { case (_, Some(o)) => o }
+      val abandoned  = results.collect { case (c, None) => c.toString }.reverse
+      val checked    = outcomes.map(_.checked).sum
+      val skipped    = outcomes.map(_.skipped).sum
+      val bad        = outcomes.flatMap(_.disagreed)
       println(
         s"differential: $name, ${candidates.size} executable methods discovered, " +
           s"$checked inputs compared, $skipped skipped as undefined, ${abandoned.size} abandoned, ${bad.size} disagreed"

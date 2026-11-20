@@ -12,14 +12,16 @@ import org.jetbrains.java.decompiler.struct.gen.MethodDescriptor
 import org.jetbrains.java.decompiler.struct.{IDecompiledData, StructClass, StructContext, StructMethod}
 import org.jetbrains.java.decompiler.util.DataInputFullStream
 import polyregion.ast.*
+import polyregion.javalang.Interop.absent
 
+import java.util.concurrent.locks.ReentrantLock
 import java.util.jar.Manifest
 import scala.jdk.CollectionConverters.*
 
 // drives Vineflower far enough to obtain the structured tree for one method, see BYTECODE.md
 object Vineflower {
 
-  final case class Method(cl: StructClass, mt: StructMethod, md: MethodDescriptor, root: RootStatement)
+  case class Method(cl: StructClass, mt: StructMethod, md: MethodDescriptor, root: RootStatement)
 
   private object Silent extends IFernflowerLogger {
     override def writeMessage(message: String, severity: IFernflowerLogger.Severity): Unit               = ()
@@ -44,7 +46,7 @@ object Vineflower {
   }
 
   private def preferences: java.util.Map[String, Object] = {
-    val props = new java.util.HashMap[String, Object](IFernflowerPreferences.getDefaults)
+    val props = java.util.HashMap[String, Object](IFernflowerPreferences.getDefaults)
     // the timeout path decompiles on a second thread whose DecompilerContext would need replicating
     props.put(IFernflowerPreferences.MAX_PROCESSING_METHOD, "0")
     props.put(IFernflowerPreferences.BYTECODE_SOURCE_MAPPING, "0")
@@ -54,32 +56,38 @@ object Vineflower {
   }
 
   // DecompilerContext is thread local and the attribute registry process-wide, so one decompilation at a time
-  private val lock = new Object
+  private val lock = ReentrantLock()
+
+  private def locked[A](f: => A): A = {
+    lock.lock()
+    try f
+    finally lock.unlock()
+  }
 
   private def read(classBytes: Array[Byte]): StructClass = {
     StructGeneralAttribute.init()
-    StructClass.create(new DataInputFullStream(classBytes), true)
+    StructClass.create(DataInputFullStream(classBytes), true)
   }
 
-  private def withContext[A](classBytes: Array[Byte])(f: StructClass => A): Result[A] = lock.synchronized {
-    val structContext = new StructContext(NoResults, NoData)
-    val classes       = new ClassesProcessor(structContext)
-    val context       = new DecompilerContext(preferences, Silent, structContext, classes, null)
-    context.renamerFactory = new IdentityRenamerFactory
+  private def withContext[A](classBytes: Array[Byte])(f: StructClass => A): Result[A] = locked {
+    val structContext = StructContext(NoResults, NoData)
+    val classes       = ClassesProcessor(structContext)
+    val context       = DecompilerContext(preferences, Silent, structContext, classes, absent)
+    context.renamerFactory = IdentityRenamerFactory()
     DecompilerContext.setCurrentContext(context)
     try {
       val cl   = read(classBytes)
-      val node = new ClassesProcessor.ClassNode(ClassesProcessor.ClassNode.Type.ROOT, cl)
+      val node = ClassesProcessor.ClassNode(ClassesProcessor.ClassNode.Type.ROOT, cl)
       classes.getMapRootClasses.put(cl.qualifiedName, node)
       DecompilerContext.setProperty(DecompilerContext.CURRENT_CLASS, cl)
       DecompilerContext.setProperty(DecompilerContext.CURRENT_CLASS_NODE, node)
-      DecompilerContext.setProperty(DecompilerContext.CURRENT_CLASS_WRAPPER, new ClassWrapper(node))
-      DecompilerContext.startClass(new ImportCollector(node))
+      DecompilerContext.setProperty(DecompilerContext.CURRENT_CLASS_WRAPPER, ClassWrapper(node))
+      DecompilerContext.startClass(ImportCollector(node))
       f(cl).success
     } catch {
       case e: CancelationManager.CanceledException => s"Vineflower gave up: ${e.getMessage}".fail
       case e: Throwable                            => e.failE
-    } finally DecompilerContext.setCurrentContext(null)
+    } finally DecompilerContext.setCurrentContext(absent)
   }
 
   def classNameOf(classBytes: Array[Byte]): Result[String] =
@@ -88,22 +96,22 @@ object Vineflower {
   // a VarExprent reads the decompiler's options, so the tree is only valid, and lowered, inside its context
   def structure[A](classBytes: Array[Byte], name: String, desc: String)(use: Method => Result[A]): Result[A] =
     withContext(classBytes) { cl =>
-      val mt = cl.getMethod(name, desc)
-      if (mt == null) {
-        val declared = cl.getMethods.asScala.map(m => s"${m.getName}${m.getDescriptor}").toList.sorted
-        s"No method `$name$desc`; the class declares ${declared.mkString(", ")}".fail
-      } else if (!mt.containsCode) s"`${cl.qualifiedName}.$name` is abstract or native".fail
-      else {
-        val md      = MethodDescriptor.parseDescriptor(mt, null)
-        val varProc = new VarProcessor(mt, md)
-        DecompilerContext.startMethod(varProc)
-        val m = Method(cl, mt, md, MethodProcessor.codeToJava(cl, mt, md, varProc, null))
-        diagnose(m).flatMap(_ => use(m))
+      Option(cl.getMethod(name, desc)) match {
+        case None =>
+          val declared = cl.getMethods.asScala.map(m => s"${m.getName}${m.getDescriptor}").toList.sorted
+          s"No method `$name$desc`; the class declares ${declared.mkString(", ")}".fail
+        case Some(mt) if !mt.containsCode => s"`${cl.qualifiedName}.$name` is abstract or native".fail
+        case Some(mt) =>
+          val md      = MethodDescriptor.parseDescriptor(mt, absent)
+          val varProc = VarProcessor(mt, md)
+          DecompilerContext.startMethod(varProc)
+          val m = Method(cl, mt, md, MethodProcessor.codeToJava(cl, mt, md, varProc, absent))
+          diagnose(m).flatMap(_ => use(m))
       }
     }.flatten
 
   private def walk(s: Statement): LazyList[Statement] =
-    s #:: LazyList.from(s.getStats.asScala).flatMap(walk)
+    s #:: LazyList.from(s.getStats.asScala).flatMap(walk(_))
 
   // a structuring failure is a GeneralStatement in the tree, anything else a comment on the root
   private def diagnose(m: Method): Result[Unit] = {

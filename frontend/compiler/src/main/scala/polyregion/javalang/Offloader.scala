@@ -2,8 +2,6 @@ package polyregion.javalang
 
 import cats.syntax.all.*
 import com.sun.source.tree.MethodTree
-import com.sun.source.util.Trees
-import com.sun.tools.javac.code.Symbol
 import net.bytebuddy.description.method.MethodDescription
 import net.bytebuddy.{ByteBuddy, ClassFileVersion}
 import net.bytebuddy.description.modifier.{FieldManifestation, Ownership, TypeManifestation, Visibility}
@@ -16,8 +14,6 @@ import polyregion.ast.{CodeGen, MsgPack, PolyAST as p, *}
 import polyregion.jvm.{compiler as ct, runtime as rt}
 import polyregion.scalalang.Pickler
 
-import java.util.Base64
-import javax.annotation.processing.ProcessingEnvironment
 import javax.lang.model.element.TypeElement
 
 object Offloader {
@@ -28,7 +24,7 @@ object Offloader {
   private val HostTarget = ct.Target.LLVM_HOST
   private val HostArch   = "native"
 
-  final case class Executable(fqcn: String, bytes: Array[Byte])
+  case class Executable(fqcn: String, bytes: Array[Byte])
 
   // the backend normalises non-alphanumerics in symbols, so pre-normalise to keep the runtime's name identical
   private def normalise(s: String): String = s.map(c => if (c.isLetterOrDigit || c == '_') c else '_')
@@ -87,25 +83,40 @@ object Offloader {
     else {
       val slot                  = p.Named(ResultCapture, p.Type.Ptr(entry.rtn, p.Type.Space.Global))
       val target: p.Term.Select = p.Term.Select(slot, Nil, slot.tpe)
-      var fresh                 = 0
-      def rewrite(stmts: List[p.Stmt]): List[p.Stmt] = stmts.flatMap {
+      def rewrite(stmts: List[p.Stmt], from: Int): (List[p.Stmt], Int) =
+        stmts.foldLeft((List.empty[p.Stmt], from)) { case ((done, n), stmt) =>
+          val (rewritten, next) = rewriteStmt(stmt, n)
+          (done ::: rewritten, next)
+        }
+      def rewriteStmt(stmt: p.Stmt, n: Int): (List[p.Stmt], Int) = stmt match {
         case p.Stmt.Return(e) =>
-          val tmp = p.Named(s"#rtn$fresh", entry.rtn)
-          fresh += 1
-          List(
-            p.Stmt.Var(tmp, Some(e)),
-            p.Stmt.Update(target, p.Term.IntS32Const(0), p.Term.Select(tmp, Nil, entry.rtn)),
-            p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+          val tmp = p.Named(s"#rtn$n", entry.rtn)
+          (
+            List(
+              p.Stmt.Var(tmp, Some(e)),
+              p.Stmt.Update(target, p.Term.IntS32Const(0), p.Term.Select(tmp, Nil, entry.rtn)),
+              p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+            ),
+            n + 1
           )
-        case p.Stmt.Cond(c, t, f)             => List(p.Stmt.Cond(c, rewrite(t), rewrite(f)))
-        case p.Stmt.While(c, b)               => List(p.Stmt.While(c, rewrite(b)))
-        case p.Stmt.ForRange(i, lb, ub, s, b) => List(p.Stmt.ForRange(i, lb, ub, s, rewrite(b)))
-        case p.Stmt.Annotated(inner, pos, c)  => rewrite(List(inner)).map(p.Stmt.Annotated(_, pos, c))
-        case other                            => List(other)
+        case p.Stmt.Cond(c, t, f) =>
+          val (t1, n1) = rewrite(t, n)
+          val (f1, n2) = rewrite(f, n1)
+          (List(p.Stmt.Cond(c, t1, f1)), n2)
+        case p.Stmt.While(c, b) =>
+          val (b1, n1) = rewrite(b, n)
+          (List(p.Stmt.While(c, b1)), n1)
+        case p.Stmt.ForRange(i, lb, ub, s, b) =>
+          val (b1, n1) = rewrite(b, n)
+          (List(p.Stmt.ForRange(i, lb, ub, s, b1)), n1)
+        case p.Stmt.Annotated(inner, pos, c) =>
+          val (inner1, n1) = rewriteStmt(inner, n)
+          (inner1.map(p.Stmt.Annotated(_, pos, c)), n1)
+        case other => (List(other), n)
       }
       entry.copy(
         decl = entry.decl.copy(termCaptures = entry.termCaptures :+ p.Arg(slot), rtn = p.Type.Unit0),
-        body = rewrite(entry.body) :+ p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+        body = rewrite(entry.body, 0)._1 :+ p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       )
     }
 
@@ -164,7 +175,6 @@ object Offloader {
 
   private def compileToObject(prog: p.Program): Result[(Array[Byte], List[String])] = for {
     ast <- Either.catchNonFatal {
-      import polyregion.ast.MsgPack.Codec.given
       MsgPack.encode(CodeGen.programVersioned(prog))
     }
     compilation <- Either.catchNonFatal {
@@ -178,17 +188,17 @@ object Offloader {
   } yield (image, compilation.features.toList)
 
   // an array is no constant, so chunks go in as strings and join at class load
-  private final class BinaryInitialiser(fqcn: String, chunks: List[String]) extends ByteCodeAppender {
+  private class BinaryInitialiser(fqcn: String, chunks: List[String]) extends ByteCodeAppender {
     override def apply(
         mv: MethodVisitor,
         ctx: Implementation.Context,
         method: MethodDescription
     ): ByteCodeAppender.Size = {
-      mv.visitLdcInsn(Integer.valueOf(chunks.size))
+      mv.visitLdcInsn(chunks.size)
       mv.visitTypeInsn(Opcodes.ANEWARRAY, "java/lang/String")
       chunks.zipWithIndex.foreach { (chunk, i) =>
         mv.visitInsn(Opcodes.DUP)
-        mv.visitLdcInsn(Integer.valueOf(i))
+        mv.visitLdcInsn(i)
         mv.visitLdcInsn(chunk)
         mv.visitInsn(Opcodes.AASTORE)
       }
@@ -207,9 +217,9 @@ object Offloader {
 
   private def emitClass(fqcn: String, image: Array[Byte], descriptor: String): Result[Array[Byte]] =
     Either.catchNonFatal {
-      val chunks = Base64.getEncoder.encodeToString(image).grouped(ChunkSize).toList
+      val chunks = java.util.Base64.getEncoder.encodeToString(image).grouped(ChunkSize).toList
       // unpinned, ByteBuddy stamps the build JVM's class-file version
-      new ByteBuddy(ClassFileVersion.JAVA_V8)
+      ByteBuddy(ClassFileVersion.JAVA_V8)
         .subclass(classOf[BinaryOffloadExecutable])
         .name(fqcn)
         .modifiers(Visibility.PUBLIC, TypeManifestation.FINAL)
@@ -231,19 +241,12 @@ object Offloader {
     emitClass(fqcn, Array.emptyByteArray, UnsupportedMarker + reason.take(ReasonLimit))
       .map(Executable(fqcn, _))
 
-  def compile(
-      env: ProcessingEnvironment,
-      trees: Trees,
-      classTable: Map[String, TypeElement],
-      methodTable: Map[String, MethodTree],
-      localTrees: Map[Symbol.MethodSymbol, MethodTree],
-      entry: MethodTree,
-      fqcn: String
-  ): Result[Executable] = {
+  def compile(sources: TreeRemapper.Sources, entry: MethodTree, fqcn: String): Result[Executable] = {
+    import sources.{classTable, env}
     val log    = PluginEntry.defaultLog
     val symbol = normalise(fqcn)
     for {
-      region   <- TreeRemapper.compileRegion(env, trees, classTable, methodTable, localTrees, entry)
+      region   <- TreeRemapper.compileRegion(sources, entry)
       raw      <- withFieldStructs(region.program, classTable, region.tags)
       rawEntry <- raw.entry.failIfEmpty(s"Region `$symbol` has no entry")
       resultTpe = rawEntry.rtn

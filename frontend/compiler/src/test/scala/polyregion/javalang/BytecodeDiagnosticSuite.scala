@@ -63,7 +63,7 @@ class BytecodeDiagnosticSuite extends munit.FunSuite {
 
   test("a truncated class file is reported rather than silently mislowered") {
     Vineflower.classNameOf(Array[Byte](0xca.toByte, 0xfe.toByte, 0xba.toByte, 0xbe.toByte)) match {
-      case Left(e)  => assert(e != null)
+      case Left(e)  => assert(Option(e).isDefined)
       case Right(_) => fail("a truncated class file should not parse")
     }
   }
