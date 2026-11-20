@@ -937,7 +937,7 @@ std::string SharedDevice::name() {
 }
 ModuleFormat SharedDevice::moduleFormat() {
   POLYINVOKE_TRACE();
-  return compiler.empty() ? ModuleFormat::Object : ModuleFormat::Source;
+  return compiler.empty() ? ModuleFormat::DSO : ModuleFormat::Source;
 }
 std::vector<Property> SharedDevice::properties() {
   POLYINVOKE_TRACE();
