@@ -1231,18 +1231,42 @@ private[polyregion] object ProgramLinker {
     Either.cond(errors.isEmpty, program, errors)
   }
 
+  private def hostOnlyFunctions(program: p.Program): Set[p.Sym] = {
+    val functions = (program.entry.toList ::: program.functions).filter(_.affinity == p.Function.Affinity.Host)
+    def callees(function: p.Function) =
+      function.collectWhere[p.Expr] { case p.Expr.Invoke(p.Type.FnRef(target), _, _, _, _) => target }
+    def needsHost(function: p.Function) =
+      function.args.headOption.exists(_.named.symbol == "#context") ||
+        function
+          .collectFirst_[p.Expr] {
+            case p.Expr.SpecOp(
+                  _: p.Spec.RemoteLaunch | _: p.Spec.RemoteAlloc | _: p.Spec.RemoteTempAlloc | _: p.Spec.RemoteFree |
+                  _: p.Spec.RemoteMemcpy | _: p.Spec.RemoteSync
+                ) =>
+              true
+          }
+          .isDefined
+    val callers = functions
+      .flatMap(function => callees(function).map(_ -> function.name))
+      .groupMap(_._1)(_._2)
+    @annotation.tailrec
+    def loop(frontier: List[p.Sym], reached: Set[p.Sym]): Set[p.Sym] = frontier match {
+      case Nil                           => reached
+      case name :: rest if reached(name) => loop(rest, reached)
+      case name :: rest                  => loop(callers.getOrElse(name, Nil) ::: rest, reached + name)
+    }
+    loop(functions.filter(needsHost).map(_.name), Set.empty)
+  }
+
   private def validateOffloadHostCalls(program: p.Program): Either[List[String], p.Program] = {
-    val functions = program.entry.toList ::: program.functions
-    val hostNames = functions.collect {
-      case function if function.affinity == p.Function.Affinity.Host => function.name
-    }.toSet
-    val errors = functions.flatMap { function =>
+    val hostOnly = hostOnlyFunctions(program)
+    val errors = (program.entry.toList ::: program.functions).flatMap { function =>
       if (function.affinity != p.Function.Affinity.Offload) Nil
       else
         function
           .collectWhere[p.Expr] { case p.Expr.Invoke(p.Type.FnRef(target), _, _, _, _) => target }
           .distinct
-          .filter(hostNames)
+          .filter(hostOnly)
           .map(target => s"offload function `${function.name.fqcn}` calls host function `${target.fqcn}`")
     }
     Either.cond(errors.isEmpty, program, errors)

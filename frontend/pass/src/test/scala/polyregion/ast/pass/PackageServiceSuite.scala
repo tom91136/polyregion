@@ -296,6 +296,7 @@ class PackageServiceSuite extends munit.FunSuite {
     )
     val implementation = function(
       decl(p.Sym("implementation.call"), p.Function.Affinity.Host),
+      List(syncStmt, unitReturn.head),
       implements = Some(publicName),
       visibility = p.Function.Visibility.Exported
     )
@@ -321,6 +322,13 @@ class PackageServiceSuite extends munit.FunSuite {
     )
   }
 
+  test("imports allow offload functions calling host-tagged callables") {
+    val callable = function(decl(p.Sym("host.callable"), p.Function.Affinity.Host))
+    val kernel   = kernelCalling(callable.name)
+    val imported = importCall(List(kernel, callable))
+    assert(imported.isRight, imported)
+  }
+
   test("imports allow host functions to call interface roots") {
     val caller = function(
       decl(p.Sym("host.caller"), p.Function.Affinity.Host),
@@ -330,18 +338,72 @@ class PackageServiceSuite extends munit.FunSuite {
     assert(imported.isRight, imported)
   }
 
-  test("offload functions reject calls into host functions") {
-    val hostName   = p.Sym("host.helper")
-    val kernelName = p.Sym("kernel.device")
-    val kernel = function(
-      decl(kernelName, p.Function.Affinity.Offload),
-      List(invokeStmt(hostName), unitReturn.head)
-    ).copy(convention = p.CallConvention.OffloadEntry)
-    val linked = linkCall(
-      List(handleStmt(kernelName)),
-      List(kernel, function(decl(hostName, p.Function.Affinity.Host)))
+  private val nullContext = p.Term.NullPtrConst(p.Type.IntU8, p.Type.Space.Global, p.Region.Opaque)
+
+  private def syncStmt = p.Stmt.Var(
+    p.Named("sync", p.Type.Unit0),
+    Some(p.Expr.SpecOp(p.Spec.RemoteSync(nullContext)))
+  )
+
+  private def kernelCalling(callee: p.Sym) = function(
+    decl(p.Sym("kernel.device"), p.Function.Affinity.Offload),
+    List(invokeStmt(callee), unitReturn.head)
+  ).copy(convention = p.CallConvention.OffloadEntry)
+
+  private def linkKernel(kernel: p.Function, functions: List[p.Function]) =
+    linkCall(List(handleStmt(kernel.name)), kernel :: functions)
+
+  test("offload functions may call host-tagged callables") {
+    val callable = p.Sym("host.callable")
+    val leaf     = p.Sym("host.leaf")
+    val linked = linkKernel(
+      kernelCalling(callable),
+      List(
+        function(decl(callable, p.Function.Affinity.Host), List(invokeStmt(leaf), unitReturn.head)),
+        function(decl(leaf, p.Function.Affinity.Host))
+      )
+    )
+    assert(linked.isRight, linked)
+  }
+
+  test("offload functions reject calls into host functions that launch remote work") {
+    val hostName = p.Sym("host.helper")
+    val linked = linkKernel(
+      kernelCalling(hostName),
+      List(function(decl(hostName, p.Function.Affinity.Host), List(syncStmt, unitReturn.head)))
     )
     assertEquals(linked, Left(List("offload function `kernel.device` calls host function `host.helper`")))
+  }
+
+  test("offload functions reject calls that reach remote work transitively") {
+    val middle = p.Sym("host.middle")
+    val leaf   = p.Sym("host.leaf")
+    val linked = linkKernel(
+      kernelCalling(middle),
+      List(
+        function(decl(middle, p.Function.Affinity.Host), List(invokeStmt(leaf), unitReturn.head)),
+        function(decl(leaf, p.Function.Affinity.Host), List(syncStmt, unitReturn.head))
+      )
+    )
+    assertEquals(linked, Left(List("offload function `kernel.device` calls host function `host.middle`")))
+  }
+
+  test("offload functions reject calls into functions taking a context") {
+    val contextual = p.Sym("host.contextual")
+    val callee = function(
+      decl(contextual, p.Function.Affinity.Host).copy(args = List(p.Arg(p.Named("#context", p.Spec.ContextType))))
+    )
+    val kernel = kernelCalling(contextual).copy(body =
+      List(
+        p.Stmt.Var(
+          p.Named("call", p.Type.Unit0),
+          Some(p.Expr.Invoke(p.Type.FnRef(contextual), Nil, None, List(nullContext), p.Type.Unit0))
+        ),
+        unitReturn.head
+      )
+    )
+    val linked = linkKernel(kernel, List(callee))
+    assertEquals(linked, Left(List("offload function `kernel.device` calls host function `host.contextual`")))
   }
 
   test("host functions may call offload functions") {
