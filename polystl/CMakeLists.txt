@@ -23,7 +23,7 @@ foreach (TARGET polystl polystl-static)
     )
 
     target_link_libraries(${TARGET} PRIVATE polyinvoke-obj polyrt-obj polyreflect-rt)
-    polyregion_apply_common_options(${TARGET})
+    polyregion_apply_common_options(${TARGET} DYNAMIC_CXX_RUNTIME)
     if (APPLE)
         target_link_options(${TARGET} PRIVATE LINKER:-undefined,dynamic_lookup)
     elseif (UNIX)
