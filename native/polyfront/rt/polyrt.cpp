@@ -567,6 +567,7 @@ struct CatalogueEntry {
   Backend backend;
   std::unique_ptr<Platform> platform;
   std::vector<std::unique_ptr<Device>> devices;
+  bool enumerated = false;
 };
 
 std::mutex &catalogueMutex() {
@@ -583,9 +584,8 @@ std::vector<CatalogueEntry> &catalogue() {
         log(DebugLevel::Debug, "Backend %s is not in the catalogue: %s", magic_enum::enum_name(backend).data(), error->c_str());
         continue;
       }
-      auto owned = std::move(std::get<std::unique_ptr<Platform>>(platform));
-      auto devices = owned->enumerate();
-      built->emplace_back(CatalogueEntry{.backend = backend, .platform = std::move(owned), .devices = std::move(devices)});
+      built->emplace_back(
+          CatalogueEntry{.backend = backend, .platform = std::move(std::get<std::unique_ptr<Platform>>(platform)), .devices = {}});
     }
     return built.release();
   }();
@@ -599,11 +599,20 @@ CatalogueEntry &platformAt(const int32_t platform) {
   return entries[platform];
 }
 
+std::vector<std::unique_ptr<Device>> &devicesOf(CatalogueEntry &entry) {
+  if (!entry.enumerated) {
+    entry.devices = entry.platform->enumerate();
+    entry.enumerated = true;
+  }
+  return entry.devices;
+}
+
 Device &deviceAt(CatalogueEntry &entry, const int32_t platform, const int32_t device) {
-  if (device < 0 || static_cast<size_t>(device) >= entry.devices.size())
+  auto &devices = devicesOf(entry);
+  if (device < 0 || static_cast<size_t>(device) >= devices.size())
     throw std::invalid_argument(
-        fmt::format("device index {} is out of range for platform {} ({} devices)", device, platform, entry.devices.size()));
-  return *entry.devices[device];
+        fmt::format("device index {} is out of range for platform {} ({} devices)", device, platform, devices.size()));
+  return *devices[device];
 }
 
 template <size_t N> void copyName(char (&out)[N], const std::string &name) { std::snprintf(out, N, "%s", name.c_str()); }
@@ -624,7 +633,7 @@ POLYREGION_EXPORT extern "C" bool polyrt_platform_info(const int32_t platform, P
     auto &entry = platformAt(platform);
     *info = {.backend = static_cast<int32_t>(entry.backend),
              .kind = static_cast<int32_t>(entry.platform->kind()),
-             .deviceCount = static_cast<int32_t>(entry.devices.size()),
+             .deviceCount = static_cast<int32_t>(devicesOf(entry).size()),
              .name = {}};
     copyName(info->name, entry.platform->name());
   });
