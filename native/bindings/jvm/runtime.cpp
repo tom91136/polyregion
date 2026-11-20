@@ -119,7 +119,7 @@ jlong Platforms::pointerOfDirectBuffer0(JNIEnv *env, jclass, jobject buffer) {
 }
 
 static jobject toJni(JNIEnv *env, rt::Backend backend) {
-  return wrapException(env, EX, [&] {
+  return wrapBackend(env, EX, [&] {
     if (auto errorOrPlatform = rt::Platform::of(backend); std::holds_alternative<std::string>(errorOrPlatform)) {
       throw std::runtime_error("Backend " + std::string(magic_enum::enum_name(backend))
                                + " failed to initialise: " + std::get<std::string>(errorOrPlatform));
@@ -155,7 +155,7 @@ jobjectArray Platform::runtimeProperties0(JNIEnv *env, jclass, jlong nativePeer)
   return toJni(env, findRef(env, platforms, nativePeer)->properties());
 }
 jobjectArray Platform::devices0(JNIEnv *env, jclass, jlong nativePeer) {
-  return wrapException(env, EX, [&] {
+  return wrapBackend(env, EX, [&] {
     auto xs = findRef(env, platforms, nativePeer)->enumerate();
     return toJni(env, xs, gen::Device::of(env).clazz, [&](auto &device) {
       auto [peer, d] = emplaceRef(devices, std::shared_ptr(std::move(device)));
@@ -177,7 +177,7 @@ jobjectArray Platform::deviceFeatures0(JNIEnv *env, jclass, jlong nativePeer) {
 
 void Platform::loadModule0(JNIEnv *env, jclass, jlong nativePeer, jstring name, jbyteArray image) {
 
-  wrapException(env, EX, [&] {
+  wrapBackend(env, EX, [&] {
     const auto dev = findRef(env, devices, nativePeer);
     // We need to hold on to our copied image here before passing it on, this is later destroyed with the device.
     auto data = std::make_unique<std::string>(env->GetArrayLength(image), '\0');

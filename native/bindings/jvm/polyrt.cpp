@@ -211,7 +211,7 @@ extern "C" void __polyregion_builtin_assert(const uint32_t code, const char *mes
 }
 
 jint Context::platformCount0(JNIEnv *env, jclass) {
-  return wrapException(env, EX, [&] {
+  return wrapBackend(env, EX, [&] {
     int32_t count = 0;
     check(polyrt_platform_count(&count));
     return static_cast<jint>(count);
@@ -219,7 +219,7 @@ jint Context::platformCount0(JNIEnv *env, jclass) {
 }
 
 jlongArray Context::platformInfo0(JNIEnv *env, jclass, jint platform) {
-  return wrapException(env, EX, [&] {
+  return wrapBackend(env, EX, [&] {
     PolyrtPlatformInfo info{};
     check(polyrt_platform_info(platform, &info));
     const jlong values[] = {info.backend, info.kind, info.deviceCount};
@@ -230,7 +230,7 @@ jlongArray Context::platformInfo0(JNIEnv *env, jclass, jint platform) {
 }
 
 jstring Context::platformName0(JNIEnv *env, jclass, jint platform) {
-  return wrapException(env, EX, [&] {
+  return wrapBackend(env, EX, [&] {
     PolyrtPlatformInfo info{};
     check(polyrt_platform_info(platform, &info));
     return toJni(env, std::string(info.name, strnlen(info.name, sizeof(info.name))));
@@ -238,7 +238,7 @@ jstring Context::platformName0(JNIEnv *env, jclass, jint platform) {
 }
 
 jlongArray Context::deviceInfo0(JNIEnv *env, jclass, jint platform, jint device) {
-  return wrapException(env, EX, [&] {
+  return wrapBackend(env, EX, [&] {
     PolyrtDeviceInfo info{};
     check(polyrt_device_info(platform, device, &info));
     const jlong values[] = {info.backend,
@@ -256,7 +256,7 @@ jlongArray Context::deviceInfo0(JNIEnv *env, jclass, jint platform, jint device)
 }
 
 jstring Context::deviceName0(JNIEnv *env, jclass, jint platform, jint device) {
-  return wrapException(env, EX, [&] {
+  return wrapBackend(env, EX, [&] {
     PolyrtDeviceInfo info{};
     check(polyrt_device_info(platform, device, &info));
     return toJni(env, std::string(info.name, strnlen(info.name, sizeof(info.name))));
@@ -264,7 +264,7 @@ jstring Context::deviceName0(JNIEnv *env, jclass, jint platform, jint device) {
 }
 
 jlong Context::create0(JNIEnv *env, jclass, jint platform, jint device) {
-  return wrapException(env, EX, [&] {
+  return wrapBackend(env, EX, [&] {
     void *context = nullptr;
     check(polyrt_context_create(platform, device, &context));
     return fromHandle(context);
@@ -272,7 +272,7 @@ jlong Context::create0(JNIEnv *env, jclass, jint platform, jint device) {
 }
 
 void Context::destroy0(JNIEnv *env, jclass, jlong context) {
-  wrapException(env, EX, [&] { check(polyrt_context_destroy(toHandle(context))); });
+  wrapBackend(env, EX, [&] { check(polyrt_context_destroy(toHandle(context))); });
 }
 
 jlong Context::current0(JNIEnv *env, jclass) {
@@ -363,7 +363,7 @@ jlongArray Context::stats0(JNIEnv *env, jclass, jlong context) {
 
 jint Context::select0(JNIEnv *env, jclass, jlong context, //
                       jobjectArray imageNames, jbyteArray imageTargets, jobjectArray imageFeatures, jobjectArray images) {
-  return wrapException(env, EX, [&] {
+  return wrapBackend(env, EX, [&] {
     auto set = readImages(env, imageNames, imageTargets, imageFeatures, images);
     auto *handle = toHandle(context);
     Transaction transaction(handle);
@@ -380,7 +380,7 @@ jint Context::select0(JNIEnv *env, jclass, jlong context, //
 void Context::launch0(JNIEnv *env, jclass, jlong context,                                                                //
                       jobjectArray imageNames, jbyteArray imageTargets, jobjectArray imageFeatures, jobjectArray images, //
                       jstring moduleName, jstring kernel, jbyteArray argTypes, jbyteArray argData, jlongArray dims) {
-  wrapException(env, EX, [&] {
+  wrapBackend(env, EX, [&] {
     auto set = readImages(env, imageNames, imageTargets, imageFeatures, images);
     const auto module = fromJni(env, moduleName);
     const auto entry = fromJni(env, kernel);
@@ -407,7 +407,7 @@ void Context::launch0(JNIEnv *env, jclass, jlong context,                       
 }
 
 void Context::loadHostProgram0(JNIEnv *env, jclass, jstring name, jbyteArray image) {
-  wrapException(env, EX, [&] {
+  wrapBackend(env, EX, [&] {
     auto &host = hostRuntime();
     const auto moduleName = fromJni(env, name);
     const auto data = fromJni<jbyte>(env, image);
@@ -418,7 +418,7 @@ void Context::loadHostProgram0(JNIEnv *env, jclass, jstring name, jbyteArray ima
 }
 
 jboolean Context::hostProgramLoaded0(JNIEnv *env, jclass, jstring name) {
-  return wrapException(env, EX, [&] {
+  return wrapBackend(env, EX, [&] {
     auto &host = hostRuntime();
     const std::scoped_lock lock(host.mutex);
     return static_cast<jboolean>(host.device->moduleLoaded(fromJni(env, name)));
@@ -428,7 +428,7 @@ jboolean Context::hostProgramLoaded0(JNIEnv *env, jclass, jstring name) {
 void Context::callHost0(JNIEnv *env, jclass, jlong context,                                                                //
                         jobjectArray imageNames, jbyteArray imageTargets, jobjectArray imageFeatures, jobjectArray images, //
                         jstring programName, jstring entry, jbyteArray argTypes, jbyteArray argData) {
-  wrapException(env, EX, [&] {
+  wrapBackend(env, EX, [&] {
     auto set = readImages(env, imageNames, imageTargets, imageFeatures, images);
     const auto program = fromJni(env, programName);
     const auto symbol = fromJni(env, entry);

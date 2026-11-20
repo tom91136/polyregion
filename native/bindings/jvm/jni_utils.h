@@ -2,7 +2,14 @@
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <utility>
 #include <vector>
+
+#ifndef _WIN32
+  #include <csignal>
+  #include <cstddef>
+  #include <mutex>
+#endif
 
 #include "jni.h"
 
@@ -67,4 +74,52 @@ template <typename F> static auto wrapException(JNIEnv *env, const std::string &
   } catch (const std::exception &e) {
     return throwGeneric<std::invoke_result_t<F>>(env, exceptionClass, e.what());
   }
+}
+
+#ifndef _WIN32
+class SignalGuard {
+  static constexpr int SIGNALS[] = {SIGHUP,  SIGINT,  SIGQUIT, SIGILL,  SIGTRAP, SIGABRT, SIGBUS, SIGFPE,
+                                    SIGSEGV, SIGPIPE, SIGUSR2, SIGTERM, SIGXCPU, SIGXFSZ, SIGSYS};
+  static constexpr size_t COUNT = sizeof(SIGNALS) / sizeof(SIGNALS[0]);
+
+  struct State {
+    std::mutex mutex;
+    size_t active = 0;
+    struct sigaction trusted[COUNT]{};
+  };
+
+  static State &state() {
+    static State s;
+    return s;
+  }
+
+public:
+  SignalGuard() {
+    auto &s = state();
+    const std::scoped_lock lock(s.mutex);
+    if (s.active++ == 0)
+      for (size_t i = 0; i < COUNT; ++i)
+        sigaction(SIGNALS[i], nullptr, &s.trusted[i]);
+  }
+  SignalGuard(const SignalGuard &) = delete;
+  SignalGuard &operator=(const SignalGuard &) = delete;
+  ~SignalGuard() {
+    auto &s = state();
+    const std::scoped_lock lock(s.mutex);
+    for (size_t i = 0; i < COUNT; ++i) {
+      struct sigaction current{};
+      if (sigaction(SIGNALS[i], nullptr, &current) == 0
+          && (current.sa_handler != s.trusted[i].sa_handler || current.sa_flags != s.trusted[i].sa_flags))
+        sigaction(SIGNALS[i], &s.trusted[i], nullptr);
+    }
+    --s.active;
+  }
+};
+#else
+struct SignalGuard {};
+#endif
+
+template <typename F> static auto wrapBackend(JNIEnv *env, const std::string &exceptionClass, F &&f) {
+  const SignalGuard guard;
+  return wrapException(env, exceptionClass, std::forward<F>(f));
 }
