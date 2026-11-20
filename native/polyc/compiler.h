@@ -23,7 +23,7 @@ using TimePoint = std::chrono::steady_clock::time_point;
 POLYREGION_EXPORT void initialise();
 
 inline constexpr auto DefaultPipelineSpec = "FullOpt;StructuredExit";
-inline constexpr auto JvmPipelineSpec = "FullOpt;EscapeAnalysis(refuse=true);PartialEval;StructuredExit";
+inline constexpr auto JvmPipelineSpec = "FullOpt;EscapeAnalysis(refuse=true);ZeroAlloc;PartialEval;StructuredExit";
 inline constexpr uint32_t DefaultWorkgroupMemoryBytes = 32768;
 
 [[nodiscard]] constexpr uint32_t defaultWorkgroupMemoryBytes(const compiletime::Target target) {

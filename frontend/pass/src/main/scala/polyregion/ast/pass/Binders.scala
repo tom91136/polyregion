@@ -80,4 +80,25 @@ private[pass] object Binders {
       p.Named(symbol, tpe)
     }
   }
+
+  def descend(s: p.Stmt)(g: List[p.Stmt] => List[p.Stmt]): p.Stmt = s match {
+    case p.Stmt.Annotated(inner, pos, comment) => p.Stmt.Annotated(descend(inner)(g), pos, comment)
+    case p.Stmt.Cond(c, t, e)                  => p.Stmt.Cond(c, g(t), g(e))
+    case p.Stmt.While(c, b)                    => p.Stmt.While(c, g(b))
+    case p.Stmt.ForRange(i, lb, ub, st, b)     => p.Stmt.ForRange(i, lb, ub, st, g(b))
+    case p.Stmt.Try(b, hs, fin)                => p.Stmt.Try(g(b), hs.map(h => h.copy(body = g(h.body))), g(fin))
+    case p.Stmt.Raise(v, k, cleanup)           => p.Stmt.Raise(v, k, g(cleanup))
+    case other                                 => other
+  }
+
+  def mapBlocks(stmts: List[p.Stmt])(g: List[p.Stmt] => List[p.Stmt]): List[p.Stmt] =
+    g(stmts.map(descend(_)(mapBlocks(_)(g))))
+
+  def mapStmts(stmts: List[p.Stmt])(f: p.Stmt => List[p.Stmt]): List[p.Stmt] = {
+    def one(s: p.Stmt): List[p.Stmt] = s match {
+      case p.Stmt.Annotated(inner, pos, comment) => one(inner).map(p.Stmt.Annotated(_, pos, comment))
+      case other                                 => f(other)
+    }
+    mapBlocks(stmts)(_.flatMap(one))
+  }
 }

@@ -5,22 +5,6 @@ import polyregion.ast.Traversal.*
 
 import scala.collection.mutable
 
-// flow-insensitive escape analysis over heap allocations (`alloc` in Global/Opaque), then scalar replacement
-// of what does not escape. objects are alloc sites, caller-owned parameters and an unknown top; an alloc
-// escapes when a pointer to it is returned, thrown, stored into memory that is not a tracked site, stored into
-// an escaping site, converted to an integer, or passed to a callee/foreign op that lets it escape. callee
-// effects come from per-parameter summaries solved to a fixed point over the program's functions
-// examples:
-//   a = alloc[int](2); a[0] = x; a[1] = y; a[0] + a[1]  ->  a_0 = x; a_1 = y; a_0 + a_1   // const-index cells
-//   t: Pair; t.a = 1; t.b = 2; t.a + t.b                ->  t_a = 1; t_b = 2; t_a + t_b  // struct temporary
-//   a = alloc[int](n); a[i] = x; sum(a)                 ->  unchanged (dynamic index, but does not escape)
-//   a = alloc[int](1); cap[0] = a                       ->  refuse: stored into capture `cap`
-//   a = alloc[int](1); return a                         ->  refuse: returned from the offload entry
-// edge cases:
-//   struct whose address is taken, or used as a whole value (copied, passed, returned)  ->  kept
-//   union struct, or a used member of array type                                         ->  kept
-//   Local/Private alloc (group or stack storage)                                         ->  not a heap site
-//   refuse=false                                                                         ->  analysis and rewrite only
 final case class EscapeAnalysis(refuse: Boolean = false) extends ProgramPass derives PassArgCodec {
 
   import EscapeAnalysis.*
@@ -48,7 +32,8 @@ final case class EscapeAnalysis(refuse: Boolean = false) extends ProgramPass der
 
 object EscapeAnalysis {
 
-  private type Summaries = Map[(p.Sym, Int), Map[Int, String]]
+  private final case class Signature(name: p.Sym, params: List[p.Type])
+  private type Summaries = Map[Signature, Map[Int, String]]
 
   private sealed trait Obj
   private final case class Site(symbol: String) extends Obj
@@ -78,6 +63,11 @@ object EscapeAnalysis {
     case _                      => false
   }
 
+  private def isArr(t: p.Type): Boolean = t match {
+    case p.Type.Arr(comp = _) => true
+    case _                    => false
+  }
+
   private def isPtr(t: p.Type): Boolean = t match {
     case p.Type.Ptr(_, _) => true
     case _                => false
@@ -98,11 +88,10 @@ object EscapeAnalysis {
   private def isHeapAlloc(a: p.Expr.Alloc): Boolean =
     a.space == p.Type.Space.Global && a.region == p.Region.Opaque
 
-  private def loadsOf(root: p.Named, steps: List[p.PathStep]): Int =
-    steps.count {
-      case p.PathStep.Field(_) => false
-      case _                   => true
-    } + (if (isPtr(root.tpe) && steps.headOption.exists(_.isInstanceOf[p.PathStep.Field])) 1 else 0)
+  private def loadsOf(steps: List[p.PathStep]): Int = steps.count {
+    case p.PathStep.Field(_) => false
+    case _                   => true
+  }
 
   private final class Analysis(f: p.Function, summaries: Summaries) {
 
@@ -112,6 +101,8 @@ object EscapeAnalysis {
     private val reasons = mutable.LinkedHashMap.empty[Obj, String]
     private val params  = flatParams(f)
     private var changed = false
+
+    private val anonymous = java.util.IdentityHashMap[p.Expr.Alloc, p.Named]()
 
     params.zipWithIndex.foreach { case ((named, _), i) =>
       if (mayHoldPointer(named.tpe)) vals(named.symbol) = Set(Param(i))
@@ -178,13 +169,13 @@ object EscapeAnalysis {
         ._1
 
     private def term(t: p.Term): Set[Obj] = t match {
-      case p.Term.Select(root, steps, tpe) if mayHoldPointer(tpe) => reach(vals(root.symbol), loadsOf(root, steps))
+      case p.Term.Select(root, steps, tpe) if mayHoldPointer(tpe) => reach(vals(root.symbol), loadsOf(steps))
       case _                                                      => Set.empty
     }
 
     private def store(lhs: p.Term.Select, value: Set[Obj], throughPointer: Boolean): Unit =
       if (value.nonEmpty) {
-        val loads = loadsOf(lhs.root, lhs.steps)
+        val loads = loadsOf(lhs.steps)
         if (throughPointer) into(term(lhs), value)
         else if (loads == 0) addVal(lhs.root.symbol, value)
         else into(reach(vals(lhs.root.symbol), loads - 1), value)
@@ -193,6 +184,17 @@ object EscapeAnalysis {
     private def into(targets: Set[Obj], value: Set[Obj]): Unit = targets.foreach {
       case s: Site => addMem(s, value)
       case o       => escape(value, s"stored into ${describe(o)}")
+    }
+
+    private def summary(name: p.Sym, actuals: List[p.Term]): Option[Map[Int, String]] = {
+      val candidates  = summaries.keys.filter(k => k.name == name && k.params.size == actuals.size).toList
+      val actualTypes = actuals.map(_.tpe)
+      val exact       = candidates.filter(_.params == actualTypes)
+      (candidates, exact) match {
+        case (single :: Nil, _) => summaries.get(single)
+        case (_, single :: Nil) => summaries.get(single)
+        case _                  => None
+      }
     }
 
     private def returnReason: String =
@@ -215,14 +217,19 @@ object EscapeAnalysis {
       case p.Expr.RefTo(lhs = lhs) => term(lhs) + Top
       case a @ p.Expr.Alloc(comp, size, _, _) =>
         if (isHeapAlloc(a)) {
-          val named = ctx.getOrElse(p.Named("<anonymous>", p.Type.Ptr(comp, p.Type.Space.Global)))
+          val named = ctx.getOrElse {
+            anonymous.computeIfAbsent(
+              a,
+              _ => p.Named(s"<allocation ${anonymous.size}>", p.Type.Ptr(comp, p.Type.Space.Global))
+            )
+          }
           sites.getOrElseUpdate(named.symbol, SiteInfo(named, comp, size, pos.orElse(named.origin.pos)))
           Set(Site(named.symbol))
         } else Set(Top)
       case ivk: p.Expr.Invoke =>
         val actuals = ivk.receiver.toList ::: ivk.args
         val name    = ivk.calleeName
-        summaries.get((name, actuals.size)) match {
+        summary(name, actuals) match {
           case Some(esc) =>
             actuals.zipWithIndex.foreach { case (a, i) =>
               esc.get(i).foreach(why => escape(term(a), s"passed to `${name.repr}`, which lets it escape: $why"))
@@ -277,7 +284,7 @@ object EscapeAnalysis {
   }
 
   private def summarise(functions: List[p.Function]): Summaries = {
-    def key(f: p.Function)   = (f.name, flatParams(f).size)
+    def key(f: p.Function)   = Signature(f.name, flatParams(f).map(_._1.tpe))
     var summaries: Summaries = functions.map(f => key(f) -> Map.empty[Int, String]).toMap
     var again                = true
     while (again) {
@@ -302,27 +309,6 @@ object EscapeAnalysis {
       case _                            => "n"
     }
     s"allocation `${info.display}` (${info.comp.repr}[$size]) in `${f.name.repr}`$at escapes: $why"
-  }
-
-  private def descend(s: p.Stmt)(g: List[p.Stmt] => List[p.Stmt]): p.Stmt = s match {
-    case p.Stmt.Annotated(inner, pos, comment) => p.Stmt.Annotated(descend(inner)(g), pos, comment)
-    case p.Stmt.Cond(c, t, e)                  => p.Stmt.Cond(c, g(t), g(e))
-    case p.Stmt.While(c, b)                    => p.Stmt.While(c, g(b))
-    case p.Stmt.ForRange(i, lb, ub, st, b)     => p.Stmt.ForRange(i, lb, ub, st, g(b))
-    case p.Stmt.Try(b, hs, fin)                => p.Stmt.Try(g(b), hs.map(h => h.copy(body = g(h.body))), g(fin))
-    case p.Stmt.Raise(v, k, cleanup)           => p.Stmt.Raise(v, k, g(cleanup))
-    case other                                 => other
-  }
-
-  private def mapBlocks(stmts: List[p.Stmt])(g: List[p.Stmt] => List[p.Stmt]): List[p.Stmt] =
-    g(stmts.map(descend(_)(mapBlocks(_)(g))))
-
-  private def mapStmts(stmts: List[p.Stmt])(f: p.Stmt => List[p.Stmt]): List[p.Stmt] = {
-    def one(s: p.Stmt): List[p.Stmt] = s match {
-      case p.Stmt.Annotated(inner, pos, comment) => one(inner).map(p.Stmt.Annotated(_, pos, comment))
-      case other                                 => f(other)
-    }
-    mapBlocks(stmts)(_.flatMap(one))
   }
 
   private def mentions(s: p.Stmt, symbols: Set[String]): Boolean =
@@ -353,11 +339,17 @@ object EscapeAnalysis {
 
   private def rewrite(f: p.Function, analysis: Analysis, defs: Map[p.Sym, p.StructDef]): p.Function = {
     val taken = mutable.Set.from(symbolsOf(f))
-    val a     = replaceAllocs(f, analysis, taken)
+    val a     = replaceAllocs(f, analysis, defs, taken)
     replaceStructs(a, defs, taken)
   }
 
-  private def replaceAllocs(f: p.Function, analysis: Analysis, taken: mutable.Set[String]): p.Function = {
+  @SuppressWarnings(Array("bonsai:loop-boxing"))
+  private def replaceAllocs(
+      f: p.Function,
+      analysis: Analysis,
+      defs: Map[p.Sym, p.StructDef],
+      taken: mutable.Set[String]
+  ): p.Function = {
     val decls = declCounts(f)
     val terms = f.collectAll[p.Term]
     val occurrences =
@@ -377,16 +369,17 @@ object EscapeAnalysis {
       val limit   = constIndex(info.size)
       Option.when(
         declared && decls.get(symbol).contains(1) && !analysis.escaped(symbol) && limit.isDefined &&
+          Zero.declare(defs, info.named.copy(tpe = info.comp), mutable = false).isDefined &&
           reads.size + writes.size == total && indices.size == total && indices.forall(i => i >= 0 && i < limit.get)
-      )(symbol -> (info, indices.distinct.sorted))
+      )(symbol -> (info, indices.distinct.sorted, writes.flatten))
     }
     if (candidates.isEmpty) f
     else {
-      val cells = candidates.map { case (symbol, (info, indices)) =>
-        symbol -> indices
-          .map(i => i -> info.named.copy(symbol = uniqueName(taken, s"${symbol}_$i"), tpe = info.comp))
-          .toMap
+      val sites = candidates.map { case (symbol, (info, indices, written)) =>
+        val named = indices.map(i => i -> info.named.copy(symbol = uniqueName(taken, s"${symbol}_$i"), tpe = info.comp))
+        symbol -> (named.toMap, named.flatMap((i, c) => Zero.declare(defs, c, written.contains(i)).get))
       }.toMap
+      val cells                                             = sites.view.mapValues(_._1).toMap
       def cell(root: p.Named, idx: p.Term): Option[p.Named] = cells.get(root.symbol).flatMap(_.get(constIndex(idx).get))
       val exprs = f.modifyAll[p.Expr] {
         case p.Expr.Index(p.Term.Select(root, Nil, _), idx, comp) if cell(root, idx).isDefined =>
@@ -394,9 +387,9 @@ object EscapeAnalysis {
           p.Expr.Alias(p.Term.Select(c, Nil, comp))
         case other => other
       }
-      val body = mapStmts(exprs.body) {
+      val body = Binders.mapStmts(exprs.body) {
         case p.Stmt.Var(n, Some(p.Expr.Alloc(comp = _)), _) if cells.contains(n.symbol) =>
-          cells(n.symbol).toList.sortBy(_._1).map { case (_, c) => p.Stmt.Var(c, None) }
+          sites(n.symbol)._2
         case p.Stmt.Update(p.Term.Select(root, Nil, _), idx, value) if cell(root, idx).isDefined =>
           val c = cell(root, idx).get
           List(p.Stmt.Mut(p.Term.Select(c, Nil, c.tpe), p.Expr.Alias(value)))
@@ -415,18 +408,8 @@ object EscapeAnalysis {
     case _ => None
   }
 
-  private def structMembers(defs: Map[p.Sym, p.StructDef], tpe: p.Type): Option[List[(String, p.Type)]] = tpe match {
-    case p.Type.Struct(name, args) =>
-      defs.get(name).filter(d => !d.isUnion && d.tpeVars.size == args.size).flatMap { d =>
-        val env     = d.tpeVars.map(_.name).zip(args).toMap
-        val members = d.members.map(m => m.symbol -> Binders.substType(m.tpe, env))
-        Option.when(members.forall {
-          case (_, p.Type.Arr(comp = _)) => false
-          case _                         => true
-        })(members)
-      }
-    case _ => None
-  }
+  private def structMembers(defs: Map[p.Sym, p.StructDef], tpe: p.Type): Option[List[(String, p.Type)]] =
+    Zero.members(defs, tpe).filter(_.forall((_, t) => !isArr(t)))
 
   private def expandCopies(f: p.Function, defs: Map[p.Sym, p.StructDef]): p.Function = {
     val decls = declCounts(f)
@@ -449,7 +432,7 @@ object EscapeAnalysis {
     }.toSet
     if (sources.isEmpty) f
     else
-      f.copy(body = mapStmts(f.body) {
+      f.copy(body = Binders.mapStmts(f.body) {
         case p.Stmt.Var(y, Some(p.Expr.Alias(p.Term.Select(x, Nil, _))), m) if sources(x.symbol) =>
           val members = structMembers(defs, y.tpe).get
           p.Stmt.Var(y, None, m) :: members.map { case (name, tpe) =>
@@ -500,7 +483,7 @@ object EscapeAnalysis {
           p.Term.Select(cells(root.symbol)(name), rest, tpe)
         case other => other
       }
-      val body = mapStmts(terms2.body) {
+      val body = Binders.mapStmts(terms2.body) {
         case p.Stmt.Var(n, None, mutable) if cells.contains(n.symbol) =>
           candidates.find(_._1.symbol == n.symbol).get._2.map { case (name, _) =>
             p.Stmt.Var(cells(n.symbol)(name), None, mutable)
@@ -527,10 +510,15 @@ object EscapeAnalysis {
       }
       .toSet
     def fusable(c: String) = cells(c) && writes.get(c).contains(1) && !addressed(c)
+    def isZero(tpe: p.Type, e: p.Expr) = e match {
+      case p.Expr.Alias(t) => Zero.term(tpe).contains(t)
+      case _               => false
+    }
 
     def go(stmts: List[p.Stmt]): List[p.Stmt] = stmts match {
       case Nil => Nil
-      case (decl @ p.Stmt.Var(n, None, _)) :: rest if fusable(n.symbol) =>
+      case (decl @ p.Stmt.Var(n, init, _)) :: rest
+          if fusable(n.symbol) && !isArr(n.tpe) && init.forall(isZero(n.tpe, _)) =>
         val (before, after) = rest.span(!mentions(_, Set(n.symbol)))
         after match {
           case p.Stmt.Mut(p.Term.Select(root, Nil, _), e) :: tail
@@ -540,6 +528,6 @@ object EscapeAnalysis {
         }
       case other :: rest => other :: go(rest)
     }
-    f.copy(body = mapBlocks(f.body)(go))
+    f.copy(body = Binders.mapBlocks(f.body)(go))
   }
 }

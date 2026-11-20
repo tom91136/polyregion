@@ -55,6 +55,22 @@ class EscapeSuite extends BaseSuite {
     xs(3) + xs(2)
   }
 
+  testExpr("array-unwritten-constant-index") {
+    val xs = Array.ofDim[Int](3)
+    xs(0) = 1
+    xs(0) + xs(2)
+  }
+
+  testExpr("array-unwritten-dynamic-index") {
+    val xs = Array.ofDim[Int](6)
+    var i  = 0
+    while (i < 3) {
+      xs(i) = 5
+      i += 1
+    }
+    xs(1) + xs(4)
+  }
+
   test("an array stored into a capture is refused") {
     val errors = typeCheckErrors("""
       val holder = new Array[Array[Int]](1)

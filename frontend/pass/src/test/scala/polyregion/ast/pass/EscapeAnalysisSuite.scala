@@ -424,6 +424,137 @@ class EscapeAnalysisSuite extends munit.FunSuite {
     assertEquals(allocs(out.entry.required).size, 1)
   }
 
+  test("unwritten constant cell reads as zero") {
+    val a = named("a", ptrI32)
+    val r = named("r", i32)
+    val x = named("x", i32)
+    val y = named("y", i32)
+    val real = List(
+      v(a, allocOf(i32, 2)),
+      p.Stmt.Update(selectT(a), int(0), int(1)),
+      v(x, p.Expr.Index(selectT(a), int(0), i32)),
+      v(y, p.Expr.Index(selectT(a), int(1), i32)),
+      v(r, add(selectT(x), selectT(y))),
+      ret(alias(selectT(r)))
+    )
+    val out = PartialEval()(run(real, rtn = i32), NoopLog)
+    assertEquals(allocs(out.entry.required), Nil)
+    assertEquals(out.entry.body, List(ret(alias(int(1)))))
+  }
+
+  test("unwritten struct-element cell reads as a zeroed struct") {
+    val a = named("a", p.Type.Ptr(pairT, g))
+    val t = named("t", pairT)
+    val real = List(
+      v(a, p.Expr.Alloc(pairT, int(1), g, p.Region.Opaque)),
+      v(t, p.Expr.Index(selectT(a), int(0), pairT)),
+      ret(alias(field(t, "b")))
+    )
+    val out = PartialEval()(run(real, rtn = i32), NoopLog)
+    assertEquals(allocs(out.entry.required), Nil)
+    assertEquals(out.entry.body, List(ret(alias(int(0)))))
+  }
+
+  test("allocation of array elements is not replaced") {
+    val arr = p.Type.Arr(i32, 2, g)
+    val a   = named("a", p.Type.Ptr(arr, g))
+    val out = run(
+      List(
+        v(a, p.Expr.Alloc(arr, int(1), g, p.Region.Opaque)),
+        v(named("e", arr), p.Expr.Index(selectT(a), int(0), arr)),
+        ret(alias(p.Term.Unit0Const))
+      )
+    )
+    assertEquals(allocs(out.entry.required).size, 1)
+  }
+
+  test("reassigned array variable is not replaced") {
+    val a = named("a", ptrI32)
+    val out = run(
+      List(
+        v(a, allocOf(i32, 2), mut = true),
+        p.Stmt.Update(selectT(a), int(0), int(1)),
+        mut(a, allocOf(i32, 4)),
+        v(named("r", i32), p.Expr.Index(selectT(a), int(0), i32)),
+        ret(alias(selectT("r")))
+      ),
+      rtn = i32
+    )
+    assertEquals(allocs(out.entry.required).size, 2)
+  }
+
+  test("same-name overloads keep separate escape summaries") {
+    val hold = arg("hold", ptrPtr)
+    val q32  = arg("q", ptrI32)
+    val q64  = arg("q", p.Type.Ptr(p.Type.IntS64, g))
+    val keep32 = fn(
+      "keep",
+      List(q32, hold),
+      p.Type.Unit0,
+      List(p.Stmt.Update(selectT(hold.named), int(0), selectT(q32.named)), ret(alias(p.Term.Unit0Const)))
+    )
+    val keep64 = fn("keep", List(q64, hold), p.Type.Unit0, List(ret(alias(p.Term.Unit0Const))))
+    val wide   = named("wide", p.Type.Ptr(p.Type.IntS64, g))
+    val narrow = named("narrow", ptrI32)
+    def call(a: p.Named) =
+      p.Expr.Invoke(p.Type.FnRef(sym("keep")), Nil, None, List(selectT(a), selectT(capture.named)), p.Type.Unit0)
+    val ok = List(
+      v(wide, p.Expr.Alloc(p.Type.IntS64, int(4), g, p.Region.Opaque)),
+      v(named("u", p.Type.Unit0), call(wide)),
+      ret(alias(p.Term.Unit0Const))
+    )
+    run(ok, termCaptures = List(capture), functions = List(keep32, keep64), refuse = true)
+    val bad = List(v(narrow, allocOf(i32, 4)), v(named("u", p.Type.Unit0), call(narrow)), ret(alias(p.Term.Unit0Const)))
+    val msg = refused(bad, termCaptures = List(capture), functions = List(keep32, keep64))
+    assert(msg.contains("passed to `keep`"), msg)
+  }
+
+  test("allocation stored into a field of a struct parameter escapes through the callee") {
+    val holderSym = sym("Holder")
+    val holderT   = p.Type.Struct(holderSym, Nil)
+    val holderDef = p.StructDef(holderSym, Nil, List(named("p", ptrI32)), Nil)
+    val q         = arg("q", ptrI32)
+    val h         = arg("h", p.Type.Ptr(holderT, g))
+    val store = p.Stmt.Mut(
+      p.Term.Select(h.named, List(p.PathStep.Deref, p.PathStep.Field("p")), ptrI32),
+      alias(selectT(q.named))
+    )
+    val callee    = fn("stash", List(q, h), p.Type.Unit0, List(store, ret(alias(p.Term.Unit0Const))))
+    val holderCap = arg("holder", p.Type.Ptr(holderT, g))
+    val a         = named("a", ptrI32)
+    val call =
+      p.Expr.Invoke(p.Type.FnRef(sym("stash")), Nil, None, List(selectT(a), selectT(holderCap.named)), p.Type.Unit0)
+    val in = program(
+      withResult(
+        entry(
+          body = List(v(a, allocOf(i32, 1)), v(named("u", p.Type.Unit0), call), ret(alias(p.Term.Unit0Const))),
+          termCaptures = List(holderCap)
+        ),
+        p.Type.Unit0
+      ),
+      List(callee),
+      List(holderDef)
+    )
+    val msg = intercept[IllegalStateException](EscapeAnalysis(refuse = true)(in, NoopLog)).getMessage
+    assert(msg.contains("passed to `stash`"), msg)
+  }
+
+  test("distinct anonymous allocations are reported separately") {
+    val c = arg("c", p.Type.Bool1)
+    val msg = refused(
+      List(
+        p.Stmt.Cond(
+          selectT(c.named),
+          List(ret(allocOf(i32, 4))),
+          List(ret(p.Expr.Alloc(p.Type.IntS64, int(8), g, p.Region.Opaque)))
+        )
+      ),
+      args = List(c),
+      rtn = ptrI32
+    )
+    assertEquals(msg.linesIterator.count(_.contains("escapes:")), 2, msg)
+  }
+
   test("pass is idempotent") {
     val once  = EscapeAnalysis()(program(withResult(entry(body = sumPair), i32), Nil, List(pairDef)), NoopLog)
     val twice = EscapeAnalysis()(once, NoopLog)
