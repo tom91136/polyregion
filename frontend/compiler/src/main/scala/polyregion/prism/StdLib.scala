@@ -16,9 +16,46 @@ object StdLib {
     def _2 = v2
   }
 
-  class Range(val start: Int, val end: Int, val step: Int) {
-    // def by(step: Int): Range            = mkDef(step) // new Range(start, end, step)
-    // private inline def mkDef(step: Int): Range = new Range(start, end, step)
+  class Range(val start: Int, val end: Int, val step: Int, val isInclusive: Boolean) {
+    def by(step: Int): Range =
+      new Range(start, end, step, isInclusive)
+
+    def foreach[U](f: Int => U): Unit = {
+      val last: Long = if (isInclusive) end.toLong else if (step > 0) end.toLong - 1L else end.toLong + 1L
+      val count: Long =
+        if (step == 0) 0L
+        else if (step > 0) {
+          if (start.toLong > last) 0L else (last - start.toLong) / step.toLong + 1L
+        } else {
+          if (start.toLong < last) 0L else (start.toLong - last) / (-step.toLong) + 1L
+        }
+      var k = 0L
+      while (k < count) {
+        f((start.toLong + k * step.toLong).toInt)
+        k += 1L
+      }
+    }
+  }
+
+  class Inclusive(val start: Int, val end: Int, val step: Int) {
+    def by(step: Int): Range =
+      new Range(start, end, step, isInclusive = true)
+
+    def foreach[U](f: Int => U): Unit = {
+      val last: Long = end.toLong
+      val count: Long =
+        if (step == 0) 0L
+        else if (step > 0) {
+          if (start.toLong > last) 0L else (last - start.toLong) / step.toLong + 1L
+        } else {
+          if (start.toLong < last) 0L else (start.toLong - last) / (-step.toLong) + 1L
+        }
+      var k = 0L
+      while (k < count) {
+        f((start.toLong + k * step.toLong).toInt)
+        k += 1L
+      }
+    }
   }
 
   class Class[T] {}
@@ -34,7 +71,12 @@ object StdLib {
   class RichInt(val x: Int) {
     def min(that: Int)         = java.lang.Math.min(x, that)
     def max(that: Int)         = java.lang.Math.max(x, that)
-    def until(end: Int): Range = new Range(x, end, 1)
+    def until(end: Int): Range = new Range(x, end, 1, isInclusive = false)
+    def until(end: Int, step: Int): Range =
+      new Range(x, end, step, isInclusive = false)
+    def to(end: Int): Inclusive = Inclusive(x, end, 1)
+    def to(end: Int, step: Int): Inclusive =
+      Inclusive(x, end, step)
   }
 
   class ArrayOps[A](val xs: scala.Array[A]) {
@@ -237,9 +279,19 @@ object StdLib {
         { case (_ @ given Quotes, ys, _) => '{ () } }
       ),
       witness[scala.collection.immutable.Range, Range](
-        { case (_ @ given Quotes, r) => '{ new Range($r.start, $r.end, $r.step) } },
-        { case (_ @ given Quotes, r) => '{ scala.collection.immutable.Range($r.start, $r.end, $r.step) } },
-        { case (_ @ given Quotes, x, _) => '{ () } }
+        { case (_ @ given Quotes, r) => '{ new Range($r.start, $r.end, $r.step, $r.isInclusive) } },
+        { case (_ @ given Quotes, r) =>
+          '{
+            if ($r.isInclusive) scala.collection.immutable.Range.inclusive($r.start, $r.end, $r.step)
+            else scala.collection.immutable.Range($r.start, $r.end, $r.step)
+          }
+        },
+        { case (_ @ given Quotes, _, _) => '{ () } }
+      ),
+      witness[scala.collection.immutable.Range.Inclusive, Inclusive](
+        { case (_ @ given Quotes, r) => '{ Inclusive($r.start, $r.end, $r.step) } },
+        { case (_ @ given Quotes, r) => '{ scala.collection.immutable.Range.inclusive($r.start, $r.end, $r.step) } },
+        { case (_ @ given Quotes, _, _) => '{ () } }
       ),
       witness[scala.reflect.ClassTag.type, ClassTag.type](
         { case (_ @ given Quotes, _) => '{ ClassTag } },

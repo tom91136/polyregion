@@ -14,7 +14,9 @@ object Symbols {
   val SeqOps        = "scala" :: "collection" :: "SeqOps" :: Nil
 
 //  val Buffer   = p.Sym[Buffer[_]]
-  val ClassTag = p.Sym[ClassTag[?]]
+  val ClassTag: p.Sym = p.Sym[ClassTag[?]]
+  val String: p.Sym   = p.Sym(JavaLang :+ "String")
+  val Object: p.Sym   = p.Sym(JavaLang :+ "Object")
 
   val Array       = p.Sym("scala" :: "Array" :: Nil)
   val ArrayModule = "scala" :: "Array$" :: Nil

@@ -111,8 +111,13 @@ object Specialisation extends ProgramPass {
     (kernel.moduleCaptures ::: kernel.termCaptures ::: kernel.args)
       .filterNot(arg => arg.named.tpe == p.Type.Unit0 || arg.named.tpe == p.Type.Nothing)
 
-  private def callsiteParams(fn: p.Function, remote: Boolean): List[p.Arg] =
-    if (remote) launchParams(fn) else fn.args
+  private def callsiteParams(fn: p.Function, remote: Boolean, argCount: Int): List[p.Arg] =
+    if (remote) launchParams(fn)
+    else {
+      List(fn.args, fn.termCaptures ::: fn.args, fn.moduleCaptures ::: fn.termCaptures ::: fn.args)
+        .find(_.size == argCount)
+        .getOrElse(fn.args)
+    }
 
   private def normalizedLaunchType(expected: p.Type, actual: p.Type): p.Type = (expected, actual) match {
     case (p.Type.Struct(expectedName, expectedArgs), p.Type.Ptr(struct: p.Type.Struct, _))
@@ -436,7 +441,7 @@ object Specialisation extends ProgramPass {
       }
 
   private def erasedCallableBindings(callsite: Callsite, fn: p.Function): List[(p.Named, p.Type.FnRef)] =
-    callsiteParams(fn, callsite.remote)
+    callsiteParams(fn, callsite.remote, callsite.args.size)
       .zip(callsite.args)
       .flatMap {
         case (formal, callable: p.Type.FnRef) =>
@@ -456,7 +461,7 @@ object Specialisation extends ProgramPass {
         .zip(callsite.args)
         .forall((expected, actual) => compatibleArgumentType(expected, actual, allowScalarConversion))
     } else {
-      val params = fn.args.map(_.named.tpe)
+      val params = callsiteParams(fn, remote = false, callsite.args.size).map(_.named.tpe)
       fn.receiver.size == callsite.receiver.size &&
       fn.receiver.map(_.named.tpe).zip(callsite.receiver).forall(sameType) &&
       params.size == callsite.args.size &&
@@ -489,8 +494,9 @@ object Specialisation extends ProgramPass {
         (expected, actual, false)
       }
       val argumentPatterns =
-        callsiteParams(fn, callsite.remote).map(_.named.tpe).zip(callsite.args).map { case (expected, actual) =>
-          (expected, actual, true)
+        callsiteParams(fn, callsite.remote, callsite.args.size).map(_.named.tpe).zip(callsite.args).map {
+          case (expected, actual) =>
+            (expected, actual, true)
         }
       val returnPatterns = callsite.rtn.map(fn.rtn -> _).toList.map { case (expected, actual) =>
         (expected, actual, false)

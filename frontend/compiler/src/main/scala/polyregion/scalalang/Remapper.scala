@@ -11,13 +11,14 @@ import scala.util.Try
 
 object Remapper {
 
+  private val RefEquality = Set("java.lang.Object.eq", "java.lang.Object.ne")
+
   private def fullyApplyGenExec(exec: p.Type.Exec, tpeArgs: List[p.Type]): p.Type.Exec = {
     val tpeTable = exec.tpeVars.map(_.name).zip(tpeArgs).toMap
     // Recurse fully so type vars nested inside Struct args, Ptr components, or curried inner Execs
     // (e.g. `<T>(Int) => <>(ClassTag[T]) => Array[T]`) are all rewritten.
     def resolve(t: p.Type): p.Type = t match {
       case v @ p.Type.Var(name, _) =>
-        // unapplied vars stay generic for Specialisation
         tpeTable.getOrElse(name, v)
       case p.Type.Struct(name, args) =>
         p.Type.Struct(name, args.map(resolve))
@@ -47,12 +48,14 @@ object Remapper {
       f: q.DefDef
   ): Result[(List[(q.ValDef, p.Named)], q.ClsWitnesses)] =
     f.termParamss.flatMap(_.params).foldMapM { arg =>
-      Retyper.typer0(arg.tpt.tpe).map { case (_ -> t, wit) => ((arg, p.Named(arg.name, t)) :: Nil, wit) }
+      Retyper.typer0(arg.tpt.tpe).map { case (_ -> t, wit) =>
+        ((arg, p.Named(arg.name, Retyper.callableVar(arg.symbol).getOrElse(t))) :: Nil, wit)
+      }
     }
 
-  /** Resolves the local `DefDef` behind a closure term: a lambda literal, a `Block` that defines the lambda method, or
-    * a reference to a val/def holding one.
-    */
+  def callableParams(using q: Quoted)(f: q.DefDef): List[p.Type.Var] =
+    f.termParamss.flatMap(_.params).flatMap(arg => Retyper.callableVar(arg.symbol))
+
   private def closureDefOf(using q: Quoted)(term: q.Term, depth: Int = 0): Option[q.DefDef] =
     if (depth > 8) None
     else
@@ -70,10 +73,11 @@ object Remapper {
         case q.Typed(x, _)      => closureDefOf(x, depth + 1)
         case q.Inlined(_, _, x) => closureDefOf(x, depth + 1)
         case ref: q.Ref =>
-          ref.symbol.tree match {
-            case dd: q.DefDef if ref.symbol.name.contains("$anonfun") => Some(dd)
-            case vd: q.ValDef                                         => vd.rhs.flatMap(closureDefOf(_, depth + 1))
-            case _                                                    => None
+          val sym = ref.symbol
+          sym.tree match {
+            case dd: q.DefDef if sym.name.contains("$anonfun") => Some(dd)
+            case vd: q.ValDef                                  => vd.rhs.flatMap(closureDefOf(_, depth + 1))
+            case _                                             => None
           }
         case _ => None
       }
@@ -92,7 +96,7 @@ object Remapper {
     d.modules.values.toList.map(t => p.Named(t.name.fqn.mkString("_"), t))
 
   private def isFnTpe(t: p.Type, u: p.Type) = (t, u) match {
-    case (p.Type.Struct(structSym, _), p.Type.Exec(tpeVars, args, rtnTpe)) =>
+    case (p.Type.Struct(structSym, _), p.Type.Exec(tpeVars, args, _)) =>
       // Without parents on Type.Struct, we approximate by matching Function$n by sym only.
       structSym match {
         case p.Sym("scala" :: s"Function$n" :: Nil) if args.size == n.toInt => true
@@ -118,17 +122,18 @@ object Remapper {
     // Assert that the term list matches Exec's nested (recursive) types.
     // Note that Exec treats both empty args `()` and no-args as `Nil` where as the collected arg lists through
     // `Apply` will give empty args as `Nil` and not collect no-args at all because no application took place.
-    val termTpess  = termArgss.map(_.map(_.tpe)) // Poison type???
-    val execTpess  = collectExecArgLists(tpe)
-    val calleeName = fn.symbol.fullName
-    val rootName   = ctx.root.fullName
+    val termTpess   = termArgss.map(_.map(_.tpe)) // Poison type???
+    val execTpess   = collectExecArgLists(tpe)
+    val calleeName  = fn.symbol.fullName
+    val rootName    = ctx.root.fullName
+    val termParamss = fn.termParamss
     for {
       // First we validate the application by checking whether types of the positional arguments line up.
-      _ <- (fn.termParamss.isEmpty, termTpess, execTpess) match {
+      _ <- (termParamss.isEmpty, termTpess, execTpess) match {
         case (true, Nil, (Nil :: Nil) | Nil) =>
           ().success // no-ap; no-arg Exec (`Nil::Nil`) or no Exec (`Nil`)
         case (false, tss, ess) if tss == ess => ().success // everything else, do the assertion
-        case (ap, tss, ess) => // we may have unapplied generic types from the exec side
+        case (_, tss, ess) => // we may have unapplied generic types from the exec side
           (tss.flatten, ess.flatten) match {
             case (ts, es) if ts.size == es.size =>
               ts.zip(es).traverse {
@@ -141,7 +146,11 @@ object Remapper {
                     else ().success
                   } else if (structConforms(termSym, execSym)) ().success
                   else s"Class type mismatch calling $calleeName from $rootName: $termSym != $execSym ".fail
-                case (t, u) if isFnTpe(t, u) || isFnTpe(u, t) => t.success
+                case (t, u) if isFnTpe(t, u) || isFnTpe(u, t)                         => t.success
+                case (t @ (p.Type.FnRef(_) | p.Type.Var(_, _)), p.Type.Exec(_, _, _)) => t.success
+                case (t: p.Type.Ptr, p.Type.Struct(Symbols.Object, _))                => t.success
+                case (t @ p.Type.Ptr(p.Type.IntS8, p.Type.Space.Constant), p.Type.Struct(Symbols.String, _)) =>
+                  t.success
                 case (t, u) => s"Cannot match $t with $u calling $calleeName from $rootName".fail
               }
             case (ts, es) =>
@@ -149,7 +158,11 @@ object Remapper {
           }
       }
       rtnTpe = resolveExecRtnTpe(tpe)
-      ivk <- ctx.mkInvoke(fn, tpeArgs, receiver, termArgss.flatten, rtnTpe)
+      callableTpeArgs = termParamss
+        .flatMap(_.params)
+        .zip(termArgss.flatten)
+        .collect { case (param, arg) if Retyper.callableVar(param.symbol).isDefined => arg.tpe }
+      ivk <- ctx.mkInvoke(fn, tpeArgs ::: callableTpeArgs, receiver, termArgss.flatten, rtnTpe)
     } yield ivk
   }
 
@@ -161,10 +174,11 @@ object Remapper {
       tpe: p.Type,
       tpeArgs: List[p.Type],
       termArgss: List[List[p.Expr]]
-  ): Result[(p.Expr, q.RemapContext)] =
+  ): Result[(p.Expr, q.RemapContext)] = {
+    val ddSymbol = dd.symbol
     Retyper
-      .owningClassSymbol(dd.symbol)
-      .failIfEmpty(s"${dd.symbol} does not have an owning class symbol")
+      .owningClassSymbol(ddSymbol)
+      .failIfEmpty(s"$ddSymbol does not have an owning class symbol")
       .flatMap { classSym =>
         Retyper.clsSymTyper0(classSym).flatMap { tpe0 =>
           (classSym.tree, tpe0) match {
@@ -176,6 +190,7 @@ object Remapper {
           }
         }
       }
+  }
 
   extension (using q: Quoted)(c: q.RemapContext) {
 
@@ -202,9 +217,8 @@ object Remapper {
           (term -> tpe, c) <- c.typerAndWitness(tpeTree.tpe)
           // if tpe is singleton, substitute with constant directly
           (ref, c) <- term.fold((c !! tree).mapTerm(rhs, Some(tpe)))(x => (x, c).success)
-          // a closure value has no Exec representation; it stands for the outlined callable itself
           varTpe = ref.tpe match {
-            case _: p.Type.FnRef => ref.tpe
+            case p.Type.FnRef(_) => ref.tpe
             case _               => tpe
           }
           closure = closureDefOf(rhs).orElse(rhs match {
@@ -220,6 +234,7 @@ object Remapper {
       // TODO DefDef here comes from general closures ( (a:A) => ??? )
 
       case defDef @ q.DefDef(_, _, _, _) =>
+        val defSymbol = defDef.symbol
         // The outliner would consider function args as foreign so we need to collect them first and discard.
         val argSymbols = defDef.termParamss.flatMap(_.params).map(_.symbol).toSet
 
@@ -234,17 +249,29 @@ object Remapper {
                 ((sym, p.Named(name, tpe)) :: acc) -> c
               }
             )
-          (fn, c0) <- c.mapFn(defDef, RenderedLog(""))
+          (fn, c0) <- c.withFnName(defSymbol).mapFn(defDef, RenderedLog(""))
           allCaptureNames = (fn.termCaptures ++ captures
             .map(_._2)
             .map(p.Arg(_))).distinct // Include outlined and propagated
           c <- c
+            .copy(fnNames = c0.fnNames)
             .withInvokeCapture(
-              defDef.symbol,
+              defSymbol,
               allCaptureNames.map(arg => p.Term.Select(arg.named, Nil, arg.named.tpe))
             )
             .updateDeps(_ |+| c0.deps)
-            .updateDeps(_.witness(fn.copy(decl = fn.decl.copy(termCaptures = allCaptureNames))))
+            .updateDeps(
+              _.witness(
+                fn.copy(decl =
+                  fn.decl.copy(
+                    tpeVars = (fn.tpeVars ::: allCaptureNames.map(_.named.tpe).collect {
+                      case v: p.Type.Var if Retyper.isCallableVar(v) => v
+                    }).distinct,
+                    termCaptures = allCaptureNames
+                  )
+                )
+              )
+            )
             .success
 
         } yield (
@@ -285,7 +312,7 @@ object Remapper {
         // Fuse receiver's tpe vars with what's explicitly defined
         fnTpeVars: List[p.Type.Var] =
           f.paramss.flatMap(_.params).collect { case q.TypeDef(name, _) => p.Type.Var(name) }
-        allTpeArgs: List[p.Type.Var] = (receiverTpeVars ::: fnTpeVars).distinct
+        allTpeArgs: List[p.Type.Var] = (receiverTpeVars ::: fnTpeVars ::: callableParams(f)).distinct
 
         // Finally, we compile the def body like a closure or return the term if we have one.
         (fnStmts, c) <- fnRtnTerm match {
@@ -296,9 +323,9 @@ object Remapper {
               // We reuse the same context, but reset anything related to the *current* scope.
               // So, delete any existing statement and `this` witness first
               c <- c
-                .copy(depth = 0, stmts = Nil, thisCls = None)
+                .copy(root = sym, depth = 0, stmts = Nil, thisCls = None)
                 .success
-              (term, c)         <- c.mapTerm(rhs, Some(fnRtnTpe), allTpeArgs)
+              (term, c)         <- c.mapTerm(rhs, Some(fnRtnTpe))
               ((_, termTpe), _) <- Retyper.typer0(rhs.tpe)
               _ <-
                 if (termTpe == term.tpe) ().success
@@ -310,7 +337,7 @@ object Remapper {
 
         fn = p.Function(
           decl = p.FunctionDecl(
-            name = p.Sym(sym.fullName),
+            name = c.fnSym(sym),
             tpeVars = allTpeArgs,
             receiver = receiver.map(p.Arg(_)),
             args = fnArgs.map(_._2).map(p.Arg(_)),
@@ -345,6 +372,23 @@ object Remapper {
         args: List[p.Expr],
         rtnTpe: p.Type
     ): Result[(p.Expr, q.RemapContext)] = (fn.symbol, fn.rhs, receiver) match {
+      case (sym, _, Some(lhs)) if RefEquality.contains(sym.fullName) && args.size == 1 =>
+        (lhs.tpe, args.head.tpe) match {
+          case (lhsTpe: p.Type.Ptr, rhsTpe: p.Type.Ptr) =>
+            val named = c.named(p.Type.Bool1)
+            def conform(term: p.Term, target: p.Type.Ptr): p.Term = term match {
+              case p.Term.NullPtrConst(_, _, region) => p.Term.NullPtrConst(target.comp, target.space, region)
+              case other                             => other
+            }
+            val (x, y) = (conform(asTerm(lhs), rhsTpe), conform(asTerm(args.head), lhsTpe))
+            if (x.tpe != y.tpe)
+              s"Reference equality between unrelated pointer types ${lhsTpe.repr} and ${rhsTpe.repr}".fail
+            else {
+              val op = if (sym.name == "eq") p.Intr.LogicEq(x, y) else p.Intr.LogicNeq(x, y)
+              (selectExpr(Nil, named), c.down(fn) ::= p.Stmt.Var(named, Some(p.Expr.IntrOp(op)))).success
+            }
+          case (l, r) => s"Reference equality is only supported between pointers, got ${l.repr} and ${r.repr}".fail
+        }
       // We handle synthesis of the primary ctor here: primary ctors have the following invariant:
       //  * `fn.name` == "<init>"
       //  * `fn.rhs` is empty
@@ -399,7 +443,7 @@ object Remapper {
 
         // termCaptures filled by Compiler.patchFn after this pass.
         val ivk: p.Expr.Invoke = p.Expr.Invoke(
-          p.Type.FnRef(p.Sym(sym.fullName)),
+          p.Type.FnRef(c.fnSym(sym)),
           receiverTpeArgs ::: tpeArgs,
           receiver.map(asTerm),
           args.map(asTerm),
@@ -437,6 +481,25 @@ object Remapper {
       }
     }
 
+    private def invokeCallable(
+        root: q.Term,
+        callable: p.Type.Var,
+        tpe: p.Type,
+        termArgss: List[List[p.Expr]]
+    ): Result[(p.Expr, q.RemapContext)] =
+      c.mapTerm(root).map { case (receiver, c) =>
+        val rtnTpe = resolveExecRtnTpe(tpe)
+        val ptrTpe = p.Type.Ptr(callable, p.Type.Space.Global)
+        val ptr    = c.named(ptrTpe)
+        val c0 = c.down(root) ::= p.Stmt.Var(
+          ptr,
+          Some(p.Expr.RefTo(asTerm(receiver), None, callable, p.Type.Space.Global, p.Region.Opaque))
+        )
+        val result = c0.named(rtnTpe)
+        val ivk    = p.Expr.Invoke(callable, Nil, Some(selectTerm(Nil, ptr)), termArgss.flatten.map(asTerm), rtnTpe)
+        (selectExpr(Nil, result), c0.down(root) ::= p.Stmt.Var(result, Some(ivk)))
+      }
+
     // The general idea is that idents are either used as-is or it goes through a series of type/term applications (e.g `{ foo.fn[A](b)(c) }`).
     // We collect the types and term lists in `mapTerm` and then fully apply it here.
     private def mapRef0(
@@ -456,10 +519,14 @@ object Remapper {
         case (Some(term) -> tpe, c) => (term, c).success
         case (None -> tpe0, c)      =>
           // Apply any unresolved type vars first.
-          val tpe = tpe0 match {
+          val callable = ref match {
+            case _: q.Ident => Retyper.callableVar(ref.symbol)
+            case _          => None
+          }
+          val tpe = callable.getOrElse(tpe0 match {
             case exec: p.Type.Exec => fullyApplyGenExec(exec, tpeArgs)
             case x                 => x
-          }
+          })
 
           // Call no-arg functions (i.e. `x.toDouble` or just `def fn = ???; fn` ) directly or pass-through if not no-arg
           def invokeOrSelect(
@@ -578,18 +645,17 @@ object Remapper {
               case ident @ q.Ident(s) => // this is the root of q.Select, it can appear at top-level as well
                 // We may encounter a case where the ident's name is different from the TermRef's name.
                 // This is likely a result of inline where we end up with synthetic names, we use the TermRef's name in this case.
+                val sym = ident.symbol
                 val name = ident.tpe match {
                   case q.TermRef(_, name) if name != s => name
                   case _                               => s
                 }
-                val localTpe = c.closures.get(ident.symbol).fold(tpe)(dd => p.Type.FnRef(p.Sym(dd.symbol.fullName)))
+                val localTpe = c.closures.get(sym).fold(tpe)(dd => p.Type.FnRef(c.fnSym(dd.symbol)))
                 val local    = p.Named(name, localTpe)
 
                 handleThisRef(ident, local)
                   .orElse(handleObjectSelect(ident, local))
                   .getOrElse {
-                    val sym = ident.symbol
-
                     def synthesiseSelectOnMethodWithReceiver(classSym: q.Symbol) =
                       Retyper.clsSymTyper0(classSym).map(classSym.tree -> _).flatMap {
                         case (clsDef: q.ClassDef, s @ p.Type.Struct(_, _)) =>
@@ -667,6 +733,13 @@ object Remapper {
                 handleThisRef(select, named)
                   .orElse(handleObjectSelect(select, named))
                   .orElse(
+                    Option(root)
+                      .collect { case r: q.Ref => Retyper.callableVar(r.symbol) }
+                      .flatten
+                      .filter(_ => name == "apply" && termArgss.nonEmpty)
+                      .map(callable => c.invokeCallable(root, callable, tpe, termArgss))
+                  )
+                  .orElse(
                     c.closures
                       .get(root.symbol)
                       .orElse(closureDefOf(root))
@@ -698,7 +771,9 @@ object Remapper {
         case p.Expr.Alias(s: p.Term.Select) => s
         case other => throw IllegalStateException(s"mkMut lhs must be an Alias(Term.Select); got ${other.repr}")
       }
-      if (lhs.tpe == rhs.tpe) {
+      if (rhs.tpe == p.Type.Nothing) {
+        (Nil, c)
+      } else if (lhs.tpe == rhs.tpe) {
         (p.Stmt.Mut(lhsSelect, rhs) :: Nil, c)
       } else {
         val c0       = c.down(t)
@@ -740,6 +815,12 @@ object Remapper {
       }
 
       (tpeArgs, termArgss, term) match {
+        case (Nil, Nil, q.Return(expr, from)) =>
+          if (from != c1.root) c1.fail(s"Non-local return from ${from.fullName} is unsupported")
+          else
+            c1.down(term).mapTerm(expr).map { case (value, c) =>
+              (p.Expr.Alias(p.Term.Poison(p.Type.Nothing)), c ::= p.Stmt.Return(value))
+            }
         case (Nil, Nil, q.NamedArg(name, rhs)) => (c1 !! term).mapTerm(rhs) // named argument: `$name = $rhs`
         case (ta, ts, q.Typed(x, _)) =>
           (c1 !! term).mapTerm(x, tpeArgs = ta, termArgss = ts) // type ascription: `value : T`
@@ -762,15 +843,11 @@ object Remapper {
         case (Nil, Nil, q.Literal(q.StringConstant(v))) =>
           (p.Expr.Alias(p.Term.StringConst(v)), c1 !! term).pure
         case (Nil, Nil, q.Literal(q.ClassOfConstant(_))) => typedVar(termTpe)
-        case (Nil, Nil, l @ q.Literal(q.NullConstant())) =>
-          c1.typerAndWitness(l.tpe).map { case (_ -> tpe, c) =>
-            val nullTpe = eventualTpe.collect { case ptr: p.Type.Ptr => ptr }.getOrElse(tpe)
-            val term0 = nullTpe match {
-              case p.Type.Ptr(comp, space) => p.Term.NullPtrConst(comp, space, p.Region.Opaque)
-              case _                       => p.Term.NullPtrConst(p.Type.Nothing, p.Type.Space.Global, p.Region.Opaque)
-            }
-            (p.Expr.Alias(term0), c !! term)
-          }
+        case (Nil, Nil, q.Literal(q.NullConstant())) =>
+          val (comp, space) = eventualTpe
+            .collect { case p.Type.Ptr(comp, space) => (comp, space) }
+            .getOrElse((p.Type.Nothing, p.Type.Space.Global))
+          (p.Expr.Alias(p.Term.NullPtrConst(comp, space, p.Region.Opaque)), c1 !! term).pure
         case (Nil, Nil, q.This(_)) => // reference to the current class: `this.???`
           // XXX Don't use typerAndWitness here, we need to record the witnessing of `this` separately.
           (c1 !! term).typerAndWitness(termTpe).flatMap {
@@ -809,7 +886,6 @@ object Remapper {
           closure match {
             case Some(dd) =>
               for {
-                // map the lambda literal first so its method and captures are registered
                 (_, c)        <- (c1 !! ap).mapTerm(fun)
                 (args, c)     <- c.down(ap).mapTerms(args)
                 (_ -> tpe, c) <- c.typerAndWitness(fun.tpe)
@@ -872,7 +948,7 @@ object Remapper {
             cond <- (thenTerm.tpe, elseTerm.tpe, eventualTpe) match {
               case (`tpe`, `tpe`, _) => // Same on both side, perfect
                 mkCondStmts(tpe)
-              case (p.Type.Nothing, `tpe`, _) => // diverging branch (e.g. `throw`)
+              case (p.Type.Nothing, `tpe`, _) =>
                 mkCondStmts(tpe)
               case (`tpe`, p.Type.Nothing, _) =>
                 mkCondStmts(tpe)
@@ -941,10 +1017,10 @@ object Remapper {
             case None => c1.fail(s"Unapplied closure ${q.safeShow(closure)}")
           }
         case (Nil, Nil, closure: q.Closure) =>
-          (p.Expr.Alias(p.Term.Poison(p.Type.FnRef(p.Sym(closure.meth.symbol.fullName)))), c1 !! term).pure
+          (p.Expr.Alias(p.Term.Poison(p.Type.FnRef(c1.fnSym(closure.meth.symbol)))), c1 !! term).pure
         case _ =>
           c1.fail(
-            s"Unhandled: <${tpeArgs.map(_.repr)}>`$term`(${termArgss}), show=`${q.safeShow(term)}`\nSymbol:\n${term.symbol}"
+            s"Unhandled: <${tpeArgs.map(_.repr)}>`$term`($termArgss), show=`${q.safeShow(term)}`\nSymbol:\n${term.symbol}"
           )
       }
     }

@@ -104,7 +104,9 @@ object RefOutliner {
     // Set[(q.Ident, q.Ref, Option[p.Expr])]
 
     (typedRefs, wit) <- sharedValRefs.foldMapM { (root, i: q.Ref) =>
-      Retyper.typer0(i.tpe).map { case (t, wit) => ((root, i, t) :: Nil, wit) }
+      Retyper.typer0(i.tpe).map { case (t, wit) =>
+        ((root, i, Retyper.callableVar(i.symbol).fold(t)(callable => (None, callable))) :: Nil, wit)
+      }
     }
 
     uniqueTypedRefs = typedRefs.distinctBy { case (root, ref, _) => root.symbol -> ref.symbol }

@@ -51,7 +51,32 @@ object Retyper {
 
   def structName0(using q: Quoted)(clsSym: q.Symbol): p.Sym = p.Sym(clsSym.fullName)
 
+  private val CallableSuffix = "#fn"
+
+  def isCallableVar(tpe: p.Type): Boolean = tpe match {
+    case p.Type.Var(name, _) => name.endsWith(CallableSuffix)
+    case _                   => false
+  }
+
+  private def lambdaBody(using q: Quoted)(ctor: q.TypeRepr): Option[q.TypeRepr] = ctor.dealias.simplified match {
+    case q.TypeLambda(_, _, body) => Some(body)
+    case _                        => None
+  }
+
+  @tailrec private def isFunctionRepr(using q: Quoted)(repr: q.TypeRepr): Boolean =
+    repr.dealias.widenTermRefByName.simplified match {
+      case q.AnnotatedType(underlying, _)                       => isFunctionRepr(underlying)
+      case q.AppliedType(ctor, _) if lambdaBody(ctor).isDefined => isFunctionRepr(lambdaBody(ctor).get)
+      case tpe                                                  => tpe.isFunctionType
+    }
+
+  def callableVar(using q: Quoted)(sym: q.Symbol): Option[p.Type.Var] =
+    Option.when(sym.isValDef && sym.flags.is(q.Flags.Param) && Try(isFunctionRepr(sym.termRef)).getOrElse(false))(
+      p.Type.Var(s"${sym.name}$CallableSuffix")
+    )
+
   private def deriveParents(using q: Quoted)(clsSym: q.Symbol): List[p.Type.Struct] = {
+    val declared = clsTypeCtorNames(clsSym).toSet
     // Find out the parents
     val roots = Set(
       q.defn.AnyClass,
@@ -70,7 +95,12 @@ object Retyper {
     clsSym.typeRef.baseClasses
       .drop(1)
       .filterNot(roots.contains(_))
-      .map(parentSym => p.Type.Struct(structName0(parentSym), clsTypeCtorNames(parentSym).map(p.Type.Var(_))))
+      .map(parentSym =>
+        p.Type.Struct(
+          structName0(parentSym),
+          clsTypeCtorNames(parentSym).map(name => if (declared(name)) p.Type.Var(name) else p.Type.Nothing)
+        )
+      )
   }
 
   def structDef0(using q: Quoted)(clsSym: q.Symbol): Result[p.StructDef] = {
@@ -200,6 +230,8 @@ object Retyper {
         (None -> p.Type.Nothing, Map.empty).success
       case ref @ q.TypeRef(_, name) if ref.typeSymbol.isAbstractType => (None -> p.Type.Var(name), Map.empty).success
       case q.ParamRef(q.PolyType(args, _, _), argIdx)          => (None -> p.Type.Var(args(argIdx)), Map.empty).success
+      case q.ParamRef(q.TypeLambda(args, _, _), argIdx)        => (None -> p.Type.Var(args(argIdx)), Map.empty).success
+      case q.TypeLambda(_, _, body)                            => typer0(body)
       case q.TypeBounds(_, _)                                  => (None -> p.Type.Nothing, Map.empty).success
       case q.PolyType(vars, _, method @ q.MethodType(_, _, _)) =>
         // this shows up from reference to generic methods
@@ -258,6 +290,22 @@ object Retyper {
             }
           //            else s"Left type `$leftTpe` and right type `$rightTpe` did not unify for ${andOr.widenByName.widen.simplified.show}".fail
         } yield r
+      case q.AnnotatedType(underlying, _) => typer0(underlying)
+      case q.AppliedType(ctor, args) if lambdaBody(ctor).isDefined =>
+        val body = lambdaBody(ctor).get
+        @tailrec def unannotated(t: q.TypeRepr): q.TypeRepr = t match {
+          case q.AnnotatedType(underlying, _) => unannotated(underlying)
+          case other                          => other
+        }
+        unannotated(body) match {
+          case q.AppliedType(tpeCtor, xs) =>
+            val actuals = args.toVector
+            typer0(tpeCtor.appliedTo(xs.map {
+              case q.ParamRef(_, i) => actuals(i)
+              case x                => x
+            }))
+          case other => s"Unsupported type lambda application ${Try(other.show).getOrElse(other.toString)}".fail
+        }
       case tpe @ q.AppliedType(tpeCtor, args) =>
         for {
 

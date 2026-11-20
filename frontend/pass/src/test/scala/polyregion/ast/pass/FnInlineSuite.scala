@@ -805,4 +805,103 @@ class FnInlineSuite extends munit.FunSuite {
     assertEquals(selected.root.symbol, variable.symbol)
     assertEquals(selected.root.tpe, refined)
   }
+
+  test("callable inline only inlines callees that take a callable") {
+    val callback = fn(
+      "callback",
+      args = List(arg("x")),
+      rtn = p.Type.IntS32,
+      body = List(p.Stmt.Return(p.Expr.Alias(p.Term.IntS32Const(1))))
+    )
+    val plain = fn("plain", rtn = p.Type.IntS32, body = List(p.Stmt.Return(p.Expr.Alias(p.Term.IntS32Const(2)))))
+    val taker = fn(
+      "taker",
+      args = List(arg("f", p.Type.FnRef(callback.name))),
+      rtn = p.Type.IntS32,
+      body = List(
+        p.Stmt.Var(named("r"), Some(p.Expr.Invoke(p.Type.FnRef(plain.name), Nil, None, Nil, p.Type.IntS32))),
+        p.Stmt.Return(p.Expr.Alias(p.Term.IntS32Const(3)))
+      )
+    )
+    val takerCall = p.Expr.Invoke(
+      p.Type.FnRef(taker.name),
+      Nil,
+      None,
+      List(p.Term.Poison(p.Type.FnRef(callback.name))),
+      p.Type.IntS32
+    )
+    val plainCall = p.Expr.Invoke(p.Type.FnRef(plain.name), Nil, None, Nil, p.Type.IntS32)
+    val e         = entry(body = List(p.Stmt.Var(named("a"), Some(takerCall)), p.Stmt.Return(plainCall)))
+
+    val out = CallableInline(program(e, List(callback, plain, taker)), NoopLog)
+
+    assertEquals(out.functions.map(_.name), List(callback.name, plain.name))
+    val remaining = out.entry.collectWhere[p.Expr] { case i: p.Expr.Invoke => i.calleeName }
+    assertEquals(remaining.distinct, List(plain.name))
+  }
+
+  test("repeated inlining does not reuse names from an earlier run") {
+    val helper = fn(
+      "helper",
+      args = List(arg("x")),
+      rtn = p.Type.IntS32,
+      body = List(p.Stmt.Return(p.Expr.Alias(p.Term.IntS32Const(1))))
+    )
+    val other = fn(
+      "other",
+      args = List(arg("x")),
+      rtn = p.Type.IntS32,
+      body = List(p.Stmt.Return(p.Expr.Alias(p.Term.IntS32Const(2))))
+    )
+    val call =
+      (f: p.Function) => p.Expr.Invoke(p.Type.FnRef(f.name), Nil, None, List(p.Term.IntS32Const(0)), p.Type.IntS32)
+    val first = FnInline(
+      program(
+        entry(body = List(p.Stmt.Var(named("a"), Some(call(helper))), p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const)))),
+        List(helper)
+      ),
+      NoopLog
+    )
+    val again =
+      first.copy(entry = first.entry.map(e => e.copy(body = p.Stmt.Var(named("b"), Some(call(other))) :: e.body)))
+
+    val out   = FnInline(again.copy(functions = List(other)), NoopLog)
+    val names = out.entry.collectWhere[p.Stmt] { case p.Stmt.Var(name, _, _) => name.symbol }
+    assertEquals(names.distinct, names)
+  }
+
+  test("callable inline leaves a plain call that shares a callable overload's name and arity") {
+    val callback = fn(
+      "callback",
+      args = List(arg("x")),
+      rtn = p.Type.IntS32,
+      body = List(p.Stmt.Return(p.Expr.Alias(p.Term.IntS32Const(1))))
+    )
+    val plain = fn(
+      "overloaded",
+      args = List(arg("x")),
+      rtn = p.Type.IntS32,
+      body = List(p.Stmt.Return(p.Expr.Alias(p.Term.IntS32Const(2))))
+    )
+    val taker = fn(
+      "overloaded",
+      args = List(arg("f", p.Type.FnRef(callback.name))),
+      rtn = p.Type.IntS32,
+      body = List(p.Stmt.Return(p.Expr.Alias(p.Term.IntS32Const(3))))
+    )
+    val plainCall = p.Expr.Invoke(p.Type.FnRef(plain.name), Nil, None, List(p.Term.IntS32Const(3)), p.Type.IntS32)
+    val takerCall = p.Expr.Invoke(
+      p.Type.FnRef(taker.name),
+      Nil,
+      None,
+      List(p.Term.Poison(p.Type.FnRef(callback.name))),
+      p.Type.IntS32
+    )
+    val e = entry(body = List(p.Stmt.Var(named("a"), Some(takerCall)), p.Stmt.Return(plainCall)))
+
+    val out = CallableInline(program(e, List(callback, plain, taker)), NoopLog)
+
+    assertEquals(out.functions.map(_.signatureKey).toSet, Set(callback.signatureKey, plain.signatureKey))
+    assertEquals(out.entry.collectWhere[p.Expr] { case i: p.Expr.Invoke => i.calleeName }, List(plain.name))
+  }
 }

@@ -8,6 +8,8 @@ import polyregion.intrinsic.IntrinsicTable
 import polyregion.prism.PrismTables
 
 import java.nio.file.Paths
+import scala.annotation.tailrec
+import scala.collection.mutable
 import scala.quoted.Expr
 import scala.util.Try
 
@@ -69,9 +71,10 @@ object Compiler {
     symbol = f.symbol
     (fnArgsTpeWithTerms, _) <- typer0N(params.collect { case d: q.ValDef => d.tpt.tpe })
     owningClass             <- clsSymTyper0(symbol.owner)
-    fnArgsTpes = fnArgsTpeWithTerms.map(_._2)
+    callableVars = params.collect { case d: q.ValDef => Retyper.callableVar(d.symbol) }
+    fnArgsTpes   = fnArgsTpeWithTerms.map(_._2).zip(callableVars).map((tpe, callable) => callable.getOrElse(tpe))
     fnTypeVars: List[p.Type.Var] =
-      params.collect { case q.TypeDef(name, _) => p.Type.Var(name) }
+      params.collect { case q.TypeDef(name, _) => p.Type.Var(name) } ::: callableVars.flatten
     (receiver, receiverTpeVars) <- owningClass match {
       case t @ p.Type.Struct(_, args) =>
         (Some(t), args.collect { case p.Type.Var(name, size) => p.Type.Var(name, size) }: List[p.Type.Var]).success
@@ -138,6 +141,7 @@ object Compiler {
         Set.empty[q.Symbol]     // acc
       ).iterateWhileM { (remaining, fnAcc, clsDepAcc, moduleSymDepAcc) =>
         remaining.toList
+          .flatMap((sym, ivks) => ivks.groupBy(_.receiver.map(_.tpe)).values.map(group => sym -> Set(group.head)))
           .foldLeftM((fnAcc, Map.empty: q.FnWitnesses, clsDepAcc, moduleSymDepAcc)) {
             case ((xs, depss, clsDepss, moduleSymDepss), (sym, ivks)) =>
               for {
@@ -305,7 +309,7 @@ object Compiler {
   ): Result[(p.Function, q.Dependencies)] =
     for {
       log <- sink.subLog(s"Compile DefDef: ${f.name}").success
-      _      = log.info(s"Body", showTree(f))
+      _      = log.info("Body", showTree(f))
       symbol = f.symbol
       rhs <- f.rhs.failIfEmpty(s"Function does not contain an implementation: (in ${symbol.maybeOwner}) ${showTree(f)}")
 
@@ -329,7 +333,7 @@ object Compiler {
       _ = log.info(s"Method owner: $owningClass")
       (receiver, receiverTpeVars) <- Remapper.receiverOf(owningClass)
 
-      allTypeVars = (receiverTpeVars ::: fnTypeVars).distinct
+      allTypeVars = (receiverTpeVars ::: fnTypeVars ::: Remapper.callableParams(f)).distinct
 
       _ = log.info("DefDef arguments", fnArgs.map((a, n) => s"$a(symbol=${a.symbol}) ~> $n")*)
       _ = log.info("DefDef tpe vars (recv+fn)", allTypeVars.map(_.repr)*)
@@ -344,7 +348,7 @@ object Compiler {
             term = rhs,
             root = symbol,
             scope = scope, // We pass an empty scope table as we are compiling an independent fn.
-            tpeArgs = allTypeVars,
+            tpeArgs = Nil,
             intrinsify = intrinsify
           ).map((stmts, _, deps, thisCls) => (stmts, deps, thisCls))
       }
@@ -497,6 +501,23 @@ object Compiler {
 
     } yield (mappedFn, mappedFnDeps, structDefs, deps.modules.keySet)
 
+  private def dropClosureReceivers(program: p.Program): p.Program = {
+    def receiverless(fn: p.Function): Boolean =
+      fn.name.fqn.lastOption.exists(_.contains("$anonfun")) &&
+        fn.receiver.exists { recv =>
+          fn.collectFirst_[p.Term] { case p.Term.Select(root, _, _) if root == recv.named => true }.isEmpty
+        }
+    val names = (program.entry.toList ::: program.functions).filter(receiverless(_)).map(_.name).toSet
+    def fix(fn: p.Function): p.Function = {
+      val base = if (names(fn.name)) fn.copy(decl = fn.decl.copy(receiver = None)) else fn
+      base.modifyAll[p.Expr] {
+        case ivk @ p.Expr.Invoke(p.Type.FnRef(name), _, Some(_), _, _) if names(name) => ivk.copy(receiver = None)
+        case expr                                                                     => expr
+      }
+    }
+    program.copy(entry = program.entry.map(fix(_)), functions = program.functions.map(fix(_)))
+  }
+
   def wireCaptures(program: p.Program, includeModules: Boolean = true): Result[p.Program] = program.entry match {
     case None => "compiler optimisation removed the program entry".fail
     case Some(entry) =>
@@ -506,13 +527,12 @@ object Compiler {
       // we collect callees once up front rather than re-walking every body each iteration.
       def computeTransitiveModuleCaps(): Map[p.Sym, List[p.Arg]] = {
         val callGraph: Map[p.Sym, List[p.Sym]] =
-          fnByName.view.mapValues(_.collectWhere[p.Expr] { case ivk: p.Expr.Invoke => ivk.calleeName }).toMap
-        var current: Map[p.Sym, List[p.Arg]] = fnByName.view.mapValues(_.moduleCaptures).toMap
-        var changed                          = true
-        while (changed) {
-          changed = false
+          fnByName.view
+            .mapValues(_.collectWhere[p.Expr] { case p.Expr.Invoke(p.Type.FnRef(name), _, _, _, _) => name })
+            .toMap
+        @tailrec def fixpoint(current: Map[p.Sym, List[p.Arg]]): Map[p.Sym, List[p.Arg]] = {
           val next = current.map { case (sym, caps) =>
-            val seen = scala.collection.mutable.Set.from(caps.map(_.named.tpe))
+            val seen = mutable.Set.from(caps.map(_.named.tpe))
             val merged = callGraph(sym)
               .foldLeft(caps.reverse) { (acc, callee) =>
                 current.getOrElse(callee, Nil).foldLeft(acc) { (acc1, cap) =>
@@ -522,11 +542,39 @@ object Compiler {
               .reverse
             sym -> merged
           }
-          if (next != current) { changed = true; current = next }
+          if (next == current) current else fixpoint(next)
         }
-        current
+        fixpoint(fnByName.view.mapValues(_.moduleCaptures).toMap)
+      }
+      def declaredNames(fn: p.Function): Set[p.Named] =
+        (fn.receiver.toList ::: fn.args).map(_.named).toSet ++ fn
+          .collectWhere[p.Stmt] {
+            case p.Stmt.Var(named, _, _)                => named :: Nil
+            case p.Stmt.ForRange(induction = induction) => induction :: Nil
+            case p.Stmt.Try(_, handlers, _)             => handlers.flatMap(_.binder)
+          }
+          .flatten
+      def computeTransitiveTermCaps(): Map[p.Sym, List[p.Arg]] = {
+        val callGraph: Map[p.Sym, List[p.Sym]] =
+          fnByName.view
+            .mapValues(_.collectWhere[p.Expr] { case p.Expr.Invoke(p.Type.FnRef(name), _, _, _, _) => name })
+            .toMap
+        val declared = fnByName.view.mapValues(declaredNames(_)).toMap
+        @tailrec def fixpoint(current: Map[p.Sym, List[p.Arg]]): Map[p.Sym, List[p.Arg]] = {
+          val next = current.map { case (sym, caps) =>
+            if (sym == entry.name) sym -> caps
+            else {
+              val inherited = callGraph(sym).flatMap(callee => current.getOrElse(callee, Nil))
+              val extra     = inherited.filterNot(cap => declared(sym)(cap.named)).distinctBy(_.named)
+              sym -> (caps ::: extra.filterNot(cap => caps.exists(_.named == cap.named)))
+            }
+          }
+          if (next == current) current else fixpoint(next)
+        }
+        fixpoint(fnByName.view.mapValues(_.termCaptures).toMap)
       }
       val transitive   = if (includeModules) computeTransitiveModuleCaps() else Map.empty[p.Sym, List[p.Arg]]
+      val termCaps     = computeTransitiveTermCaps()
       val entryAllCaps = transitive.getOrElse(entry.name, entry.moduleCaptures)
       val newEntry     = entry.copy(decl = entry.decl.copy(moduleCaptures = entryAllCaps))
       val entryCapByTpe: Map[p.Type, p.Named] =
@@ -534,37 +582,49 @@ object Compiler {
 
       // Update each function's own moduleCaptures to its transitive set, so when its body
       // forwards a capture into a callee Invoke, the capture name is in scope.
-      def updateFnCaps(fn: p.Function): p.Function =
-        if (!includeModules) fn
-        else {
-          val transitiveCaps = transitive.getOrElse(fn.name, fn.moduleCaptures)
-          if (transitiveCaps == fn.moduleCaptures) fn
-          else fn.copy(decl = fn.decl.copy(moduleCaptures = transitiveCaps))
-        }
+      def updateFnCaps(fn: p.Function): p.Function = {
+        val moduleCaps = if (includeModules) transitive.getOrElse(fn.name, fn.moduleCaptures) else fn.moduleCaptures
+        val termCaps0  = termCaps.getOrElse(fn.name, fn.termCaptures)
+        if (moduleCaps == fn.moduleCaptures && termCaps0 == fn.termCaptures) fn
+        else fn.copy(decl = fn.decl.copy(moduleCaptures = moduleCaps, termCaptures = termCaps0))
+      }
 
       // Rebuild the LUT from post-updateFnCaps functions so callee.moduleCaptures reflects
       // the transitive set the backend will actually register.
-      val updatedFns                              = newEntry :: program.functions.map(updateFnCaps)
+      val updatedFns                              = newEntry :: program.functions.map(updateFnCaps(_))
       val updatedFnByName: Map[p.Sym, p.Function] = updatedFns.map(fn => fn.name -> fn).toMap
 
       def patchFn(fn: p.Function): p.Function = {
         val ownCapByTpe: Map[p.Type, p.Named] =
           (fn.moduleCaptures ++ fn.termCaptures).map(arg => arg.named.tpe -> arg.named).toMap
-        def patchIvk(ivk: p.Expr.Invoke): p.Expr.Invoke = updatedFnByName.get(ivk.calleeName) match {
+        val inScope = declaredNames(fn) ++ (fn.moduleCaptures ++ fn.termCaptures).map(_.named)
+        def patchIvk(ivk: p.Expr.Invoke): p.Expr.Invoke = (ivk.callee match {
+          case p.Type.FnRef(name) => updatedFnByName.get(name)
+          case _                  => None
+        }) match {
           case None    => ivk
           case Some(c) =>
             // captures are always a leading prefix; a pre-opt patch may have added ones the
             // optimiser has since dropped from the callee, so normalise to the current set
             val existing = math.max(0, ivk.args.size - c.args.size)
-            val actual   = ivk.args.drop(existing)
-            val needed   = (if (includeModules) c.moduleCaptures else Nil) ++ c.termCaptures
-            if (needed.size == existing) ivk
-            else
-              ivk.copy(args = needed.map { arg =>
-                val tpe   = arg.named.tpe
-                val named = ownCapByTpe.get(tpe).orElse(entryCapByTpe.get(tpe)).getOrElse(arg.named)
-                selectTerm(Nil, named)
-              } ::: actual)
+            val modules  = if (includeModules) c.moduleCaptures else Nil
+            if (modules.size + c.termCaptures.size == existing) ivk
+            else {
+              val prefix = ivk.args.take(existing)
+              val actual = ivk.args.drop(existing)
+              def lookup(arg: p.Arg): p.Term = {
+                val tpe = arg.named.tpe
+                selectTerm(
+                  Nil,
+                  if (inScope(arg.named)) arg.named
+                  else ownCapByTpe.get(tpe).orElse(entryCapByTpe.get(tpe)).getOrElse(arg.named)
+                )
+              }
+              val terms =
+                if (prefix.size >= c.termCaptures.size) prefix.takeRight(c.termCaptures.size)
+                else c.termCaptures.map(lookup(_))
+              ivk.copy(args = modules.map(lookup(_)) ::: terms ::: actual)
+            }
         }
         fn.modifyAll[p.Expr] {
           case ivk: p.Expr.Invoke => patchIvk(ivk)
@@ -574,7 +634,7 @@ object Compiler {
       program
         .copy(
           entry = Some(patchFn(newEntry)),
-          functions = updatedFns.tail.map(patchFn)
+          functions = updatedFns.tail.map(patchFn(_))
         )
         .success
   }
@@ -957,10 +1017,12 @@ object Compiler {
         p.StructDef(classStruct.name, Nil, Nil, Nil).success
       }
 
-    unopt = p.Program(
-      Some(rootFn0),
-      IntrinsicTable.dedupe(abstractFnsWithAssertBody ::: allRootDependentFns0 ::: resolvedFunctions0),
-      ((rootDependentStructs ++ allRootDependentStructs).toList ++ dispatchAnonStructDefs).distinct
+    unopt = dropClosureReceivers(
+      p.Program(
+        Some(rootFn0),
+        IntrinsicTable.dedupe(abstractFnsWithAssertBody ::: allRootDependentFns0 ::: resolvedFunctions0),
+        ((rootDependentStructs ++ allRootDependentStructs).toList ++ dispatchAnonStructDefs).distinct
+      )
     )
     _ = log.info(
       s"Program compiled (unpot), structures = ${unopt.defs.size}, functions = ${unopt.functions.size}"
@@ -981,14 +1043,14 @@ object Compiler {
     optPassLog = log.subLog("Opt Passes")
 
     unoptWired <- wireCaptures(unopt, includeModules = false)
-    opt = scala.Function.chain(
-      List[ProgramPass](
-        printPass(Intrinsify),
-        printPass(Specialisation),
-        PartialEval(),
-        DeadArgElimination
-      ).map(p => p(_, optPassLog))
+    specialised = scala.Function.chain(
+      List[ProgramPass](printPass(Intrinsify), printPass(Specialisation)).map(p => p(_, optPassLog))
     )(unoptWired)
+    specialisedTerms <- wireCaptures(specialised, includeModules = false)
+    specialisedWired <- wireCaptures(DeadArgElimination(specialisedTerms, optPassLog))
+    opt = scala.Function.chain(
+      List[ProgramPass](printPass(CallableInline), PartialEval(), DeadArgElimination).map(p => p(_, optPassLog))
+    )(specialisedWired)
     (monomorphicToPolymorphicSym, opt) <- MonoStruct(opt, log).success
 
     opt <- wireCaptures(opt)

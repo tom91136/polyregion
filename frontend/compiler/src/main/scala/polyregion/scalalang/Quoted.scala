@@ -70,7 +70,6 @@ class Quoted(val underlying: scala.quoted.Quotes) {
       )
   )
 
-  /** show crashes on synthetic annotations such as @retains */
   def safeShow(t: Tree): String = scala.util.Try(t.show).getOrElse(t.toString)
 
   // TODO rename to RemapContext
@@ -81,8 +80,9 @@ class Quoted(val underlying: scala.quoted.Quotes) {
 
       refs: Map[Symbol, p.Expr] = Map.empty, // ident/select table
       names: Map[Symbol, Int] = Map.empty,
-      closures: Map[Symbol, DefDef] = Map.empty, // val -> its lambda method
+      closures: Map[Symbol, DefDef] = Map.empty,
       invokeCaptures: Map[Symbol, List[p.Term]] = Map.empty,
+      fnNames: Map[Symbol, p.Sym] = Map.empty,
       deps: Dependencies = Dependencies(),
       stmts: List[p.Stmt] = List.empty, // fn statements
       thisCls: Option[(ClassDef, p.Type.Struct)] = None
@@ -126,6 +126,16 @@ class Quoted(val underlying: scala.quoted.Quotes) {
 
     def withClosure(s: Symbol, dd: DefDef): RemapContext =
       copy(closures = closures + (s -> dd))
+
+    def fnSym(s: Symbol): p.Sym = fnNames.getOrElse(s, p.Sym(s.fullName))
+
+    def withFnName(s: Symbol): RemapContext =
+      if (fnNames.contains(s)) this
+      else {
+        val base    = s.fullName
+        val ordinal = fnNames.keys.count(_.fullName == base)
+        copy(fnNames = fnNames + (s -> p.Sym(if (ordinal == 0) base else s"$base$$$ordinal")))
+      }
 
     def noStmts: RemapContext = copy(stmts = Nil)
     // def mark(s: p.Signature, d: DefDef) = copy(defs = defs + (s -> d))
