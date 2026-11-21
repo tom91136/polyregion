@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -82,6 +83,16 @@ std::string codeName(const uint32_t code) {
   return name;
 }
 
+void throwJvmException(JNIEnv *env, const std::string &raised) {
+  const auto split = raised.find(": ");
+  auto cls = (split == std::string::npos ? raised : raised.substr(0, split));
+  const auto message = split == std::string::npos ? std::string{} : raised.substr(split + 2);
+  std::replace(cls.begin(), cls.end(), '.', '/');
+  if (auto *exClass = env->FindClass(cls.c_str()); exClass && env->ThrowNew(exClass, message.c_str()) == JNI_OK) return;
+  env->ExceptionClear();
+  throwGeneric(env, EX, "Device raised " + raised);
+}
+
 void raiseAssert(JNIEnv *env) {
   const auto raised = std::exchange(raisedAssert, {});
   if (!raised.raised) return;
@@ -89,6 +100,7 @@ void raiseAssert(JNIEnv *env) {
     throwGeneric(env, "java/lang/AssertionError", raised.message);
   else if (raised.code == static_cast<uint32_t>(polyregion::invoke::AssertCode::Arithmetic))
     throwGeneric(env, "java/lang/ArithmeticException", raised.message);
+  else if (raised.code == static_cast<uint32_t>(polyregion::invoke::AssertCode::JvmException)) throwJvmException(env, raised.message);
   else throwGeneric(env, EX, "Device assertion failed (code " + codeName(raised.code) + "): " + raised.message);
 }
 

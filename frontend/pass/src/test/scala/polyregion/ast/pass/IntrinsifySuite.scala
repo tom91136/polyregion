@@ -38,6 +38,60 @@ class IntrinsifySuite extends munit.FunSuite {
     assert(specs.nonEmpty, "expected a SpecOp from gpuBarrierGlobal")
   }
 
+  test("intrinsics.raise(e, m) lowers to a JvmException Assert carrying both strings") {
+    val e = entry(
+      body = List(
+        p.Stmt.Var(
+          named("u", p.Type.Unit0),
+          Some(
+            call(
+              "raise",
+              List(p.Term.StringConst("java.lang.IllegalArgumentException"), p.Term.StringConst("step cannot be 0.")),
+              p.Type.Unit0
+            )
+          )
+        )
+      )
+    )
+    val out     = Intrinsify(program(e), NoopLog)
+    val invokes = out.entry.body.flatMap(_.collectWhere[p.Expr] { case i: p.Expr.Invoke => i })
+    assert(invokes.isEmpty, s"raise should be lowered, got: ${invokes.map(_.repr)}")
+    val asserts = out.entry.body.flatMap(_.collectWhere[p.Expr] { case p.Expr.SpecOp(a: p.Spec.Assert) => a })
+    assertEquals(
+      asserts,
+      List(
+        p.Spec.Assert(
+          p.Term.IntU32Const(p.Enums.AssertCode.JvmException.value),
+          p.Term.StringConst("java.lang.IllegalArgumentException: step cannot be 0.")
+        )
+      )
+    )
+  }
+
+  test("intrinsics.zero[T] lowers to a cast of zero to T") {
+    val e   = entry(body = List(p.Stmt.Var(named("z", p.Type.Float64), Some(call("zero", Nil, p.Type.Float64)))))
+    val out = Intrinsify(program(e), NoopLog)
+    assertEquals(
+      out.entry.body,
+      List(p.Stmt.Var(named("z", p.Type.Float64), Some(p.Expr.Cast(p.Term.IntS32Const(0), p.Type.Float64))))
+    )
+  }
+
+  test("intrinsics.add[T](x, y) lowers to Intr.Add") {
+    val x = arg("x", p.Type.IntS64)
+    val y = arg("y", p.Type.IntS64)
+    val e = entry(
+      args = List(x, y),
+      body = List(
+        p.Stmt
+          .Var(named("r", p.Type.IntS64), Some(call("add", List(selectT(x.named), selectT(y.named)), p.Type.IntS64)))
+      )
+    )
+    val out  = Intrinsify(program(e), NoopLog)
+    val adds = out.entry.body.flatMap(_.collectWhere[p.Expr] { case p.Expr.IntrOp(a: p.Intr.Add) => a })
+    assertEquals(adds, List(p.Intr.Add(selectT(x.named), selectT(y.named), p.Type.IntS64)))
+  }
+
   test("promotion statements produced inside try remain inside the try") {
     val x   = arg("x", p.Type.IntS8)
     val y   = arg("y", p.Type.IntS8)

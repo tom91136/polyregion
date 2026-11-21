@@ -10,6 +10,9 @@ import polyregion.ast.Traversal.*
 //   intrinsics.gpuGlobalIdx(d)  ->  Spec.GpuGlobalIdx(d)
 //   intrinsics.gpuBarrierAll()  ->  Spec.GpuBarrierAll
 //   intrinsics.assert(c, m)     ->  Spec.Assert(c, m)
+//   intrinsics.raise(e, m)      ->  Spec.Assert(JvmException, "e: m")
+//   intrinsics.zero[T]          ->  Cast(i32(0), T)
+//   intrinsics.add[T](x, y)     ->  Intr.Add(x, y, T)
 //   intrinsics.sin(x)           ->  Math.Sin(x)
 //   intrinsics.pow(x, y)        ->  Math.Pow(x, y)
 //   intrinsics.min(x, y)        ->  Intr.Min(x, y)
@@ -96,6 +99,16 @@ object Intrinsify extends ProgramPass {
 
     (op, args) match {
       case "assert" -> (code :: message :: Nil) => spec(p.Spec.Assert(code, message))
+      case "raise" -> (p.Term.StringConst(exception) :: p.Term.StringConst(message) :: Nil) =>
+        spec(
+          p.Spec.Assert(
+            p.Term.IntU32Const(p.Enums.AssertCode.JvmException.value),
+            p.Term.StringConst(s"$exception: $message")
+          )
+        )
+
+      case "zero" -> Nil            => p.Expr.Cast(p.Term.IntS32Const(0), rtn) -> List.empty[p.Stmt]
+      case "add" -> (x :: y :: Nil) => intr(p.Intr.Add(x, y, rtn))
 
       case "gpuGlobalIdx" -> (x :: Nil)  => spec(p.Spec.GpuGlobalIdx(x))
       case "gpuGlobalSize" -> (x :: Nil) => spec(p.Spec.GpuGlobalSize(x))

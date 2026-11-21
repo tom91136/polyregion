@@ -58,4 +58,10 @@ object intrinsics {
 
   def assert(code: Int, message: String): Unit = intrinsic
 
+  def raise(exception: String, message: String): Unit = intrinsic
+
+  def zero[A]: A = intrinsic
+
+  def add[A](x: A, y: A): A = intrinsic
+
 }

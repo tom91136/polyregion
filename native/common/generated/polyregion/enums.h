@@ -31,6 +31,7 @@ enum class POLYREGION_EXPORT AssertCode : uint32_t {
   RecursionLimit = 1296649298,
   Exception = 1346590789,
   Arithmetic = 1414091329,
+  JvmException = 1129858378,
 };
 
 } // namespace polyregion::invoke

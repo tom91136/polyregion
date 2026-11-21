@@ -298,6 +298,30 @@ class ContextSuite extends munit.FunSuite {
     } finally ctx.close()
   }
 
+  test("a kernel JvmException assert raises the named exception class carrying the message") {
+    val ctx = rt.Context.create(hostDevice)
+    try {
+      val e = intercept[IllegalArgumentException](
+        launchAssert(ctx, p.Enums.AssertCode.JvmException, "java.lang.IllegalArgumentException: step cannot be 0.")
+      )
+      assertEquals(e.getMessage, "step cannot be 0.")
+      val empty = intercept[NoSuchElementException](
+        launchAssert(ctx, p.Enums.AssertCode.JvmException, "java.util.NoSuchElementException: head on empty Range")
+      )
+      assertEquals(empty.getMessage, "head on empty Range")
+    } finally ctx.close()
+  }
+
+  test("a kernel JvmException assert naming no loadable class raises a runtime exception") {
+    val ctx = rt.Context.create(hostDevice)
+    try {
+      val e = intercept[rt.PolyregionRuntimeException](
+        launchAssert(ctx, p.Enums.AssertCode.JvmException, "no.such.Failure: boom")
+      )
+      assert(e.getMessage.contains("no.such.Failure: boom"), e.getMessage)
+    } finally ctx.close()
+  }
+
   test("any other kernel assert code raises a runtime exception naming the code and message") {
     val ctx = rt.Context.create(hostDevice)
     try {
