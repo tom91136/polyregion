@@ -36,7 +36,7 @@ class ExceptionClassSuite extends RangeSuiteBase {
 
   test("an exception class without a String constructor is refused") {
     val errors = compileErrors("""
-      compiletime.offload0[Config[Target.Host.type, Opt.O2]](blocking.Host.context, _ => ())(intrinsics.raise[Failures.NoStringConstructor]("x"))
+      compiletime.offload0(blocking.Host.context, _ => ())(intrinsics.raise[Failures.NoStringConstructor]("x"))
     """)
     assert(errors.contains("String"), errors)
     assert(errors.contains("NoStringConstructor"), errors)
@@ -44,21 +44,21 @@ class ExceptionClassSuite extends RangeSuiteBase {
 
   test("an exception class whose constructor takes another type is refused") {
     val errors = compileErrors("""
-      compiletime.offload0[Config[Target.Host.type, Opt.O2]](blocking.Host.context, _ => ())(intrinsics.raise[Failures.IntConstructor]("x"))
+      compiletime.offload0(blocking.Host.context, _ => ())(intrinsics.raise[Failures.IntConstructor]("x"))
     """)
     assert(errors.contains("IntConstructor"), errors)
   }
 
   test("an abstract exception class is refused") {
     val errors = compileErrors("""
-      compiletime.offload0[Config[Target.Host.type, Opt.O2]](blocking.Host.context, _ => ())(intrinsics.raise[Failures.Abstract]("x"))
+      compiletime.offload0(blocking.Host.context, _ => ())(intrinsics.raise[Failures.Abstract]("x"))
     """)
     assert(errors.contains("Abstract"), errors)
   }
 
   test("an exception class nested in a class is refused") {
     val errors = compileErrors("""
-      compiletime.offload0[Config[Target.Host.type, Opt.O2]](blocking.Host.context, _ => ())(intrinsics.raise[SuiteFailure]("x"))
+      compiletime.offload0(blocking.Host.context, _ => ())(intrinsics.raise[SuiteFailure]("x"))
     """)
     assert(errors.contains("SuiteFailure"), errors)
   }
@@ -66,7 +66,7 @@ class ExceptionClassSuite extends RangeSuiteBase {
   test("a local exception class is refused") {
     val errors = compileErrors("""
       class Local(message: String) extends RuntimeException(message)
-      compiletime.offload0[Config[Target.Host.type, Opt.O2]](blocking.Host.context, _ => ())(intrinsics.raise[Local]("x"))
+      compiletime.offload0(blocking.Host.context, _ => ())(intrinsics.raise[Local]("x"))
     """)
     assert(errors.contains("Local"), errors)
   }

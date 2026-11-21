@@ -488,8 +488,22 @@ lazy val compiler = project
   .dependsOn(ast.jvm(scala3Version), pass.jvm(scala3Version), `binding-jvm`)
 
 lazy val cudaSuites =
-  Set("CudaIntrinsicSuite.scala", "RecursionSuite.scala", "SpectraLaunchSuite.scala", "TwinSuite.scala")
-lazy val cudaSuiteSupport = Set("BaseSuite.scala", "Toggles.scala")
+  Set(
+    "ArrayMemberSuite.scala",
+    "CudaIntrinsicSuite.scala",
+    "ExceptionClassSuite.scala",
+    "RangeAccessSuite.scala",
+    "RangeFoldSuite.scala",
+    "RangeLengthSuite.scala",
+    "RangeMembershipSuite.scala",
+    "RangeQuerySuite.scala",
+    "RangeStepSuite.scala",
+    "RangeSumSuite.scala",
+    "RecursionSuite.scala",
+    "SpectraLaunchSuite.scala",
+    "TwinSuite.scala"
+  )
+lazy val cudaSuiteSupport = Set("BaseSuite.scala", "RangeSuiteBase.scala", "Toggles.scala")
 
 def compilerTestsuiteSettings(projectName: String) = Seq(
   fork                      := true,

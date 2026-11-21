@@ -19,32 +19,32 @@ trait RangeSuiteBase extends munit.FunSuite {
       finally ctx.close()
   }
 
-  protected inline def run[C, A](ctx: rt.Context)(inline f: => A): A = {
+  protected inline def run[A](ctx: rt.Context)(inline f: => A): A = {
     val holder                           = mutable.ListBuffer[A](null.asInstanceOf[A])
     var outcome: Either[Throwable, Unit] = null
-    compiletime.offload0[C](ctx, outcome = _) { holder(0) = f; () }
+    compiletime.offload0(ctx, outcome = _) { holder(0) = f; () }
     outcome.fold(throw _, _ => holder(0))
   }
 
   protected inline def same[A](name: String)(inline f: => A): Unit = {
     test(s"[host] $name")(
-      withContext("host", host)(ctx => assertEquals(run[Config[Target.Host.type, Opt.O2], A](ctx)(f), f))
+      withContext("host", host)(ctx => assertEquals(run[A](ctx)(f), f))
     )
     test(s"[nvidia] $name")(
-      withContext("nvidia", nvidia)(ctx => assertEquals(run[Config[Target.NVPTX64["sm_80"], Opt.O2], A](ctx)(f), f))
+      withContext("nvidia", nvidia)(ctx => assertEquals(run[A](ctx)(f), f))
     )
   }
 
   protected inline def sameOnHost[A](name: String)(inline f: => A): Unit =
     test(s"[host] $name")(
-      withContext("host", host)(ctx => assertEquals(run[Config[Target.Host.type, Opt.O2], A](ctx)(f), f))
+      withContext("host", host)(ctx => assertEquals(run[A](ctx)(f), f))
     )
 
   protected inline def raisesSame[A](name: String)(inline f: => A): Unit = {
     test(s"[host] $name") {
       withContext("host", host) { ctx =>
         val expected = intercept[Throwable](f)
-        val actual   = intercept[Throwable](run[Config[Target.Host.type, Opt.O2], A](ctx)(f))
+        val actual   = intercept[Throwable](run[A](ctx)(f))
         assertEquals(actual.getClass, expected.getClass)
         assertEquals(actual.getMessage, expected.getMessage)
       }
@@ -52,7 +52,7 @@ trait RangeSuiteBase extends munit.FunSuite {
     test(s"[nvidia] $name") {
       withContext("nvidia", nvidia) { ctx =>
         val expected = intercept[Throwable](f)
-        val actual   = intercept[Throwable](run[Config[Target.NVPTX64["sm_80"], Opt.O2], A](ctx)(f))
+        val actual   = intercept[Throwable](run[A](ctx)(f))
         assertEquals(actual.getClass, expected.getClass)
         assertEquals(actual.getMessage, expected.getMessage)
       }
@@ -63,14 +63,14 @@ trait RangeSuiteBase extends munit.FunSuite {
     test(s"[host] $name") {
       withContext("host", host) { ctx =>
         val expected = intercept[Throwable](f)
-        val actual   = intercept[Throwable](run[Config[Target.Host.type, Opt.O2], A](ctx)(f))
+        val actual   = intercept[Throwable](run[A](ctx)(f))
         assertEquals(actual.getClass, expected.getClass)
       }
     }
     test(s"[nvidia] $name") {
       withContext("nvidia", nvidia) { ctx =>
         val expected = intercept[Throwable](f)
-        val actual   = intercept[Throwable](run[Config[Target.NVPTX64["sm_80"], Opt.O2], A](ctx)(f))
+        val actual   = intercept[Throwable](run[A](ctx)(f))
         assertEquals(actual.getClass, expected.getClass)
       }
     }
@@ -81,14 +81,14 @@ trait RangeSuiteBase extends munit.FunSuite {
   ): Unit = {
     test(s"[host] $name") {
       withContext("host", host) { ctx =>
-        val actual = intercept[Throwable](run[Config[Target.Host.type, Opt.O2], Unit](ctx)(f))
+        val actual = intercept[Throwable](run[Unit](ctx)(f))
         assertEquals(actual.getClass, scala.reflect.classTag[E].runtimeClass)
         assertEquals(actual.getMessage, message)
       }
     }
     test(s"[nvidia] $name") {
       withContext("nvidia", nvidia) { ctx =>
-        val actual = intercept[Throwable](run[Config[Target.NVPTX64["sm_80"], Opt.O2], Unit](ctx)(f))
+        val actual = intercept[Throwable](run[Unit](ctx)(f))
         assertEquals(actual.getClass, scala.reflect.classTag[E].runtimeClass)
         assertEquals(actual.getMessage, message)
       }

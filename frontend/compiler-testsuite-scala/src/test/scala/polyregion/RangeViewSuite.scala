@@ -20,7 +20,7 @@ class RangeViewSuite extends RangeSuiteBase {
   test("a mapped range stored into a capture is refused") {
     val errors = compileErrors("""
       val holder = new Array[scala.collection.immutable.IndexedSeq[Int]](1)
-      compiletime.offload0[Config[Target.Host.type, Opt.O2]](blocking.Host.context, _ => ())({ holder(0) = (0 until 4).map(_ + 1); () })
+      compiletime.offload0(blocking.Host.context, _ => ())({ holder(0) = (0 until 4).map(_ + 1); () })
     """)
     assert(errors.contains("may not let an allocation escape"), errors)
   }
@@ -28,7 +28,7 @@ class RangeViewSuite extends RangeSuiteBase {
   test("a filtered range stored into a capture is refused") {
     val errors = compileErrors("""
       val holder = new Array[scala.collection.immutable.IndexedSeq[Int]](1)
-      compiletime.offload0[Config[Target.Host.type, Opt.O2]](blocking.Host.context, _ => ())({ holder(0) = (0 until 4).filter(_ > 1); () })
+      compiletime.offload0(blocking.Host.context, _ => ())({ holder(0) = (0 until 4).filter(_ > 1); () })
     """)
     assert(errors.contains("may not let an allocation escape"), errors)
   }
