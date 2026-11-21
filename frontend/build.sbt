@@ -576,20 +576,34 @@ lazy val `compiler-testsuite-scala` = project
   )
   .dependsOn(`runtime-scala`)
 
-lazy val `compiler-testsuite-cuda` = project
-  .settings(
-    commonSettings,
-    polyregionSettings(Seq("host@native", "cuda@sm_80")),
-    compilerTestsuiteSettings("compiler-testsuite-cuda"),
-    Test / unmanagedSourceDirectories := Seq(
-      (ThisBuild / baseDirectory).value / "compiler-testsuite-scala" / "src" / "test" / "scala"
-    ),
-    Test / unmanagedSources / includeFilter := new SimpleFileFilter(file =>
-      cudaSuites(file.getName) || cudaSuiteSupport(file.getName)
-    ),
-    Test / unmanagedSources += (ThisBuild / baseDirectory).value / ".." / "spectra" / "generated" / "scala" / "polyregion" / "spectra.scala"
-  )
-  .dependsOn(`runtime-scala`)
+def cudaSuiteProject(projectName: String, targets: Seq[String]) =
+  Project(projectName, file(projectName))
+    .settings(
+      commonSettings,
+      polyregionSettings(targets),
+      compilerTestsuiteSettings(projectName),
+      Test / unmanagedSourceDirectories := Seq(
+        (ThisBuild / baseDirectory).value / "compiler-testsuite-scala" / "src" / "test" / "scala"
+      ),
+      Test / unmanagedSources / includeFilter := new SimpleFileFilter(file =>
+        cudaSuites(file.getName) || cudaSuiteSupport(file.getName)
+      ),
+      Test / unmanagedSources ++= {
+        if (polyregionLibraryPath.value.isEmpty) Nil
+        else
+          Seq(
+            (ThisBuild / baseDirectory).value / ".." / "spectra" / "generated" / "scala" / "polyregion" / "spectra.scala"
+          )
+      },
+      Test / unmanagedSources / excludeFilter := {
+        val base = (Test / unmanagedSources / excludeFilter).value
+        if (polyregionLibraryPath.value.isEmpty) base || "SpectraLaunchSuite.scala" else base
+      }
+    )
+    .dependsOn(`runtime-scala`)
+
+lazy val `compiler-testsuite-cuda`      = cudaSuiteProject("compiler-testsuite-cuda", Seq("host@native", "cuda@sm_80"))
+lazy val `compiler-testsuite-cuda-host` = cudaSuiteProject("compiler-testsuite-cuda-host", Seq("host@native"))
 
 lazy val `compiler-testsuite-java` = project
   .settings(
@@ -679,6 +693,7 @@ lazy val root = project
     compiler,
     `compiler-testsuite-scala`,
     `compiler-testsuite-cuda`,
+    `compiler-testsuite-cuda-host`,
     `compiler-testsuite-java`,
     `examples-scala`,
     `benchmarks-scala`
