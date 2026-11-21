@@ -207,19 +207,11 @@ class IntrinsicTableSuite extends munit.FunSuite {
     assertEquals(offending.toList, Nil)
   }
 
-  test("floorDiv and floorMod assert on a zero divisor") {
-    val arithmetic = p.Enums.AssertCode.Arithmetic.value
-    val divisions  = IntrinsicTable.entries.map(_._1).filter(k => k.name == "floorDiv" || k.name == "floorMod")
-    val silent = divisions.filterNot { key =>
-      IntrinsicTable
-        .function(key)
-        .get
-        .collectWhere[p.Expr] {
-          case p.Expr.SpecOp(p.Spec.Assert(p.Term.IntU32Const(code), _)) if code == arithmetic => ()
-        }
-        .nonEmpty
+  test("floorDiv and floorMod leave division by zero undefined, like the / operator") {
+    val raising = IntrinsicTable.entries.map(_._1).filter(k => k.name.startsWith("floor")).filter { key =>
+      IntrinsicTable.function(key).get.collectWhere[p.Expr] { case p.Expr.SpecOp(p.Spec.Assert(_, _)) => () }.nonEmpty
     }
-    assertEquals(silent.map(_.repr).toList, Nil)
+    assertEquals(raising.toList, Nil)
   }
 
   test("intrinsic helpers deduplicate only when identical") {

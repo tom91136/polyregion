@@ -33,8 +33,9 @@ class CudaIntrinsicSuite extends BaseSuite {
     r(0)
   }
 
-  private inline def offloadOutcome(inline f: => Any): Either[Throwable, Unit] = {
+  private inline def offloadOutcome[A](inline f: => A): Either[Throwable, Unit] = {
     val ctx                                      = polyregion.scalalang.blocking.CUDA.devices.head.context
+    val sink                                     = scala.collection.mutable.ListBuffer[A](null.asInstanceOf[A])
     var outcome: Option[Either[Throwable, Unit]] = None
     val latch                                    = CountDownLatch(1)
     polyregion.scalalang.compiletime.offload0[Config[CudaTarget.SM89.type, Opt.O2]](
@@ -43,16 +44,16 @@ class CudaIntrinsicSuite extends BaseSuite {
         outcome = Some(r)
         latch.countDown()
       }
-    ) { f; () }
+    ) { sink(0) = f; () }
     assert(latch.await(60, TimeUnit.SECONDS))
     outcome.get
   }
 
-  private inline def testFails(name: String)(inline f: => Any) = if (Toggles.CudaIntrinsicSuite) {
+  private inline def testFails[A](name: String)(inline f: => A) = if (Toggles.CudaIntrinsicSuite) {
     test(name) {
       assume(hasCuda, "no CUDA device")
       intercept[ArithmeticException](f)
-      offloadOutcome(f) match {
+      offloadOutcome[A](f) match {
         case Left(e)  => assert(e.getMessage.contains("by zero"), e.getMessage)
         case Right(_) => fail("offload did not report the division by zero")
       }
@@ -123,6 +124,14 @@ class CudaIntrinsicSuite extends BaseSuite {
     testFails("floorMod by zero")(java.lang.Math.floorMod(7, zero))
     testFails("long floorDiv by zero")(java.lang.Math.floorDiv(7L, zeroL))
     testFails("long floorMod by zero")(java.lang.Math.floorMod(7L, zeroL))
+    testFails("division by zero")(7 / zero)
+    testFails("remainder by zero")(7 % zero)
+    testFails("long division by zero")(7L / zeroL)
+    testFails("long remainder by zero")(7L % zeroL)
+    testFails("unused division by zero") { 7 / zero; () }
+    testFails("unused remainder by zero") { 7 % zero; () }
+    testFails("unused long division by zero") { 7L / zeroL; () }
+    testFails("unused long remainder by zero") { 7L % zeroL; () }
 
     testExpr[Double](java.lang.Math.signum(e))
     testExpr[Float](java.lang.Math.signum(g))
@@ -163,6 +172,10 @@ class CudaIntrinsicSuite extends BaseSuite {
     val nanC = java.lang.Double.longBitsToDouble(0x7ff8000000000001L)
     val nanD = java.lang.Double.longBitsToDouble(0x7ff8000000000002L)
     val neg3 = -3
+    testExpr[Int](iMin / m1)
+    testExpr[Int](iMin % m1)
+    testExpr[Long](lMin / m1l)
+    testExpr[Long](lMin % m1l)
 
     testExpr[Int](java.lang.Math.floorDiv(iMin, m1))
     testExpr[Int](java.lang.Math.floorMod(iMin, m1))

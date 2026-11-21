@@ -1049,7 +1049,9 @@ object Compiler {
     specialisedTerms <- wireCaptures(specialised, includeModules = false)
     specialisedWired <- wireCaptures(DeadArgElimination(specialisedTerms, optPassLog))
     opt = scala.Function.chain(
-      List[ProgramPass](printPass(CallableInline), PartialEval(), DeadArgElimination).map(p => p(_, optPassLog))
+      List[ProgramPass](printPass(CallableInline), ArithmeticGuard, PartialEval(), DeadArgElimination).map(p =>
+        p(_, optPassLog)
+      )
     )(specialisedWired)
     (monomorphicToPolymorphicSym, opt) <- MonoStruct(opt, log).success
 
