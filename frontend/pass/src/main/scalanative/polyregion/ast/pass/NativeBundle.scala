@@ -20,15 +20,33 @@ import scala.scalanative.libc.stdlib
 
 object NativeBundle {
 
-  private def attached[A](body: => A): A = {
-    BoehmGC.GC_allow_register_threads()
+  private val GCSuccess = 0
+
+  private lazy val registrationAllowed: Unit = BoehmGC.GC_allow_register_threads()
+
+  private def attached[A](failed: String => A)(body: => A): A = {
+    registrationAllowed
     if (BoehmGC.GC_thread_is_registered() != 0) body
     else {
       val base = stackalloc[Ptr[Byte]](2)
-      BoehmGC.GC_get_stack_base(base)
-      BoehmGC.GC_register_my_thread(base)
-      try body
-      finally BoehmGC.GC_unregister_my_thread()
+      base(0) = null
+      base(1) = null
+      val stack = BoehmGC.GC_get_stack_base(base)
+      if (stack != GCSuccess) failed(s"PolyPass: GC_get_stack_base failed with $stack")
+      else {
+        val registered = BoehmGC.GC_register_my_thread(base)
+        if (registered != GCSuccess) failed(s"PolyPass: GC_register_my_thread failed with $registered")
+        else {
+          val result =
+            try body
+            finally {
+              val unregistered = BoehmGC.GC_unregister_my_thread()
+              if (unregistered != GCSuccess)
+                throw IllegalStateException(s"GC_unregister_my_thread failed with $unregistered")
+            }
+          result
+        }
+      }
     }
   }
 
@@ -85,10 +103,14 @@ object NativeBundle {
     val idx = i.toInt
     if (idx < 0 || idx >= nameStrings.length) null
     else
-      plugin.passDescr(plugin.passNames(idx)) match {
-        case None    => null
-        case Some(d) => descrCache.getOrElseUpdate(d, toCString(d)(using nameZone))
-      }
+      attached { message =>
+        setError(message); null
+      }(
+        plugin.passDescr(plugin.passNames(idx)) match {
+          case None    => null
+          case Some(d) => descrCache.getOrElseUpdate(d, toCString(d)(using nameZone))
+        }
+      )
   }
 
   @exported(PolyPassAbi.LastError.Name)
@@ -101,7 +123,11 @@ object NativeBundle {
       inLen: CSize,
       outPtr: Ptr[Ptr[Byte]],
       outLen: Ptr[CSize]
-  ): CInt = attached(runPassesAttached(steps, inPtr, inLen, outPtr, outLen))
+  ): CInt = attached { message =>
+    setError(message); PolyPassAbi.Status.PipelineError
+  }(
+    runPassesAttached(steps, inPtr, inLen, outPtr, outLen)
+  )
 
   private def runPassesAttached(
       steps: Ptr[CString],
@@ -185,40 +211,43 @@ object NativeBundle {
       inLen: CSize,
       outPtr: Ptr[Ptr[Byte]],
       outLen: Ptr[CSize]
-  )(operation: A => Either[List[String], B]): CInt = attached {
-    val status: CInt =
-      try
-        MsgPack.decode[MsgPack.Versioned[A]](readBytes(inPtr, inLen)) match {
-          case Left(error) =>
-            setPackageError(s"PolyPackage $label: cannot decode request: ${error.getMessage}")
-            PolyPackageAbi.Status.Invalid
-          case Right(envelope) if envelope.hash != PolyPackageWireSchema.Hash =>
+  )(operation: A => Either[List[String], B]): CInt =
+    attached { message =>
+      setPackageError(message); PolyPackageAbi.Status.Invalid
+    } {
+      val status: CInt =
+        try
+          MsgPack.decode[MsgPack.Versioned[A]](readBytes(inPtr, inLen)) match {
+            case Left(error) =>
+              setPackageError(s"PolyPackage $label: cannot decode request: ${error.getMessage}")
+              PolyPackageAbi.Status.Invalid
+            case Right(envelope) if envelope.hash != PolyPackageWireSchema.Hash =>
+              setPackageError(
+                s"PolyPackage $label: package-service wire hash differs: expected ${PolyPackageWireSchema.Hash}, got ${envelope.hash}"
+              )
+              PolyPackageAbi.Status.AbiMismatch
+            case Right(envelope) =>
+              val request = envelope.t
+              operation(request) match {
+                case Left(errors) =>
+                  setPackageError(s"PolyPackage $label: ${errors.mkString("\n")}")
+                  PolyPackageAbi.Status.Invalid
+                case Right(result) =>
+                  writeBytes(MsgPack.encode(MsgPack.Versioned(PolyPackageWireSchema.Hash, result)), outPtr, outLen)
+              }
+          }
+        catch {
+          case error: Throwable =>
+            val sw = java.io.StringWriter()
+            error.printStackTrace(java.io.PrintWriter(sw))
             setPackageError(
-              s"PolyPackage $label: package-service wire hash differs: expected ${PolyPackageWireSchema.Hash}, got ${envelope.hash}"
+              s"PolyPackage $label: ${error.getClass.getName}: ${Option(error.getMessage).getOrElse("<no message>")}\n${sw.toString}"
             )
-            PolyPackageAbi.Status.AbiMismatch
-          case Right(envelope) =>
-            val request = envelope.t
-            operation(request) match {
-              case Left(errors) =>
-                setPackageError(s"PolyPackage $label: ${errors.mkString("\n")}")
-                PolyPackageAbi.Status.Invalid
-              case Right(result) =>
-                writeBytes(MsgPack.encode(MsgPack.Versioned(PolyPackageWireSchema.Hash, result)), outPtr, outLen)
-            }
+            PolyPackageAbi.Status.Invalid
         }
-      catch {
-        case error: Throwable =>
-          val sw = java.io.StringWriter()
-          error.printStackTrace(java.io.PrintWriter(sw))
-          setPackageError(
-            s"PolyPackage $label: ${error.getClass.getName}: ${Option(error.getMessage).getOrElse("<no message>")}\n${sw.toString}"
-          )
-          PolyPackageAbi.Status.Invalid
-      }
-    releaseHeap()
-    status
-  }
+      releaseHeap()
+      status
+    }
 
   private def releaseHeap(): Unit = BoehmGC.GC_gcollect_and_unmap()
 
