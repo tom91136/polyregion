@@ -327,7 +327,7 @@ object Offloader {
       resultTpe = rawEntry.rtn
       routed    = routeReturnThroughCapture(rawEntry.copy(decl = rawEntry.decl.copy(name = p.Sym(symbol))))
       slots <- slotsOf(routed, region.captures, resultTpe != p.Type.Unit0)
-      named              = raw.copy(entry = Some(routed))
+      named              = Devirtualise(region.dispatch)(raw.copy(entry = Some(routed)), log)
       passed             = runPasses(named, log)
       (monoToPoly, prog) = passed
       failures           = Verify(prog, log, verifyFunction = false).filter(_._2.nonEmpty)

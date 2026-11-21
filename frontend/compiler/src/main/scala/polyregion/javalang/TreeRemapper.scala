@@ -7,6 +7,7 @@ import com.sun.tools.javac.code.Symbol as JSymbol
 import com.sun.tools.javac.processing.JavacProcessingEnvironment
 import com.sun.tools.javac.tree.JCTree
 import polyregion.ast.{PolyAST as p, *}
+import polyregion.ast.pass.Devirtualise
 import polyregion.intrinsic.IntrinsicTable
 
 import javax.annotation.processing.ProcessingEnvironment
@@ -51,9 +52,10 @@ object TreeRemapper {
           t
       }
 
-    val tagOf                    = mutable.LinkedHashMap.empty[String, Int]
-    val taggedTypes              = mutable.LinkedHashSet.empty[String]
-    def tagFor(fqn: String): Int = tagOf.getOrElseUpdate(fqn, tagOf.size)
+    val taggedTypes = mutable.LinkedHashSet.empty[String]
+
+    // each virtual method with the classes implementing it, `args` picking the call's arguments an implementation takes
+    val dispatch = mutable.LinkedHashMap.empty[p.Sym, List[Arm]]
 
     val witnessed = mutable.LinkedHashSet.empty[TypeElement]
 
@@ -85,10 +87,13 @@ object TreeRemapper {
 
   case class Captured(name: String, capture: Capture)
 
+  case class Arm(cls: p.Sym, impl: p.Sym, args: List[Int])
+
   case class Region(
       program: p.Program,
       captures: List[Captured],
       tags: Map[String, Int],
+      dispatch: Map[p.Sym, List[Devirtualise.Candidate]],
       outerRefs: Set[(String, String)]
   )
 
@@ -1442,38 +1447,32 @@ object TreeRemapper {
             s"(${fields.map(_.getSimpleName).mkString(", ")}), and only stateless implementations can " +
             "share the abstract receiver's layout").fail
       }
-      _                        = scope.deps.taggedTypes += ownerName(sym)
-      result                   = scope.fresh(rtn)
-      resultSel: p.Term.Select = p.Term.Select(result, Nil, rtn)
-      _                        = if (rtn != p.Type.Unit0) buf += p.Stmt.Var(result, None, isMutable = true)
-      tag = bind(
-        scope,
-        buf,
-        p.Expr.Alias(fieldOf(self, JavaTyper.TagMember, p.Type.IntS32))
-      )
-      _ <- candidates.traverse_ { (cls, impl) =>
+      _ = scope.deps.taggedTypes += ownerName(sym)
+      arms <- candidates.traverse { (cls, impl) =>
         val fqn = cls.getQualifiedName.toString
         scope.deps.taggedTypes += fqn
         scope.deps.fnSyms += impl
         scope.calls += impl
-        val hit    = bind(scope, buf, p.Expr.IntrOp(p.Intr.LogicEq(tag, p.Term.IntS32Const(scope.deps.tagFor(fqn)))))
-        val armBuf = mutable.ListBuffer.empty[p.Stmt]
-        (lengthArgsFor(scope, impl, argLengths), staticArgsFor(scope, impl)).mapN { (ls, ss) =>
-          val armSelf = self.tpe match {
-            case p.Type.Ptr(_, space) =>
-              val target = p.Type.Ptr(p.Type.Struct(p.Sym(JavaTyper.structName(cls)), Nil), space)
-              bind(scope, armBuf, p.Expr.Cast(self, target))
-            case _ => self
-          }
-          val call = p.Expr.Invoke(p.Type.FnRef(p.Sym(fullName(impl))), Nil, Some(armSelf), refArgs ++ ls ++ ss, rtn)
-
-          if (rtn == p.Type.Unit0) armBuf += p.Stmt.Var(scope.fresh(rtn), Some(call))
-          else armBuf += p.Stmt.Mut(resultSel, call)
-          buf += p.Stmt.Cond(hit, armBuf.toList, Nil)
-          ()
-        }
+        (lengthArgsFor(scope, impl, argLengths), staticArgsFor(scope, impl)).mapN((ls, ss) =>
+          (p.Sym(JavaTyper.structName(cls)), p.Sym(fullName(impl)), ls ++ ss)
+        )
       }
-    } yield p.Expr.Alias(if (rtn == p.Type.Unit0) p.Term.Unit0Const else resultSel)
+      // implementations differ in the lengths and statics they take, so the call passes their union and each arm picks
+      extras   = arms.flatMap(_._3).distinct
+      callee   = p.Sym(fullName(sym))
+      prefix   = refArgs.indices.toList
+      refCount = refArgs.size
+      slot     = extras.zipWithIndex.map((t, i) => t -> (refCount + i)).toMap
+      armOf    = arms.map((cls, impl, own) => Arm(cls, impl, prefix ::: own.map(slot)))
+      _ <- scope.deps.dispatch.get(callee) match {
+        case Some(known) if known != armOf =>
+          s"Call sites of `${fullName(sym)}` disagree on the arguments its implementations take".fail
+        case _ => scope.deps.dispatch(callee) = armOf; ().success
+      }
+      result = scope.fresh(rtn)
+      call   = p.Expr.Invoke(p.Type.FnRef(callee), Nil, Some(self), refArgs ++ extras, rtn)
+      _      = buf += p.Stmt.Var(result, Some(call), isMutable = false)
+    } yield p.Expr.Alias(if (rtn == p.Type.Unit0) p.Term.Unit0Const else p.Term.Select(result, Nil, rtn))
   }
 
   private def regionAllocated(scope: Scope, tpe: p.Type): Option[JSymbol.ClassSymbol] = referent(tpe) match {
@@ -2251,6 +2250,7 @@ object TreeRemapper {
       _ <- compileMethod(entry, deps, Role.Entry, None)
       _ <- compileTransitive(trees, deps, entrySym, plan = None)
       plan = Some(Plan(planStatics(deps), planLengths(deps)))
+      _    = deps.dispatch.clear()
       entryAndStatics <- compileMethod(entry, deps, Role.Entry, plan)
       (entryFn, _, captures) = entryAndStatics
       sourceFns <- compileTransitive(trees, deps, entrySym, plan = plan)
@@ -2269,6 +2269,16 @@ object TreeRemapper {
       }
       sourced = (signatureStructs ++ allocatedStructs).map(_.name).toSet
       structs = signatureStructs ++ allocatedStructs ++ bytecode.structs.filterNot(d => sourced(d.name))
-    } yield Region(p.Program(Some(entryFn), depFns, structs.distinct), captures, deps.tagOf.toMap, deps.outerRefs.toSet)
+      tags    = Devirtualise.tagsOf(deps.dispatch.values.flatten.map(_.cls))
+      candidates = deps.dispatch.view.mapValues { arms =>
+        arms.map(a => Devirtualise.Candidate(p.Type.Struct(a.cls, Nil), a.impl, tags(a.cls), Some(a.args)))
+      }.toMap
+    } yield Region(
+      p.Program(Some(entryFn), depFns, structs.distinct),
+      captures,
+      tags.map((cls, tag) => cls.fqn.mkString(".") -> tag),
+      candidates,
+      deps.outerRefs.toSet
+    )
   }
 }
