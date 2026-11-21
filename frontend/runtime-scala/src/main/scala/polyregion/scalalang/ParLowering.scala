@@ -355,15 +355,15 @@ class Lowerer(val q: Quotes) extends ParChain {
     tpe
   }
 
-  def sum[T: Type](xs: Expr[Any]): Expr[T] = {
-    val tpe = numeric[T]("sum")
-    bind(xs)(frame => reduceNeutral[T](frame, literal(tpe, 0), combine(tpe)(infix(_, "+", _)), identity)).asExprOf[T]
+  private def arithmetic[T: Type](xs: Expr[Any], what: String, neutral: Int, op: String): Expr[T] = {
+    val tpe = numeric[T](what)
+    bind(xs)(frame => reduceNeutral[T](frame, literal(tpe, neutral), combine(tpe)(infix(_, op, _)), identity))
+      .asExprOf[T]
   }
 
-  def product[T: Type](xs: Expr[Any]): Expr[T] = {
-    val tpe = numeric[T]("product")
-    bind(xs)(frame => reduceNeutral[T](frame, literal(tpe, 1), combine(tpe)(infix(_, "*", _)), identity)).asExprOf[T]
-  }
+  def sum[T: Type](xs: Expr[Any]): Expr[T] = arithmetic[T](xs, "sum", 0, "+")
+
+  def product[T: Type](xs: Expr[Any]): Expr[T] = arithmetic[T](xs, "product", 1, "*")
 
   def fold[T: Type](xs: Expr[Any], z: Expr[T], op: Expr[Any]): Expr[T] =
     bind(xs)(frame =>
@@ -456,63 +456,37 @@ class Lowerer(val q: Quotes) extends ParChain {
   def count(xs: Expr[Any], f: Expr[Any]): Expr[Int] =
     counted(xs, applied(f.asTerm, _)).asExprOf[Int]
 
-  def exists(xs: Expr[Any], f: Expr[Any]): Expr[Boolean] =
+  private def quantified(xs: Expr[Any], f: Expr[Any], all: Boolean): Expr[Boolean] =
     bind(xs) { frame =>
+      val vacuous = Literal(BooleanConstant(all))
       frame.source match {
         case Bound.Held(array, _) =>
-          whenPositive[Boolean](frame.length, Literal(BooleanConstant(false)))(
+          whenPositive[Boolean](frame.length, vacuous)(
             call[Boolean](
-              ParLowering.Spectra.AnyOf,
+              if (all) ParLowering.Spectra.AllOf else ParLowering.Spectra.AnyOf,
               frame.context,
-              List(
-                array,
-                frame.length,
-                over(frame, TypeRepr.of[Boolean])(applied(f.asTerm, _), Literal(BooleanConstant(false)))
-              )
+              List(array, frame.length, over(frame, TypeRepr.of[Boolean])(applied(f.asTerm, _), vacuous))
             )
           )
         case Bound.Indexed(_, _) =>
+          val witness = literal(TypeRepr.of[Int], if (all) 0 else 1)
+          val other   = literal(TypeRepr.of[Int], if (all) 1 else 0)
           infix(
             reduceNeutral[Int](
               frame,
-              Literal(IntConstant(0)),
+              literal(TypeRepr.of[Int], 0),
               combine(TypeRepr.of[Int])(infix(_, "+", _)),
-              y => If(applied(f.asTerm, y), Literal(IntConstant(1)), Literal(IntConstant(0)))
+              y => If(applied(f.asTerm, y), witness, other)
             ),
-            ">",
-            Literal(IntConstant(0))
+            if (all) "==" else ">",
+            literal(TypeRepr.of[Int], 0)
           )
       }
     }.asExprOf[Boolean]
 
-  def forall(xs: Expr[Any], f: Expr[Any]): Expr[Boolean] =
-    bind(xs) { frame =>
-      frame.source match {
-        case Bound.Held(array, _) =>
-          whenPositive[Boolean](frame.length, Literal(BooleanConstant(true)))(
-            call[Boolean](
-              ParLowering.Spectra.AllOf,
-              frame.context,
-              List(
-                array,
-                frame.length,
-                over(frame, TypeRepr.of[Boolean])(applied(f.asTerm, _), Literal(BooleanConstant(true)))
-              )
-            )
-          )
-        case Bound.Indexed(_, _) =>
-          infix(
-            reduceNeutral[Int](
-              frame,
-              Literal(IntConstant(0)),
-              combine(TypeRepr.of[Int])(infix(_, "+", _)),
-              y => If(applied(f.asTerm, y), Literal(IntConstant(0)), Literal(IntConstant(1)))
-            ),
-            "==",
-            Literal(IntConstant(0))
-          )
-      }
-    }.asExprOf[Boolean]
+  def exists(xs: Expr[Any], f: Expr[Any]): Expr[Boolean] = quantified(xs, f, all = false)
+
+  def forall(xs: Expr[Any], f: Expr[Any]): Expr[Boolean] = quantified(xs, f, all = true)
 
   def sorted[T: Type](xs: Expr[Any], lt: Option[Expr[Any]]): Expr[Array[T]] = {
     val tpe = TypeRepr.of[T]
