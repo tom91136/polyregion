@@ -284,6 +284,9 @@ inline Checked<polyast::Program> decodeValidatedImplementation(const ArchiveEntr
       return {{}, {std::move(*error)}};
     if (auto error = archiveSymbolError("implemented declaration `" + polyast::fqcn(*function.implements) + "`", *function.implements))
       return {{}, {std::move(*error)}};
+    for (const auto &capability : function.requiredCapabilities)
+      if (capability.find('@') != std::string::npos)
+        return {{}, {"package implementation `" + polyast::fqcn(function.decl.name) + "` has malformed capability `" + capability + "`"}};
     if (polyast::fqcn(function.decl.name) == entry.implementation && polyast::fqcn(*function.implements) == entry.declaration) {
       if (root) return {{}, {"package implementation `" + entry.implementation + "` contains multiple declared implementation roots"}};
       root = &function;

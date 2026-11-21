@@ -350,6 +350,28 @@ TEST_CASE("package selection and packing reject a malformed implementation paylo
   CHECK(validated.errors ^ exists([](const auto &error) { return error ^ contains_slice("cannot decode package implementation"); }));
 }
 
+TEST_CASE("package selection rejects a target-qualified required capability") {
+  TemporaryDirectory root;
+  const auto value = fixture(7);
+  const auto qualified = value.program.functions.front().withRequiredCapabilities({"foo.thrust@cuda"});
+  const auto raw = hashed_program_to_msgpack(Program({}, {qualified}, {}, PassPhase::Initial(), {}));
+  const auto compressed = detail::compress(raw);
+  REQUIRE(compressed);
+  const detail::EncodedImplementation implementation{"foo.bar.apply", "foo.implementation.apply", detail::encodeHeader(qualified),
+                                                     raw.size(), *compressed.value};
+  const auto encoded = detail::encodeArchive(value.interface, {implementation});
+  REQUIRE(encoded);
+  llvm::SmallString<128> path(root.path);
+  llvm::sys::path::append(path, "qualified.polyast");
+  REQUIRE(writeBytes(path, *encoded.value));
+
+  const auto archive = loadPackageFile(path.str().str());
+  REQUIRE(archive);
+  const auto selected = loadPackageSelection(*archive.value, "foo.bar.apply");
+  REQUIRE_FALSE(selected);
+  CHECK(selected.errors ^ exists([](const auto &error) { return error ^ contains_slice("malformed capability `foo.thrust@cuda`"); }));
+}
+
 TEST_CASE("package archive decoding rejects inconsistent indexes") {
   TemporaryDirectory root;
   const auto value = fixture(7);
