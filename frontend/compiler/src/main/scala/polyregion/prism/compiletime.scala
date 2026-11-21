@@ -267,20 +267,27 @@ object compiletime {
                 Compiler.deriveSignature(sourceDef).map(sourceSym -> _)
               )
 
-              r <- sourceSigs.filter { case (_, sourceSig) =>
-                // FIXME Removing the receiver for now because it may be impossible to mirror a private type.
-                //  Doing this may make the overload resolution less accurate.
-                //  We also discard the generic types here, to handle cases like Seq[A] =:= SeqOp[A, CC[_], C]
+              r <- {
+                def matching(relaxed: Boolean) = sourceSigs.filter { case (_, sourceSig) =>
+                  // FIXME Removing the receiver for now because it may be impossible to mirror a private type.
+                  //  Doing this may make the overload resolution less accurate.
+                  //  We also discard the generic types here, to handle cases like Seq[A] =:= SeqOp[A, CC[_], C]
 
-                // a result typed by a class type parameter or constructor (`C`, `CC[B]`) is only known at the use site
-                val unresolvedRtn = sourceSig.rtn match {
-                  case p.Type.Var(_, _)                                 => true
-                  case p.Type.Struct(p.Sym("scala" :: "Any" :: Nil), _) => true
-                  case _                                                => false
+                  // the relaxed pass ignores a result typed by a class type parameter or constructor, which erases to a variable or `Any`
+                  val unresolvedRtn = sourceSig.rtn match {
+                    case p.Type.Var(_, _)                                 => true
+                    case p.Type.Struct(p.Sym("scala" :: "Any" :: Nil), _) => true
+                    case _                                                => false
+                  }
+                  val expected =
+                    if (relaxed && unresolvedRtn) sourceSig.copy(rtn = reflectedSigWithSourceTpes.rtn) else sourceSig
+                  expected.copy(receiver = None, tpeVars = Nil) ==
+                    reflectedSigWithSourceTpes.copy(receiver = None, tpeVars = Nil)
                 }
-                val expected = if (unresolvedRtn) sourceSig.copy(rtn = reflectedSigWithSourceTpes.rtn) else sourceSig
-                expected.copy(receiver = None, tpeVars = Nil) ==
-                  reflectedSigWithSourceTpes.copy(receiver = None, tpeVars = Nil)
+                matching(relaxed = false) match {
+                  case Nil => matching(relaxed = true)
+                  case xs  => xs
+                }
               } match {
                 case sourceMirror :: Nil => // single match
                   mirrorMethod(sourceMirror._1, reflectedSym)(mirrorToSourceTable).map((f, deps) =>
