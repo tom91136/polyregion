@@ -79,7 +79,7 @@ class Lowerer(val q: Quotes) extends ParChain {
     val chain = decode(xs.asTerm)
     chain.source match {
       case Source.Elements(_, elem) => stored(elem)
-      case Source.Indices(_)        => fail(".par over a Range is not supported yet")
+      case _                        =>
     }
     chain.stages.foreach { stage =>
       if (!is(stage.to, primitives))

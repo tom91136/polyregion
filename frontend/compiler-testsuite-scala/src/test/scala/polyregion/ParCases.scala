@@ -211,6 +211,37 @@ abstract class ParCases extends munit.FunSuite {
     assertEquals(xs.par.on(ctx).filter(_ > 1000).sum, 0)
   }
 
+  check("range sum") { ctx =>
+    assertEquals((0 until 100000).par.on(ctx).map(_ % 7).sum, (0 until 100000).map(_ % 7).sum)
+    assertEquals((1 to 100 by 3).par.on(ctx).sum, (1 to 100 by 3).sum)
+    assertEquals((10 until 0 by -3).par.on(ctx).map(_ * 2).sum, (10 until 0 by -3).map(_ * 2).sum)
+  }
+
+  check("range count and exists") { ctx =>
+    assertEquals((0 until 10000).par.on(ctx).count(_ % 7 == 0), (0 until 10000).count(_ % 7 == 0))
+    assertEquals((0 until 10000).par.on(ctx).exists(_ == 9999), true)
+    assertEquals((0 until 10000).par.on(ctx).forall(_ < 9999), false)
+  }
+
+  check("range toArray") { ctx =>
+    assertEquals((0 until 1000).par.on(ctx).map(_ * 3).toArray.toList, (0 until 1000).map(_ * 3).toList)
+    assertEquals((0 until 1000).par.on(ctx).filter(_ % 3 == 0).toArray.toList, (0 until 1000).filter(_ % 3 == 0).toList)
+    assertEquals((0 until 1000).par.on(ctx).toArray.toList, (0 until 1000).toList)
+  }
+
+  check("range reduce and max") { ctx =>
+    assertEquals((1 to 50).par.on(ctx).reduce(_ + _), (1 to 50).reduce(_ + _))
+    assertEquals((0 until 1000).par.on(ctx).map(x => (x * 37) % 101).max, (0 until 1000).map(x => (x * 37) % 101).max)
+  }
+
+  check("range foreach writes a captured array") { ctx =>
+    val n   = 1000
+    val xs  = ints(n)
+    val out = Array.ofDim[Int](n)
+    (0 until n).par.on(ctx).foreach(i => out(i) = xs(i) * 2)
+    assertEquals(out.toList, xs.map(_ * 2).toList)
+  }
+
   check("array foreach reads and writes captured arrays") { ctx =>
     val n   = 1000
     val xs  = ints(n)
@@ -239,6 +270,7 @@ abstract class ParCases extends munit.FunSuite {
   check("the default context runs the chain") { _ =>
     val xs = ints(1000)
     assertEquals(xs.par.map(_ * 2).filter(_ > 0).sum, xs.map(_ * 2).filter(_ > 0).sum)
+    assertEquals((0 until 1000).par.count(_ % 3 == 0), (0 until 1000).count(_ % 3 == 0))
   }
 
   check("a million elements") { ctx =>
