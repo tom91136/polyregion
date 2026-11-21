@@ -5,7 +5,7 @@ import polyregion.ast.Traversal.*
 import polyregion.ast.pass.*
 import polyregion.ast.{PolyAST as p, *, given}
 import polyregion.intrinsic.IntrinsicTable
-import polyregion.prism.PrismTables
+import polyregion.prism.{Prism, PrismTables}
 
 import java.nio.file.Paths
 import scala.annotation.tailrec
@@ -690,11 +690,11 @@ object Compiler {
       config: LaunchConfig,
       callable: Boolean = false
   ): Result[
-    (                                       //
-        List[(p.Named, q.Term)],            //
-        Map[p.Sym, polyregion.prism.Prism], //
-        Map[p.Sym, p.Sym],                  //
-        List[(String, p.Program)]           //
+    (                             //
+        List[(p.Named, q.Term)],  //
+        Map[p.Sym, Prism],        //
+        Map[p.Sym, p.Sym],        //
+        List[(String, p.Program)] //
     )
   ] = {
     val targets = config.targetNames

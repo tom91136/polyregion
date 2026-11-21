@@ -90,7 +90,7 @@ object compiletime {
   private case class ReifiedConfig(name: String, target: ct.Target, arch: String, opt: ct.Opt)
 
   private def reifiedConfigs(compiler: ct.Compiler, config: LaunchConfig): Result[List[ReifiedConfig]] =
-    config.targets.traverse { (name, arch) =>
+    config.targets.traverse { case LaunchConfig.DeviceTarget(name, arch) =>
       Either
         .catchNonFatal(compiler.targetByName(name))
         .map(target => ReifiedConfig(name, target, arch, config.opt))
@@ -182,7 +182,7 @@ object compiletime {
       // Name actual => type actual
       // configs               <- reifyConfigFromTpe[C](using q.underlying)()
 
-      (captures, prismRefs, monoMap, programs) <- Compiler.compileExpr(log, f, StdLib.Tables, config)
+      (captures, prismRefs, _, programs) <- Compiler.compileExpr(log, f, StdLib.Tables, config)
       prog0 = programs.head._2
 
       resolveStructDef = (s: p.Type.Struct) => prog0.defs.find(_.name == s.name)
@@ -271,7 +271,7 @@ object compiletime {
           )
           '{
             val jitCompiler = ct.Compiler.create()
-            val asts        = $astsExpr
+            val asts        = $astsExpr.toIndexedSeq
             $jitConfigs.map { case (targetName, arch, opt, ast) =>
               val target = ct.Target.valueOf(targetName)
               val comp   = jitCompiler.compile(asts(ast), emitAssembly = false, ct.Options.of(target, arch), opt)

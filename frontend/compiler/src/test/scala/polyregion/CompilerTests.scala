@@ -2,7 +2,7 @@ package polyregion
 
 import polyregion.ast.*
 import polyregion.prism.StdLib
-import polyregion.scalalang.{Compiler, Quoted}
+import polyregion.scalalang.{Compiler, LaunchConfig, Quoted}
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
 import scala.quoted.*
@@ -56,11 +56,11 @@ object CompilerTests {
     val compiled =
       try
         for {
-          (captures, prismRefs, monoMap, programs) <- Compiler.compileExpr(using Quoted(q))(
+          (_, _, _, _) <- Compiler.compileExpr(using Quoted(q))(
             l,
             expr,
             StdLib.Tables,
-            polyregion.scalalang.LaunchConfig.Default
+            LaunchConfig.Default
           )
         } yield '{ () }
       catch {

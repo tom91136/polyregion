@@ -4,31 +4,21 @@ import polyregion.jvm.compiler.Opt
 
 import scala.quoted.Quotes
 
-final case class LaunchConfig(
-    targets: List[(String, String)],
-    opt: Opt,
-    jit: Boolean,
-    roots: String,
-    capabilities: List[String]
-) {
-  def targetNames: List[String] = targets.map(_._1).distinct
-  def targetList: String        = targets.map((name, arch) => s"$name@$arch").mkString(",")
-  def capabilityList: String    = capabilities.mkString(",")
-}
-
 object LaunchConfig {
 
-  val TargetsKey      = "polyregion.targets"
-  val OptKey          = "polyregion.opt"
-  val JitKey          = "polyregion.jit"
-  val RootsKey        = "polyregion.library.path"
-  val CapabilitiesKey = "polyregion.library.capabilities"
+  case class DeviceTarget(name: String, arch: String)
 
-  val Default: LaunchConfig = LaunchConfig(List("host" -> "native"), Opt.O2, jit = false, "", Nil)
+  val TargetsKey: String      = "polyregion.targets"
+  val OptKey: String          = "polyregion.opt"
+  val JitKey: String          = "polyregion.jit"
+  val RootsKey: String        = "polyregion.library.path"
+  val CapabilitiesKey: String = "polyregion.library.capabilities"
 
-  def parseTarget(entry: String): (String, String) = {
+  val Default: LaunchConfig = LaunchConfig(List(DeviceTarget("host", "native")), Opt.O2, jit = false, "", Nil)
+
+  def parseTarget(entry: String): DeviceTarget = {
     val at = entry.indexOf('@')
-    if (at < 0) entry -> "native" else entry.take(at) -> entry.drop(at + 1)
+    if (at < 0) DeviceTarget(entry, "native") else DeviceTarget(entry.take(at), entry.drop(at + 1))
   }
 
   // XXX CompilationInfo.XmacroSettings is @experimental and -experimental would taint every consumer
@@ -36,7 +26,10 @@ object LaunchConfig {
     val info   = q.reflect.CompilationInfo
     val method = info.getClass.getMethods.find(_.getName == "XmacroSettings").get
     method.setAccessible(true)
-    method.invoke(info).asInstanceOf[List[String]]
+    method.invoke(info) match {
+      case settings: List[?] => settings.map(_.toString)
+      case other             => throw IllegalStateException(s"unexpected macro settings $other")
+    }
   }
 
   def fromSettings(settings: List[String]): Either[String, LaunchConfig] = {
@@ -55,7 +48,7 @@ object LaunchConfig {
     } yield LaunchConfig(
       values(TargetsKey) match {
         case Nil     => Default.targets
-        case configs => configs.map(parseTarget)
+        case configs => configs.map(parseTarget(_))
       },
       opt,
       jit,
@@ -63,4 +56,16 @@ object LaunchConfig {
       values(CapabilitiesKey)
     )
   }
+}
+
+case class LaunchConfig(
+    targets: List[LaunchConfig.DeviceTarget],
+    opt: Opt,
+    jit: Boolean,
+    roots: String,
+    capabilities: List[String]
+) {
+  def targetNames: List[String] = targets.map(_.name).distinct
+  def targetList: String        = targets.map(target => s"${target.name}@${target.arch}").mkString(",")
+  def capabilityList: String    = capabilities.mkString(",")
 }

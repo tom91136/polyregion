@@ -20,7 +20,7 @@ class LaunchRuntimeSuite extends munit.FunSuite {
     val loader = Thread(() =>
       LaunchRuntime.ensureLoaded("concurrent-first-use", false) {
         started.countDown()
-        release.await()
+        assert(release.await(10, TimeUnit.SECONDS))
         loaded.set(true)
       }
     )

@@ -7,11 +7,9 @@ import scala.concurrent.duration.*
 
 class JvmDivisionSuite extends BaseSuite {
 
-  private type Host = Config[Target.Host.type, Opt.O2]
+  private inline def blockingValue[A](inline f: => A): A = blocking.Host.ops.task[A](f)
 
-  private inline def blockingValue[A](inline f: => A): A = blocking.Host.aot.task[Host, A](f)
-
-  private inline def futureValue[A](inline f: => A): A = Await.result(future.Host.aot.task[Host, A](f), 30.seconds)
+  private inline def futureValue[A](inline f: => A): A = Await.result(future.Host.ops.task[A](f), 30.seconds)
 
   private inline def blockingRaises[A](inline f: => A): Unit =
     assertEquals(intercept[ArithmeticException](blockingValue[A](f)).getMessage, "/ by zero")

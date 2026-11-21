@@ -212,7 +212,7 @@ class TwinSuite extends munit.FunSuite {
       withContext(label, device) { ctx =>
         val l   = Lazy()
         val out = Buffer.ofDim[Int](1)
-        launch[C](ctx) {
+        launch(ctx) {
           out(0) = l.k + 1
         }
         assertEquals(out(0), 5)
@@ -224,7 +224,7 @@ class TwinSuite extends munit.FunSuite {
       withContext(label, device) { ctx =>
         val l   = Lazy()
         val out = Buffer.ofDim[Int](1)
-        launch[C](ctx) {
+        launch(ctx) {
           out(0) = l.k + 2
         }
         assertEquals(out(0), 6)
@@ -237,7 +237,7 @@ class TwinSuite extends munit.FunSuite {
         val l     = Lazy()
         val heavy = l.heavy
         val out   = Buffer.ofDim[Int](1)
-        launch[C](ctx) {
+        launch(ctx) {
           out(0) = heavy + l.k
         }
         assertEquals(out(0), 404)
@@ -249,7 +249,7 @@ class TwinSuite extends munit.FunSuite {
       withContext(label, device) { ctx =>
         val l   = Local()
         val out = Buffer.ofDim[Int](1)
-        launch[C](ctx) {
+        launch(ctx) {
           out(0) = l.get + l.k
         }
         assertEquals(out(0), 20)
@@ -260,7 +260,7 @@ class TwinSuite extends munit.FunSuite {
       withContext(label, device) { ctx =>
         val t   = Tagged()
         val out = Buffer.ofDim[Int](1)
-        launch[C](ctx) {
+        launch(ctx) {
           out(0) = t.k + 1
         }
         assertEquals(out(0), 3)
@@ -271,7 +271,7 @@ class TwinSuite extends munit.FunSuite {
       withContext(label, device) { ctx =>
         val n   = Outer().nested
         val out = Buffer.ofDim[Int](1)
-        launch[C](ctx) {
+        launch(ctx) {
           out(0) = n.k + 1
         }
         assertEquals(out(0), 8)
@@ -282,7 +282,7 @@ class TwinSuite extends munit.FunSuite {
       withContext(label, device) { ctx =>
         val c   = Expanded()
         val out = Buffer.ofDim[Int](1)
-        launch[C](ctx) {
+        launch(ctx) {
           out(0) = c.b + 1
         }
         assertEquals(out(0), 3)

@@ -23,7 +23,10 @@ class LaunchConfigSuite extends munit.FunSuite {
         )
       )
       .fold(error => fail(error), identity)
-    assertEquals(config.targets, List("host" -> "native", "cuda" -> "sm_80"))
+    assertEquals(
+      config.targets,
+      List(LaunchConfig.DeviceTarget("host", "native"), LaunchConfig.DeviceTarget("cuda", "sm_80"))
+    )
     assertEquals(config.targetList, "host@native,cuda@sm_80")
     assertEquals(config.targetNames, List("host", "cuda"))
     assertEquals(config.opt, Opt.O3)
@@ -33,7 +36,7 @@ class LaunchConfigSuite extends munit.FunSuite {
   }
 
   test("a target without an architecture is native") {
-    assertEquals(LaunchConfig.parseTarget("host"), "host" -> "native")
+    assertEquals(LaunchConfig.parseTarget("host"), LaunchConfig.DeviceTarget("host", "native"))
   }
 
   test("reject an unknown optimisation level and a malformed jit flag") {

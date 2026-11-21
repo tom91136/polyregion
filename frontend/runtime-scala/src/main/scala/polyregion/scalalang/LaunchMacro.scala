@@ -239,11 +239,12 @@ object LaunchMacro {
     try
       for {
         encoded <- Either.catchNonFatal(MsgPack.encode(CodeGen.structDefsVersioned(List(definition))))
-        layouts <- (LaunchConfig.Default.targets ::: config.targets).distinct.traverse { (name, arch) =>
-          Either.catchNonFatal {
-            val layout = compiler.layoutOf(encoded, ct.Options.of(compiler.targetByName(name), arch)).head
-            s"$name@$arch" -> layout
-          }
+        layouts <- (LaunchConfig.Default.targets ::: config.targets).distinct.traverse {
+          case LaunchConfig.DeviceTarget(name, arch) =>
+            Either.catchNonFatal {
+              val layout = compiler.layoutOf(encoded, ct.Options.of(compiler.targetByName(name), arch)).head
+              s"$name@$arch" -> layout
+            }
         }
         shape = (layout: ct.Layout) =>
           (

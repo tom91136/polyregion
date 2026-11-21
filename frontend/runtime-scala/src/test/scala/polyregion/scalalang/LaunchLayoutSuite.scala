@@ -16,7 +16,10 @@ class LaunchLayoutSuite extends munit.FunSuite {
   )
 
   private def layout(targets: (String, String)*) =
-    LaunchMacro.layoutOf(environment, LaunchConfig.Default.copy(targets = targets.toList))
+    LaunchMacro.layoutOf(
+      environment,
+      LaunchConfig.Default.copy(targets = targets.toList.map((name, arch) => LaunchConfig.DeviceTarget(name, arch)))
+    )
 
   test("the environment layout is shared by the host and every configured device target") {
     val host = layout("host" -> "native").fold(throw _, identity)

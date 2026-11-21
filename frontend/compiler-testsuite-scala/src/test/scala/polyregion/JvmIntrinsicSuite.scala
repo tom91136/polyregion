@@ -150,12 +150,12 @@ class JvmIntrinsicSuite extends BaseSuite {
   private def assertDivByZero(e: ArithmeticException): Unit = assertEquals(e.getMessage, "/ by zero")
 
   private inline def blockingDivByZero[A](inline f: => A): Unit = {
-    val raised = intercept[ArithmeticException](blocking.Host.aot.task[Config[Target.Host.type, Opt.O2], A](f))
+    val raised = intercept[ArithmeticException](blocking.Host.ops.task[A](f))
     assertDivByZero(raised)
   }
 
   private inline def futureDivByZero[A](inline f: => A): Unit = {
-    val failed = future.Host.aot.task[Config[Target.Host.type, Opt.O2], A](f)
+    val failed = future.Host.ops.task[A](f)
     assertDivByZero(intercept[ArithmeticException](Await.result(failed, 30.seconds)))
   }
 
