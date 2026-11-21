@@ -29,7 +29,7 @@ add_library(polyc ${LIB_SOURCES})
 add_library(polyc-driver driver_package.cpp driver_polyc.cpp)
 
 add_executable(polyc-tests test/ast_codegen.cpp test/backend.cpp test/ast.cpp test/jit.cpp test/js_runner.cpp test/vendor_bitcode.cpp
-        test/treeshake.cpp test/c11_host.cpp test/package_object.cpp)
+        test/treeshake.cpp test/c11_host.cpp test/package_object.cpp test/plugin_threads.cpp)
 add_executable(polyc-benchmarks benchmark/babelstream.cpp)
 add_executable(polyc-bin driver_main.cpp)
 
