@@ -45,6 +45,7 @@
 #include "llvm/Config/llvm-config.h"
 #include "llvm/ExecutionEngine/JITLink/JITLinkMemoryManager.h"
 #include "llvm/ExecutionEngine/Orc/AbsoluteSymbols.h"
+#include "llvm/ExecutionEngine/Orc/EHFrameRegistrationPlugin.h"
 #include "llvm/ExecutionEngine/Orc/ExecutionUtils.h"
 #include "llvm/ExecutionEngine/Orc/ObjectLinkingLayer.h"
 #include "llvm/ExecutionEngine/Orc/SelfExecutorProcessControl.h"
@@ -653,6 +654,10 @@ RelocatableDevice::RelocatableDevice() {
     if (!mm) POLYINVOKE_FATAL(RELOBJ_PREFIX, "Cannot create JITLink memory manager: %s", toString(mm.takeError()).c_str());
     jitMemMgr = std::move(*mm);
     auto layer = std::make_unique<llvm::orc::ObjectLinkingLayer>(*es, *jitMemMgr);
+    auto ehFrames = llvm::orc::EHFrameRegistrationPlugin::Create(*es);
+    if (!ehFrames)
+      POLYINVOKE_FATAL(RELOBJ_PREFIX, "Cannot create EH frame registration plugin: %s", toString(ehFrames.takeError()).c_str());
+    layer->addPlugin(std::move(*ehFrames));
     // promote our object flags so duplicate symbols across modules don't fail materialisation
     layer->setOverrideObjectFlagsWithResponsibilityFlags(true);
     layer->setAutoClaimResponsibilityForObjectSymbols(true);
