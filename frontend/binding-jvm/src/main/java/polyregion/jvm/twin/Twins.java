@@ -32,6 +32,11 @@ public final class Twins {
     return layouts.get(className);
   }
 
+  /** Registers a generated twin for the class its layout names. */
+  public void add(Twin twin) {
+    twins.put(twin.layout().className, twin);
+  }
+
   public Twin of(Class<?> type) {
     Twin t = twins.get(type.getName());
     if (t != null) return t;

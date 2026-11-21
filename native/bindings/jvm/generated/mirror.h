@@ -245,8 +245,8 @@ public:
   static Compilation &of(JNIEnv *env);
   static void drop(JNIEnv *env);
   Instance wrap(JNIEnv *env, jobject instance);
-  Instance operator()(JNIEnv *env, jbyteArray program, jobjectArray features, jobjectArray events, jobjectArray layouts,
-                      jstring messages) const;
+  Instance operator()(JNIEnv *env, jbyteArray program, jobjectArray features, jobjectArray entryArgs, jobjectArray events,
+                      jobjectArray layouts, jstring messages) const;
 };
 struct String {
   struct Instance {

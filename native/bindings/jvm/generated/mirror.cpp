@@ -428,9 +428,9 @@ Compilation::Instance::Instance(const Compilation &meta, jobject instance) : met
 
 Compilation::Compilation(JNIEnv *env, jclass found)
     : clazz(reinterpret_cast<jclass>(env->NewGlobalRef(found))),
-      ctor0Method(env->GetMethodID(
-          clazz, "<init>", "([B[Ljava/lang/String;[Lpolyregion/jvm/compiler/Event;[Lpolyregion/jvm/compiler/Layout;Ljava/lang/String;)V")) {
-      };
+      ctor0Method(env->GetMethodID(clazz, "<init>",
+                                   "([B[Ljava/lang/String;[Ljava/lang/String;[Lpolyregion/jvm/compiler/Event;[Lpolyregion/jvm/compiler/"
+                                   "Layout;Ljava/lang/String;)V")) {};
 thread_local std::vector<std::unique_ptr<Compilation>> Compilation::cached = {};
 Compilation &Compilation::of(JNIEnv *env) {
   jclass found = env->FindClass("polyregion/jvm/compiler/Compilation");
@@ -462,9 +462,9 @@ void Compilation::drop(JNIEnv *env) {
   env->DeleteLocalRef(found);
 }
 Compilation::Instance Compilation::wrap(JNIEnv *env, jobject instance) { return {*this, instance}; }
-Compilation::Instance Compilation::operator()(JNIEnv *env, jbyteArray program, jobjectArray features, jobjectArray events,
-                                              jobjectArray layouts, jstring messages) const {
-  return {*this, env->NewObject(clazz, ctor0Method, program, features, events, layouts, messages)};
+Compilation::Instance Compilation::operator()(JNIEnv *env, jbyteArray program, jobjectArray features, jobjectArray entryArgs,
+                                              jobjectArray events, jobjectArray layouts, jstring messages) const {
+  return {*this, env->NewObject(clazz, ctor0Method, program, features, entryArgs, events, layouts, messages)};
 }
 
 String::Instance::Instance(const String &meta, jobject instance) : meta(meta), instance(instance) {}

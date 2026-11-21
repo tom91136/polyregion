@@ -13,10 +13,9 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>The handle comes from {@code MethodHandles.privateLookupIn}, so fields of JDK classes need the
  * owning package opened to the caller ({@code --add-opens java.base/java.util=ALL-UNNAMED}). The
- * source uses only the Java 8 API and reaches {@code VarHandle} reflectively. A build for JDK 8
- * (javalang) therefore loads on a JDK 8 runtime, where {@link #of} fails with a {@link
- * TwinException}; a build for a newer JDK (this repository's default) loads where it was built
- * for.
+ * source uses only the Java 8 API and reaches {@code VarHandle} reflectively. Where the JDK has no
+ * {@code VarHandle} (Java 8), the field is made accessible instead, which Java 8 allows unless a
+ * security manager refuses.
  */
 public final class FieldAccess {
 
@@ -133,6 +132,18 @@ public final class FieldAccess {
     }
   }
 
+  private static FieldAccess openByAccessible(Field field) {
+    try {
+      field.setAccessible(true);
+      MethodHandle getter = MethodHandles.lookup().unreflectGetter(field);
+      MethodHandle setter =
+          Modifier.isFinal(field.getModifiers()) ? null : MethodHandles.lookup().unreflectSetter(field);
+      return new FieldAccess(field, getter, setter);
+    } catch (IllegalAccessException | RuntimeException e) {
+      throw unreachable(field, e);
+    }
+  }
+
   private static FieldAccess open(Field field) {
     Class<?> owner = field.getDeclaringClass();
     Class<?> varHandle;
@@ -145,10 +156,7 @@ public final class FieldAccess {
           MethodHandles.class.getMethod(
               "privateLookupIn", Class.class, MethodHandles.Lookup.class);
     } catch (ReflectiveOperationException e) {
-      throw new TwinException(
-          "Reaching private fields needs a JDK with VarHandle (9 or newer), running on "
-              + System.getProperty("java.version"),
-          e);
+      return openByAccessible(field);
     }
     try {
       MethodHandles.Lookup lookup =
