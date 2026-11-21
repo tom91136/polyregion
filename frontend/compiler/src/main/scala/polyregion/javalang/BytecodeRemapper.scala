@@ -156,13 +156,19 @@ object BytecodeRemapper {
     def superOf(internal: String): Result[Option[String]] = ClassLayouts.superOf(internal, bytesOf)
 
     def accessOf(method: MethodRef): Result[(Int, Option[Int])] = ClassLayouts.accessOf(method, bytesOf)
+
+    def commonAncestor(a: String, b: String): Result[Option[String]] = ClassLayouts.commonAncestor(a, b, bytesOf)
+
+    def stateOf(internal: String): Result[Option[String]] = ClassLayouts.carriedState(internal, bytesOf)
   }
 
-  private class Lowerer(rtn: p.Type, register: Boolean, classes: Classes, owner: String, receiver: Option[String]) {
+  private class Lowerer(rtn: p.Type, register: Boolean, classes: Classes, receiver: Option[String]) {
 
     private val ids = Iterator.from(0)
     val declared    = mutable.LinkedHashMap.empty[String, p.Named]
     val calls       = mutable.LinkedHashSet.empty[MethodRef]
+    val sites       = mutable.LinkedHashSet.empty[OpenSite]
+    val allocated   = mutable.LinkedHashSet.empty[String]
     val helpers     = mutable.ListBuffer.empty[p.Function]
 
     private val closures = mutable.Map.empty[(Int, Int), Closure]
@@ -239,7 +245,7 @@ object BytecodeRemapper {
         buf: mutable.ListBuffer[p.Stmt]
     ): Result[List[p.Term]] = exprs.traverse(expr(_, buf)).flatMap(coerced(desc, _, buf))
 
-    // a constructor is the one instance method called without a receiver lookup: the callee is known and `self` goes first
+    // a constructor is the one instance method called without a receiver lookup: the callee is known
     private def construct(
         internal: String,
         desc: String,
@@ -250,21 +256,26 @@ object BytecodeRemapper {
       val target = internal.replace('/', '.')
       arguments(desc, exprs, buf).map { args =>
         calls += MethodRef(target, "<init>", desc)
-        val call = p.Expr.Invoke(p.Type.FnRef(symbolOf(target, "<init>")), Nil, None, self :: args, p.Type.Unit0)
+        val call = p.Expr.Invoke(p.Type.FnRef(symbolOf(target, "<init>")), Nil, Some(self), args, p.Type.Unit0)
         buf += p.Stmt.Var(fresh(p.Type.Unit0), Some(call))
         ()
       }
     }
 
+    // a superclass the allocation admitted has no state of its own, so its constructor runs on the subclass's storage
     private def delegate(i: InvocationExprent, buf: mutable.ListBuffer[p.Stmt]): Result[p.Term] =
       if (i.getClassname == "java/lang/Object") p.Term.Unit0Const.success
-      else if (i.getClassname.replace('/', '.') != owner)
-        (s"Unsupported call to the superclass constructor `${i.getClassname.replace('/', '.')}.<init>${i.getStringDescriptor}`; " +
-          "a superclass carries layout the struct of its subclass has no room for").fail
       else
         for {
+          ref  <- classes.reference(i.getClassname)
           self <- expr(i.getInstance, buf)
-          _    <- construct(i.getClassname, i.getStringDescriptor, self, i.getLstParameters.asScala.toList, buf)
+          _ <- construct(
+            i.getClassname,
+            i.getStringDescriptor,
+            coerce(buf, self, ref),
+            i.getLstParameters.asScala.toList,
+            buf
+          )
         } yield p.Term.Unit0Const
 
     private def callStatic(callee: MethodRef, args: List[p.Term], buf: mutable.ListBuffer[p.Stmt]): Result[p.Term] = {
@@ -339,7 +350,8 @@ object BytecodeRemapper {
       }
     }
 
-    // a call through a receiver is direct only where nothing can override it: a final class or method, or a private one
+    // a call through a receiver is direct where nothing can override it: a final class or method, or a private one
+    // any other is left for the shared devirtualiser, to be given the classes the region can see
     private def callInstance(i: InvocationExprent, recv: p.Term, buf: mutable.ListBuffer[p.Stmt]): Result[p.Term] = {
       val target = i.getClassname.replace('/', '.')
       val callee = MethodRef(target, i.getName, i.getStringDescriptor, instance = true)
@@ -350,7 +362,12 @@ object BytecodeRemapper {
       for {
         ref    <- classes.reference(i.getClassname)
         access <- classes.accessOf(callee)
-        _      <- if (closed(access._1, access._2)) ().success else unsupported(i)
+        direct = closed(access._1, access._2)
+        _ <-
+          if (direct || i.getInvocationType != InvocationExprent.InvocationType.SPECIAL) ().success
+          else
+            (s"Unsupported call `${callee.repr}`; a `super` call binds to one implementation, " +
+              "which only a final class or method guarantees").fail
         self <- recv match {
           case s: p.Term.Select if s.tpe == ref => s.success
           case other =>
@@ -359,8 +376,10 @@ object BytecodeRemapper {
         args <- i.getLstParameters.asScala.toList.traverse(expr(_, buf)).flatMap(coerced(i.getStringDescriptor, _, buf))
         rtn  <- classes.returned(MethodDescriptor.parseDescriptor(i.getStringDescriptor).ret, callee.repr)
       } yield {
-        calls += callee
-        bind(buf, p.Expr.Invoke(p.Type.FnRef(symbolOf(target, i.getName)), Nil, None, self :: args, rtn))
+        val site = OpenSite(target, i.getName, i.getStringDescriptor)
+        val sym  = if (direct) symbolOf(target, i.getName) else site.callee
+        if (direct) calls += callee else sites += site
+        bind(buf, p.Expr.Invoke(p.Type.FnRef(sym), Nil, Some(self), args, rtn))
       }
     }
 
@@ -401,15 +420,17 @@ object BytecodeRemapper {
       val internal = n.getNewType.value
       val what     = internal.replace('/', '.')
       for {
-        _      <- classes.reference(internal)
-        sdef   <- classes.struct(internal)
-        ctor   <- Option(n.getConstructor).failIfEmpty(s"Unsupported allocation of `$what`")
-        parent <- classes.superOf(internal)
+        _         <- classes.reference(internal)
+        sdef      <- classes.struct(internal)
+        ctor      <- Option(n.getConstructor).failIfEmpty(s"Unsupported allocation of `$what`")
+        parent    <- classes.superOf(internal)
+        inherited <- parent.filter(_ != "java/lang/Object").flatTraverse(classes.stateOf(_))
         _ <-
-          if (parent.contains("java/lang/Object")) ().success
-          else
-            (s"Unsupported allocation of `$what`: its superclass `${parent.fold("")(_.replace('/', '.'))}` " +
-              "carries layout the struct has no room for").fail
+          inherited.fold(().success)(c =>
+            (s"Unsupported allocation of `$what`: its superclass `$c` declares instance state " +
+              "the struct has no room for").fail
+          )
+        _      = allocated += what
         struct = p.Type.Struct(sdef.name, Nil)
         obj    = fresh(struct)
         _      = buf += p.Stmt.Var(obj, None)
@@ -602,7 +623,15 @@ object BytecodeRemapper {
         c <- expr(ops.get(0), buf)
         t <- expr(ops.get(1), tb)
         e <- expr(ops.get(2), fb)
-        r <- unify(t.tpe, e.tpe)
+        r <- (t.tpe, e.tpe) match {
+          case (p.Type.Ptr(p.Type.Struct(x, _), _), p.Type.Ptr(p.Type.Struct(y, _), _)) if x != y =>
+            classes
+              .commonAncestor(ops.get(1).getExprType.value, ops.get(2).getExprType.value)
+              .flatMap(
+                _.fold[Result[p.Type]](s"No common class for `${x.repr}` and `${y.repr}`".fail)(classes.reference(_))
+              )
+          case _ => unify(t.tpe, e.tpe)
+        }
       } yield {
         val n                  = fresh(r)
         val sel: p.Term.Select = p.Term.Select(n, Nil, r)
@@ -877,8 +906,16 @@ object BytecodeRemapper {
   ): Result[p.Function] =
     lowerWithCalls(classBytes, name, desc, classes).map(_.fn)
 
-  // calls are the static callees no intrinsic covers, helpers the table functions the body invokes
-  case class Lowered(fn: p.Function, calls: List[MethodRef], helpers: List[p.Function], structs: List[p.StructDef])
+  // calls are the callees no intrinsic covers, helpers the table functions the body invokes, sites the calls
+  // through a receiver left to dispatch and allocated the classes the body builds
+  case class Lowered(
+      fn: p.Function,
+      calls: List[MethodRef],
+      helpers: List[p.Function],
+      structs: List[p.StructDef],
+      sites: List[OpenSite],
+      allocated: List[String]
+  )
 
   def lowerWithCalls(
       classBytes: Array[Byte],
@@ -913,7 +950,7 @@ object BytecodeRemapper {
       declared <- m.md.params.toList.traverse(classes.typeOf(_))
       argTypes = self ::: declared
       register = needsRegister(m.root)
-      lowerer  = Lowerer(rtn, register, classes, owner, receiver)
+      lowerer  = Lowerer(rtn, register, classes, receiver)
       base     = if (isStatic || hasThis) 0 else 1
       slots = argTypes
         .foldLeft((List.empty[(Int, p.Type)], base)) { case ((acc, at), t) => ((at, t) :: acc, at + words(t)) }
@@ -948,8 +985,8 @@ object BytecodeRemapper {
         decl = p.FunctionDecl(
           name = symbolOf(owner, name),
           tpeVars = Nil,
-          receiver = None,
-          args = args,
+          receiver = args.headOption.filter(_ => hasThis),
+          args = if (hasThis) args.drop(1) else args,
           moduleCaptures = Nil,
           termCaptures = Nil,
           rtn = rtn,
@@ -964,7 +1001,14 @@ object BytecodeRemapper {
         fpMode = p.Function.FpMode.Relaxed,
         convention = p.CallConvention.RegularCall
       )
-      Lowered(fn, lowerer.calls.toList, lowerer.helpers.toList, classes.structs)
+      Lowered(
+        fn,
+        lowerer.calls.toList,
+        lowerer.helpers.toList,
+        classes.structs,
+        lowerer.sites.toList,
+        lowerer.allocated.toList
+      )
     }
   }
 

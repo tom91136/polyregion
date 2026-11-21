@@ -89,8 +89,6 @@ object TreeRemapper {
 
   case class Captured(name: String, capture: Capture)
 
-  case class Arm(cls: p.Sym, impl: p.Sym, args: List[Int])
-
   case class Region(
       program: p.Program,
       captures: List[Captured],
@@ -318,6 +316,20 @@ object TreeRemapper {
     case same if same == target                                            => t
     case p.Type.Ptr(pointee @ p.Type.Struct(_, _), _) if pointee == target => t
     case _                                                                 => bind(scope, buf, p.Expr.Cast(t, target))
+  }
+
+  // a subtype handed to a parameter of its supertype goes by reference, as a copy into the smaller supertype would truncate it
+  private def coerceArg(
+      scope: Scope,
+      buf: mutable.ListBuffer[p.Stmt],
+      t: p.Term,
+      target: p.Type,
+      byRef: Boolean
+  ): p.Term = (t, target) match {
+    case (sel @ p.Term.Select(_, _, p.Type.Struct(a, _)), p.Type.Struct(b, _)) if byRef && a != b =>
+      val ref = byReference(scope, buf, sel)
+      bind(scope, buf, p.Expr.Cast(ref, p.Type.Ptr(target, p.Type.Space.Private)))
+    case _ => coerce(scope, buf, t, target)
   }
 
   private def fieldOf(base: p.Term.Select, name: String, tpe: p.Type): p.Term.Select = {
@@ -1395,9 +1407,11 @@ object TreeRemapper {
   // the candidate set is a lower bound: a class outside this compilation can implement the method, hence the host-written tag
   private def implementationsOf(
       deps: DepCollector,
-      sym: JSymbol.MethodSymbol
+      sym: JSymbol.MethodSymbol,
+      within: Option[JSymbol.ClassSymbol] = None
   ): Result[List[(TypeElement, JSymbol.MethodSymbol)]] = sym.owner match {
-    case owner: JSymbol.ClassSymbol =>
+    case declaring: JSymbol.ClassSymbol =>
+      val owner    = within.getOrElse(declaring)
       val ownerTpe = deps.types.erasure(owner.asType)
       deps.classTable.values.toList
         .filter(c => c != owner && !c.getModifiers.contains(Modifier.ABSTRACT))
@@ -1477,6 +1491,33 @@ object TreeRemapper {
       _      = buf += p.Stmt.Var(result, Some(call), isMutable = false)
     } yield p.Expr.Alias(if (rtn == p.Type.Unit0) p.Term.Unit0Const else p.Term.Select(result, Nil, rtn))
   }
+
+  private def methodOf(deps: DepCollector, owner: TypeElement, site: OpenSite): Option[JSymbol.MethodSymbol] =
+    deps.elements.getAllMembers(owner).asScala.collectFirst {
+      case m: JSymbol.MethodSymbol
+          if !m.isStatic && m.getSimpleName.contentEquals(site.name) && descriptorOf(deps, m) == site.desc =>
+        m
+    }
+
+  // the classes the compilation declares that a call from bytecode can reach, brought into the region as they are found
+  private def sourceArms(deps: DepCollector, plan: Option[Plan])(site: OpenSite): Result[List[Arm]] =
+    ClassLayouts.structName(site.owner, deps.classBytes).flatMap { name =>
+      (for {
+        owner <- Option(deps.elements.getTypeElement(name)).collect { case c: JSymbol.ClassSymbol => c }
+        sym   <- methodOf(deps, owner, site)
+      } yield implementationsOf(deps, sym, Some(owner)).flatMap(_.traverse { (cls, impl) =>
+        val extras =
+          plan.exists(pl => pl.statics.get(impl).exists(_.nonEmpty) || pl.lengths.get(impl).exists(_.nonEmpty))
+        if (extras)
+          (s"`${fullName(impl)}` is a candidate receiver of `${site.repr}` but takes array lengths or static state " +
+            "that a call from bytecode cannot pass").fail
+        else {
+          deps.dispatchClasses += cls
+          deps.fnSyms += impl
+          Arm(p.Sym(JavaTyper.structName(cls)), p.Sym(fullName(impl)), List.range(0, site.arity)).success
+        }
+      })).getOrElse(Nil.success)
+    }
 
   private def regionAllocated(scope: Scope, tpe: p.Type): Option[JSymbol.ClassSymbol] = referent(tpe) match {
     case p.Type.Struct(name, _) =>
@@ -1566,8 +1607,9 @@ object TreeRemapper {
       _ = argTrees.zipWithIndex.foreach { (a, i) =>
         symOf(a).flatMap(scope.paramOf.get).foreach(j => scope.argFlows += ((sym, i, j)))
       }
-      argLengths = lowered.map(_._2)
-      args       = if (paramTpes.size == raw.size) raw.zip(paramTpes).map(coerce(scope, buf, _, _)) else raw
+      argLengths  = lowered.map(_._2)
+      viaBytecode = recv.isEmpty && isBytecodeCallee(scope.deps, sym)
+      args = if (paramTpes.size == raw.size) raw.zip(paramTpes).map(coerceArg(scope, buf, _, _, viaBytecode)) else raw
       e <- intrinsicOf(scope.deps, sym, args).fold(invokeOf(scope, buf, sym, recv, args, argLengths, rtn))(_.success)
     } yield e
 
@@ -2236,6 +2278,20 @@ object TreeRemapper {
         .orElse(BytecodeResolver.runtimeClasses(owner))
   }
 
+  // lowering a candidate can reach more bytecode, and bytecode can reach more candidates, so both run until neither grows
+  private def settle(
+      trees: Trees,
+      deps: DepCollector,
+      entrySym: JSymbol.MethodSymbol,
+      plan: Option[Plan]
+  ): Result[(List[p.Function], BytecodeResolver.Resolved)] =
+    compileTransitive(trees, deps, entrySym, plan).flatMap { fns =>
+      val before = deps.fnSyms.size
+      BytecodeResolver.resolve(deps.bytecodeRoots.toList, deps.classBytes, sourceArms(deps, plan)).flatMap { resolved =>
+        if (deps.fnSyms.size > before) settle(trees, deps, entrySym, plan) else (fns, resolved).success
+      }
+    }
+
   def compileRegion(sources: Sources, entry: MethodTree): Result[Region] = {
     import sources.*
     val entrySym = methodDeclSym(entry)
@@ -2251,13 +2307,17 @@ object TreeRemapper {
     for {
       // exploratory lowering, discarded: learns the call graph and statics needed to size signatures
       _ <- compileMethod(entry, deps, Role.Entry, None)
-      _ <- compileTransitive(trees, deps, entrySym, plan = None)
+      _ <- settle(trees, deps, entrySym, plan = None)
       plan = Some(Plan(planStatics(deps), planLengths(deps)))
       _    = deps.dispatch.clear()
       entryAndStatics <- compileMethod(entry, deps, Role.Entry, plan)
       (entryFn, _, captures) = entryAndStatics
-      sourceFns <- compileTransitive(trees, deps, entrySym, plan = plan)
-      bytecode  <- BytecodeResolver.resolve(deps.bytecodeRoots.toList, deps.classBytes)
+      settled <- settle(trees, deps, entrySym, plan = plan)
+      (sourceFns, bytecode) = settled
+      _                     = bytecode.dispatch.foreach((callee, arms) => deps.dispatch(callee) = arms)
+      _ = bytecode.owners.foreach((owner, impls) =>
+        deps.owners(owner) = (deps.owners.getOrElse(owner, Nil) ++ impls).distinct
+      )
       depFns = IntrinsicTable.dedupe(sourceFns ++ bytecode.functions ++ deps.nativeFns.toList)
       signatureStructs <- structSyms(entryFn :: depFns).flatTraverse { sym =>
         classTable.get(sym.fqn.mkString(".")) match {

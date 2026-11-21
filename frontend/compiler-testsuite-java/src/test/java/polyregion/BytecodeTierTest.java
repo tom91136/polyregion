@@ -2,6 +2,7 @@ package polyregion;
 
 import org.junit.Test;
 import polyregion.helpers.Kernels;
+import polyregion.helpers.Shape;
 
 public class BytecodeTierTest extends BaseSuite {
 
@@ -138,9 +139,46 @@ public class BytecodeTierTest extends BaseSuite {
     assertMatchesJdk("counter", () -> Kernels.counting(a));
   }
 
+  static final class Triangle extends Shape {
+    final int base;
+    final int height;
+
+    Triangle(int base, int height) {
+      this.base = base;
+      this.height = height;
+    }
+
+    @Override
+    public int area() {
+      return base * height / 2;
+    }
+  }
+
   @Test
-  public void openReceiversAreRefused() {
+  public void openReceiversOfStatefulOwnersAreRefused() {
     int a = 4;
-    assertRejected("cannot resolve statically", () -> Kernels.openReceiver(a));
+    assertRejected("carries instance state", () -> Kernels.openReceiver(a));
+  }
+
+  @Test
+  public void openReceiversDispatchOverClassesTheRegionBuilds() {
+    int a = 4;
+    int b = 7;
+    assertMatchesJdk("square", () -> Kernels.areaChosen(b, a));
+    assertMatchesJdk("rect", () -> Kernels.areaChosen(a, b));
+    assertMatchesJdk("interface, doubled", () -> Kernels.scored(a, true));
+    assertMatchesJdk("interface, negated", () -> Kernels.scored(a, false));
+  }
+
+  @Test
+  public void openReceiversDispatchOverSourceClasses() {
+    int a = 4;
+    assertMatchesJdk("source subclass", () -> Kernels.areaOf(new Triangle(a, 3)));
+    assertMatchesJdk("both kinds", () -> Kernels.areaBoth(new Triangle(a, 3), 5));
+  }
+
+  @Test
+  public void inheritedImplementationsAreRefused() {
+    assertRejected("inherits its implementation", () -> Kernels.inheritedId());
   }
 }

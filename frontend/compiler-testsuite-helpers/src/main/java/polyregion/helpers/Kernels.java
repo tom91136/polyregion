@@ -179,4 +179,28 @@ public final class Kernels {
     Open o = new Open(a);
     return o.get();
   }
+
+  public static int areaOf(Shape s) {
+    return s.area();
+  }
+
+  public static int areaChosen(int a, int b) {
+    Shape s = a > b ? new Square(a) : new Rect(a, b);
+    return s.area();
+  }
+
+  public static int areaBoth(Shape given, int a) {
+    Shape own = new Square(a);
+    return given.area() * 100 + own.area();
+  }
+
+  public static int scored(int x, boolean doubled) {
+    Scorer s = doubled ? new Doubler() : new Negator();
+    return s.score(x);
+  }
+
+  public static int inheritedId() {
+    Base b = new Leaf();
+    return b.id();
+  }
 }

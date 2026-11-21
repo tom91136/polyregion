@@ -645,7 +645,7 @@ lazy val `compiler-testsuite-helpers` = project
   .settings(
     commonSettings,
     javaRelease := minRuntimeJdk,
-    javacOptions += "-Xlint:-options",
+    javacOptions ++= Seq("-Xlint:-options", "-g"),
     name             := "compiler-testsuite-helpers",
     autoScalaLibrary := false,
     exportJars       := true

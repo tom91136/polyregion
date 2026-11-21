@@ -14,13 +14,16 @@ class BytecodeAllocSuite extends munit.FunSuite {
       |    Box(int v) { this.v = v; }
       |    Box() { this(7); }
       |  }
-      |  public static class Base { }
+      |  public static class Base { int k; }
       |  public static final class Derived extends Base { int z; }
+      |  public static abstract class Empty { Empty() { } }
+      |  public static final class Plain extends Empty { int z; Plain(int z) { this.z = z; } }
       |  public static int scratch(int n) { int[] xs = new int[n]; xs[0] = 1; return xs[0]; }
       |  public static int literal() { int[] xs = {3, 1, 4}; return xs[2]; }
       |  public static int objects(int a) { Box b = new Box(a); return b.v; }
       |  public static int delegating() { return new Box().v; }
       |  public static int derived() { return new Derived().z; }
+      |  public static int plain(int a) { return new Plain(a).z; }
       |  public static int boxes(int n) { Box[] bs = new Box[n]; return n; }
       |  public static int platform() { return new java.util.ArrayList<Integer>().size(); }
       |  public static Box leak(int a) { return new Box(a); }
@@ -87,7 +90,8 @@ class BytecodeAllocSuite extends munit.FunSuite {
   test("a constructor takes its object first and stores through it") {
     val l = lowered("Alloc$Box", "<init>", "(I)V").fold(e => fail(e.getMessage), identity)
     assertEquals(l.fn.name, p.Sym("Alloc$Box.<init>"))
-    assertEquals(l.fn.args.map(_.named.tpe), List(BoxRef, p.Type.IntS32))
+    assertEquals(l.fn.receiver.map(_.named.tpe), Some(BoxRef))
+    assertEquals(l.fn.args.map(_.named.tpe), List(p.Type.IntS32))
     assertEquals(l.fn.rtn, p.Type.Unit0)
     assertEquals(l.calls, Nil)
     val stores = l.fn.collectWhere[p.Stmt] {
@@ -114,10 +118,25 @@ class BytecodeAllocSuite extends munit.FunSuite {
     }
   }
 
-  test("an object whose class has a superclass is refused") {
+  test("an object whose superclass has state is refused") {
     val message = refusal("derived")
     assert(message.contains("Unsupported allocation of `Alloc$Derived`"), message)
-    assert(message.contains("superclass"), message)
+    assert(message.contains("superclass `Alloc$Base` declares instance state"), message)
+  }
+
+  test("a superclass without state runs its constructor on the subclass's storage") {
+    val root = MethodRef("Alloc", "plain", descOf("plain"))
+    val r    = BytecodeResolver.resolve(List(root), loaded.classes.get).fold(e => fail(e.getMessage), identity)
+    assertEquals(
+      r.functions.map(_.name.repr).sorted,
+      List("Alloc$Empty.<init>", "Alloc$Plain.<init>", "Alloc.plain").sorted
+    )
+    val init  = r.functions.find(_.name.repr == "Alloc$Plain.<init>").get
+    val calls = init.collectWhere[p.Expr] { case i: p.Expr.Invoke if i.calleeName.repr == "Alloc$Empty.<init>" => i }
+    assertEquals(
+      calls.map(_.receiver.map(_.tpe)),
+      List(Some(p.Type.Ptr(p.Type.Struct(p.Sym("Alloc.Empty"), Nil), p.Type.Space.Private)))
+    )
   }
 
   test("an array of objects is refused") {

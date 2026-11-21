@@ -52,7 +52,7 @@ Two places where the JVM's semantics are reproduced exactly, because getting the
   of objects), which is refused where it is accessed. A class javac has a symbol for gets its struct from
   `JavaTyper.lowerStruct` instead and keeps it: `TreeRemapper` only adds bytecode structs for names it has none for,
   and names follow javac (`Outer.Inner` for a member class).
-- Allocation. `new C(args)` for a class whose superclass is `Object` is a zeroed stack struct, a reference to it,
+- Allocation. `new C(args)` for a class whose superclass chain declares no instance state is a zeroed stack struct, a reference to it,
   and a call to the constructor lowered as `C.<init>(this, args)`, with `this(...)` delegation as a plain call and
   `super()` to `Object` dropped. `new T[n]` and `new T[] {...}` of a primitive `T` is a global `Alloc`; zero fill is
   `ZeroAlloc`'s and an escaping array is `EscapeAnalysis`'s refusal (`allocation ... escapes: ...`). Objects never
@@ -62,12 +62,22 @@ Two places where the JVM's semantics are reproduced exactly, because getting the
   that does not use `this`, and `Math::abs`-style references) binds a closure to the local it is assigned to. The
   interface method called on it becomes a call to the body with the captured values first. A functional value
   that is stored, passed, returned, or called through any other interface method is refused.
-- Receivers. A call through an object is lowered where nothing can override it: the class is final, or the method is
-  final or private, and it is declared in the class the instruction names. The callee is lowered with its object as
-  the first argument (`MethodRef.instance`). Any other `invokevirtual`, `invokeinterface` and `invokespecial` is
-  refused with `Unsupported call ...; a call through a receiver needs the receiver's class, which the bytecode tier
-  cannot resolve statically`. The shared `Devirtualise` pass needs the candidate classes of an open receiver, and the
-  tier has no closed set of them yet: the classes of the compilation are source trees, not class files.
+- Receivers. A call through an object is direct where nothing can override it: the class is final, or the method is
+  final or private, and it is declared in the class the instruction names. The callee is lowered with its object as its
+  receiver (`MethodRef.instance`, `this` is `decl.receiver`). Any other `invokevirtual` or `invokeinterface` is an open
+  site: the call is an `Invoke` of a per-site symbol (`owner.name(desc)`) with the object as receiver, and the shared
+  `Devirtualise` pass rewrites it into a tag switch whose last arm asserts, so a class the region cannot name fails
+  loudly. `invokespecial` that is not direct (`super.m()`) is refused.
+- Closed world of an open site. The candidates are the concrete subtypes of the site's class among (1) the classes the
+  compilation declares (`classTable`, lowered through `TreeRemapper`, which is also what gives the host a twin and a
+  tag) and (2) the classes the lowered bytecode builds with `new` (lowered from their class files, structs from
+  `ClassLayouts`). Candidates are keyed by `Devirtualise.tagsOf` like the source tier's. `BytecodeResolver.resolve`
+  iterates until no new method appears, and `TreeRemapper.settle` alternates it with source lowering. A site is
+  refused when no candidate exists, when a candidate inherits the method instead of declaring it, when the owner (or a
+  superclass) carries instance state, or when a source candidate takes array lengths or statics a bytecode caller
+  cannot pass. Owner state stays refused because candidate layouts hold declared fields only, so `decorate` keeping the
+  owner's fields would put them where the candidates keep their own. Locals are typed from the `LocalVariableTable`:
+  a class file built without `-g` makes Vineflower infer `Object` and the lowering refuses it.
 - Static calls. A call to a static method is lowered to an `Invoke` of `owner.name`, and the callee is
   lowered from its own class file in turn (`BytecodeResolver.resolve` walks the closure, deduplicated by
   owner, name and descriptor). Overloads share a symbol and differ by signature.
@@ -192,7 +202,7 @@ Every refusal names the construct in the user's vocabulary, not as an opcode num
 | instance method using `this` | ``` `Owner.m` is not static and uses its receiver; instance methods need a receiver struct ``` |
 | call through a receiver | ``` Unsupported call `Owner.callee(I)I`; a call through a receiver needs the receiver's class, which the bytecode tier cannot resolve statically ``` |
 | static field, or a field the layout cannot carry | ``` Unsupported field access `Owner.field`; static fields have no device storage ``` |
-| allocation | ``` Unsupported multi-dimensional array allocation of `int[][]` ```, ``` Unsupported allocation of `Owner$C`: its superclass `B` carries layout the struct has no room for ``` |
+| allocation | ``` Unsupported multi-dimensional array allocation of `int[][]` ```, ``` Unsupported allocation of `Owner$C`: its superclass `B` declares instance state the struct has no room for ``` |
 | `xs.length` | ``` Unsupported `length` of an array; PolyRegion carries array lengths as separate arguments ``` |
 | `switch` | ``` Unsupported `switch` ``` |
 | `try`/`catch`, `finally` | ``` Unsupported `try`/`catch`; PolyRegion kernels cannot throw ``` |

@@ -6,6 +6,7 @@ import org.jetbrains.java.decompiler.struct.gen.{CodeType, VarType}
 import polyregion.ast.{PolyAST as p, *}
 import polyregion.javalang.Interop.absent
 
+import scala.annotation.tailrec
 import scala.collection.mutable
 
 // instance state as a class file declares it; JavaTyper.lowerStruct is the same job for a class javac has a symbol for
@@ -46,19 +47,20 @@ object ClassLayouts {
   private case class Shape(
       access: Int,
       superName: Option[String],
+      interfaces: List[String],
       member: Option[(String, String)],
       fields: List[(String, String)],
       methods: List[(String, String, Int)]
   )
 
   private class ShapeCollector extends ClassVisitor(Opcodes.ASM9) {
-    val header  = mutable.ListBuffer.empty[(String, Option[String], Int)]
+    val header  = mutable.ListBuffer.empty[(String, Option[String], Int, List[String])]
     val methods = mutable.ListBuffer.empty[(String, String, Int)]
     val inners  = mutable.ListBuffer.empty[(String, String, String)]
     val fields  = mutable.ListBuffer.empty[(String, String)]
 
     override def visit(v: Int, a: Int, n: String, s: String, sup: String, itf: Array[String]): Unit =
-      header += ((n, Option(sup), a))
+      header += ((n, Option(sup), a, Option(itf).fold(List.empty[String])(_.toList)))
 
     override def visitMethod(a: Int, n: String, d: String, s: String, e: Array[String]): MethodVisitor = {
       methods += ((n, d, a))
@@ -80,9 +82,9 @@ object ClassLayouts {
   private def shapeOf(bytes: Array[Byte]): Shape = {
     val collector = ShapeCollector()
     ClassReader(bytes).accept(collector, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES)
-    val (self, parent, access) = collector.header.headOption.getOrElse(("", None, 0))
-    val member                 = collector.inners.collectFirst { case (n, outer, inner) if n == self => outer -> inner }
-    Shape(access, parent, member, collector.fields.toList, collector.methods.toList)
+    val (self, parent, access, interfaces) = collector.header.headOption.getOrElse(("", None, 0, Nil))
+    val member = collector.inners.collectFirst { case (n, outer, inner) if n == self => outer -> inner }
+    Shape(access, parent, interfaces, member, collector.fields.toList, collector.methods.toList)
   }
 
   private def shapeFor(internal: String, bytesOf: ClassBytes): Result[Shape] =
@@ -134,4 +136,39 @@ object ClassLayouts {
 
   def superOf(internal: String, bytesOf: ClassBytes): Result[Option[String]] =
     shapeFor(internal, bytesOf).map(_.superName)
+
+  // every class and interface a class extends or implements, nearest first; one the class path lacks ends its branch
+  def ancestors(internal: String, bytesOf: ClassBytes): List[String] = {
+    @tailrec def go(todo: List[String], seen: List[String]): List[String] = todo match {
+      case Nil                           => seen.reverse
+      case c :: rest if seen.contains(c) => go(rest, seen)
+      case c :: rest =>
+        shapeFor(c, bytesOf) match {
+          case Right(shape) => go(rest ::: shape.superName.toList ::: shape.interfaces, c :: seen)
+          case Left(_)      => go(rest, c :: seen)
+        }
+    }
+    go(List(internal), Nil).drop(1).map(_.replace('/', '.'))
+  }
+
+  // an interface or abstract class has no instances of its own, so it only stands for its implementations
+  def isConcrete(internal: String, bytesOf: ClassBytes): Result[Boolean] =
+    shapeFor(internal, bytesOf).map(s => (s.access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_INTERFACE)) == 0)
+
+  // the nearest class of the superclass chain, starting at the class itself, that declares instance fields
+  def carriedState(internal: String, bytesOf: ClassBytes): Result[Option[String]] =
+    shapeFor(internal, bytesOf).flatMap { shape =>
+      if (shape.fields.nonEmpty) Some(internal.replace('/', '.')).success
+      else
+        shape.superName
+          .filter(_ != "java/lang/Object")
+          .fold(Option.empty[String].success)(carriedState(_, bytesOf))
+    }
+
+  // the nearest class or interface, other than Object, that both extend or implement
+  def commonAncestor(a: String, b: String, bytesOf: ClassBytes): Result[Option[String]] = {
+    val left  = a.replace('/', '.') :: ancestors(a, bytesOf)
+    val right = (b.replace('/', '.') :: ancestors(b, bytesOf)).toSet
+    left.find(c => right(c) && c != "java.lang.Object").success
+  }
 }

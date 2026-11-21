@@ -1,9 +1,11 @@
 package polyregion.javalang
 
 import cats.syntax.all.*
+import net.bytebuddy.jar.asm.Opcodes
 import org.jetbrains.java.decompiler.struct.gen.MethodDescriptor
 import polyregion.ast.{PolyAST as p, *}
 import polyregion.intrinsic.IntrinsicTable
+import polyregion.javalang.BytecodeRemapper.symbolOf
 
 import scala.annotation.tailrec
 
@@ -12,7 +14,15 @@ object BytecodeResolver {
 
   type ClassBytes = ClassLayouts.ClassBytes
 
-  case class Resolved(functions: List[p.Function], structs: List[p.StructDef])
+  case class Resolved(
+      functions: List[p.Function],
+      structs: List[p.StructDef],
+      sites: List[OpenSite],
+      dispatch: Map[p.Sym, List[Arm]],
+      owners: Map[p.Sym, List[p.Sym]]
+  )
+
+  private case class Settled(site: OpenSite, owner: p.Sym, arms: List[Arm], impls: List[MethodRef])
 
   @tailrec def lowerable(t: p.Type): Boolean = t match {
     case p.Type.Ptr(component, _) => lowerable(component)
@@ -81,14 +91,15 @@ object BytecodeResolver {
   private def walk(
       todo: List[(MethodRef, MethodRef)],
       seen: Set[MethodRef],
+      done: List[BytecodeRemapper.Lowered],
       bytesOf: ClassBytes
-  ): Result[List[BytecodeRemapper.Lowered]] = {
+  ): Result[(Set[MethodRef], List[BytecodeRemapper.Lowered])] = {
     @tailrec def go(
         todo: List[(MethodRef, MethodRef)],
         seen: Set[MethodRef],
         acc: List[BytecodeRemapper.Lowered]
-    ): Result[List[BytecodeRemapper.Lowered]] = todo match {
-      case Nil                           => acc.reverse.success
+    ): Result[(Set[MethodRef], List[BytecodeRemapper.Lowered])] = todo match {
+      case Nil                           => (seen, acc).success
       case (ref, _) :: rest if seen(ref) => go(rest, seen, acc)
       case (ref, origin) :: rest =>
         lowerRef(ref, origin, bytesOf) match {
@@ -96,23 +107,113 @@ object BytecodeResolver {
           case Right(lowered) => go(rest ::: lowered.calls.map(_ -> origin), seen + ref, lowered :: acc)
         }
     }
-    go(todo, seen, Nil)
+    go(todo, seen, done)
   }
 
-  private def resolvedOf(lowered: List[BytecodeRemapper.Lowered]): Resolved =
+  private def stateless(site: OpenSite, bytesOf: ClassBytes): Result[Unit] =
+    ClassLayouts.carriedState(site.owner, bytesOf).flatMap {
+      case None => ().success
+      case Some(c) =>
+        (s"Cannot devirtualise `${site.repr}`: `$c` carries instance state, which the layout shared by its " +
+          "implementations has no room for").fail
+    }
+
+  // the classes the region builds that a receiver of the site's class can be, with the method each declares
+  private def classFileArms(
+      site: OpenSite,
+      allocated: List[String],
+      bytesOf: ClassBytes
+  ): Result[List[(Arm, MethodRef)]] =
+    allocated.distinct.sorted
+      .filterNot(c => ClassLayouts.isPlatform(c.replace('.', '/')))
+      .filter(c => c == site.owner || ClassLayouts.ancestors(c, bytesOf).contains(site.owner))
+      .flatTraverse { cls =>
+        ClassLayouts.isConcrete(cls, bytesOf).flatMap { concrete =>
+          val impl = MethodRef(cls, site.name, site.desc, instance = true)
+          if (!concrete) List.empty[(Arm, MethodRef)].success
+          else
+            for {
+              access <- ClassLayouts.accessOf(impl, bytesOf)
+              _ <-
+                if (access._2.exists(m => (m & Opcodes.ACC_ABSTRACT) == 0)) ().success
+                else
+                  (s"`$cls` is a candidate receiver of `${site.repr}` but inherits its implementation rather " +
+                    "than declaring one, which this lowering cannot dispatch to").fail
+              name <- ClassLayouts.structName(cls, bytesOf)
+            } yield List(Arm(p.Sym(name), symbolOf(cls, site.name), List.range(0, site.arity)) -> impl)
+        }
+      }
+
+  // every open site gets the classes the compilation declares (`sourced`) and the ones the region builds; a site
+  // nothing implements is refused, so a call never reaches the pass with no arm to dispatch to
+  private def dispatchOf(
+      sites: List[OpenSite],
+      allocated: List[String],
+      bytesOf: ClassBytes,
+      sourced: OpenSite => Result[List[Arm]]
+  ): Result[List[Settled]] =
+    sites.traverse { site =>
+      for {
+        _     <- stateless(site, bytesOf)
+        owner <- ClassLayouts.structName(site.owner, bytesOf)
+        own   <- sourced(site)
+        built <- classFileArms(site, allocated, bytesOf)
+        arms = (own ++ built.map(_._1)).distinctBy(_.cls).sortBy(_.cls.repr)
+        _ <-
+          if (arms.nonEmpty) ().success
+          else
+            (s"Cannot devirtualise `${site.repr}`: no class the compilation declares or the region builds " +
+              "implements it, so there is nothing to compile into the kernel").fail
+      } yield Settled(site, p.Sym(owner), arms, built.map(_._2))
+    }
+
+  private def resolvedOf(
+      lowered: List[BytecodeRemapper.Lowered],
+      settled: List[Settled] = Nil
+  ): Resolved =
     Resolved(
       IntrinsicTable.dedupe(lowered.flatMap(l => l.fn :: l.helpers)),
-      lowered.flatMap(_.structs).distinctBy(_.name)
+      lowered.flatMap(_.structs).distinctBy(_.name),
+      lowered.flatMap(_.sites).distinct,
+      settled.map(s => s.site.callee -> s.arms).toMap,
+      settled.groupMapReduce(_.owner)(_.arms.map(_.cls))(_ ++ _).view.mapValues(_.distinct).toMap
     )
 
-  def resolve(roots: List[MethodRef], bytesOf: ClassBytes): Result[Resolved] =
-    walk(roots.map(r => r -> r), Set.empty, bytesOf).map(resolvedOf(_))
+  // the open calls of a closure are settled against the classes it builds, and the implementations that adds can
+  // build more, so lowering runs until no new method appears
+  def resolve(
+      roots: List[MethodRef],
+      bytesOf: ClassBytes,
+      sourced: OpenSite => Result[List[Arm]] = _ => Nil.success
+  ): Result[Resolved] = {
+    @tailrec def go(
+        todo: List[(MethodRef, MethodRef)],
+        seen: Set[MethodRef],
+        done: List[BytecodeRemapper.Lowered]
+    ): Result[Resolved] =
+      walk(todo, seen, done, bytesOf) match {
+        case Left(e) => Left(e)
+        case Right((seen1, lowered)) =>
+          val ordered = lowered.reverse
+          dispatchOf(ordered.flatMap(_.sites).distinct, ordered.flatMap(_.allocated), bytesOf, sourced) match {
+            case Left(e) => Left(e)
+            case Right(dispatched) =>
+              val more = dispatched.flatMap { s =>
+                val origin = MethodRef(s.site.owner, s.site.name, s.site.desc)
+                s.impls.map(_ -> origin)
+              }
+              if (more.forall((ref, _) => seen1(ref))) Right(resolvedOf(ordered, dispatched))
+              else go(more, seen1, lowered)
+          }
+      }
+    go(roots.map(r => r -> r), Set.empty, Nil)
+  }
 
   // the root's own function is returned apart from the closure it heads
   def resolveRoot(root: MethodRef, bytesOf: ClassBytes): Result[(p.Function, Resolved)] = for {
     head <- lowerRef(root, root, bytesOf)
-    rest <- walk(head.calls.map(_ -> root), Set(root), bytesOf)
-  } yield head.fn -> resolvedOf(head :: rest)
+    rest <- walk(head.calls.map(_ -> root), Set(root), List(head), bytesOf)
+  } yield head.fn -> resolvedOf(rest._2.reverse)
 
   // the Scala frontend knows a callee by its lowered signature rather than by a JVM descriptor
   def descriptorFor(

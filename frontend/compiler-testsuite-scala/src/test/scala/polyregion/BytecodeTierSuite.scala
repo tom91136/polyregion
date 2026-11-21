@@ -64,6 +64,19 @@ class BytecodeTierSuite extends BaseSuite {
     )
   }
 
+  test("a static that calls through a receiver names the call") {
+    val errors = typeCheckErrors("""
+      offload0(using AssertTarget.Offload) { Kernels.areaChosen(3, 4); () }
+    """)
+    assert(
+      errors.exists(m =>
+        m.message.contains("areaChosen") && m.message.contains("calls through a receiver") &&
+          m.message.contains("polyregion.helpers.Shape.area()I")
+      ),
+      errors.map(_.message).mkString("\n")
+    )
+  }
+
   test("a lambda that escapes its method is named") {
     val errors = typeCheckErrors("""
       offload0(using AssertTarget.Offload) { Kernels.lambdaEscapes(3); () }

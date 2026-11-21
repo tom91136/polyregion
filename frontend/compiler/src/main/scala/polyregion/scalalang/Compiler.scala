@@ -143,6 +143,12 @@ object Compiler {
         lowered <- BytecodeResolver.resolveRoot(ref, bytes)
         (root, closure) = lowered
         _ <-
+          if (closure.sites.isEmpty) ().success
+          else
+            (s"Cannot lower the Java static `${sym.fullName}` from its class file: it calls through a receiver " +
+              s"(${closure.sites.map(_.repr).mkString(", ")}), and Scala programs cannot close the set of " +
+              "classes that receiver can be").fail
+        _ <-
           if (closure.structs.isEmpty) ().success
           else
             (s"Cannot lower the Java static `${sym.fullName}` from its class file: it builds objects of " +

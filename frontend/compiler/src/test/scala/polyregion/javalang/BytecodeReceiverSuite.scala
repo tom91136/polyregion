@@ -44,11 +44,6 @@ class BytecodeReceiverSuite extends munit.FunSuite {
       withReceiver = receiver
     )
 
-  private def refusal(name: String): String = lowered("Receivers", name) match {
-    case Left(e)   => e.getMessage
-    case Right(fn) => fail(s"`$name` was expected to be refused but lowered to:\n${fn.fn.repr}")
-  }
-
   test("calls on an object of a final class are direct calls with the object first") {
     val l = lowered("Receivers", "counting").fold(e => fail(e.getMessage), identity)
     assertEquals(
@@ -56,7 +51,8 @@ class BytecodeReceiverSuite extends munit.FunSuite {
       List("<init>" -> false, "add" -> true, "get" -> true, "next" -> true).sorted
     )
     val invokes = l.fn.collectWhere[p.Expr] { case i: p.Expr.Invoke if i.calleeName.last == "next" => i }
-    assertEquals(invokes.map(_.args.map(_.tpe)), List(List(CounterRef), List(CounterRef)))
+    assertEquals(invokes.map(_.receiver.map(_.tpe)), List(Some(CounterRef), Some(CounterRef)))
+    assertEquals(invokes.map(_.args), List(Nil, Nil))
   }
 
   test("a private method is direct even on a class that is not final") {
@@ -64,9 +60,10 @@ class BytecodeReceiverSuite extends munit.FunSuite {
     assert(l.calls.exists(_.name == "viaPrivate"), l.calls.toString)
   }
 
-  test("an instance method lowered for a receiver takes it as its first argument") {
+  test("an instance method lowered for a receiver declares it as its receiver") {
     val l = lowered(Counter, "next", receiver = true).fold(e => fail(e.getMessage), identity)
-    assertEquals(l.fn.args.map(_.named.tpe), List(CounterRef))
+    assertEquals(l.fn.receiver.map(_.named.tpe), Some(CounterRef))
+    assertEquals(l.fn.args, Nil)
     val stores = l.fn.collectWhere[p.Stmt] {
       case p.Stmt.Mut(lhs, _) if lhs.steps == List(p.PathStep.Deref, p.PathStep.Field("n")) => lhs
     }
@@ -96,14 +93,21 @@ class BytecodeReceiverSuite extends munit.FunSuite {
     }
   }
 
-  test("a call that an unknown subclass could override is refused") {
-    val message = refusal("open")
-    assert(message.contains("Unsupported call `Receivers$Open.get()I`"), message)
-    assert(message.contains("cannot resolve statically"), message)
+  private def resolveRefusal(name: String): String =
+    BytecodeResolver.resolve(List(MethodRef("Receivers", name, descOf("Receivers", name))), loaded.classes.get) match {
+      case Left(e)  => e.getMessage
+      case Right(_) => fail(s"`$name` was expected to be refused")
+    }
+
+  test("a call that an unknown subclass could override is left open, and refused when nothing implements it") {
+    val l = lowered("Receivers", "open").fold(e => fail(e.getMessage), identity)
+    assertEquals(l.sites, List(OpenSite("Receivers$Open", "get", "()I")))
+    val message = resolveRefusal("open")
+    assert(message.contains("Cannot devirtualise `Receivers$Open.get()I`"), message)
   }
 
-  test("an abstract method is refused") {
-    assert(refusal("abstractCall").contains("cannot resolve statically"))
+  test("an abstract method is refused when nothing implements it") {
+    assert(resolveRefusal("abstractCall").contains("Cannot devirtualise `Receivers$Shape.area()I`"))
   }
 
   test("a final method on an open class is direct") {
