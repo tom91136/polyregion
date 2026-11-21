@@ -491,6 +491,7 @@ lazy val cudaSuites =
   Set(
     "ArrayMemberSuite.scala",
     "CudaIntrinsicSuite.scala",
+    "DevirtSuite.scala",
     "ExceptionClassSuite.scala",
     "RangeAccessSuite.scala",
     "RangeFoldSuite.scala",
@@ -503,7 +504,7 @@ lazy val cudaSuites =
     "SpectraLaunchSuite.scala",
     "TwinSuite.scala"
   )
-lazy val cudaSuiteSupport = Set("BaseSuite.scala", "RangeSuiteBase.scala", "Toggles.scala")
+lazy val cudaSuiteSupport = Set("BaseSuite.scala", "DevirtFixtures.scala", "RangeSuiteBase.scala", "Toggles.scala")
 
 def compilerTestsuiteSettings(projectName: String) = Seq(
   fork                      := true,

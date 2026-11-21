@@ -56,9 +56,9 @@ class DevirtSuite extends munit.FunSuite {
   private val host    = devices.find(d => d.platformKind == 1 && d.moduleFormat == 2)
   private val nvidia  = devices.find(d => d.platformKind == 2 && d.cudaArchitectureMajor > 0)
 
-  private inline def launch[C](inline ctx: rt.Context)(inline f: Unit): Unit = {
+  private inline def launch(inline ctx: rt.Context)(inline f: Unit): Unit = {
     var outcome: Either[Throwable, Unit] = null
-    compiletime.offload0[C](ctx, outcome = _)(f)
+    compiletime.offload0(ctx, outcome = _)(f)
     outcome.fold(throw _, identity)
   }
 
@@ -70,13 +70,13 @@ class DevirtSuite extends munit.FunSuite {
       finally ctx.close()
   }
 
-  private inline def cases[C](label: String, device: Option[rt.DeviceInfo]): Unit = {
+  private inline def cases(label: String, device: Option[rt.DeviceInfo]): Unit = {
 
     test(s"[$label] sealed trait elements dispatch to their own class") {
       withContext(label, device) { ctx =>
         val shapes = mutable.ListBuffer[Shape](Circle(1.0), Rect(2.0, 3.0), Square(4.0), Circle(2.0), Rect(5.0, 1.0))
         val out    = Buffer.ofDim[Double](5)
-        launch[C](ctx) {
+        launch(ctx) {
           var i = 0
           while (i < 5) {
             out(i) = shapes(i).area
@@ -91,7 +91,7 @@ class DevirtSuite extends munit.FunSuite {
       withContext(label, device) { ctx =>
         val ops = mutable.ListBuffer[Op](Inc(1), Scale(3), Inc(10), Scale(2))
         val out = Buffer.ofDim[Int](4)
-        launch[C](ctx) {
+        launch(ctx) {
           var i = 0
           while (i < 4) {
             out(i) = ops(i)(i + 5)
@@ -106,7 +106,7 @@ class DevirtSuite extends munit.FunSuite {
       withContext(label, device) { ctx =>
         val xs  = mutable.ListBuffer[Counts](Pair(3, 4), Triple(2, 5, 7), Pair(10, 20))
         val out = Buffer.ofDim[Int](3)
-        launch[C](ctx) {
+        launch(ctx) {
           var i = 0
           while (i < 3) {
             out(i) = xs(i).total
@@ -121,7 +121,7 @@ class DevirtSuite extends munit.FunSuite {
       withContext(label, device) { ctx =>
         val pets = mutable.ListBuffer[Pet](Dog(1), Cat(9), Dog(2))
         val out  = Buffer.ofDim[Int](3)
-        launch[C](ctx) {
+        launch(ctx) {
           var i = 0
           while (i < 3) {
             out(i) = pets(i).legs
@@ -136,7 +136,7 @@ class DevirtSuite extends munit.FunSuite {
       withContext(label, device) { ctx =>
         val gauges = mutable.ListBuffer[Gauge](new Doubler(1), new Adder(2), new Doubler(3))
         val out    = Buffer.ofDim[Int](3)
-        launch[C](ctx) {
+        launch(ctx) {
           var i = 0
           while (i < 3) {
             out(i) = gauges(i).read(10)
@@ -152,7 +152,7 @@ class DevirtSuite extends munit.FunSuite {
         val ops = mutable.ListBuffer[Op](Inc(1), Outsider(7))
         val out = Buffer.ofDim[Int](2)
         val raised = intercept[Throwable] {
-          launch[C](ctx) {
+          launch(ctx) {
             var i = 0
             while (i < 2) {
               out(i) = ops(i)(3)
@@ -171,7 +171,7 @@ class DevirtSuite extends munit.FunSuite {
       """{
         val xs  = mutable.ListBuffer[Sized](Plain(1), Box(2.0))
         val out = Buffer.ofDim[Int](2)
-        launch[Config[Target.Host.type, Opt.O2]](null) {
+        launch(null) {
           var i = 0
           while (i < 2) {
             out(i) = xs(i).size
@@ -184,6 +184,6 @@ class DevirtSuite extends munit.FunSuite {
     assert(errors.contains("DevirtSuite$.Box"), errors)
   }
 
-  cases[Config[Target.Host.type, Opt.O2]]("host", host)
-  cases[Config[Target.NVPTX64["sm_80"], Opt.O2]]("nvidia", nvidia)
+  cases("host", host)
+  cases("nvidia", nvidia)
 }
