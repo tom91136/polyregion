@@ -2,30 +2,24 @@ package polyregion.scalalang
 
 import cats.syntax.all.*
 import polyregion.ast.generated.PolyPackageWireSchema
-import polyregion.ast.{MsgPack, PolyAST as p, *, given}
+import polyregion.ast.{MsgPack, PolyAST as p, *}
 import polyregion.jvm.twin.Marshal
 import polyregion.jvm.{compiler as ct, runtime as rt}
 import polyregion.prism.StdLib
 
-import java.util.Base64
-import scala.util.chaining.*
 import java.util.concurrent.atomic.AtomicLong
 import scala.quoted.*
+import scala.util.chaining.*
 
-object launch {
-  inline def call[R](inline identity: String, inline context: rt.Context, inline args: Any*): R =
-    ${ LaunchMacro.generate[R]('identity, 'context, 'args) }
-}
-
-private[scalalang] object LaunchMacro {
+object LaunchMacro {
 
   private val Counter = AtomicLong(0)
 
-  private final case class Argument(expr: Expr[Any], kind: Kind)
+  private case class Argument(expr: Expr[Any], kind: Kind)
 
-  private final case class Environment(definition: p.StructDef, size: Int, fields: List[(Int, Kind, Expr[Any])])
+  private case class Environment(definition: p.StructDef, size: Int, fields: List[(Int, Kind, Expr[Any])])
 
-  private final case class Callable(function: p.Function, environment: Option[Environment])
+  private case class Callable(function: p.Function, environment: Option[Environment])
 
   private enum Kind {
     case Callable
@@ -51,7 +45,7 @@ private[scalalang] object LaunchMacro {
     import q.reflect.*
     val tpe = expr.asTerm.tpe.widen.dealias.simplified
     def array(of: TypeRepr) = prims.collectFirst {
-      case (repr, tpe, size, name) if TypeRepr.of[Array].appliedTo(repr) =:= of => Kind.Arr(tpe, size, name)
+      case (repr, component, size, name) if TypeRepr.of[Array].appliedTo(repr) =:= of => Kind.Arr(component, size, name)
     }
     if (tpe.typeSymbol.fullName.startsWith("scala.Function")) Argument(expr, Kind.Callable).success
     else
@@ -77,7 +71,7 @@ private[scalalang] object LaunchMacro {
         case Varargs(xs) => xs.toList.success
         case _           => "launch arguments are not a literal sequence".fail
       }
-      arguments <- exprs.traverse(classify)
+      arguments <- exprs.traverse(expr => classify(expr))
       generated <- build[R](using Q)(packageName, declaration, context, arguments, LaunchConfig.targets)
     } yield generated
     result.fold(
@@ -281,7 +275,7 @@ private[scalalang] object LaunchMacro {
   }
 
   private def emit[R: Type](using
-      q: Quotes
+      Quotes
   )(
       context: Expr[rt.Context],
       entryName: String,
@@ -292,16 +286,16 @@ private[scalalang] object LaunchMacro {
   ): Expr[R] = {
     val entry = Expr(entryName)
     val groupExprs = groups.map { (program, bytes, _, targets) =>
-      val chunks = Base64.getEncoder.encodeToString(bytes).grouped(30000).toList.map(Expr(_))
-      '{ LaunchGroup(${ Expr(program) }, ${ Expr.ofList(chunks) }.toArray, ${ Expr(targets) }) }
+      val chunks = java.util.Base64.getEncoder.encodeToString(bytes).grouped(30000).toList.map(Expr(_))
+      '{ LaunchRuntime.Group(${ Expr(program) }, ${ Expr.ofList(chunks) }.toArray, ${ Expr(targets) }) }
     }
-    def staged(marshal: Expr[Marshal]): List[Expr[LaunchArg]] = arguments.zipWithIndex.collect {
+    def staged(marshal: Expr[Marshal]): List[Expr[LaunchRuntime.Arg]] = arguments.zipWithIndex.collect {
       case (Argument(expr, Kind.Prim(_, _, name)), _) => primitive(expr, name)
-      case (Argument(expr, Kind.Arr(_, _, _)), _)     => '{ LaunchRuntime.array($marshal, $expr.asInstanceOf[AnyRef]) }
+      case (Argument(expr, Kind.Arr(_, _, _)), _) => '{ LaunchRuntime.array($marshal, ${ expr.asExprOf[Array[?]] }) }
       case (Argument(_, Kind.Callable), index) if callables(index).environment.nonEmpty =>
         environment(marshal, callables(index).environment.get)
     }
-    val resultCell: Option[Expr[LaunchArg]] = rtn.map { name =>
+    val resultCell: Option[Expr[LaunchRuntime.Arg]] = rtn.map { name =>
       val size = prims.collectFirst { case (_, _, size, n) if n == name => size }.get
       '{ LaunchRuntime.result(${ Expr(size) }) }
     }
@@ -330,12 +324,12 @@ private[scalalang] object LaunchMacro {
     }
   }
 
-  private def environment(using q: Quotes)(marshal: Expr[Marshal], env: Environment): Expr[LaunchArg] =
+  private def environment(using Quotes)(marshal: Expr[Marshal], env: Environment): Expr[LaunchRuntime.Arg] =
     env.fields
       .foldLeft('{ LaunchRuntime.environment($marshal, ${ Expr(env.size) }) }) {
         case (builder, (offset, kind, value)) =>
           kind match {
-            case Kind.Arr(_, _, _)     => '{ $builder.array(${ Expr(offset) }, $value.asInstanceOf[AnyRef]) }
+            case Kind.Arr(_, _, _)     => '{ $builder.array(${ Expr(offset) }, ${ value.asExprOf[Array[?]] }) }
             case Kind.Prim(_, _, name) => putPrimitive(builder, Expr(offset), value, name)
             case Kind.Callable         => builder
           }
@@ -343,7 +337,7 @@ private[scalalang] object LaunchMacro {
       .pipe(builder => '{ $builder.done })
 
   private def putPrimitive(using
-      q: Quotes
+      Quotes
   )(
       builder: Expr[LaunchRuntime.EnvironmentBuilder],
       offset: Expr[Int],
@@ -351,28 +345,28 @@ private[scalalang] object LaunchMacro {
       name: String
   ): Expr[LaunchRuntime.EnvironmentBuilder] =
     name match {
-      case "int"     => '{ $builder.int($offset, $value.asInstanceOf[Int]) }
-      case "long"    => '{ $builder.long($offset, $value.asInstanceOf[Long]) }
-      case "float"   => '{ $builder.float($offset, $value.asInstanceOf[Float]) }
-      case "double"  => '{ $builder.double($offset, $value.asInstanceOf[Double]) }
-      case "short"   => '{ $builder.short($offset, $value.asInstanceOf[Short]) }
-      case "byte"    => '{ $builder.byte($offset, $value.asInstanceOf[Byte]) }
-      case "char"    => '{ $builder.char($offset, $value.asInstanceOf[Char]) }
-      case "boolean" => '{ $builder.boolean($offset, $value.asInstanceOf[Boolean]) }
+      case "int"     => '{ $builder.int($offset, ${ value.asExprOf[Int] }) }
+      case "long"    => '{ $builder.long($offset, ${ value.asExprOf[Long] }) }
+      case "float"   => '{ $builder.float($offset, ${ value.asExprOf[Float] }) }
+      case "double"  => '{ $builder.double($offset, ${ value.asExprOf[Double] }) }
+      case "short"   => '{ $builder.short($offset, ${ value.asExprOf[Short] }) }
+      case "byte"    => '{ $builder.byte($offset, ${ value.asExprOf[Byte] }) }
+      case "char"    => '{ $builder.char($offset, ${ value.asExprOf[Char] }) }
+      case "boolean" => '{ $builder.boolean($offset, ${ value.asExprOf[Boolean] }) }
     }
 
-  private def primitive(using q: Quotes)(expr: Expr[Any], name: String): Expr[LaunchArg] = name match {
-    case "int"     => '{ LaunchRuntime.int($expr.asInstanceOf[Int]) }
-    case "long"    => '{ LaunchRuntime.long($expr.asInstanceOf[Long]) }
-    case "float"   => '{ LaunchRuntime.float($expr.asInstanceOf[Float]) }
-    case "double"  => '{ LaunchRuntime.double($expr.asInstanceOf[Double]) }
-    case "short"   => '{ LaunchRuntime.short($expr.asInstanceOf[Short]) }
-    case "byte"    => '{ LaunchRuntime.byte($expr.asInstanceOf[Byte]) }
-    case "char"    => '{ LaunchRuntime.char($expr.asInstanceOf[Char]) }
-    case "boolean" => '{ LaunchRuntime.boolean($expr.asInstanceOf[Boolean]) }
+  private def primitive(using Quotes)(expr: Expr[Any], name: String): Expr[LaunchRuntime.Arg] = name match {
+    case "int"     => '{ LaunchRuntime.int(${ expr.asExprOf[Int] }) }
+    case "long"    => '{ LaunchRuntime.long(${ expr.asExprOf[Long] }) }
+    case "float"   => '{ LaunchRuntime.float(${ expr.asExprOf[Float] }) }
+    case "double"  => '{ LaunchRuntime.double(${ expr.asExprOf[Double] }) }
+    case "short"   => '{ LaunchRuntime.short(${ expr.asExprOf[Short] }) }
+    case "byte"    => '{ LaunchRuntime.byte(${ expr.asExprOf[Byte] }) }
+    case "char"    => '{ LaunchRuntime.char(${ expr.asExprOf[Char] }) }
+    case "boolean" => '{ LaunchRuntime.boolean(${ expr.asExprOf[Boolean] }) }
   }
 
-  private def readResult(using q: Quotes)(name: String, cell: Expr[LaunchArg]): Expr[Any] = name match {
+  private def readResult(using Quotes)(name: String, cell: Expr[LaunchRuntime.Arg]): Expr[Any] = name match {
     case "int"     => '{ LaunchRuntime.resultInt($cell) }
     case "long"    => '{ LaunchRuntime.resultLong($cell) }
     case "float"   => '{ LaunchRuntime.resultFloat($cell) }
