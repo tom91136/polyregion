@@ -165,17 +165,7 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
   const auto external = [&](const std::string &name, llvm::Type *result, llvm::ArrayRef<llvm::Type *> args) {
     return cg.M.getOrInsertFunction(name, llvm::FunctionType::get(result, args, false));
   };
-  const auto checkedRuntimeCall = [&](llvm::FunctionCallee callee, llvm::ArrayRef<llvm::Value *> args) {
-    auto *success = cg.B.CreateCall(callee, args);
-    auto *function = cg.B.GetInsertBlock()->getParent();
-    auto *failure = llvm::BasicBlock::Create(ctx, "polyrt.failure", function);
-    auto *continuation = llvm::BasicBlock::Create(ctx, "polyrt.continue", function);
-    cg.B.CreateCondBr(success, continuation, failure);
-    cg.B.SetInsertPoint(failure);
-    cg.B.CreateCall(external("polyrt_abort", unit, {}));
-    cg.B.CreateUnreachable();
-    cg.B.SetInsertPoint(continuation);
-  };
+  const auto runtimeCall = [&](llvm::FunctionCallee callee, llvm::ArrayRef<llvm::Value *> args) { cg.B.CreateCall(callee, args); };
   const auto remoteResultSlot = [&](const char *name) {
     auto &entry = cg.B.GetInsertBlock()->getParent()->getEntryBlock();
     llvm::IRBuilder<> entryBuilder(&entry, entry.getFirstNonPHIOrDbgOrAlloca());
@@ -365,39 +355,37 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
         }
         auto *module = cg.B.CreateGlobalString(kernelName, "remote_module", 0, &cg.M);
         auto *kernel = cg.B.CreateGlobalString(kernelName, "remote_kernel", 0, &cg.M);
-        checkedRuntimeCall(
-            external("polyrt_remote_launch_marshalled", i1,
-                     {ptr, ptr, ptr, sizeTy, sizeTy, sizeTy, sizeTy, sizeTy, sizeTy, sizeTy, sizeTy, ptr, ptr, ptr, ptr, ptr}),
-            {cg.mkTermVal(v.context), module, kernel, asSize(v.gridX), asSize(v.gridY), asSize(v.gridZ), asSize(v.blockX), asSize(v.blockY),
-             asSize(v.blockZ), asSize(v.shmem), llvm::ConstantInt::get(sizeTy, count), cg.B.CreateGEP(argTypesType, argTypes, {zero, zero}),
-             cg.B.CreateGEP(argPointersType, argPointers, {zero, zero}), cg.B.CreateGEP(mirrorSizesType, mirrorSizes, {zero, zero}),
-             cg.B.CreateGEP(mirrorKindsType, mirrorKinds, {zero, zero}), cg.B.CreateGEP(layoutsType, layouts, {zero, zero})});
+        runtimeCall(external("polyrt_remote_launch_marshalled", i1,
+                             {ptr, ptr, ptr, sizeTy, sizeTy, sizeTy, sizeTy, sizeTy, sizeTy, sizeTy, sizeTy, ptr, ptr, ptr, ptr, ptr}),
+                    {cg.mkTermVal(v.context), module, kernel, asSize(v.gridX), asSize(v.gridY), asSize(v.gridZ), asSize(v.blockX),
+                     asSize(v.blockY), asSize(v.blockZ), asSize(v.shmem), llvm::ConstantInt::get(sizeTy, count),
+                     cg.B.CreateGEP(argTypesType, argTypes, {zero, zero}), cg.B.CreateGEP(argPointersType, argPointers, {zero, zero}),
+                     cg.B.CreateGEP(mirrorSizesType, mirrorSizes, {zero, zero}), cg.B.CreateGEP(mirrorKindsType, mirrorKinds, {zero, zero}),
+                     cg.B.CreateGEP(layoutsType, layouts, {zero, zero})});
         return noop();
       },
       [&](const Spec::RemoteAlloc &v) -> ValPtr {
         auto *result = remoteResultSlot("remote_alloc_result");
-        checkedRuntimeCall(external("polyrt_remote_malloc", i1, {ptr, sizeTy, ptr}), {cg.mkTermVal(v.context), asSize(v.bytes), result});
+        runtimeCall(external("polyrt_remote_malloc", i1, {ptr, sizeTy, ptr}), {cg.mkTermVal(v.context), asSize(v.bytes), result});
         auto *value = cg.B.CreateLoad(sizeTy, result);
         return cg.B.CreateIntToPtr(value, cg.resolveType(v.tpe));
       },
       [&](const Spec::RemoteTempAlloc &v) -> ValPtr {
         auto *result = remoteResultSlot("remote_temp_alloc_result");
-        checkedRuntimeCall(external("polyrt_remote_temp_malloc", i1, {ptr, sizeTy, ptr}),
-                           {cg.mkTermVal(v.context), asSize(v.bytes), result});
+        runtimeCall(external("polyrt_remote_temp_malloc", i1, {ptr, sizeTy, ptr}), {cg.mkTermVal(v.context), asSize(v.bytes), result});
         auto *value = cg.B.CreateLoad(sizeTy, result);
         return cg.B.CreateIntToPtr(value, cg.resolveType(v.tpe));
       },
       [&](const Spec::RemoteFree &v) -> ValPtr {
-        checkedRuntimeCall(external("polyrt_remote_free", i1, {ptr, sizeTy}), {cg.mkTermVal(v.context), asSize(v.ptr)});
+        runtimeCall(external("polyrt_remote_free", i1, {ptr, sizeTy}), {cg.mkTermVal(v.context), asSize(v.ptr)});
         return noop();
       },
       [&](const Spec::RemoteMemcpy &v) -> ValPtr {
         const auto direction =
             v.direction.match_total([](const Direction::LocalToRemote &) { return 0; }, [](const Direction::RemoteToLocal &) { return 1; },
                                     [](const Direction::RemoteToRemote &) { return 2; });
-        checkedRuntimeCall(
-            external("polyrt_remote_memcpy", i1, {ptr, sizeTy, sizeTy, sizeTy, i32}),
-            {cg.mkTermVal(v.context), asSize(v.dst), asSize(v.src), asSize(v.bytes), llvm::ConstantInt::get(i32, direction)});
+        runtimeCall(external("polyrt_remote_memcpy", i1, {ptr, sizeTy, sizeTy, sizeTy, i32}),
+                    {cg.mkTermVal(v.context), asSize(v.dst), asSize(v.src), asSize(v.bytes), llvm::ConstantInt::get(i32, direction)});
         return noop();
       },
       [&](const Spec::RemoteSync &v) -> ValPtr {

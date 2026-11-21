@@ -133,6 +133,8 @@ void raiseAssert(JNIEnv *env) {
   else if (raised.code == static_cast<uint32_t>(polyregion::invoke::AssertCode::Arithmetic))
     throwGeneric(env, "java/lang/ArithmeticException", raised.message);
   else if (raised.code == static_cast<uint32_t>(polyregion::invoke::AssertCode::JvmException)) throwJvmException(env, raised.message);
+  else if (raised.code == static_cast<uint32_t>(polyregion::invoke::AssertCode::Runtime))
+    throwGeneric(env, EX, raised.message.empty() ? "unknown runtime failure" : raised.message);
   else throwGeneric(env, EX, "Device assertion failed (code " + codeName(raised.code) + "): " + raised.message);
 }
 
@@ -177,6 +179,14 @@ struct Transaction {
   ~Transaction() {
     if (context) polyrt_context_release(context);
   }
+};
+
+struct HostFailures {
+  const bool previous = polyrt_raise_host_failures(true);
+  HostFailures() = default;
+  HostFailures(const HostFailures &) = delete;
+  HostFailures &operator=(const HostFailures &) = delete;
+  ~HostFailures() { polyrt_raise_host_failures(previous); }
 };
 
 struct ImageSet {
@@ -274,7 +284,7 @@ std::vector<rt::Type> readTypes(const std::vector<jbyte> &raw) {
 
 } // namespace
 
-extern "C" void __polyregion_builtin_assert(const uint32_t code, const char *message) { // NOLINT(*-reserved-identifier)
+POLYREGION_EXPORT extern "C" void __polyregion_builtin_assert(const uint32_t code, const char *message) { // NOLINT(*-reserved-identifier)
   raisedAssert = {.raised = true, .code = code, .message = message ? message : ""};
 }
 
@@ -521,6 +531,7 @@ void Context::callHost0(JNIEnv *env, jclass, jlong context,                     
     Transaction transaction(handle);
     loadImages(handle, set);
     raisedAssert = {};
+    const HostFailures raising;
     if (!host.queue->invokeEntryBlocking(program, symbol, types, std::move(bytes)))
       throw std::runtime_error("Host program `" + program + "` has no entry `" + symbol + "`");
     transaction.end();

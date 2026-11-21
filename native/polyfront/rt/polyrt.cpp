@@ -775,6 +775,32 @@ POLYREGION_EXPORT extern "C" void polyrt_abort() noexcept {
   std::abort();
 }
 
+thread_local bool raiseHostFailures = false;
+
+POLYREGION_EXPORT extern "C" bool polyrt_raise_host_failures(const bool enabled) noexcept {
+  return std::exchange(raiseHostFailures, enabled);
+}
+
+POLYREGION_EXPORT extern "C" bool polyrt_remote_failed() noexcept {
+  if (runtimeErrorMessage[0] == '\0') {
+    if (!foreignMarshalAttempted) return false;
+    std::snprintf(runtimeErrorMessage, sizeof(runtimeErrorMessage), "%s", foreignMarshalMessage);
+  }
+  if (!raiseHostFailures) polyrt_abort();
+  foreignMarshalAttempted = false;
+  if (activeTransactions.empty()) return true;
+  char reported[sizeof(runtimeErrorMessage)];
+  std::memcpy(reported, runtimeErrorMessage, sizeof(reported));
+  if (runtimeStatus("settle after failure", [] { activeTransactions.back()->settle(); })) {
+    std::memcpy(runtimeErrorMessage, reported, sizeof(reported));
+  } else {
+    char settleError[sizeof(runtimeErrorMessage)];
+    std::memcpy(settleError, runtimeErrorMessage, sizeof(settleError));
+    std::snprintf(runtimeErrorMessage, sizeof(runtimeErrorMessage), "%s; %s", reported, settleError);
+  }
+  return true;
+}
+
 POLYREGION_EXPORT void polyrt_context_acquire_or_throw(void *context) {
   if (!polyrt_context_acquire(context)) throw std::runtime_error(polyrt_error_message());
 }

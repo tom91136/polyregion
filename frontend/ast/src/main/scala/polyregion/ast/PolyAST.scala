@@ -868,6 +868,7 @@ object PolyAST {
       case Exception         extends AssertCode(fourCC('E', 'X', 'C', 'P'))
       case Arithmetic        extends AssertCode(fourCC('A', 'R', 'I', 'T'))
       case JvmException      extends AssertCode(fourCC('J', 'E', 'X', 'C'))
+      case Runtime           extends AssertCode(fourCC('R', 'N', 'T', 'M'))
       case Unknown(raw: Int) extends AssertCode(raw)
     }
 
@@ -986,7 +987,8 @@ object PolyAST {
           AssertCode.RecursionLimit,
           AssertCode.Exception,
           AssertCode.Arithmetic,
-          AssertCode.JvmException
+          AssertCode.JvmException,
+          AssertCode.Runtime
         )
   }
 

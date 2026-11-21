@@ -192,6 +192,83 @@ class StructuredExitSuite extends munit.FunSuite {
     assertEquals(run(p.Program(None, functions, Nil)), (List(2L, -1L, 3L), 1))
   }
 
+  test("a failed remote operation in a host function reports a runtime failure and drains") {
+    val context = named("ctx", p.Spec.ContextType)
+    val memory  = named("mem", p.Spec.ContextType)
+    val bytes   = p.Term.IntU64Const(64)
+    val body = List(
+      p.Stmt.Var(memory, Some(p.Expr.SpecOp(p.Spec.RemoteAlloc(selectT(context), bytes)))),
+      p.Stmt
+        .Var(named("freed", p.Type.Unit0), Some(p.Expr.SpecOp(p.Spec.RemoteFree(selectT(context), selectT(memory))))),
+      ret
+    )
+    val driver = fn("driver", args = List(p.Arg(context)), body = body)
+    val in     = program(driver.copy(decl = driver.decl.copy(affinity = p.Function.Affinity.Host)))
+    val out    = StructuredExit(in, NoopLog).entry.required
+    val calls  = out.collectWhere[p.Expr] { case p.Expr.ForeignCall(name, _, _) => name }
+    assertEquals(calls.count(_ == "polyrt_remote_failed"), 2)
+    assertEquals(calls.count(_ == "__polyregion_builtin_assert"), 2)
+    assertEquals(out.decl.flatParams.map(_.named.symbol), List("ctx"))
+    val reported = out.collectWhere[p.Expr] { case p.Expr.ForeignCall("__polyregion_builtin_assert", code :: _, _) =>
+      code
+    }
+    assertEquals(reported.toSet, Set[p.Term](p.Term.IntU32Const(p.Enums.AssertCode.Runtime.value)))
+  }
+
+  private def remoteAlloc(context: p.Named, memory: p.Named): p.Stmt =
+    p.Stmt.Var(memory, Some(p.Expr.SpecOp(p.Spec.RemoteAlloc(selectT(context), p.Term.IntU64Const(64)))))
+
+  private def asHost(f: p.Function): p.Function = f.copy(decl = f.decl.copy(affinity = p.Function.Affinity.Host))
+
+  private def foreignCalls(f: p.Function): List[String] =
+    f.collectWhere[p.Expr] { case p.Expr.ForeignCall(name, _, _) => name }
+
+  private def survivingAsserts(f: p.Function): Int =
+    f.collectWhere[p.Expr] { case p.Expr.SpecOp(p.Spec.Assert(_, _)) => () }.size
+
+  test("a remote operation outside a host function is checked and reported through the error buffer") {
+    val context = named("ctx", p.Spec.ContextType)
+    val out =
+      lower(List(p.Arg(context)), List(remoteAlloc(context, named("mem", p.Spec.ContextType)), ret)).entry.required
+    assertEquals(foreignCalls(out).count(_ == "polyrt_remote_failed"), 1)
+    assertEquals(survivingAsserts(out), 0)
+    assertEquals(out.decl.flatParams.headOption.map(_.named.symbol), Some(p.Conventions.ErrorArg))
+  }
+
+  test("a remote operation wrapped in an annotation is checked") {
+    val context  = named("ctx", p.Spec.ContextType)
+    val position = p.SourcePosition("remote.cpp", 3, Some(1))
+    val body     = List(p.Stmt.Annotated(remoteAlloc(context, named("mem", p.Spec.ContextType)), Some(position)), ret)
+    val out = StructuredExit(program(asHost(fn("driver", List(p.Arg(context)), body = body))), NoopLog).entry.required
+    assertEquals(foreignCalls(out).count(_ == "polyrt_remote_failed"), 1)
+    assertEquals(survivingAsserts(out), 0)
+  }
+
+  test("a host entry with a remote operation and an escaping raise keeps no assert for the backend") {
+    val context = named("ctx", p.Spec.ContextType)
+    val body    = List(remoteAlloc(context, named("mem", p.Spec.ContextType)), raise(p.Term.IntS32Const(7), "int"), ret)
+    val out = StructuredExit(program(asHost(fn("driver", List(p.Arg(context)), body = body))), NoopLog).entry.required
+    assertEquals(foreignCalls(out).count(_ == "polyrt_remote_failed"), 1)
+    assertEquals(survivingAsserts(out), 0)
+    assertEquals(out.collectWhere[p.Stmt] { case r: p.Stmt.Raise => r }, Nil)
+  }
+
+  test("a host function with a remote operation that calls an asserting host helper is lowered") {
+    val context = named("ctx", p.Spec.ContextType)
+    val helper  = asHost(fn("helper", body = List(assertStmt(), ret), visibility = p.Function.Visibility.Internal))
+    val call = p.Stmt.Var(
+      named("called", p.Type.Unit0),
+      Some(p.Expr.Invoke(p.Type.FnRef(helper.name), Nil, None, Nil, p.Type.Unit0))
+    )
+    val body   = List(remoteAlloc(context, named("mem", p.Spec.ContextType)), call, ret)
+    val driver = asHost(fn("driver", List(p.Arg(context)), body = body))
+    val out    = StructuredExit(program(driver, List(helper)), NoopLog)
+    (out.entry.toList ::: out.functions).foreach { f =>
+      assertEquals(survivingAsserts(f), 0, f.name.fqcn)
+    }
+    assertEquals(foreignCalls(out.entry.required).count(_ == "polyrt_remote_failed"), 1)
+  }
+
   test("an asserting entry gains a leading error-buffer arg and a drain return") {
     val out = lower(Nil, List(assertStmt(), ret))
     assertEquals(out.entry.args.headOption.map(_.named.tpe), Some(errT)) // the leading Ptr<i8> the dispatch binds

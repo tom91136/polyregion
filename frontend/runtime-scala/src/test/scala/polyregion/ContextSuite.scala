@@ -5,6 +5,7 @@ import polyregion.jvm.compiler as ct
 import polyregion.jvm.runtime as rt
 import polyregion.scalalang.Platforms
 
+import java.nio.file.Files
 import java.nio.{ByteBuffer, ByteOrder}
 
 class ContextSuite extends munit.FunSuite {
@@ -141,6 +142,95 @@ class ContextSuite extends munit.FunSuite {
         ct.Opt.O3.value
       )
     finally compiler.close()
+  }
+
+  private def hostProgram(name: String, params: List[p.Named], body: List[p.Stmt]): p.Program = {
+    val decl = p.FunctionDecl(
+      p.Sym(name),
+      Nil,
+      None,
+      params.map(p.Arg(_)),
+      Nil,
+      Nil,
+      p.Type.Unit0,
+      p.Function.Affinity.Host
+    )
+    p.Program(
+      Some(
+        p.Function(
+          decl,
+          body :+ p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const)),
+          p.Function.Visibility.Exported,
+          p.Function.FpMode.Relaxed,
+          p.CallConvention.RegularCall
+        )
+      ),
+      Nil,
+      Nil
+    )
+  }
+
+  private def usableProgram: p.Program = {
+    val (ctx, mem) = (p.Named("ctx", p.Spec.ContextType), p.Named("mem", p.Spec.ContextType))
+    val context    = p.Term.Select(ctx, Nil, ctx.tpe)
+    hostProgram(
+      "usable",
+      List(ctx),
+      List(
+        p.Stmt.Var(mem, Some(p.Expr.SpecOp(p.Spec.RemoteAlloc(context, p.Term.IntU64Const(64))))),
+        p.Stmt.Var(
+          p.Named("freed", p.Type.Unit0),
+          Some(p.Expr.SpecOp(p.Spec.RemoteFree(context, p.Term.Select(mem, Nil, mem.tpe))))
+        )
+      )
+    )
+  }
+
+  private def emptyLaunch(ctx: p.Named, args: List[p.Term]): p.Stmt = {
+    val one = p.Term.IntU64Const(1)
+    p.Stmt.Var(
+      p.Named("launched", p.Type.Unit0),
+      Some(
+        p.Expr.SpecOp(
+          p.Spec.RemoteLaunch(
+            p.Term.Select(ctx, Nil, ctx.tpe),
+            p.Term.Unit0Const,
+            Nil,
+            one,
+            one,
+            one,
+            one,
+            one,
+            one,
+            p.Term.IntU64Const(0),
+            args
+          )
+        )
+      ),
+      isMutable = false
+    )
+  }
+
+  private def hostPointerLaunch: p.Program = {
+    val (ctx, buf) = (p.Named("ctx", p.Spec.ContextType), p.Named("buf", PtrTpe))
+    hostProgram("refuse", List(ctx, buf), List(emptyLaunch(ctx, List(p.Term.Select(buf, Nil, buf.tpe)))))
+  }
+
+  private def refusal(program: p.Program): String = {
+    val images = List(program, usableProgram).map { p =>
+      val image = Files.createTempFile("refusal", ".o")
+      Files.write(image, compile(p, ct.Target.LLVM_HOST, "native").program)
+      image
+    }
+    val (code, output) =
+      try
+        ChildJvm.run(
+          "polyregion.RefusalProbe",
+          Map("REFUSAL_REFUSE" -> images.head.toString, "REFUSAL_USABLE" -> images(1).toString)
+        )
+      finally images.foreach(Files.deleteIfExists)
+    assertEquals(code, 0, output)
+    output
   }
 
   private def hostDevice: rt.DeviceInfo = rt.Context
@@ -538,5 +628,15 @@ class ContextSuite extends munit.FunSuite {
           } finally ctx.free(remote)
         } finally ctx.close()
     }
+  }
+
+  test("a host program marshalling a host pointer through a created managed context raises and leaves it usable") {
+    assume(
+      rt.Context.platforms().flatMap(_.devices).exists(_.platformKind == ManagedKind),
+      "no managed device in the catalogue"
+    )
+    val output = refusal(hostPointerLaunch)
+    assert(output.contains("raised: ") && output.contains("created context cannot marshal"), output)
+    assert(output.contains("usable: remoteMallocs=1"), output)
   }
 }

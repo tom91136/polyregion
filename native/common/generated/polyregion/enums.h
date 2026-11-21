@@ -32,6 +32,7 @@ enum class POLYREGION_EXPORT AssertCode : uint32_t {
   Exception = 1346590789,
   Arithmetic = 1414091329,
   JvmException = 1129858378,
+  Runtime = 1297370706,
 };
 
 } // namespace polyregion::invoke

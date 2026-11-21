@@ -181,6 +181,8 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_context_acquire(void *contex
 POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_context_release(void *context) noexcept;
 POLYREGION_RT_PROTECT POLYREGION_EXPORT const char *polyrt_error_message() noexcept;
 [[noreturn]] POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_abort() noexcept;
+POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_remote_failed() noexcept;
+POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_raise_host_failures(bool enabled) noexcept;
 POLYREGION_RT_PROTECT POLYREGION_EXPORT size_t polyrt_device_max_threads_per_block(void *context);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT uint64_t polyrt_device_max_threads_per_block_u64(void *context);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT uint64_t polyrt_device_subgroup_size(void *context);

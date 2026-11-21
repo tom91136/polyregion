@@ -198,6 +198,34 @@ TEST_CASE("invalid indices and arguments report an error") {
   CHECK_FALSE(polyrt_context_create(host.platform, 0, nullptr));
 }
 
+TEST_CASE("a failed remote operation is reported to a host program that raises failures") {
+  const auto host = find(RelocatableBackend);
+  REQUIRE(host);
+  Created created(host);
+  REQUIRE(created.context != nullptr);
+  REQUIRE(polyrt_context_acquire(created.context));
+  polyrt_raise_host_failures(true);
+  CHECK_FALSE(polyrt_remote_malloc(created.context, 8, nullptr));
+  CHECK(polyrt_remote_failed());
+  CHECK_FALSE(lastError().empty());
+  uintptr_t memory = 0;
+  CHECK(polyrt_remote_malloc(created.context, 8, &memory));
+  CHECK_FALSE(polyrt_remote_failed());
+  polyrt_raise_host_failures(false);
+  CHECK(polyrt_remote_free(created.context, memory));
+  CHECK(polyrt_context_release(created.context));
+  REQUIRE(polyrt_context_acquire(created.context));
+  CHECK(polyrt_context_release(created.context));
+}
+
+TEST_CASE("raising host failures nests and restores the previous setting") {
+  CHECK_FALSE(polyrt_raise_host_failures(true));
+  CHECK(polyrt_raise_host_failures(true));
+  CHECK(polyrt_raise_host_failures(true));
+  CHECK(polyrt_raise_host_failures(false));
+  CHECK_FALSE(polyrt_raise_host_failures(false));
+}
+
 TEST_CASE("a created host context reports its device and releases once") {
   const auto host = find(RelocatableBackend);
   REQUIRE(host);
@@ -286,6 +314,23 @@ TEST_CASE("release reports a mirror refusal recorded during the transaction") {
   CHECK_FALSE(polyrt_context_release(created.context));
   CHECK(lastError().find("created context") != std::string::npos);
   REQUIRE(polyrt_context_acquire(created.context));
+  CHECK(polyrt_context_release(created.context));
+}
+
+TEST_CASE("a recorded mirror refusal is reported once, through the host program check") {
+  const auto host = find(RelocatableBackend);
+  REQUIRE(host);
+  Created created(host);
+  REQUIRE(polyrt_context_acquire(created.context));
+  const auto previous = polyrt_raise_host_failures(true);
+  REQUIRE(polyregion::polyrt::sma::foreignContextActive("probe"));
+  uintptr_t memory = 0;
+  REQUIRE(polyrt_remote_malloc(created.context, 8, &memory));
+  CHECK(polyrt_remote_failed());
+  CHECK(lastError().find("created context") != std::string::npos);
+  CHECK(polyrt_remote_free(created.context, memory));
+  CHECK_FALSE(polyrt_remote_failed());
+  polyrt_raise_host_failures(previous);
   CHECK(polyrt_context_release(created.context));
 }
 

@@ -56,6 +56,9 @@ object StructuredExit extends ProgramPass {
   private val AssertTag                 = 0
   private val HostAssertSym             = "__polyregion_builtin_assert"
   private val RaisedSym                 = "#raised"
+  private val RemoteFailedSym           = "polyrt_remote_failed"
+  private val ErrorMessageSym           = "polyrt_error_message"
+  private val RemoteFailedPrefix        = "#remote_failed"
   private val AssertedPtrSym            = "#asserted_ptr"
   private val DiscardSym                = "#raised_discard"
   private val FlagPtr                   = p.Type.Ptr(p.Type.Bool1, p.Type.Space.Private)
@@ -192,6 +195,72 @@ object StructuredExit extends ProgramPass {
 
   private def mayAssert(s: p.Stmt): Boolean       = s.collectFirst_[p.Stmt] { case x if isAssert(x) => x }.isDefined
   private def containsBarrier(s: p.Stmt): Boolean = s.collectFirst_[p.Stmt] { case x if isBarrier(x) => x }.isDefined
+
+  private def isHost(f: p.Function): Boolean =
+    f.affinity == p.Function.Affinity.Host && f.convention == p.CallConvention.RegularCall
+
+  private def isRemote(s: p.Stmt): Boolean = s match {
+    case p.Stmt.Var(_, Some(p.Expr.SpecOp(spec)), _) => isRemote(spec)
+    case p.Stmt.Mut(_, p.Expr.SpecOp(spec))          => isRemote(spec)
+    case p.Stmt.Annotated(inner, _, _)               => isRemote(inner)
+    case _                                           => false
+  }
+
+  private def isRemote(spec: p.Spec): Boolean = spec match {
+    case _: (p.Spec.RemoteLaunch | p.Spec.RemoteAlloc | p.Spec.RemoteTempAlloc | p.Spec.RemoteFree |
+          p.Spec.RemoteMemcpy) =>
+      true
+    case _ => false
+  }
+
+  private def remoteFailureCheck(index: Int): List[p.Stmt] = {
+    val failed  = p.Named(s"$RemoteFailedPrefix$index", p.Type.Bool1)
+    val message = p.Named(s"$RemoteFailedPrefix${index}_message", ErrorPtr)
+    val reason  = p.Expr.SpecOp(p.Spec.Assert(p.Term.IntU32Const(p.Enums.AssertCode.Runtime.value), sel(message)))
+    List(
+      p.Stmt.Var(failed, Some(p.Expr.ForeignCall(RemoteFailedSym, Nil, p.Type.Bool1))),
+      p.Stmt.Cond(
+        sel(failed),
+        List(
+          p.Stmt.Var(message, Some(p.Expr.ForeignCall(ErrorMessageSym, Nil, ErrorPtr))),
+          p.Stmt.Var(p.Named(s"$RemoteFailedPrefix${index}_assert", p.Type.Unit0), Some(reason))
+        ),
+        Nil
+      )
+    )
+  }
+
+  private def checkRemoteFailures(f: p.Function): p.Function = {
+    def block(body: List[p.Stmt], first: Int): (List[p.Stmt], Int) =
+      body.foldLeft((List.empty[p.Stmt], first)) { case ((out, next), stmt) =>
+        val (inner, after) = stmt match {
+          case p.Stmt.Cond(c, taken, other) =>
+            val (t, n) = block(taken, next)
+            val (o, m) = block(other, n)
+            (p.Stmt.Cond(c, t, o), m)
+          case p.Stmt.While(c, loop) =>
+            val (l, n) = block(loop, next)
+            (p.Stmt.While(c, l), n)
+          case p.Stmt.ForRange(i, lb, ub, step, loop) =>
+            val (l, n) = block(loop, next)
+            (p.Stmt.ForRange(i, lb, ub, step, l), n)
+          case p.Stmt.Try(attempt, handlers, fin) =>
+            val (a, n) = block(attempt, next)
+            val (hs, m) = handlers.foldLeft((List.empty[p.Handler], n)) { case ((done, at), h) =>
+              val (handled, to) = block(h.body, at)
+              (done :+ h.copy(body = handled), to)
+            }
+            val (r, k) = block(fin, m)
+            (p.Stmt.Try(a, hs, r), k)
+          case p.Stmt.Annotated(wrapped, position, comment) if !isRemote(wrapped) =>
+            val (checked, n) = block(List(wrapped), next)
+            (p.Stmt.Annotated(checked.head, position, comment), n)
+          case other => (other, next)
+        }
+        if (isRemote(inner)) (out ::: inner :: remoteFailureCheck(after), after + 1) else (out :+ inner, after)
+      }
+    f.copy(body = block(f.body, 0)._1)
+  }
 
   private def callee(s: p.Stmt): Option[p.Sym] = s match {
     case p.Stmt.Var(_, Some(p.Expr.Invoke(p.Type.FnRef(f), _, _, _, _)), _) => Some(f)
@@ -1011,22 +1080,26 @@ object StructuredExit extends ProgramPass {
       )
   }
 
-  private def lowerHostExits(program: p.Program, log: Log): p.Program = {
+  private def lowerHostExits(input: p.Program, log: Log): (p.Program, Boolean) = {
+    val program =
+      input.copy(entry = input.entry.map(checkRemoteFailures), functions = input.functions.map(checkRemoteFailures))
     val flow = Flow(program.defs)
     val callables = program.metadata.collect {
       case p.MetaEntry(key, _) if key.startsWith(p.Conventions.LinkCallableMeta) =>
         key.stripPrefix(p.Conventions.LinkCallableMeta)
     }.toSet
-    val candidates = program.functions.filter { f =>
-      f.affinity == p.Function.Affinity.Host && f.convention == p.CallConvention.RegularCall &&
-      flow.raised(f.body).isEmpty
+    val candidates = (program.entry.toList ::: program.functions).filter { f =>
+      isHost(f) && flow.raised(f.body).isEmpty
     }
     val asserting = candidates.filter(_.body.exists(mayAssert)).map(_.name).toSet
     val callees = candidates.map { f =>
       f.name -> f.collectWhere[p.Expr] { case p.Expr.Invoke(p.Type.FnRef(callee), _, _, _, _) => callee }.toSet
     }.toMap
+    val entryName = program.entry.map(_.name)
     val boundaries = candidates.collect {
-      case f if f.visibility == p.Function.Visibility.Exported || callables(f.name.fqcn) => f.name
+      case f
+          if f.visibility == p.Function.Visibility.Exported || callables(f.name.fqcn) || entryName.contains(f.name) =>
+        f.name
     }.toSet
     @annotation.tailrec
     def close(raising: Set[p.Sym]): Set[p.Sym] = {
@@ -1038,26 +1111,25 @@ object StructuredExit extends ProgramPass {
     val raising  = close(Set.empty)
     val lowered  = callees.collect { case (f, called) if asserting(f) || called.exists(raising) => f }.toSet
     val hostFlow = Flow(program.defs, raising)
-    if (lowered.isEmpty) program
-    else
-      program.copy(
-        entry = program.entry.map(discardRaised(_, raising)),
-        functions = program.functions.map { f =>
-          if (!lowered(f.name)) discardRaised(f, raising)
-          else
-            lowerFunction(
-              f.copy(body = passFlag(f.body, raising, assertedPtr)),
-              hostFlow,
-              Exit.Report(raising(f.name)),
-              log
-            )
-        }
-      )
+    if (lowered.isEmpty) program -> false
+    else {
+      def lower(f: p.Function): p.Function =
+        if (!lowered(f.name)) discardRaised(f, raising)
+        else
+          lowerFunction(
+            f.copy(body = passFlag(f.body, raising, assertedPtr)),
+            hostFlow,
+            Exit.Report(raising(f.name)),
+            log
+          )
+      program.copy(entry = program.entry.map(lower(_)), functions = program.functions.map(lower(_))) ->
+        program.entry.exists(f => lowered(f.name))
+    }
   }
 
   override def apply(program: p.Program, log: Log): p.Program = {
-    val flow = Flow(program.defs)
-    val host = lowerHostExits(program, log)
+    val flow                     = Flow(program.defs)
+    val (host, hostEntryLowered) = lowerHostExits(program, log)
     val functions = host.functions.map { function =>
       val hasStructuredExit = function
         .collectFirst_[p.Stmt] { case s @ (_: p.Stmt.Raise | _: p.Stmt.Try) => s }
@@ -1065,7 +1137,8 @@ object StructuredExit extends ProgramPass {
       if (hasStructuredExit && !function.body.exists(flow.escapes)) lowerFunction(function, flow, Exit.Buffer, log)
       else function
     }
-    lowerEntry(host.copy(functions = functions), log)
+    val lowered = host.copy(functions = functions)
+    if (hostEntryLowered) lowered else lowerEntry(lowered, log)
   }
 
   private[pass] def lowerHandledFunction(f: p.Function, defs: List[p.StructDef], log: Log): p.Function = {

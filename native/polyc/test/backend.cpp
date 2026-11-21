@@ -261,6 +261,34 @@ TEST_CASE("entry-less libraries compile their exported closure", "[backend][libr
   CHECK_THAT(std::string(source.binary->begin(), source.binary->end()), Catch::Matchers::ContainsSubstring("exported"));
 }
 
+TEST_CASE("host runtime failures lower to a host assert instead of an abort", "[backend][host]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto pointer = Type::Ptr(Type::IntU8(), TypeSpace::Global());
+  const Named context("context", pointer);
+  const Named memory("memory", pointer);
+  const Function driver = mkFn(
+      "driver", {Arg(context, {})}, Type::Unit0(),
+      {Var(memory, Expr::SpecOp(Spec::RemoteAlloc(selectNamed(context).widen(), Term::IntU64Const(64).widen())).widen(), false).widen(),
+       Var(Named("freed", Type::Unit0()), Expr::SpecOp(Spec::RemoteFree(selectNamed(context).widen(), selectNamed(memory).widen())).widen(),
+           false)
+           .widen(),
+       ret()},
+      FunctionVisibility::Exported());
+  const Function host(FunctionDecl(driver.decl.name, {}, {}, driver.decl.args, {}, {}, Type::Unit0(), FunctionAffinity::Host()),
+                      driver.body, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), CallConvention::RegularCall().widen());
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  const auto compiled =
+      polyregion::compiler::compile(Program(host, {}, {}, PassPhase::Initial(), {}), {Target::Object_LLVM_HOST, "native"}, OptLevel::O0);
+  REQUIRE(compiled.binary);
+  const auto &ir = llvmIrOf(compiled);
+  INFO(ir);
+  CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("polyrt_remote_failed"));
+  CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("__polyregion_builtin_assert"));
+  CHECK_THAT(ir, !Catch::Matchers::ContainsSubstring("polyrt_abort"));
+}
+
 TEST_CASE("population count uses native backends with portable C source fallbacks", "[backend][intrinsic]") {
   polyregion::compiler::initialise();
   using namespace polyregion::polyast::dsl;
@@ -914,7 +942,9 @@ TEST_CASE("CPU remote-operation ABI follows the target pointer width", "[backend
            .widen(),
        Var(freed, Expr::SpecOp(Spec::RemoteFree(selectNamed(context).widen(), selectNamed(remote).widen())).widen(), false).widen(), ret()},
       FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
-  const Program p(entry, {}, {}, PassPhase::Initial(), {});
+  const Function host(FunctionDecl(entry.decl.name, {}, {}, entry.decl.args, {}, {}, Type::Unit0(), FunctionAffinity::Host()), entry.body,
+                      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), CallConvention::RegularCall().widen());
+  const Program p(host, {}, {}, PassPhase::Initial(), {});
   const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
 
   const auto checkAbi = [&](const auto &result, const std::string &sizeType) {
@@ -926,7 +956,7 @@ TEST_CASE("CPU remote-operation ABI follows the target pointer width", "[backend
     CHECK_THAT(ir, Catch::Matchers::ContainsSubstring(fmt::format(
                        "declare i1 @polyrt_remote_launch_marshalled(ptr, ptr, ptr, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}", sizeType)));
     CHECK_THAT(ir, Catch::Matchers::ContainsSubstring(fmt::format("declare i1 @polyrt_remote_free(ptr, {})", sizeType)));
-    CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("call void @polyrt_abort()"));
+    CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("call i8 @polyrt_remote_failed()"));
     if (sizeType == "i64") CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("zext i32"));
   };
 
