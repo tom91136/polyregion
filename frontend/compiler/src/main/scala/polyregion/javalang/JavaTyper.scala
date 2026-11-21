@@ -1,6 +1,7 @@
 package polyregion.javalang
 
 import cats.syntax.all.*
+import com.sun.tools.javac.code.Flags
 import com.sun.tools.javac.code.Symbol as JSymbol
 import polyregion.ast.{PolyAST as p, *}
 
@@ -24,18 +25,41 @@ object JavaTyper {
       case f: VariableElement if f.getKind == ElementKind.FIELD && !f.getModifiers.contains(Modifier.STATIC) => f
     }
 
-  // javac marks captured state and the enclosing instance of an inner class synthetic and getEnclosedElements hides it
+  private def memberFields(c: JSymbol.ClassSymbol): List[JSymbol.VarSymbol] = {
+    c.complete()
+    c.members().getSymbols().asScala.toList.reverse.collect {
+      case v: JSymbol.VarSymbol if v.getKind == ElementKind.FIELD && !v.isStatic => v
+    }
+  }
+
+  // javac marks the state a local class captures synthetic and getEnclosedElements hides it
   def structFieldElements(elem: TypeElement): List[VariableElement] = elem match {
-    case c: JSymbol.ClassSymbol =>
-      c.complete()
-      c.members().getSymbols().asScala.toList.reverse.collect {
-        case v: JSymbol.VarSymbol if v.getKind == ElementKind.FIELD && !v.isStatic => v
-      }
+    case c: JSymbol.ClassSymbol
+        if elem.getNestingKind == NestingKind.LOCAL || elem.getNestingKind == NestingKind.ANONYMOUS =>
+      memberFields(c)
     case _ => instanceFields(elem)
   }
 
+  // the enclosing instance of an inner class: a field of the layout only for a region that selects it
+  def outerRefElements(elem: TypeElement): List[VariableElement] = elem match {
+    case c: JSymbol.ClassSymbol if elem.getNestingKind == NestingKind.MEMBER =>
+      memberFields(c).filter(v => (v.flags() & Flags.SYNTHETIC) != 0)
+    case _ => Nil
+  }
+
+  def hostFieldElements(elem: TypeElement): List[VariableElement] = structFieldElements(elem) ::: outerRefElements(elem)
+
   def structFields(elem: TypeElement): List[(String, TypeMirror)] =
     structFieldElements(elem).map(f => f.getSimpleName.toString -> f.asType)
+
+  def outerRefOf(sym: JSymbol): Option[(String, String)] = sym match {
+    case f: JSymbol.VarSymbol if !f.isStatic && (f.flags() & Flags.SYNTHETIC) != 0 =>
+      f.owner match {
+        case c: JSymbol.ClassSymbol if c.getNestingKind == NestingKind.MEMBER => Some(structName(c) -> f.name.toString)
+        case _                                                                => None
+      }
+    case _ => None
+  }
 
   def structSyms(t: p.Type): List[p.Sym] = t match {
     case p.Type.Struct(n, args) => n :: args.flatMap(structSyms(_))
@@ -46,8 +70,10 @@ object JavaTyper {
   }
 
   // the tag leads so every dispatch candidate agrees on its offset
-  def lowerStruct(elem: TypeElement, tagged: Boolean): Result[p.StructDef] =
-    structFields(elem)
+  def lowerStruct(elem: TypeElement, tagged: Boolean, outerRefs: Set[(String, String)]): Result[p.StructDef] =
+    (structFields(elem) ::: outerRefElements(elem)
+      .filter(f => outerRefs.contains(structName(elem) -> f.getSimpleName.toString))
+      .map(f => f.getSimpleName.toString -> f.asType))
       .traverse((name, mirror) => typer(mirror).map(t => p.Named(name, t)))
       .map { members =>
         val all = if (tagged) p.Named(TagMember, p.Type.IntS32) :: members else members

@@ -57,6 +57,8 @@ object TreeRemapper {
 
     val witnessed = mutable.LinkedHashSet.empty[TypeElement]
 
+    val outerRefs = mutable.LinkedHashSet.empty[(String, String)]
+
     val directStatics = mutable.LinkedHashMap.empty[JSymbol.MethodSymbol, List[JSymbol.VarSymbol]]
     val callees       = mutable.LinkedHashMap.empty[JSymbol.MethodSymbol, List[JSymbol.MethodSymbol]]
 
@@ -83,7 +85,12 @@ object TreeRemapper {
 
   case class Captured(name: String, capture: Capture)
 
-  case class Region(program: p.Program, captures: List[Captured], tags: Map[String, Int])
+  case class Region(
+      program: p.Program,
+      captures: List[Captured],
+      tags: Map[String, Int],
+      outerRefs: Set[(String, String)]
+  )
 
   case class LoopCtx(
       update: List[ExpressionStatementTree],
@@ -348,8 +355,16 @@ object TreeRemapper {
     case _ => false
   }
 
+  private def noteOuterRef(scope: Scope, sym: Option[JSymbol]): Unit =
+    sym.flatMap(JavaTyper.outerRefOf(_)).foreach(scope.deps.outerRefs += _)
+
+  private def classOwned(v: JSymbol): Boolean = v.owner match {
+    case _: JSymbol.ClassSymbol => true
+    case _                      => false
+  }
+
   private def staticFieldOf(t: Tree): Option[JSymbol.VarSymbol] = symOf(t).collect {
-    case v: JSymbol.VarSymbol if v.isStatic && v.owner.isInstanceOf[JSymbol.ClassSymbol] => v
+    case v: JSymbol.VarSymbol if v.isStatic && classOwned(v) => v
   }
 
   private def constOf(c: Any, tpe: p.Type): Result[p.Expr] = Scalar.constant(tpe) match {
@@ -471,6 +486,7 @@ object TreeRemapper {
         for {
           base <- selectPath(scope, buf, fa.getExpression)
           tpe  <- JavaTyper.typer(jcType(fa))
+          _ = noteOuterRef(scope, symOf(fa))
         } yield fieldOf(base, fa.getIdentifier.toString, tpe)
       case other => mapExpr(scope, buf, other).map(bind(scope, buf, _)).flatMap(x => asSelect(p.Expr.Alias(x)))
     }
@@ -500,7 +516,12 @@ object TreeRemapper {
         case other                   => s"Cannot compare `null` against a value of type ${other.repr}".fail
       }
 
-  private def isReference(t: p.Type): Boolean = t.isInstanceOf[p.Type.Ptr] || t == p.Type.Nothing
+  private def isPtr(t: p.Type): Boolean = t match {
+    case p.Type.Ptr(_, _) => true
+    case _                => false
+  }
+
+  private def isReference(t: p.Type): Boolean = isPtr(t) || t == p.Type.Nothing
 
   // reference == is identity, which PolyAST only expresses over integers, so both sides become addresses
   private def referenceCompare(
@@ -512,7 +533,7 @@ object TreeRemapper {
     l0 <- nullAgainst(r.tpe, l)
     r0 <- nullAgainst(l.tpe, r)
     _ <-
-      if (l0.tpe.isInstanceOf[p.Type.Ptr] && r0.tpe.isInstanceOf[p.Type.Ptr]) ().success
+      if (isPtr(l0.tpe) && isPtr(r0.tpe)) ().success
       else s"Cannot compare ${l0.tpe.repr} against ${r0.tpe.repr} by reference".fail
   } yield (coerce(scope, buf, l0, p.Type.IntS64), coerce(scope, buf, r0, p.Type.IntS64))
 
@@ -606,6 +627,7 @@ object TreeRemapper {
         recv <- mapExpr(scope, buf, fa.getExpression).map(bind(scope, buf, _))
         tpe  <- JavaTyper.typer(jcType(fa))
         sel  <- asSelect(p.Expr.Alias(recv))
+        _ = noteOuterRef(scope, symOf(fa))
       } yield p.Expr.Alias(fieldOf(sel, fa.getIdentifier.toString, tpe))
     case aa: ArrayAccessTree =>
       for {
@@ -703,9 +725,10 @@ object TreeRemapper {
           scope.thisOpt.map(selectExpr(Nil, _)).failIfEmpty("`this` referenced outside an instance method")
         else
           (sym, scope.thisOpt) match {
-            case (Some(v: JSymbol.VarSymbol), _) if v.isStatic && v.owner.isInstanceOf[JSymbol.ClassSymbol] =>
+            case (Some(v: JSymbol.VarSymbol), _) if v.isStatic && classOwned(v) =>
               staticRead(scope, v)
-            case (Some(v: JSymbol.VarSymbol), Some(self)) if !v.isStatic && v.owner.isInstanceOf[JSymbol.ClassSymbol] =>
+            case (Some(v: JSymbol.VarSymbol), Some(self)) if !v.isStatic && classOwned(v) =>
+              noteOuterRef(scope, sym)
               JavaTyper
                 .typer(jcType(id))
                 .map(tpe => p.Expr.Alias(fieldOf(selectTerm(Nil, self), id.getName.toString, tpe)))
@@ -1037,9 +1060,8 @@ object TreeRemapper {
     }
   }
 
-  private def soleClosureWrite(trees: List[MethodTree], v: JSymbol): Option[Closure] =
-    if (!v.isInstanceOf[JSymbol.VarSymbol]) None
-    else {
+  private def soleClosureWrite(trees: List[MethodTree], v: JSymbol): Option[Closure] = v match {
+    case _: JSymbol.VarSymbol =>
       val writes = trees.flatMap { m =>
         LambdaOutliner.collectTree(m) {
           case d: VariableTree if declOf(d) == v                     => Option(d.getInitializer).toList
@@ -1052,7 +1074,8 @@ object TreeRemapper {
           dynamicSym(mi).flatMap(metafactoryImpl(_)).map(Closure(_, Nil))
         case _ => None
       }
-    }
+    case _ => None
+  }
 
   private def argValues(
       scope: Scope,
@@ -2245,14 +2268,15 @@ object TreeRemapper {
       signatureStructs <- structSyms(entryFn :: depFns).flatTraverse { sym =>
         val fqn = sym.fqn.mkString(".")
         classTable.get(fqn) match {
-          case Some(elem) => JavaTyper.lowerStruct(elem, deps.taggedTypes.contains(fqn)).map(List(_))
-          case None       => List.empty[p.StructDef].success
+          case Some(elem) =>
+            JavaTyper.lowerStruct(elem, deps.taggedTypes.contains(fqn), deps.outerRefs.toSet).map(List(_))
+          case None => List.empty[p.StructDef].success
         }
       }
       allocatedStructs <- deps.witnessed.toList.traverse { elem =>
-        JavaTyper.lowerStruct(elem, deps.taggedTypes.contains(elem.getQualifiedName.toString))
+        JavaTyper.lowerStruct(elem, deps.taggedTypes.contains(elem.getQualifiedName.toString), deps.outerRefs.toSet)
       }
       structs = signatureStructs ++ allocatedStructs
-    } yield Region(p.Program(Some(entryFn), depFns, structs.distinct), captures, deps.tagOf.toMap)
+    } yield Region(p.Program(Some(entryFn), depFns, structs.distinct), captures, deps.tagOf.toMap, deps.outerRefs.toSet)
   }
 }

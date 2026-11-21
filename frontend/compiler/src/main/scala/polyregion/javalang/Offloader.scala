@@ -46,7 +46,8 @@ object Offloader {
   private def withFieldStructs(
       program: p.Program,
       classTable: Map[String, TypeElement],
-      tags: Map[String, Int]
+      tags: Map[String, Int],
+      outerRefs: Set[(String, String)]
   ): Result[p.Program] = {
     def go(defs: List[p.StructDef]): Result[List[p.StructDef]] = {
       val seen    = defs.map(_.name).toSet
@@ -57,7 +58,7 @@ object Offloader {
           .flatTraverse { sym =>
             val fqn = sym.fqn.mkString(".")
             classTable.get(fqn) match {
-              case Some(elem) => JavaTyper.lowerStruct(elem, tags.contains(fqn)).map(List(_))
+              case Some(elem) => JavaTyper.lowerStruct(elem, tags.contains(fqn), outerRefs).map(List(_))
               case None       => List.empty[p.StructDef].success
             }
           }
@@ -198,7 +199,7 @@ object Offloader {
 
   private def hostFieldsOf(env: ProcessingEnvironment, host: Host): Map[String, TwinEmitter.HostField] =
     JavaTyper
-      .structFieldElements(host.elem)
+      .hostFieldElements(host.elem)
       .map { f =>
         val name = f.getSimpleName.toString
         name -> TwinEmitter.HostField(
@@ -321,7 +322,7 @@ object Offloader {
     val symbol = normalise(fqcn)
     for {
       region   <- TreeRemapper.compileRegion(sources, entry)
-      raw      <- withFieldStructs(region.program, classTable, region.tags)
+      raw      <- withFieldStructs(region.program, classTable, region.tags, region.outerRefs)
       rawEntry <- raw.entry.failIfEmpty(s"Region `$symbol` has no entry")
       resultTpe = rawEntry.rtn
       routed    = routeReturnThroughCapture(rawEntry.copy(decl = rawEntry.decl.copy(name = p.Sym(symbol))))

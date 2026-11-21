@@ -54,6 +54,23 @@ public class NestedClassRegionTest extends BaseSuite {
     final int base = 1000;
   }
 
+  static final class Labelled {
+    String label = "outer";
+
+    final class Inner {
+      int x = 5;
+
+      int plusOne() {
+        return offload(() -> x + 1);
+      }
+    }
+  }
+
+  @Test
+  public void innerClassIgnoringAnUnloweredOuter() {
+    assertEquals(6, new Labelled().new Inner().plusOne());
+  }
+
   @Test
   public void staticNestedClass() {
     assertEquals(5, StaticNested.sum(2, 3));
