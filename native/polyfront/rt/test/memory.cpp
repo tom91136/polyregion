@@ -503,13 +503,16 @@ TEST_CASE("mirror tables refuse a transaction on a created context") {
     CHECK(polyrt_context_release(&context));
   }
 
-  SECTION("a launch consumes the refusal") {
+  SECTION("a launch after a refusal is skipped and the release reports it once") {
     REQUIRE(polyrt_context_acquire(&context));
     CHECK(polyregion::polyrt::sma::foreignContextActive("inside"));
     const std::array<uint8_t, 0> types{};
     const std::array<void *, 0> arguments{};
-    CHECK_FALSE(polyrt_remote_launch(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, 0, types.data(), arguments.data()));
+    CHECK(polyrt_remote_launch(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, 0, types.data(), arguments.data()));
     CHECK(queue.invokedTypes.empty());
+    CHECK_FALSE(polyrt_context_release(&context));
+    CHECK(std::string(polyrt_error_message()).find("created context cannot marshal") != std::string::npos);
+    REQUIRE(polyrt_context_acquire(&context));
     CHECK(polyrt_context_release(&context));
   }
 
