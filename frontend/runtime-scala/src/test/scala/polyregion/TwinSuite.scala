@@ -2,7 +2,7 @@ package polyregion
 
 import polyregion.jvm.compiler as ct
 import polyregion.jvm.runtime as rt
-import polyregion.jvm.twin.{FieldAccess, Layout, Marshal, ReflectiveTwin, TwinException, Twins}
+import polyregion.jvm.twin.{FieldAccess, GeneratedTwin, Layout, Marshal, ReflectiveTwin, TwinException, Twins}
 import polyregion.jvm.twin.Layout.{Field, Kind}
 
 import java.nio.{ByteBuffer, ByteOrder}
@@ -57,6 +57,20 @@ object TwinSuite {
   class Fixed(val x: Int)
   class Wrong(var items: Array[Prims])
   class Wide(var xs: Array[Long])
+  class Beacon(var code: Int, var lit: Boolean)
+  final class BeaconTwin(layout: Layout, twins: Twins) extends GeneratedTwin(layout, twins) {
+    def write(m: Marshal, root: AnyRef, dst: ByteBuffer, at: Int): Unit = {
+      val b = root.asInstanceOf[Beacon]
+      dst.putInt(at + offsets(0), b.code)
+      dst.put(at + offsets(1), if (b.lit) 1.toByte else 0.toByte)
+      putTag(dst, at)
+    }
+    def read(m: Marshal, root: AnyRef, src: ByteBuffer, at: Int): Unit = {
+      val b = root.asInstanceOf[Beacon]
+      b.code = src.getInt(at + offsets(0))
+      b.lit = GeneratedTwin.getBool(src, at + offsets(1))
+    }
+  }
 
   def prim(name: String, offset: Int, size: Int, descriptor: String) =
     Field(name, descriptor, Kind.PRIM, offset, size, "")
@@ -136,6 +150,8 @@ object TwinSuite {
   val fixedLayout: Layout = layout("Fixed", classOf[Fixed], 4, prim("x", 0, 4, "I"))
   val wrongLayout: Layout = layout("Wrong", classOf[Wrong], 8, ref("items", 0, "Inner"))
   val wideLayout: Layout  = layout("Wide", classOf[Wide], 8, Field("xs", "[I", Kind.ARRAY, 0, 8, ""))
+  val beaconLayout: Layout =
+    Layout("Beacon", classOf[Beacon].getName, 12, 4, 8, 42, Array(prim("code", 0, 4, "I"), prim("lit", 4, 1, "Z")))
 
   val all: List[Layout] = List(primsLayout, innerLayout, outerLayout, holderLayout, gridLayout, taggedLayout)
 }
@@ -302,6 +318,24 @@ class TwinSuite extends munit.FunSuite {
         try {
           val img = fx.device(m.instance(Tagged(5)), 8)
           assertEquals((img.getInt(0), img.getInt(4)), (5, 7))
+        } finally m.close()
+      }
+    }
+
+    test(s"[${row.label}] a hand-written generated twin writes, tags and reads back") {
+      withRow(row) { fx =>
+        val registry = twins(List(beaconLayout))
+        registry.add(BeaconTwin(beaconLayout, registry))
+        val b = Beacon(9, lit = true)
+        val m = Marshal(fx.queue, registry)
+        try {
+          val ptr = m.instance(b)
+          val img = fx.device(ptr, 12)
+          assertEquals((img.getInt(0), img.get(4) != 0, img.getInt(8)), (9, true, 42))
+          fx.poke(ptr, 0, _.putInt(0, 11), 4)
+          fx.poke(ptr, 4, _.put(0, 0.toByte), 1)
+          m.settle()
+          assertEquals((b.code, b.lit), (11, false))
         } finally m.close()
       }
     }

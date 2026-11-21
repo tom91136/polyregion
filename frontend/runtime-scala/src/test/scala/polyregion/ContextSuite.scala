@@ -274,6 +274,11 @@ class ContextSuite extends munit.FunSuite {
     assert(!plain.features.contains(p.Conventions.ErrorArg), plain.features.mkString(","))
   }
 
+  test("an asserting entry takes the error block as its leading argument") {
+    val c = compile(assertProgram(p.Enums.AssertCode.Assert, "no"), ct.Target.LLVM_HOST, "native")
+    assertEquals(c.entryArgs.toList, List(p.Conventions.ErrorArg, "out"))
+  }
+
   test("a kernel assert raises an AssertionError carrying the device message") {
     val ctx = rt.Context.create(hostDevice)
     try {
