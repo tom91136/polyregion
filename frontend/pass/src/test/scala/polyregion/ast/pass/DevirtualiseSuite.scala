@@ -316,6 +316,79 @@ class DevirtualiseSuite extends munit.FunSuite {
     assertEquals(out(rect.name), List(tag, named("w"), named("h")))
   }
 
+  private val tagMember = named(p.Conventions.DispatchTag)
+
+  private def padOf(words: Int): p.Named = named("#pad", p.Type.Arr(p.Type.IntS64, words, p.Type.Space.Global))
+
+  test("an owner that is also a candidate keeps the tag and is padded to its widest candidate") {
+    val plain = List(
+      p.StructDef(shape.name, Nil, Nil, Nil),
+      p.StructDef(circle.name, Nil, List(named("r", p.Type.Float64)), List(shape)),
+      p.StructDef(rect.name, Nil, List(named("w"), named("h")), List(shape))
+    )
+    val tags = Devirtualise.tagsOf(List(shape.name, circle.name, rect.name))
+    val out = Devirtualise
+      .decorate(plain, Map(shape.name -> List(shape.name, circle.name, rect.name)), tags)
+      .map(d => d.name -> d.members)
+      .toMap
+    assertEquals(out(shape.name), List(tagMember, padOf(2)))
+    assertEquals(out(circle.name), List(tagMember, named("r", p.Type.Float64)))
+  }
+
+  test("an owner nested by value in a candidate is sized from its decorated layout") {
+    val a      = struct("A")
+    val b      = struct("B")
+    val holder = struct("Holder")
+    val bImpl  = struct("BImpl")
+    val plain = List(
+      p.StructDef(a.name, Nil, Nil, Nil),
+      p.StructDef(holder.name, Nil, List(named("b", b)), List(a)),
+      p.StructDef(b.name, Nil, Nil, Nil),
+      p.StructDef(bImpl.name, Nil, List(named("x", p.Type.IntS64), named("y", p.Type.IntS64)), List(b))
+    )
+    val tags = Devirtualise.tagsOf(List(holder.name, bImpl.name))
+    val out = Devirtualise
+      .decorate(plain, Map(a.name -> List(holder.name), b.name -> List(bImpl.name)), tags)
+      .map(d => d.name -> d.members)
+      .toMap
+    assertEquals(out(b.name), List(tagMember, named("#slack"), padOf(2)))
+    assertEquals(out(a.name), List(tagMember, named("#slack"), padOf(3)))
+  }
+
+  private def byValue(defs: List[p.StructDef]): p.Program = {
+    val held = named("s", shape)
+    val call = p.Expr.Invoke(p.Type.FnRef(sym("Shape", "area")), Nil, Some(selectT(held)), List(selectT(k)), i32)
+    PassTest.program(
+      entry(
+        args = List(p.Arg(out), p.Arg(held), p.Arg(k)),
+        body = List(
+          p.Stmt.Var(named("r"), Some(call)),
+          p.Stmt.Update(selectT(out), p.Term.IntS32Const(0), selectT("r")),
+          ret(unit)
+        )
+      ),
+      List(areaAbstract, areaCircle, areaRect, growAbstract, growCircle, growRect),
+      defs
+    )
+  }
+
+  test("a by-value receiver smaller than a candidate is refused") {
+    val e = intercept[IllegalStateException](Devirtualise(table)(byValue(defs), NoopLog))
+    assert(e.getMessage.contains("Rect is larger"), e.getMessage)
+  }
+
+  test("a by-value receiver padded to its candidates is dispatched") {
+    val plain = List(
+      p.StructDef(shape.name, Nil, Nil, Nil),
+      p.StructDef(circle.name, Nil, List(named("r")), List(shape)),
+      p.StructDef(rect.name, Nil, List(named("w"), named("h")), List(shape))
+    )
+    val tags   = Devirtualise.tagsOf(List(circle.name, rect.name))
+    val padded = Devirtualise.decorate(plain, Map(shape.name -> List(circle.name, rect.name)), tags)
+    val out    = Devirtualise(table)(byValue(padded), NoopLog)
+    assert(out.entry.get.body.nonEmpty)
+  }
+
   test("the members a host can hold are the ones the pass did not synthesise") {
     val plain = List(
       p.StructDef(shape.name, Nil, Nil, Nil),
