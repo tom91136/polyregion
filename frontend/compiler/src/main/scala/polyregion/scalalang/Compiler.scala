@@ -125,7 +125,7 @@ object Compiler {
       renameMap: Map[q.Symbol, p.Sym] = Map.empty,
       callers: List[p.Function] = Nil,
       config: LaunchConfig = LaunchConfig.Default,
-      target: String = LaunchConfig.Default.targetNames.head
+      target: String
   )(
       fnLut: Map[p.Signature, (p.Function, Set[p.StructDef])],
       structDefs: Map[p.Sym, p.StructDef]
