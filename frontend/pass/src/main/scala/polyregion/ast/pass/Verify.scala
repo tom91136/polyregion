@@ -310,9 +310,7 @@ object Verify {
     val referenceAndTypeErrors = f.body match {
       case Nil => List("Function does not contain any statement")
       case xs =>
-        val initialNames = Context(
-          (f.receiver.toList ++ f.args ++ f.moduleCaptures ++ f.termCaptures).map(_.named).toSet
-        )
+        val initialNames = Context(f.decl.flatParams.map(_.named).toSet)
         xs.foldLeft(initialNames)(validateStmt(_, _)).errors
     }
 
@@ -373,10 +371,8 @@ object Verify {
                   val tpeArgCount = launch.tpeArgs.size
                   val argCount    = launch.args.size
                   val matching = candidates.exists { candidate =>
-                    val bindings = candidate.tpeVars.map(_.name).zip(launch.tpeArgs).toMap
-                    val parameters = (candidate.moduleCaptures ::: candidate.termCaptures ::: candidate.args)
-                      .map(arg => Binders.substType(arg.named.tpe, bindings))
-                      .filterNot(tpe => tpe == p.Type.Unit0 || tpe == p.Type.Nothing)
+                    val bindings   = candidate.tpeVars.map(_.name).zip(launch.tpeArgs).toMap
+                    val parameters = candidate.decl.runtimeParams(Binders.substType(_, bindings)).map(_.named.tpe)
                     TypeOps.launchShaped(candidate, tpeArgCount, parameters, argCount) &&
                     parameters.zip(launch.args).forall { case (expected, actual) =>
                       (expected, actual.tpe) match {

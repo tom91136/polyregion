@@ -25,7 +25,7 @@ private[pass] object GroupVocabulary {
   }
 
   private[pass] def params(entry: p.Function): List[p.Named] =
-    (entry.receiver.toList ::: entry.args ::: entry.moduleCaptures ::: entry.termCaptures).map(_.named)
+    entry.decl.flatParams.map(_.named)
 
   private[pass] def renameRoots[A](a: A, env: Map[String, p.Named])(using
       Traversal[A, p.Term],

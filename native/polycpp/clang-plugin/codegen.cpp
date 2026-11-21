@@ -407,10 +407,7 @@ void polystl::compilePackageProgram(const polyfront::Options &opts,             
     return args;
   };
   const auto remoteParameters = [](const FunctionDecl &decl) {
-    return decl.moduleCaptures | concat(decl.termCaptures) | concat(decl.args) | filter([](const auto &argument) {
-             return !argument.named.tpe.template is<Type::Unit0>() && !argument.named.tpe.template is<Type::Nothing>();
-           })
-           | map([](const auto &argument) { return argument.named.tpe; }) | to_vector();
+    return runtimeParams(decl) | map([](const auto &argument) { return argument.named.tpe; }) | to_vector();
   };
 
   size_t functionIterations = 0;

@@ -159,10 +159,6 @@ static std::string denseName(size_t n) {
   return "_v" + s;
 }
 
-static std::vector<Arg> kernelParams(const FunctionDecl &decl) {
-  return decl.moduleCaptures | concat(decl.termCaptures) | concat(decl.args) | to_vector();
-}
-
 std::string backend::CSource::localName(const std::string &symbol) {
   if (const auto it = localNames.find(symbol); it != localNames.end()) return it->second;
   std::string name;
@@ -197,7 +193,7 @@ void backend::CSource::bindLocalNames(const Function &fn) {
     used.emplace(name);
     localNames.emplace(named.symbol, name);
   };
-  for (const auto &arg : kernelParams(fn.decl))
+  for (const auto &arg : flatParams(fn.decl))
     bind(arg.named);
   for (const auto &named : fn.template collect_all<Named>())
     bind(named);
@@ -851,7 +847,7 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
       [&](const Expr::Cast &x) { return fmt::format("(({}) {})", mkTpe(x.as), mkTerm(x.from)); },
       [&](const Expr::BitCast &x) { return reinterpretScalar(mkTerm(x.from), x.from.tpe(), x.as); },
       [&](const Expr::Invoke &x) {
-        return fmt::format("{}({})", fqcn(calleeName(x)), x.args ^ mk_string(", ", [&](const auto &arg) { return mkTerm(arg); }));
+        return fmt::format("{}({})", fqcn(calleeName(x)), callArgs(x) ^ mk_string(", ", [&](const auto &arg) { return mkTerm(arg); }));
       }, //
       [&](const Expr::Index &x) { return fmt::format("{}[{}]", mkTerm(x.lhs), mkTerm(x.idx)); },
       [&](const Expr::RefTo &x) {
@@ -1055,7 +1051,7 @@ std::string backend::CSource::mkFnProto(const Function &fnTree) {
         return {mkDecl(arg.named.tpe, name)};
     }
   };
-  auto argExprs = kernelParams(fnTree.decl) | zip_with_index<size_t>() | flat_map(argDecls) | to_vector();
+  auto argExprs = flatParams(fnTree.decl) | zip_with_index<size_t>() | flat_map(argDecls) | to_vector();
   kernelBoundary = false;
   if (dialect == Dialect::C11 && entry) argExprs ^= prepend("int64_t "s + TidParameter);
 
@@ -1171,7 +1167,7 @@ std::string backend::CSource::mkFn(const Function &fnTree) {
                        base, offset);
   };
   const auto entryAbiDecls = openCL() && fnTree.convention.is<CallConvention::OffloadEntry>()
-                                 ? kernelParams(fnTree.decl) | zip_with_index<size_t>() | collect(entryAbiDecl) | to_vector()
+                                 ? flatParams(fnTree.decl) | zip_with_index<size_t>() | collect(entryAbiDecl) | to_vector()
                                  : std::vector<std::string>{};
 
   const auto localDecls = localVars ^ map([&](const auto &v) {

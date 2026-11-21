@@ -225,12 +225,28 @@ private def callableTypeVarErrors(path: String, tpeVars: List[p.Type.Var]): List
 }
 
 extension (decl: p.FunctionDecl) {
+  def callParams: List[p.Arg] =
+    (decl.moduleCaptures ::: decl.termCaptures ::: decl.args).filterNot(_.named.symbol == p.Conventions.ErrorArg)
+
+  def invokeParams: List[p.Arg] = decl.receiver.toList ::: callParams
+
+  def flatParams: List[p.Arg] = {
+    val error =
+      (decl.moduleCaptures ::: decl.termCaptures ::: decl.args).filter(_.named.symbol == p.Conventions.ErrorArg)
+    error ::: invokeParams
+  }
+
+  def runtimeParams(subst: p.Type => p.Type = identity): List[p.Arg] =
+    flatParams
+      .map(arg => arg.copy(named = arg.named.copy(tpe = subst(arg.named.tpe))))
+      .filterNot(arg => arg.named.tpe == p.Type.Unit0 || arg.named.tpe == p.Type.Nothing)
+
   def validate: List[String] = {
     val errors = List.newBuilder[String]
 
     errors ++= typeVarErrors(decl.tpeVars)
 
-    (decl.receiver.toList ::: decl.args ::: decl.moduleCaptures ::: decl.termCaptures)
+    flatParams
       .map(_.named.symbol)
       .groupMapReduce(identity)(_ => 1)(_ + _)
       .collect { case (name, n) if n > 1 => name }
@@ -250,11 +266,7 @@ extension (decl: p.FunctionDecl) {
     }
 
     val declared = decl.tpeVars.map(v => v.name -> v).toMap
-    val allTypes = decl.receiver.toList.map(_.named.tpe) :::
-      decl.args.map(_.named.tpe) :::
-      decl.moduleCaptures.map(_.named.tpe) :::
-      decl.termCaptures.map(_.named.tpe) :::
-      List(decl.rtn)
+    val allTypes = flatParams.map(_.named.tpe) ::: List(decl.rtn)
     allTypes.flatMap(freeVars(_)).distinct.sortBy(_.name).foreach { variable =>
       declared.get(variable.name) match {
         case None => errors += s"undeclared type variable `${variable.name}`"
@@ -427,6 +439,8 @@ extension (ivk: p.Expr.Invoke) {
 }
 
 extension (signature: p.Signature) {
+  def callParams: List[p.Type] = signature.moduleCaptures ::: signature.termCaptures ::: signature.args
+
   def signatureKey: String = {
     def types(xs: List[p.Type]): String = xs.map(_.canonicalName).mkString(",")
     val receiver                        = signature.receiver.fold("")(_.canonicalName + ".")

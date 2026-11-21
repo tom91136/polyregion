@@ -28,6 +28,12 @@ std::string canonicalName(const TypeSpace::Any &);
 std::string canonicalName(const Type::Any &);
 std::string signatureKey(const Signature &);
 
+Vector<Arg> flatParams(const FunctionDecl &decl);
+// Unit0 and Nothing lower to void, which is not a valid parameter type
+Vector<Arg> runtimeParams(const FunctionDecl &decl);
+Vector<Term::Any> callArgs(const Expr::Invoke &invoke);
+Vector<Term::Any> runtimeCallArgs(const Expr::Invoke &invoke);
+
 const static auto show_repr = [](auto &x) { return repr(x); };
 
 template <typename T> auto to_string(const T &x) -> decltype(repr(x)) { return repr(x); }

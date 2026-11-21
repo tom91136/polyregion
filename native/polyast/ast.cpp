@@ -1,5 +1,6 @@
 #include "ast.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -25,6 +26,27 @@ using namespace polyregion;
 using std::string;
 
 using namespace aspartame;
+
+Vector<Arg> polyast::flatParams(const FunctionDecl &decl) {
+  auto params = decl.receiver ? Vector<Arg>{*decl.receiver} : Vector<Arg>{};
+  params ^= concat(decl.moduleCaptures);
+  params ^= concat(decl.termCaptures);
+  params ^= concat(decl.args);
+  std::stable_partition(params.begin(), params.end(), [](const Arg &arg) { return arg.named.symbol == conventions::ErrorArg; });
+  return params;
+}
+
+Vector<Arg> polyast::runtimeParams(const FunctionDecl &decl) {
+  return flatParams(decl) ^ filter([](const Arg &arg) { return !arg.named.tpe.is<Type::Unit0>() && !arg.named.tpe.is<Type::Nothing>(); });
+}
+
+Vector<Term::Any> polyast::callArgs(const Expr::Invoke &invoke) {
+  return invoke.receiver ? invoke.args ^ prepend(*invoke.receiver) : invoke.args;
+}
+
+Vector<Term::Any> polyast::runtimeCallArgs(const Expr::Invoke &invoke) {
+  return callArgs(invoke) ^ filter([](const Term::Any &arg) { return !arg.tpe().is<Type::Unit0>() && !arg.tpe().is<Type::Nothing>(); });
+}
 
 Stmt::Any polyast::elementBoundary(const Vector<Stmt::Any> &body) {
   return Stmt::Try(body, {Handler(ExceptionKind(Type::Nothing(), conventions::ElementBoundary), {}, {})}, {});

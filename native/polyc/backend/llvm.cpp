@@ -1040,13 +1040,7 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
         return B.CreateBitCast(from, to);
       },
       [&](const Expr::Invoke &x) -> ValPtr {
-        auto allArgs = x.args;
-        if (x.receiver) allArgs ^= prepend(*x.receiver);
-        // Mirror the declaration filter: drop Unit0/Nothing args; both lower to LLVM void at the boundary.
-        const auto argNoUnit = allArgs ^ filter([](const auto &arg) {
-                                 return !arg.tpe().template is<Type::Unit0>() //
-                                        && !arg.tpe().template is<Type::Nothing>();
-                               });
+        const auto argNoUnit = runtimeCallArgs(x);
         // a kernel reference (`&trampoline_kernel`) is a FnRef poison, but the function-pointer formals it feeds are
         // harvested as Ptr(Nothing); both lower to the same stub pointer, so try that form of the signature too when
         // the exact lookup misses (some defs keep FnRef formals for direct lambda handles)
@@ -1576,16 +1570,9 @@ static auto createPrototype(CodeGen &cg, llvm::Module &mod, const Function &fn) 
   // CPU HostThreaded kernels receive `tid` as a leading arg from the runtime; GPU launches
   // provide it via intrinsics, so adding `__tid` there would off-by-one the kernel ABI.
   const auto cpuTarget = LLVMBackend::isCpuTarget(cg.C.options.target);
-  auto allArgs = fn.decl.moduleCaptures | concat(fn.decl.termCaptures) | concat(fn.decl.args) | to_vector();
-  if (fn.decl.receiver) allArgs ^= prepend(*fn.decl.receiver);
+  auto argsNoUnit = runtimeParams(fn.decl);
   const auto offloadEntry = fn.convention.is<CallConvention::OffloadEntry>();
-  if (offloadEntry && cpuTarget) allArgs ^= prepend(Arg(Named("__tid", Type::IntS64()), {}));
-
-  // Drop Unit0/Nothing args: both lower to void, which FunctionType::get's isValidArgumentType asserts.
-  const auto argsNoUnit = allArgs ^ filter([](const auto &arg) {
-                            return !arg.named.tpe.template is<Type::Unit0>() //
-                                   && !arg.named.tpe.template is<Type::Nothing>();
-                          });
+  if (offloadEntry && cpuTarget) argsNoUnit ^= prepend(Arg(Named("__tid", Type::IntS64()), {}));
 
   const bool useSret = shouldUseSret(cg, fn);
 
@@ -1767,11 +1754,7 @@ Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program, c
   Map<Signature, size_t> functionBySignature;
   bool hasAnyDynamicLocal = false;
   for (size_t i = 0; i < allFns.size(); ++i) {
-    auto allArgs = allFns[i].decl.moduleCaptures | concat(allFns[i].decl.termCaptures) | concat(allFns[i].decl.args) | to_vector();
-    if (allFns[i].decl.receiver) allArgs ^= prepend(*allFns[i].decl.receiver);
-    const auto argsNoUnit = allArgs ^ filter([](const auto &arg) {
-                              return !arg.named.tpe.template is<Type::Unit0>() && !arg.named.tpe.template is<Type::Nothing>();
-                            });
+    const auto argsNoUnit = runtimeParams(allFns[i].decl);
     functionBySignature.emplace(Signature(allFns[i].decl.name, /*tpeVars*/ {}, /*receiver*/ {},
                                           argsNoUnit ^ map([](const auto &arg) { return arg.named.tpe; }), /*moduleCaptures*/ {},
                                           /*termCaptures*/ {}, allFns[i].decl.rtn),
@@ -1808,10 +1791,7 @@ Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program, c
         throw BackendException(fmt::format("workgroup storage exceeds configured capacity of {} bytes", workgroupCapacity));
       total += ownStaticBytes[i];
       for (const auto &invoke : allFns[i].template collect_all<Expr::Invoke>()) {
-        auto args = invoke.args;
-        if (invoke.receiver) args ^= prepend(*invoke.receiver);
-        const auto argsNoUnit =
-            args ^ filter([](const auto &arg) { return !arg.tpe().template is<Type::Unit0>() && !arg.tpe().template is<Type::Nothing>(); });
+        const auto argsNoUnit = runtimeCallArgs(invoke);
         const auto sig = Signature(calleeName(invoke), /*tpeVars*/ {}, /*receiver*/ {},
                                    argsNoUnit ^ map([](const auto &arg) { return arg.tpe(); }), /*moduleCaptures*/ {},
                                    /*termCaptures*/ {}, invoke.rtn);

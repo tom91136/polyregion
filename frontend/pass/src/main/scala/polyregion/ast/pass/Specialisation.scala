@@ -107,9 +107,7 @@ object Specialisation extends ProgramPass {
       case _ => Option.when(sameType(pattern, actual))(bindings)
     }
 
-  private def launchParams(kernel: p.Function): List[p.Arg] =
-    (kernel.moduleCaptures ::: kernel.termCaptures ::: kernel.args)
-      .filterNot(arg => arg.named.tpe == p.Type.Unit0 || arg.named.tpe == p.Type.Nothing)
+  private def launchParams(kernel: p.Function): List[p.Arg] = kernel.decl.runtimeParams()
 
   private def callsiteParams(fn: p.Function, remote: Boolean, argCount: Int): List[p.Arg] =
     if (remote) launchParams(fn)

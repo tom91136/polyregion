@@ -188,7 +188,7 @@ object Interpreter {
     def call(name: p.Sym, args: List[(p.Type, V)]): V = {
       val f      = fns.getOrElse(name, sys.error(s"no function $name"))
       val fr     = new Frame
-      val params = f.receiver.toList ::: f.args ::: f.moduleCaptures ::: f.termCaptures
+      val params = f.decl.flatParams
       params.zip(args).foreach { case (a, (_, v)) =>
         val slot = allocOf(a.named.tpe)
         fr.slots(a.named.symbol) = slot

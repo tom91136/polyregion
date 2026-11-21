@@ -65,8 +65,7 @@ private[pass] object Binders {
 
   def freshNamer(function: p.Function, prefix: String): p.Type => p.Named = {
     val occupied = scala.collection.mutable.Set.from(
-      (function.receiver.toList ::: function.args ::: function.moduleCaptures ::: function.termCaptures)
-        .map(_.named.symbol) :::
+      function.decl.flatParams.map(_.named.symbol) :::
         function.collectAll[p.Stmt].flatMap {
           case p.Stmt.Var(name, _, _)                 => List(name.symbol)
           case p.Stmt.ForRange(induction = induction) => List(induction.symbol)

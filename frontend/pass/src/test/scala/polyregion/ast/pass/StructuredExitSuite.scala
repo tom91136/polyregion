@@ -179,6 +179,10 @@ class StructuredExitSuite extends munit.FunSuite {
         device.name  -> Nil
       )
     )
+    assertEquals(
+      out.functions.find(_.name == helper.name).map(_.decl.flatParams.map(_.named.symbol)),
+      Some(List("x", "#raised"))
+    )
     assertEquals(out.functions.filter(f => f.name == driver.name || f.name == device.name), List(driver, device))
     assertEquals(
       out.hostFunctions.flatMap(_.collectWhere[p.Expr] { case p.Expr.SpecOp(a: p.Spec.Assert) => a }),
@@ -295,6 +299,18 @@ class StructuredExitSuite extends munit.FunSuite {
     val withArgs   = StructuredExit(program(entry(args = List(capture), body = body)), NoopLog)
     val expected   = List(p.Conventions.ErrorArg, capture.named.symbol)
     List(withModule, withTerm, withArgs).foreach(out => assertEquals(order(out), expected))
+  }
+
+  test("the error buffer leads the receiver of an entry") {
+    val receiver = p.Arg(named("this", p.Type.Ptr(i32, g)))
+    val capture  = p.Arg(named("capture", p.Type.Ptr(i32, g)))
+    val body     = List(assertStmt(), ret)
+    val bare     = entry(termCaptures = List(capture), body = body)
+    val lowered = List(bare, entry(args = List(capture), body = body)).map { fn =>
+      StructuredExit(program(fn.copy(decl = fn.decl.copy(receiver = Some(receiver)))), NoopLog)
+    }
+    val expected = List(p.Conventions.ErrorArg, receiver.named.symbol, capture.named.symbol)
+    lowered.foreach(out => assertEquals(out.entry.required.decl.flatParams.map(_.named.symbol), expected))
   }
 
   test("an assertion after a handled raise is not caught by an enclosing catch-all") {

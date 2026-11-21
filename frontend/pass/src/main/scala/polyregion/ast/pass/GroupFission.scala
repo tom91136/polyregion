@@ -128,8 +128,7 @@ object GroupFission extends ProgramPass {
 
   // makes every declared symbol unique so hoisted declarations cannot be captured or merged by shadowing
   private def uniquify(entry: p.Function): List[p.Stmt] = {
-    val taken = mutable.Set.from(entry.args.map(_.named.symbol) ++ entry.moduleCaptures.map(_.named.symbol))
-    taken ++= entry.termCaptures.map(_.named.symbol) ++ entry.receiver.map(_.named.symbol)
+    val taken = mutable.Set.from(entry.decl.flatParams.map(_.named.symbol))
     taken ++= Reserved.map(_.symbol)
     var counter = 0L
 

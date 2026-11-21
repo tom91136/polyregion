@@ -570,6 +570,29 @@ TEST_CASE("SPIR-V kernels load and store Bool fields as bytes", "[backend][spirv
   CHECK_THAT(ir, !Catch::Matchers::ContainsSubstring("store i1"));
 }
 
+TEST_CASE("SPIR-V kernel argument metadata skips the parameters the prototype drops", "[backend][spirv]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Named unitCapture("unit_capture", Type::Unit0());
+  const Named pointer("pointer_arg", Type::Ptr(Type::IntS32(), TypeSpace::Global()));
+  const Function entry(FunctionDecl(Sym({"kernel"}), {}, std::optional<Arg>{}, {Arg(pointer, {})}, {}, {Arg(unitCapture, {})},
+                                    Type::Unit0(), FunctionAffinity::Offload()),
+                       {Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()}, FunctionVisibility::Exported(),
+                       FunctionFpMode::Relaxed(), CallConvention::OffloadEntry().widen());
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  const ScopedEnv verbose(polyregion::env::PolycVerboseNames, std::string("1"));
+  const auto compiled = polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}),
+                                                      {Target::Object_LLVM_SPIRV64_Kernel, ""}, OptLevel::O0);
+  REQUIRE(compiled.binary);
+  const auto &ir = llvmIrOf(compiled);
+  INFO(ir);
+  const auto names = ir.find("!kernel_arg_name");
+  REQUIRE(names != std::string::npos);
+  CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("!\"pointer_arg\""));
+  CHECK_THAT(ir, !Catch::Matchers::ContainsSubstring("!\"unit_capture\""));
+}
+
 TEST_CASE("SPIR-V kernels store bool array elements as bytes", "[backend][spirv]") {
   polyregion::compiler::initialise();
   using namespace polyregion::polyast::dsl;
@@ -1215,6 +1238,112 @@ TEST_CASE("opencl source kernel takes module captures, term captures, then argum
   CHECK_THAT(source, Catch::Matchers::ContainsSubstring("input"));
   CHECK(source.find("module_capture") < source.find("term_capture"));
   CHECK(source.find("term_capture") < source.find("input"));
+}
+
+TEST_CASE("an asserting entry takes the error buffer, then the receiver, captures, and arguments", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto ptrTpe = Type::Ptr(Type::IntS32(), TypeSpace::Global());
+  const Named receiver("the_receiver", ptrTpe);
+  const Named moduleCapture("the_module_capture", ptrTpe);
+  const Named termCapture("the_term_capture", ptrTpe);
+  const Named input("the_input", ptrTpe);
+  const Function entry(FunctionDecl(Sym({"kernel"}), {}, Arg(receiver, {}), {Arg(input, {})}, {Arg(moduleCapture, {})},
+                                    {Arg(termCapture, {})}, Type::Unit0(), FunctionAffinity::Offload()),
+                       {Var(Named("trap", Type::Unit0()),
+                            Expr::SpecOp(Spec::Assert(Term::IntU32Const(1).widen(), Term::StringConst("trap").widen())).widen(), false)
+                            .widen(),
+                        Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
+                       FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), CallConvention::OffloadEntry().widen());
+  const Program p(entry, {}, {}, PassPhase::Initial(), {});
+  const std::vector<std::string> expected{polyregion::conventions::ErrorArg, "the_receiver", "the_module_capture", "the_term_capture",
+                                          "the_input"};
+
+  const auto entryOrder = [&](const auto &result) { return result.entryArgs ^ map([](const auto &named) { return named.symbol; }); };
+
+  SECTION("LLVM") {
+    const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+    const ScopedEnv verbose(polyregion::env::PolycVerboseNames, std::string("1"));
+    const auto result = polyregion::compiler::compile(p, {Target::Object_LLVM_NVPTX64, "sm_89"}, OptLevel::O0);
+    INFO(repr(result));
+    REQUIRE(result.binary);
+    CHECK(entryOrder(result) == expected);
+    const auto &ir = llvmIrOf(result);
+    const auto signature = ir.substr(ir.find("define"), ir.find('{', ir.find("define")) - ir.find("define"));
+    INFO(signature);
+    const auto positions = expected ^ map([&](const auto &name) { return signature.find(name); });
+    CHECK(std::is_sorted(positions.begin(), positions.end()));
+    CHECK(positions.front() != std::string::npos);
+  }
+
+  SECTION("OpenCL source") {
+    polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
+    opts.pipelineSpec = "StructuredExit";
+    const ScopedEnv verbose(polyregion::env::PolycVerboseNames, std::string("1"));
+    const auto result = polyregion::compiler::compile(p, opts, OptLevel::O0);
+    INFO(repr(result));
+    REQUIRE(result.binary);
+    CHECK(entryOrder(result) == expected);
+  }
+}
+
+TEST_CASE("an invoke passes the receiver, then the captures, then the arguments", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto ptrTpe = Type::Ptr(Type::IntS32(), TypeSpace::Global());
+  const auto named = [&](const std::string &symbol, const Type::Any &tpe) {
+    return Named(symbol, tpe, Origin(SourcePosition("invoke.cpp", 1, 1), symbol, Sym({"source"})));
+  };
+  const Named self = named("the_receiver", ptrTpe), capture = named("the_capture", Type::IntS64()),
+              input = named("the_input", Type::IntS32());
+  const Function helper(FunctionDecl(Sym({"helper"}), {}, Arg(self, {}), {Arg(input, {})}, {}, {Arg(capture, {})}, Type::Unit0(),
+                                     FunctionAffinity::Offload()),
+                        {Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()}, FunctionVisibility::Internal(),
+                        FunctionFpMode::Relaxed(), CallConvention::RegularCall().widen());
+  const Named outer = named("outer_pointer", ptrTpe), outerCapture = named("outer_capture", Type::IntS64()),
+              outerInput = named("outer_input", Type::IntS32());
+  const Function entry = mkFn("kernel", {Arg(outer, {}), Arg(outerCapture, {}), Arg(outerInput, {})}, Type::Unit0(),
+                              {Var(Named("called", Type::Unit0()),
+                                   Expr::Invoke(Type::FnRef(helper.decl.name), {}, selectNamed(outer).widen(),
+                                                {selectNamed(outerCapture).widen(), selectNamed(outerInput).widen()}, Type::Unit0())
+                                       .widen(),
+                                   false)
+                                   .widen(),
+                               ret()},
+                              FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const Program p(entry, {helper}, {}, PassPhase::Initial(), {});
+  const ScopedEnv verbose(polyregion::env::PolycVerboseNames, std::string("1"));
+
+  SECTION("LLVM") {
+    const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+    polyregion::compiler::Options opts{Target::Object_LLVM_NVPTX64, "sm_89"};
+    opts.pipelineSpec = "DeadFunctionElimination";
+    const auto result = polyregion::compiler::compile(p, opts, OptLevel::O0);
+    INFO(repr(result));
+    REQUIRE(result.binary);
+    const auto &ir = llvmIrOf(result);
+    const auto define = ir.find("define internal void @polyregion_internal_helper");
+    REQUIRE(define != std::string::npos);
+    const auto signature = ir.substr(define, ir.find('{', define) - define);
+    INFO(signature);
+    CHECK(signature.find("the_receiver") < signature.find("the_capture"));
+    CHECK(signature.find("the_capture") < signature.find("the_input"));
+  }
+
+  SECTION("OpenCL source") {
+    polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
+    opts.pipelineSpec = "DeadFunctionElimination";
+    const auto result = polyregion::compiler::compile(p, opts, OptLevel::O0);
+    INFO(repr(result));
+    REQUIRE(result.binary);
+    const std::string source(result.binary->begin(), result.binary->end());
+    const auto call = source.find("  helper(");
+    REQUIRE(call != std::string::npos);
+    CHECK(source.find("outer_pointer", call) < source.find("outer_capture", call));
+    CHECK(source.find("outer_capture", call) < source.find("outer_input", call));
+  }
 }
 
 TEST_CASE("opencl source accepts configured subgroup emulation", "[backend]") {

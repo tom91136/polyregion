@@ -8,11 +8,10 @@ abstract class FnInliner(selective: Boolean, prefix: String) extends ProgramPass
 
   private type OverloadLut = Map[(p.Sym, Int), List[p.Function]]
 
-  private def flatParams(f: p.Function): List[p.Type] =
-    f.moduleCaptures.map(_.named.tpe) ++ f.termCaptures.map(_.named.tpe) ++ f.args.map(_.named.tpe)
+  private def callParamTypes(f: p.Function): List[p.Type] = f.decl.callParams.map(_.named.tpe)
 
   private def takesCallable(f: p.Function): Boolean =
-    (f.receiver.map(_.named.tpe).toList ++ flatParams(f)).exists {
+    f.decl.flatParams.map(_.named.tpe).exists {
       case p.Type.FnRef(_) | p.Type.Ptr(p.Type.FnRef(_), _) => true
       case _                                                => false
     }
@@ -105,11 +104,7 @@ abstract class FnInliner(selective: Boolean, prefix: String) extends ProgramPass
     val renamed = renameAll(typed, ctr)
 
     // ivk.args is the flattened (moduleCaptures ::: termCaptures ::: args) per Compiler.patchIvk.
-    val targetNames =
-      renamed.receiver.map(_.named).toList ++
-        renamed.moduleCaptures.map(_.named) ++
-        renamed.termCaptures.map(_.named) ++
-        renamed.args.map(_.named)
+    val targetNames  = renamed.decl.invokeParams.map(_.named)
     val replacements = ivk.receiver.toList ++ ivk.args
     val parameters = targetNames.zip(replacements).map { case (name, value) =>
       val conformed = (name.tpe, value) match {
@@ -258,7 +253,7 @@ abstract class FnInliner(selective: Boolean, prefix: String) extends ProgramPass
               case x                    => x
             })
             .modifyAll[p.Type](Binders.unprotectExec(ExecBinderPrefix))
-      val flatSigParams = sig.moduleCaptures ++ sig.termCaptures ++ sig.args
+      val flatSigParams = sig.callParams
       sig.receiver.size == ivk.receiver.size &&
       sig.receiver
         .zip(ivk.receiver)
@@ -394,7 +389,7 @@ abstract class FnInliner(selective: Boolean, prefix: String) extends ProgramPass
     val ctr       = java.util.concurrent.atomic.AtomicLong(highestInlineId(program))
     val distinct  = program.functions.distinct
     val inlinable = if (selective) distinct.filter(takesCallable(_)) else distinct
-    val overloads = inlinable.groupBy(f => (f.name, flatParams(f).size))
+    val overloads = inlinable.groupBy(f => (f.name, callParamTypes(f).size))
     val source    = program.entry.getOrElse(throw IllegalArgumentException("FnInline requires a program entry"))
 
     def inlineToFixedPoint(source: p.Function): p.Function = {

@@ -312,8 +312,7 @@ private[pass] object AddressRefinement {
   }
 
   private[pass] def declaredNames(function: p.Function): Map[String, p.Named] = (
-    function.receiver.iterator.map(_.named) ++ function.args.iterator.map(_.named) ++
-      function.moduleCaptures.iterator.map(_.named) ++ function.termCaptures.iterator.map(_.named) ++
+    function.decl.flatParams.iterator.map(_.named) ++
       function.collectAll[p.Stmt].iterator.collect { case p.Stmt.Var(name, _, _) => name }
   ).map(name => name.symbol -> name).toMap
 

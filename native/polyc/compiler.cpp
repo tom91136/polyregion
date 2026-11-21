@@ -810,7 +810,7 @@ polyast::CompileResult compiler::emit(Staged staged, const compiletime::OptLevel
   if (staged.hadEntry && !effective.entry) throw std::logic_error("pipeline removed the Program entry");
   if (effective.entry) {
     const auto &decl = effective.entry->decl;
-    c.entryArgs = decl.moduleCaptures ^ concat(decl.termCaptures) ^ concat(decl.args) ^ map([](const auto &a) { return a.named; });
+    c.entryArgs = flatParams(decl) ^ map([](const auto &a) { return a.named; });
   }
   if (c.entryArgs ^ exists([](const auto &arg) { return arg.symbol == conventions::ErrorArg; }))
     c.features.emplace_back(conventions::ErrorArg);

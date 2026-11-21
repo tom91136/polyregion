@@ -110,9 +110,7 @@ object KernelCaptureFlatten extends ProgramPass {
 
     def launchParameters(kernel: p.Function, tpeArgs: List[p.Type]): List[p.Arg] = {
       val env = kernel.tpeVars.map(_.name).zip(tpeArgs).toMap
-      (kernel.moduleCaptures ::: kernel.termCaptures ::: kernel.args)
-        .map(arg => arg.copy(named = arg.named.copy(tpe = subst(arg.named.tpe, env))))
-        .filterNot(arg => arg.named.tpe == p.Type.Unit0 || arg.named.tpe == p.Type.Nothing)
+      kernel.decl.runtimeParams(subst(_, env))
     }
 
     def launchTypeMatches(expected: p.Type, actual: p.Type): Boolean = (expected, actual) match {
@@ -326,7 +324,7 @@ object KernelCaptureFlatten extends ProgramPass {
       case call: p.Expr.Invoke if call.calleeSym.exists(directPlans.contains) =>
         val (kernel, plan) = directPlans(call.calleeSym.get)
         val params         = call.receiver.toList ::: call.args
-        val parameters     = kernel.receiver.toList ::: kernel.moduleCaptures ::: kernel.termCaptures ::: kernel.args
+        val parameters     = kernel.decl.invokeParams
         call.copy(args = call.args ::: extractedArgs(kernel, plan, parameters, params, "call"))
       case p.Expr.SpecOp(launch: p.Spec.RemoteLaunch) =>
         launchTarget(launch).flatMap(kernel => plans.get(kernel.decl).map(kernel -> _)) match {

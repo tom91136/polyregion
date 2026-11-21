@@ -987,7 +987,6 @@ object StructuredExit extends ProgramPass {
     }
   }
 
-  // backends order kernel parameters as moduleCaptures, termCaptures, args and the launch passes the error block first
   private def withLeadingError(decl: p.FunctionDecl): p.FunctionDecl = {
     val error = p.Arg(p.Named(ErrorSym, ErrorPtr))
     if (decl.moduleCaptures.nonEmpty) decl.copy(moduleCaptures = error +: decl.moduleCaptures)
