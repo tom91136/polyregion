@@ -2,7 +2,6 @@ package polyregion
 
 import polyregion.jvm.runtime as rt
 import polyregion.par.*
-import polyregion.scalalang.LaunchRuntime
 
 import scala.compiletime.testing.typeCheckErrors
 
@@ -36,10 +35,10 @@ abstract class ParCases extends munit.FunSuite {
       }
     }
 
-  private def launches(f: => Unit): Long = {
-    val before = LaunchRuntime.launchCount
+  private def launches(ctx: rt.Context)(f: => Unit): Long = {
+    val before = ctx.stats().launches
     f
-    LaunchRuntime.launchCount - before
+    ctx.stats().launches - before
   }
 
   private def ints(n: Int): Array[Int] = Array.tabulate(n)(i => (i * 7 + 3) % 101 - 40)
@@ -280,50 +279,75 @@ abstract class ParCases extends munit.FunSuite {
     assertEquals((0 until 1000).par.count(_ % 3 == 0), (0 until 1000).count(_ % 3 == 0))
   }
 
-  check("map, map and sum are one launch") { ctx =>
-    val xs = ints(1000)
-    assertEquals(launches(xs.par.on(ctx).map(_ + 1).map(_ * 2).sum), 1L)
+  private def baseline(ctx: rt.Context)(f: => Unit): Long = {
+    val n = launches(ctx)(f)
+    assert(n > 0, "a single call launched nothing")
+    n
   }
 
-  check("filter, map and sum are one launch") { ctx =>
+  check("map, map and sum cost one reduction") { ctx =>
     val xs = ints(1000)
-    assertEquals(launches(xs.par.on(ctx).filter(_ > 0).map(_ * 2).sum), 1L)
+    assertEquals(launches(ctx)(xs.par.on(ctx).map(_ + 1).map(_ * 2).sum), baseline(ctx)(xs.par.on(ctx).sum))
   }
 
-  check("map, filter and count are one launch") { ctx =>
+  check("filter, map and sum cost one reduction") { ctx =>
     val xs = ints(1000)
-    assertEquals(launches(xs.par.on(ctx).map(_ * 3).filter(_ > 0).count(_ % 2 == 0)), 1L)
-    assertEquals(launches(xs.par.on(ctx).map(_ * 3).filter(_ > 0).exists(_ > 100)), 1L)
-    assertEquals(launches(xs.par.on(ctx).map(_ * 3).filter(_ > 0).forall(_ > 0)), 1L)
+    assertEquals(launches(ctx)(xs.par.on(ctx).filter(_ > 0).map(_ * 2).sum), baseline(ctx)(xs.par.on(ctx).sum))
   }
 
-  check("map and map to an array is one launch") { ctx =>
+  check("map, filter and a predicate terminal cost one predicate launch") { ctx =>
     val xs = ints(1000)
-    assertEquals(launches(xs.par.on(ctx).map(_ + 1).map(_ * 2).toArray), 1L)
+    assertEquals(
+      launches(ctx)(xs.par.on(ctx).map(_ * 3).filter(_ > 0).count(_ % 2 == 0)),
+      baseline(ctx)(xs.par.on(ctx).count(_ > 0))
+    )
+    assertEquals(
+      launches(ctx)(xs.par.on(ctx).map(_ * 3).filter(_ > 0).exists(_ > 100)),
+      baseline(ctx)(xs.par.on(ctx).exists(_ > 100))
+    )
+    assertEquals(
+      launches(ctx)(xs.par.on(ctx).map(_ * 3).filter(_ > 0).forall(_ > 0)),
+      baseline(ctx)(xs.par.on(ctx).forall(_ > 0))
+    )
   }
 
-  check("a filter to an array is one launch without a map and two with one") { ctx =>
+  check("map and map to an array cost one transform") { ctx =>
     val xs = ints(1000)
-    assertEquals(launches(xs.par.on(ctx).filter(_ > 0).toArray), 1L)
-    assertEquals(launches(xs.par.on(ctx).filter(_ > 0).map(_ * 2).toArray), 2L)
+    assertEquals(
+      launches(ctx)(xs.par.on(ctx).map(_ + 1).map(_ * 2).toArray),
+      baseline(ctx)(xs.par.on(ctx).map(_ + 1).toArray)
+    )
   }
 
-  check("sorted copies without a launch other than the sort") { ctx =>
-    val xs = ints(1000)
-    assertEquals(launches(xs.par.on(ctx).sorted), 1L)
-    assertEquals(launches(xs.par.on(ctx).map(_ + 1).sorted), 2L)
+  check("a filter to an array costs a copy_if and, with a map, a transform") { ctx =>
+    val xs        = ints(1000)
+    val copy      = baseline(ctx)(xs.par.on(ctx).filter(_ > 0).toArray)
+    val transform = baseline(ctx)(xs.par.on(ctx).map(_ * 2).toArray)
+    assertEquals(launches(ctx)(xs.par.on(ctx).filter(_ > 0).map(_ * 2).toArray), copy + transform)
   }
 
-  check("a range reduction and a range map to an array are one launch") { ctx =>
-    assertEquals(launches((0 until 1000).par.on(ctx).map(_ * 2).sum), 1L)
-    assertEquals(launches((0 until 1000).par.on(ctx).map(_ * 2).toArray), 1L)
-    assertEquals(launches((0 until 1000).par.on(ctx).filter(_ % 3 == 0).toArray), 2L)
+  check("sorted costs a sort and, after a map, a transform") { ctx =>
+    val xs        = ints(1000)
+    val sort      = baseline(ctx)(xs.par.on(ctx).sorted)
+    val transform = baseline(ctx)(xs.par.on(ctx).map(_ * 2).toArray)
+    assertEquals(launches(ctx)(xs.par.on(ctx).map(_ + 1).sorted), transform + sort)
   }
 
-  check("reduce without a neutral element is one launch") { ctx =>
-    val xs = ints(1000)
-    assertEquals(launches(xs.par.on(ctx).map(_ + 100).reduce(_ + _)), 1L)
-    assertEquals(launches(xs.par.on(ctx).filter(_ > 0).reduce(_ + _)), 2L)
+  check("range chains cost one launch per fused stage group") { ctx =>
+    val reduction = baseline(ctx)((0 until 1000).par.on(ctx).sum)
+    val tabulate  = baseline(ctx)((0 until 1000).par.on(ctx).toArray)
+    val copy      = baseline(ctx)(ints(1000).par.on(ctx).filter(_ > 0).toArray)
+    assertEquals(launches(ctx)((0 until 1000).par.on(ctx).map(_ * 2).sum), reduction)
+    assertEquals(launches(ctx)((0 until 1000).par.on(ctx).map(_ * 2).toArray), tabulate)
+    assertEquals(launches(ctx)((0 until 1000).par.on(ctx).filter(_ % 3 == 0).toArray), tabulate + copy)
+  }
+
+  check("reduce without a neutral element costs one reduction and, after a filter, a copy_if") { ctx =>
+    val xs        = ints(1000)
+    val reduction = baseline(ctx)(xs.par.on(ctx).reduce(_ + _))
+    val copy      = baseline(ctx)(xs.par.on(ctx).filter(_ > 0).toArray)
+    assertEquals(launches(ctx)(xs.par.on(ctx).map(_ + 100).reduce(_ + _)), reduction)
+    assertEquals(launches(ctx)(xs.par.on(ctx).filter(_ > 0).reduce(_ + _)), copy + reduction)
   }
 
   check("a million elements") { ctx =>
@@ -343,9 +367,9 @@ abstract class ParCases extends munit.FunSuite {
 
   check("an empty chain launches nothing") { ctx =>
     val xs = Array.ofDim[Int](0)
-    assertEquals(launches(xs.par.on(ctx).map(_ + 1).sum), 0L)
-    assertEquals(launches(xs.par.on(ctx).map(_ + 1).toArray), 0L)
-    assertEquals(launches(xs.par.on(ctx).sorted), 0L)
+    assertEquals(launches(ctx)(xs.par.on(ctx).map(_ + 1).sum), 0L)
+    assertEquals(launches(ctx)(xs.par.on(ctx).map(_ + 1).toArray), 0L)
+    assertEquals(launches(ctx)(xs.par.on(ctx).sorted), 0L)
   }
 
   test("a stored chain is rejected") {
