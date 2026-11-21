@@ -31,6 +31,8 @@ object Dispatch {
     }.distinct
   }
 
+  def isGeneric(using q: Quoted)(cls: q.Symbol): Boolean = Retyper.clsTypeCtorNames(cls).nonEmpty
+
   private def isConcrete(using q: Quoted)(c: q.Symbol): Boolean =
     c.isClassDef && !c.flags.is(q.Flags.Abstract) && !c.flags.is(q.Flags.Trait) && !c.flags.is(q.Flags.Module)
 

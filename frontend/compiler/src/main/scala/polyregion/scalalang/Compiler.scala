@@ -852,6 +852,17 @@ object Compiler {
         )
       }
     }
+    genericArms = virtualCalls
+      .flatMap((method, arms, _) =>
+        arms.collect {
+          case (cls, _) if Dispatch.isGeneric(cls) => s"${cls.fullName} (candidate of ${method.fullName})"
+        }
+      )
+      .distinct
+    _ <-
+      if (genericArms.isEmpty) ().success
+      else
+        s"Cannot devirtualise generic candidate classes, a tag identifies a class but not its type arguments: ${genericArms.mkString(", ")}".fail
     armClasses      = virtualCalls.flatMap(_._2.map(_._1))
     allClassSymbols = (declaredClasses ++ armClasses).distinct
     depsWithOverrides = exprDeps.functions.flatMap { (sym, ivks) =>

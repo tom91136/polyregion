@@ -28,6 +28,18 @@ object DevirtSuite {
   case class Cat(lives: Int)  extends Pet    { def legs: Int = 4 + lives * 0 + 1 }
   case class Bird(wings: Int) extends Animal { def legs: Int = 2 + wings * 0     }
 
+  sealed trait Sized {
+    def size: Int
+  }
+  case class Plain(n: Int) extends Sized { def size: Int = n }
+  case class Box[T](v: T)  extends Sized { def size: Int = 1 }
+
+  abstract class Gauge {
+    def read(x: Int): Int
+  }
+  class Doubler(val base: Int) extends Gauge { def read(x: Int): Int = base + x * 2   }
+  class Adder(val base: Int)   extends Gauge { def read(x: Int): Int = base + x + 100 }
+
   class Inc(val n: Int) extends Op {
     def apply(x: Int): Int = x + n
   }
@@ -120,6 +132,21 @@ class DevirtSuite extends munit.FunSuite {
       }
     }
 
+    test(s"[$label] subclasses of an abstract class dispatch") {
+      withContext(label, device) { ctx =>
+        val gauges = mutable.ListBuffer[Gauge](new Doubler(1), new Adder(2), new Doubler(3))
+        val out    = Buffer.ofDim[Int](3)
+        launch[C](ctx) {
+          var i = 0
+          while (i < 3) {
+            out(i) = gauges(i).read(10)
+            i += 1
+          }
+        }
+        assertEquals((0 until 3).map(out(_)).toList, List(21, 112, 23))
+      }
+    }
+
     test(s"[$label] a class outside the candidate set raises on the device") {
       withContext(label, device) { ctx =>
         val ops = mutable.ListBuffer[Op](Inc(1), Outsider(7))
@@ -137,6 +164,24 @@ class DevirtSuite extends munit.FunSuite {
         assertEquals(out(1), 0)
       }
     }
+  }
+
+  test("a generic candidate class is rejected at compile time") {
+    val errors = compileErrors(
+      """{
+        val xs  = mutable.ListBuffer[Sized](Plain(1), Box(2.0))
+        val out = Buffer.ofDim[Int](2)
+        launch[Config[Target.Host.type, Opt.O2]](null) {
+          var i = 0
+          while (i < 2) {
+            out(i) = xs(i).size
+            i += 1
+          }
+        }
+      }"""
+    )
+    assert(errors.contains("Cannot devirtualise generic candidate classes"), errors)
+    assert(errors.contains("DevirtSuite$.Box"), errors)
   }
 
   cases[Config[Target.Host.type, Opt.O2]]("host", host)

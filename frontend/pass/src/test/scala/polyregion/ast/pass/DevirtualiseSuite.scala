@@ -296,6 +296,23 @@ class DevirtualiseSuite extends munit.FunSuite {
     assertEquals(out(rect.name), List(tag, named("w"), named("h")))
   }
 
+  test("a candidate constructed in the kernel is stamped with its tag") {
+    val c = named("c", circle)
+    val stamp = p.Stmt.Mut(
+      p.Term.Select(c, List(p.PathStep.Field(p.Conventions.DispatchTag)), i32),
+      p.Expr.Alias(p.Term.IntS32Const(0))
+    )
+    val build = List(
+      p.Stmt.Var(c, None),
+      p.Stmt.Mut(p.Term.Select(c, List(p.PathStep.Field("r")), i32), p.Expr.Alias(p.Term.IntS32Const(3)))
+    )
+    val in      = program(build ::: areaBody)
+    val body    = Devirtualise(table)(in, NoopLog).entry.get.body
+    val created = body.indexOf(p.Stmt.Var(c, None))
+    assertEquals(body.slice(created, created + 2), List(p.Stmt.Var(c, None), stamp))
+    assertEquals(body.count(_ == stamp), 1)
+  }
+
   test("calls outside the table are untouched") {
     val in = program(areaBody)
     assertEquals(Devirtualise(Map.empty)(in, NoopLog), in)

@@ -381,7 +381,14 @@ object Pickler {
         .get(mapping.source)
         .toList
         .flatMap(Dispatch.candidateReprs(_, tags))
-        .map((name, repr) => Candidate(mappings.get(name), repr, tags(name)))
+        .map { (name, repr) =>
+          val mapping = mappings.get(name)
+          if (mapping.isEmpty && layouts.keys.exists(_.name == name))
+            q.report.errorAndAbort(
+              s"Candidate ${name.repr} has a layout but no mapping, its fields would not be written"
+            )
+          Candidate(mapping, repr, tags(name))
+        }
         .sortBy(_.tag)
 
     def writeTag(buffer: Expr[ByteBuffer], base: Expr[Int], mapping: StructMapping[q.Term]): Expr[Unit] =

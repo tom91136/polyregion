@@ -151,7 +151,7 @@ object Retyper {
   //  isTypeParam  &&  isAbstractType => class C[A]
   // !isTypeParam  &&  isAbstractType => class C{ type A }
   // !isTypeParam  && !isAbstractType => class C{ type A = Concrete }
-  private def clsTypeCtorNames(using q: Quoted)(clsSym: q.Symbol): List[String] =
+  def clsTypeCtorNames(using q: Quoted)(clsSym: q.Symbol): List[String] =
     // typeMembers can throw an internal assertion ("Unknown type member found") in some Scala 3
     // versions when sorting type members of certain stdlib classes (e.g. via sortWith → typeMembers
     // recursion). Treat those as "no abstract type members" — symbols we can't introspect can't

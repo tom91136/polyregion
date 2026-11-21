@@ -4,17 +4,6 @@ import polyregion.ast.{Log, PolyAST as p, *}
 
 import scala.annotation.tailrec
 
-// replaces a call to an abstract method with a dispatch on the receiver's host-written tag
-// examples:
-//   Shape.area(s)  with  Circle(tag 0), Rect(tag 1)
-//     ->  if (s.#tag == 0) Circle.area(cast s) else if (s.#tag == 1) Rect.area(cast s) else assert
-// edge cases:
-//   candidate sets are lower bounds  ->  a class the frontend never saw carries a tag no arm tests, so the
-//                                        trailing assert fires instead of a wrong arm running
-//   callee absent from the table     ->  the invoke is untouched
-//   receiver not a Select            ->  the invoke is untouched, there is no tag to read
-//   Unit0 callee                     ->  the arms discard the result and the bound name is the unit constant
-//   candidate with `args`            ->  the arm passes only those positions of the call's arguments, in that order
 object Devirtualise {
 
   case class Candidate(receiver: p.Type.Struct, impl: p.Sym, tag: Int, args: Option[List[Int]] = None)
@@ -67,6 +56,15 @@ class Devirtualise(candidates: Map[p.Sym, List[Devirtualise.Candidate]]) extends
     if (candidates.isEmpty) program
     else program.copy(entry = program.entry.map(rewrite(_)), functions = program.functions.map(rewrite(_)))
 
+  private val tagged: Map[p.Sym, Int] = candidates.values.flatten.map(c => c.receiver.name -> c.tag).toMap
+
+  private object Tagged {
+    def unapply(name: p.Named): Option[Int] = name.tpe match {
+      case p.Type.Struct(cls, _) => tagged.get(cls)
+      case _                     => None
+    }
+  }
+
   private def dispatchable(e: p.Expr): Option[(p.Expr.Invoke, p.Term.Select, List[Candidate])] = e match {
     case ivk: p.Expr.Invoke =>
       for {
@@ -80,6 +78,10 @@ class Devirtualise(candidates: Map[p.Sym, List[Devirtualise.Candidate]]) extends
   private def rewrite(f: p.Function): p.Function = {
     val fresh = Binders.freshNamer(f, "_devirt_")
     f.copy(body = Binders.mapStmts(f.body) {
+      case v @ p.Stmt.Var(name @ Tagged(tag), None, _) =>
+        val select: p.Term.Select =
+          p.Term.Select(name, List(p.PathStep.Field(p.Conventions.DispatchTag)), p.Type.IntS32)
+        List(v, p.Stmt.Mut(select, p.Expr.Alias(p.Term.IntS32Const(tag))))
       case p.Stmt.Var(name, Some(e), isMutable) if dispatchable(e).isDefined =>
         val (ivk, recv, cs) = dispatchable(e).get
         if (ivk.rtn == p.Type.Unit0)
