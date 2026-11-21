@@ -82,10 +82,12 @@ template <typename F> static auto wrapException(JNIEnv *env, const std::string &
 
 #ifndef _WIN32
 class SignalGuard {
+public:
   static constexpr int SIGNALS[] = {SIGHUP,  SIGINT,  SIGQUIT, SIGILL,  SIGTRAP, SIGABRT, SIGBUS, SIGFPE,
                                     SIGSEGV, SIGPIPE, SIGUSR2, SIGTERM, SIGXCPU, SIGXFSZ, SIGSYS};
   static constexpr size_t COUNT = sizeof(SIGNALS) / sizeof(SIGNALS[0]);
 
+private:
   struct State {
     std::mutex mutex;
     size_t active = 0;
@@ -120,6 +122,7 @@ public:
     namespace guard = polyregion::polyrt::guard;
     auto &s = state();
     const std::scoped_lock lock(s.mutex);
+    if (--s.active != 0) return;
     for (size_t i = 0; i < COUNT; ++i) {
       const auto &saved = s.trusted[i];
       struct sigaction current{};
@@ -131,7 +134,6 @@ public:
         sigaction(SIGNALS[i], &saved, nullptr);
       }
     }
-    --s.active;
   }
 };
 #else

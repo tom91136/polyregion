@@ -47,9 +47,22 @@ object SignalProbe {
 
 object LinkerProbe {
   def main(args: Array[String]): Unit = {
+    System.load(sys.env("SIGNAL_PROBE_LIB"))
     val program = Files.readAllBytes(Path.of(sys.env("LINKER_PROBE_PROGRAM")))
+    SignalNatives.snapshot()
     Compiler.create().compile(program, false, Options.of(Target.LLVM_AMDGCN, "gfx1036"), 12)
-    sys.exit(if (NullChecks.survive()) 0 else 1)
+    val changed = SignalNatives.changed()
+    println(s"changed=$changed")
+    sys.exit(if (changed.isEmpty && NullChecks.survive()) 0 else 1)
+  }
+}
+
+object NestedGuardProbe {
+  def main(args: Array[String]): Unit = {
+    System.load(sys.env("SIGNAL_PROBE_LIB"))
+    val outcome = SignalNatives.nestedGuards()
+    println(outcome)
+    sys.exit(if (outcome == "during=;after=" && NullChecks.survive()) 0 else 1)
   }
 }
 
@@ -96,7 +109,7 @@ object GuardProbe {
 
 class SignalSuite extends munit.FunSuite {
 
-  test("a JVM that enumerates OpenCL keeps its own SIGSEGV handler") {
+  test("a JVM that enumerates OpenCL keeps every handler the guard covers") {
     val (code, output) = ChildJvm.run(
       "polyregion.SignalProbe",
       ChildJvm.pocl() + ("POLYINVOKE_DISABLE_BACKENDS" -> "HSA,HIP,LevelZero")
@@ -106,7 +119,7 @@ class SignalSuite extends munit.FunSuite {
     assert(output.contains("survived"), output)
   }
 
-  test("a JVM that links an AMDGCN kernel keeps its own SIGSEGV handler") {
+  test("a JVM that links an AMDGCN kernel keeps every handler the guard covers") {
     val entry = p.Function(
       p.FunctionDecl(p.Sym("probe"), Nil, None, Nil, Nil, Nil, p.Type.Unit0, p.Function.Affinity.Offload),
       p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const)) :: Nil,
@@ -117,10 +130,19 @@ class SignalSuite extends munit.FunSuite {
     val program = Files.createTempFile("probe", ".polyast")
     try {
       Files.write(program, MsgPack.encode(CodeGen.programVersioned(p.Program(Some(entry), List(entry), Nil))))
-      val (code, output) = ChildJvm.run("polyregion.LinkerProbe", Map("LINKER_PROBE_PROGRAM" -> program.toString))
+      val (code, output) = ChildJvm.run(
+        "polyregion.LinkerProbe",
+        Map("LINKER_PROBE_PROGRAM" -> program.toString, "SIGNAL_PROBE_LIB" -> probeLibrary.toString)
+      )
       assertEquals(code, 0, output)
-      assert(output.contains("survived"), output)
+      assert(output.contains("changed=\n") && output.contains("survived"), output)
     } finally Files.deleteIfExists(program)
+  }
+
+  test("a guard that exits while another is active leaves every handler it covers alone") {
+    val (code, output) = ChildJvm.run("polyregion.NestedGuardProbe", Map("SIGNAL_PROBE_LIB" -> probeLibrary.toString))
+    assertEquals(code, 0, output)
+    assert(output.contains("during=;after=") && output.contains("survived"), output)
   }
 
   private var probeDir: Option[Path] = None

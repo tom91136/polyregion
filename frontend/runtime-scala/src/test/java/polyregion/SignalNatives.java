@@ -8,6 +8,12 @@ final class SignalNatives {
 
   static native long map(long bytes);
 
+  static native void snapshot();
+
+  static native String changed();
+
+  static native String nestedGuards();
+
   static native ByteBuffer buffer(long base, long bytes);
 
   static native void guard(long base, long bytes);

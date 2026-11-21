@@ -1,5 +1,6 @@
 #include <atomic>
 #include <cstdint>
+#include <string>
 
 #include "polyrt/page_guard.hpp"
 
@@ -48,9 +49,57 @@ void armGuard(const jlong base, const jlong bytes) {
   guard::protect(reinterpret_cast<void *>(base), static_cast<size_t>(bytes), guard::Access::Read);
 }
 
+struct sigaction snapshotted[SignalGuard::COUNT]{};
+
+constexpr int KernelAddedFlags = 0x04000000; // SA_RESTORER, set by libc on any sigaction call
+
+bool sameAction(const struct sigaction &a, const struct sigaction &b) {
+  return a.sa_handler == b.sa_handler && (a.sa_flags & ~KernelAddedFlags) == (b.sa_flags & ~KernelAddedFlags);
+}
+
+template <class Expected> std::string differing(Expected &&expected) {
+  std::string names;
+  for (size_t i = 0; i < SignalGuard::COUNT; ++i) {
+    struct sigaction current{};
+    sigaction(SignalGuard::SIGNALS[i], nullptr, &current);
+    if (!expected(i, current)) names += (names.empty() ? "" : ",") + std::to_string(SignalGuard::SIGNALS[i]);
+  }
+  return names;
+}
+
 } // namespace
 
 extern "C" {
+
+JNIEXPORT void JNICALL Java_polyregion_SignalNatives_snapshot(JNIEnv *, jclass) {
+  for (size_t i = 0; i < SignalGuard::COUNT; ++i)
+    sigaction(SignalGuard::SIGNALS[i], nullptr, &snapshotted[i]);
+}
+
+JNIEXPORT jstring JNICALL Java_polyregion_SignalNatives_changed(JNIEnv *env, jclass) {
+  return env->NewStringUTF(
+      differing([](const size_t i, const struct sigaction &current) { return sameAction(current, snapshotted[i]); }).c_str());
+}
+
+JNIEXPORT jstring JNICALL Java_polyregion_SignalNatives_nestedGuards(JNIEnv *env, jclass) {
+  Java_polyregion_SignalNatives_snapshot(env, nullptr);
+  std::string during;
+  wrapBackend(env, EX, [&] {
+    for (const auto signal : SignalGuard::SIGNALS) {
+      struct sigaction action{};
+      action.sa_sigaction = foreignHandler;
+      action.sa_flags = SA_SIGINFO;
+      sigemptyset(&action.sa_mask);
+      sigaction(signal, &action, nullptr);
+    }
+    {
+      const SignalGuard inner;
+    }
+    during = differing([](const size_t, const struct sigaction &current) { return current.sa_sigaction == foreignHandler; });
+  });
+  const auto after = differing([](const size_t i, const struct sigaction &current) { return sameAction(current, snapshotted[i]); });
+  return env->NewStringUTF(("during=" + during + ";after=" + after).c_str());
+}
 
 JNIEXPORT jlong JNICALL Java_polyregion_SignalNatives_map(JNIEnv *, jclass, jlong bytes) {
   void *p = mmap(nullptr, static_cast<size_t>(bytes), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
