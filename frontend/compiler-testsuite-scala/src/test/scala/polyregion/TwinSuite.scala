@@ -5,7 +5,48 @@ import polyregion.scalalang.*
 
 import scala.collection.mutable
 
+object TwinSuite {
+  class Lazy {
+    val k: Int                   = 4
+    var forced: Int              = 0
+    lazy val heavy: Int          = { forced += 1; k * 100 }
+    private lazy val hidden: Int = { forced += 1; k * 10 }
+    def peek: Int                = hidden
+  }
+  class Local {
+    val k: Int         = 5
+    private val n: Int = k * 3
+    def get: Int       = n
+  }
+  trait Labelled {
+    val label: Int          = 30
+    private val secret: Int = 4
+    def reveal: Int         = secret
+  }
+  class Tagged extends Labelled {
+    val k: Int = 2
+  }
+  class Outer {
+    val base: Int = 100
+    class Nested {
+      val k: Int     = 7
+      def total: Int = base + k
+    }
+    def nested: Nested = Nested()
+  }
+  class Expanded {
+    private val a: Int = 1
+    val b: Int         = 2
+    def viaLocal: Int = {
+      class Reader { def get: Int = a }
+      Reader().get
+    }
+  }
+}
+
 class TwinSuite extends munit.FunSuite {
+
+  import TwinSuite.*
 
   case class Point(x: Double, y: Double)
   case class Segment(from: Point, to: Point)
@@ -20,7 +61,6 @@ class TwinSuite extends munit.FunSuite {
   class Shy(private val xs: Buffer[Double]) {
     def first: Double = xs(0)
   }
-
   private val devices = rt.Context.platforms().flatMap(_.devices)
   private val host    = devices.find(d => d.platformKind == 1 && d.moduleFormat == 2)
   private val nvidia  = devices.find(d => d.platformKind == 2 && d.cudaArchitectureMajor > 0)
@@ -168,6 +208,87 @@ class TwinSuite extends munit.FunSuite {
       }
     }
 
+    test(s"[$label] a lazy val the kernel never reads is not marshalled") {
+      withContext(label, device) { ctx =>
+        val l   = Lazy()
+        val out = Buffer.ofDim[Int](1)
+        launch[C](ctx) {
+          out(0) = l.k + 1
+        }
+        assertEquals(out(0), 5)
+        assertEquals(l.forced, 0)
+      }
+    }
+
+    test(s"[$label] a private lazy val the kernel never reads is not marshalled") {
+      withContext(label, device) { ctx =>
+        val l   = Lazy()
+        val out = Buffer.ofDim[Int](1)
+        launch[C](ctx) {
+          out(0) = l.k + 2
+        }
+        assertEquals(out(0), 6)
+        assertEquals(l.forced, 0)
+      }
+    }
+
+    test(s"[$label] a forced lazy val is read as a local") {
+      withContext(label, device) { ctx =>
+        val l     = Lazy()
+        val heavy = l.heavy
+        val out   = Buffer.ofDim[Int](1)
+        launch[C](ctx) {
+          out(0) = heavy + l.k
+        }
+        assertEquals(out(0), 404)
+        assertEquals(l.forced, 1)
+      }
+    }
+
+    test(s"[$label] an object-private val is read by the kernel") {
+      withContext(label, device) { ctx =>
+        val l   = Local()
+        val out = Buffer.ofDim[Int](1)
+        launch[C](ctx) {
+          out(0) = l.get + l.k
+        }
+        assertEquals(out(0), 20)
+      }
+    }
+
+    test(s"[$label] a class mixing in a trait with vals is captured") {
+      withContext(label, device) { ctx =>
+        val t   = Tagged()
+        val out = Buffer.ofDim[Int](1)
+        launch[C](ctx) {
+          out(0) = t.k + 1
+        }
+        assertEquals(out(0), 3)
+      }
+    }
+
+    test(s"[$label] an inner class instance is captured without its outer pointer") {
+      withContext(label, device) { ctx =>
+        val n   = Outer().nested
+        val out = Buffer.ofDim[Int](1)
+        launch[C](ctx) {
+          out(0) = n.k + 1
+        }
+        assertEquals(out(0), 8)
+      }
+    }
+
+    test(s"[$label] a private val renamed for a nested class is read by the kernel") {
+      withContext(label, device) { ctx =>
+        val c   = Expanded()
+        val out = Buffer.ofDim[Int](1)
+        launch[C](ctx) {
+          out(0) = c.b + 1
+        }
+        assertEquals(out(0), 3)
+      }
+    }
+
     test(s"[$label] a class holding only a buffer round trips") {
       withContext(label, device) { ctx =>
         val sink = Sink(Buffer.ofDim[Double](3))
@@ -177,6 +298,24 @@ class TwinSuite extends munit.FunSuite {
         assertEquals(sink.out(2), 9.0)
       }
     }
+  }
+
+  test("a kernel reading a lazy val of a captured object is rejected naming the member") {
+    val errors = compileErrors("""
+      val l   = Lazy()
+      val out = Buffer.ofDim[Int](1)
+      compiletime.offload0[Config[Target.Host.type, Opt.O2]](rt.Context.create(host.get), _ => ())(out(0) = l.heavy)
+    """)
+    assert(errors.contains("lazy val `heavy`"), errors)
+  }
+
+  test("a method reading a lazy val of a captured object is rejected naming the member") {
+    val errors = compileErrors("""
+      val l   = Lazy()
+      val out = Buffer.ofDim[Int](1)
+      compiletime.offload0[Config[Target.Host.type, Opt.O2]](rt.Context.create(host.get), _ => ())(out(0) = l.peek)
+    """)
+    assert(errors.contains("lazy val `hidden`"), errors)
   }
 
   cases[Config[Target.Host.type, Opt.O2]]("host", host)

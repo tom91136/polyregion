@@ -3,7 +3,7 @@ package polyregion.scalalang
 import cats.syntax.all.*
 import polyregion.ast.{PolyAST as p, *}
 import polyregion.jvm.runtime as rt
-import polyregion.jvm.twin.{FieldAccess, Layout, Marshal}
+import polyregion.jvm.twin.{FieldAccess, Layout, Marshal, TwinException}
 import polyregion.prism.{Prism, StdLib}
 
 import java.nio.{ByteBuffer, ByteOrder}
@@ -518,7 +518,20 @@ object Pickler {
         val tSym       = q.TypeRepr.of[t].widenTermRefByName.typeSymbol
         val tIsAnyLike = tSym == q.defn.AnyClass || tSym == q.defn.ObjectClass || tSym.isNoSymbol
 
+        val ownerSym = tSym.maybeOwner
+        val outerLost =
+          ownerSym.isClassDef && !ownerSym.flags.is(q.Flags.Module) &&
+            !Retyper.ownersList(q.Symbol.spliceOwner).contains(ownerSym)
+
         if (tIsAnyLike) '{ null.asInstanceOf[t] }
+        else if (outerLost)
+          '{
+            throw TwinException(
+              ${
+                Expr(s"Cannot rebuild an instance of the inner class ${tSym.fullName}, its outer instance is not known")
+              }
+            )
+          }
         else
           q.TypeRepr.of[t].widenTermRefByName.typeSymbol.primaryConstructor.tree match {
             case q.DefDef("<init>", ps, _, None) if ps.forall {

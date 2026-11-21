@@ -125,6 +125,7 @@ object Retyper {
     clsSym.fieldMembers
       .filterNot(_.flags.is(q.Flags.Module)) // TODO exclude objects for now, need to implement this later
       .filter(_.maybeOwner == clsSym)        // TODO local members for now, need to workout inherited members
+      .filterNot(_.flags.is(q.Flags.Lazy))
       .sortBy(
         _.pos.map(p => Try((p.startLine, p.startColumn)).getOrElse((0, 0)))
       ) // make sure the order follows source code decl. order

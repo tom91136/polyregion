@@ -13,6 +13,11 @@ object Remapper {
 
   private val RefEquality = Set("java.lang.Object.eq", "java.lang.Object.ne")
 
+  private def isClassLazyVal(using q: Quoted)(v: q.ValDef): Boolean = {
+    val sym = v.symbol
+    sym.flags.is(q.Flags.Lazy) && sym.owner.isClassDef
+  }
+
   private def fullyApplyGenExec(exec: p.Type.Exec, tpeArgs: List[p.Type]): p.Type.Exec = {
     val tpeTable = exec.tpeVars.map(_.name).zip(tpeArgs).toMap
     // Recurse fully so type vars nested inside Struct args, Ptr components, or curried inner Execs
@@ -534,6 +539,8 @@ object Remapper {
           )(sym: q.Symbol, receiver: Option[p.Expr])(select: => Result[p.Expr]) =
             sym.tree match {
               case fn: q.DefDef => invokeDefDef(c, fn, receiver, tpe, tpeArgs, termArgss)
+              case lzy: q.ValDef if isClassLazyVal(lzy) =>
+                s"lazy val `${lzy.name}` (${lzy.symbol.fullName}) cannot be read through a captured object, bind it to a local val before the launch".fail
               case local: q.ValDef => // sym.$local
                 c.closures
                   .get(local.symbol)
