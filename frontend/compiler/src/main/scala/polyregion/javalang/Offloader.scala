@@ -235,7 +235,7 @@ object Offloader {
             val fields = host.fold(Map.empty[String, TwinEmitter.HostField])(hostFieldsOf(env, _))
             StructLayouts.of(
               // synthesised storage has no Java field, the dispatch tag is found through the layout
-              sdef.copy(members = sdef.members.filterNot(_.symbol.startsWith("#"))),
+              sdef.copy(members = Devirtualise.hostMembers(sdef)),
               l,
               host.fold("")(_.binary),
               host.flatMap(h => tags.get(h.fqn)),
