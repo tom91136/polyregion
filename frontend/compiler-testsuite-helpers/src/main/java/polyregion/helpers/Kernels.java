@@ -167,4 +167,16 @@ public final class Kernels {
   public static int concatenated(int a) {
     return ("n=" + a).length();
   }
+
+  public static int counting(int a) {
+    Counter c = new Counter(a);
+    c.next();
+    c.add(3);
+    return c.next() + c.get() + c.viaPrivate();
+  }
+
+  public static int openReceiver(int a) {
+    Open o = new Open(a);
+    return o.get();
+  }
 }

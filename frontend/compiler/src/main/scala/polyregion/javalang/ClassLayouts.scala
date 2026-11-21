@@ -1,7 +1,7 @@
 package polyregion.javalang
 
 import cats.syntax.all.*
-import net.bytebuddy.jar.asm.{ClassReader, ClassVisitor, FieldVisitor, Opcodes, Type}
+import net.bytebuddy.jar.asm.{ClassReader, ClassVisitor, FieldVisitor, MethodVisitor, Opcodes, Type}
 import org.jetbrains.java.decompiler.struct.gen.{CodeType, VarType}
 import polyregion.ast.{PolyAST as p, *}
 import polyregion.javalang.Interop.absent
@@ -43,15 +43,27 @@ object ClassLayouts {
 
   private val Platform = List("java/", "javax/", "jdk/", "sun/", "com/sun/")
 
-  private case class Shape(superName: Option[String], member: Option[(String, String)], fields: List[(String, String)])
+  private case class Shape(
+      access: Int,
+      superName: Option[String],
+      member: Option[(String, String)],
+      fields: List[(String, String)],
+      methods: List[(String, String, Int)]
+  )
 
   private class ShapeCollector extends ClassVisitor(Opcodes.ASM9) {
-    val header = mutable.ListBuffer.empty[(String, Option[String])]
-    val inners = mutable.ListBuffer.empty[(String, String, String)]
-    val fields = mutable.ListBuffer.empty[(String, String)]
+    val header  = mutable.ListBuffer.empty[(String, Option[String], Int)]
+    val methods = mutable.ListBuffer.empty[(String, String, Int)]
+    val inners  = mutable.ListBuffer.empty[(String, String, String)]
+    val fields  = mutable.ListBuffer.empty[(String, String)]
 
     override def visit(v: Int, a: Int, n: String, s: String, sup: String, itf: Array[String]): Unit =
-      header += n -> Option(sup)
+      header += ((n, Option(sup), a))
+
+    override def visitMethod(a: Int, n: String, d: String, s: String, e: Array[String]): MethodVisitor = {
+      methods += ((n, d, a))
+      absent
+    }
 
     override def visitInnerClass(n: String, outer: String, inner: String, a: Int): Unit =
       for {
@@ -68,9 +80,9 @@ object ClassLayouts {
   private def shapeOf(bytes: Array[Byte]): Shape = {
     val collector = ShapeCollector()
     ClassReader(bytes).accept(collector, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES)
-    val (self, parent) = collector.header.headOption.getOrElse(("", None))
-    val member         = collector.inners.collectFirst { case (n, outer, inner) if n == self => outer -> inner }
-    Shape(parent, member, collector.fields.toList)
+    val (self, parent, access) = collector.header.headOption.getOrElse(("", None, 0))
+    val member                 = collector.inners.collectFirst { case (n, outer, inner) if n == self => outer -> inner }
+    Shape(access, parent, member, collector.fields.toList, collector.methods.toList)
   }
 
   private def shapeFor(internal: String, bytesOf: ClassBytes): Result[Shape] =
@@ -95,6 +107,12 @@ object ClassLayouts {
       shape <- shapeFor(internal, bytesOf)
       members = shape.fields.flatMap((field, desc) => typeOf(VarType(desc)).toOption.map(t => p.Named(field, t)))
     } yield p.StructDef(p.Sym(name), Nil, members, Nil)
+
+  // the access flags of the class and of the method it declares itself, none for an inherited one
+  def accessOf(method: MethodRef, bytesOf: ClassBytes): Result[(Int, Option[Int])] =
+    shapeFor(method.owner, bytesOf).map { s =>
+      s.access -> s.methods.collectFirst { case (method.name, method.desc, a) => a }
+    }
 
   def superOf(internal: String, bytesOf: ClassBytes): Result[Option[String]] =
     shapeFor(internal, bytesOf).map(_.superName)

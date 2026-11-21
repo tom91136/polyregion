@@ -66,7 +66,7 @@ object BytecodeResolver {
   private def lowerRef(ref: MethodRef, origin: MethodRef, bytesOf: ClassBytes): Result[BytecodeRemapper.Lowered] =
     bytesOf(ref.owner)
       .failIfEmpty(s"No class file for `${ref.owner}` while lowering `${ref.repr}`")
-      .flatMap(BytecodeRemapper.lowerWithCalls(_, ref.name, ref.desc, bytesOf))
+      .flatMap(BytecodeRemapper.lowerWithCalls(_, ref.name, ref.desc, bytesOf, ref.instance))
       .leftMap { e =>
         val cause = s"Cannot lower `${ref.repr}` from its class file: ${e.getMessage}"
         CompilerException(

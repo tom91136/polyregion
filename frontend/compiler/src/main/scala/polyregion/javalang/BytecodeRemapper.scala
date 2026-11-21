@@ -1,6 +1,7 @@
 package polyregion.javalang
 
 import cats.syntax.all.*
+import net.bytebuddy.jar.asm.Opcodes
 import org.jetbrains.java.decompiler.code.CodeConstants
 import org.jetbrains.java.decompiler.modules.decompiler.StatEdge
 import org.jetbrains.java.decompiler.modules.decompiler.exps.FunctionExprent.FunctionType
@@ -153,6 +154,8 @@ object BytecodeRemapper {
     }
 
     def superOf(internal: String): Result[Option[String]] = ClassLayouts.superOf(internal, bytesOf)
+
+    def accessOf(method: MethodRef): Result[(Int, Option[Int])] = ClassLayouts.accessOf(method, bytesOf)
   }
 
   private class Lowerer(rtn: p.Type, register: Boolean, classes: Classes, owner: String, receiver: Option[String]) {
@@ -225,15 +228,16 @@ object BytecodeRemapper {
       }
     }
 
+    private def coerced(desc: String, args: List[p.Term], buf: mutable.ListBuffer[p.Stmt]): Result[List[p.Term]] =
+      MethodDescriptor.parseDescriptor(desc).params.toList.traverse(classes.typeOf(_)).map { params =>
+        args.zip(params).map((a, t) => coerce(buf, a, t))
+      }
+
     private def arguments(
         desc: String,
         exprs: List[Exprent],
         buf: mutable.ListBuffer[p.Stmt]
-    ): Result[List[p.Term]] =
-      for {
-        params <- MethodDescriptor.parseDescriptor(desc).params.toList.traverse(classes.typeOf(_))
-        args   <- exprs.traverse(expr(_, buf))
-      } yield args.zip(params).map((a, t) => coerce(buf, a, t))
+    ): Result[List[p.Term]] = exprs.traverse(expr(_, buf)).flatMap(coerced(desc, _, buf))
 
     // a constructor is the one instance method called without a receiver lookup: the callee is known and `self` goes first
     private def construct(
@@ -334,6 +338,31 @@ object BytecodeRemapper {
       }
     }
 
+    // a call through a receiver is direct only where nothing can override it: a final class or method, or a private one
+    private def callInstance(i: InvocationExprent, recv: p.Term, buf: mutable.ListBuffer[p.Stmt]): Result[p.Term] = {
+      val target = i.getClassname.replace('/', '.')
+      val callee = MethodRef(target, i.getName, i.getStringDescriptor, instance = true)
+      def closed(cls: Int, method: Option[Int]): Boolean = method.exists { m =>
+        (m & Opcodes.ACC_ABSTRACT) == 0 &&
+        ((cls & Opcodes.ACC_FINAL) != 0 || (m & (Opcodes.ACC_FINAL | Opcodes.ACC_PRIVATE)) != 0)
+      }
+      for {
+        ref    <- classes.reference(i.getClassname)
+        access <- classes.accessOf(callee)
+        _      <- if (closed(access._1, access._2)) ().success else unsupported(i)
+        self <- recv match {
+          case s: p.Term.Select if s.tpe == ref => s.success
+          case other =>
+            s"Unsupported call `${callee.repr}`; the receiver is `${other.tpe.repr}`, not `${ref.repr}`".fail
+        }
+        args <- i.getLstParameters.asScala.toList.traverse(expr(_, buf)).flatMap(coerced(i.getStringDescriptor, _, buf))
+        rtn  <- classes.returned(MethodDescriptor.parseDescriptor(i.getStringDescriptor).ret, callee.repr)
+      } yield {
+        calls += callee
+        bind(buf, p.Expr.Invoke(p.Type.FnRef(symbolOf(target, i.getName)), Nil, None, self :: args, rtn))
+      }
+    }
+
     private def invoke(i: InvocationExprent, buf: mutable.ListBuffer[p.Stmt]): Result[p.Term] =
       if (i.getFunctype == InvocationExprent.Type.INIT) delegate(i, buf)
       else if (i.getInvocationType == InvocationExprent.InvocationType.DYNAMIC) dynamic(i)
@@ -344,7 +373,8 @@ object BytecodeRemapper {
       else
         Option(i.getInstance).flatMap(closureOf(_, buf)) match {
           case Some(c) => c.flatMap(callClosure(_, i, buf))
-          case None    => Option(i.getInstance).fold(unsupported(i))(expr(_, buf).flatMap(_ => unsupported(i)))
+          case None =>
+            Option(i.getInstance).fold(unsupported(i))(instance => expr(instance, buf).flatMap(callInstance(i, _, buf)))
         }
 
     private def fieldSelect(f: FieldExprent, buf: mutable.ListBuffer[p.Stmt]): Result[p.Term.Select] = {
@@ -853,34 +883,37 @@ object BytecodeRemapper {
       classBytes: Array[Byte],
       name: String,
       desc: String,
-      classes: ClassLayouts.ClassBytes = _ => None
+      classes: ClassLayouts.ClassBytes = _ => None,
+      withReceiver: Boolean = false
   ): Result[Lowered] =
-    Vineflower.structure(classBytes, name, desc)(lowerMethod(_, name, classBytes, classes))
+    Vineflower.structure(classBytes, name, desc)(lowerMethod(_, name, classBytes, classes, withReceiver))
 
   private def lowerMethod(
       m: Vineflower.Method,
       name: String,
       classBytes: Array[Byte],
-      others: ClassLayouts.ClassBytes
+      others: ClassLayouts.ClassBytes,
+      withReceiver: Boolean
   ): Result[Lowered] = {
     val owner    = m.cl.qualifiedName.replace('/', '.')
     val isStatic = m.mt.hasModifier(CodeConstants.ACC_STATIC)
     val isInit   = name == "<init>"
+    val hasThis  = isInit || (!isStatic && withReceiver)
     val classes  = Classes(owner, classBytes, others)
     // a `this`-free instance method is a static one with a slot reserved, the shape of every Scala `object` method
-    val receiver = Option.unless(isStatic || isInit)(
+    val receiver = Option.unless(isStatic || hasThis)(
       s"`$owner.$name` is not static and uses its receiver; instance methods need a receiver struct"
     )
     for {
       slotVars <- varsOf(m.root).success
       _        <- receiver.filter(_ => slotVars.exists(_.getIndex == 0)).fold(().success)(_.fail)
       rtn      <- classes.returned(m.md.ret, s"$owner.$name${m.mt.getDescriptor}")
-      self     <- if (isInit) classes.reference(m.cl.qualifiedName).map(List(_)) else List.empty[p.Type].success
+      self     <- if (hasThis) classes.reference(m.cl.qualifiedName).map(List(_)) else List.empty[p.Type].success
       declared <- m.md.params.toList.traverse(classes.typeOf(_))
       argTypes = self ::: declared
       register = needsRegister(m.root)
       lowerer  = Lowerer(rtn, register, classes, owner, receiver)
-      base     = if (isStatic || isInit) 0 else 1
+      base     = if (isStatic || hasThis) 0 else 1
       slots = argTypes
         .foldLeft((List.empty[(Int, p.Type)], base)) { case ((acc, at), t) => ((at, t) :: acc, at + words(t)) }
         ._1

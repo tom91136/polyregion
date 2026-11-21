@@ -131,4 +131,16 @@ public class BytecodeTierTest extends BaseSuite {
     assertRejected("functional value", () -> Kernels.lambdaEscapes(a));
     assertRejected("string concatenation", () -> Kernels.concatenated(a));
   }
+
+  @Test
+  public void receiversOfFinalClasses() {
+    int a = 4;
+    assertMatchesJdk("counter", () -> Kernels.counting(a));
+  }
+
+  @Test
+  public void openReceiversAreRefused() {
+    int a = 4;
+    assertRejected("cannot resolve statically", () -> Kernels.openReceiver(a));
+  }
 }
