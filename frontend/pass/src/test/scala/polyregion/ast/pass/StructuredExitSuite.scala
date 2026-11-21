@@ -269,6 +269,49 @@ class StructuredExitSuite extends munit.FunSuite {
     assertEquals(foreignCalls(out.entry.required).count(_ == "polyrt_remote_failed"), 1)
   }
 
+  private def survivingRaises(f: p.Function): Int = f.collectWhere[p.Stmt] { case r: p.Stmt.Raise => r }.size
+
+  test("a non-entry host function that raises and has a remote operation is lowered through the runtime report") {
+    val context = named("ctx", p.Spec.ContextType)
+    val helperBody = List(
+      remoteAlloc(context, named("mem", p.Spec.ContextType)),
+      raise(p.Term.IntS32Const(7), "int"),
+      ret
+    )
+    val helper = asHost(
+      fn("helper", List(p.Arg(context)), body = helperBody, visibility = p.Function.Visibility.Internal)
+    )
+    val call = p.Stmt.Var(
+      named("called", p.Type.Unit0),
+      Some(p.Expr.Invoke(p.Type.FnRef(helper.name), Nil, None, List(selectT(context)), p.Type.Unit0))
+    )
+    val driver = asHost(fn("driver", List(p.Arg(context)), body = List(call, ret)))
+    val out    = StructuredExit(program(driver, List(helper)), NoopLog)
+    (out.entry.toList ::: out.functions).foreach { f =>
+      assertEquals(survivingAsserts(f), 0, f.name.fqcn)
+      assertEquals(survivingRaises(f), 0, f.name.fqcn)
+    }
+    assertEquals(foreignCalls(out.functions.head).count(_ == "polyrt_remote_failed"), 1)
+  }
+
+  test("a host function that catches a raise and has a remote operation is lowered") {
+    val context = named("ctx", p.Spec.ContextType)
+    val body = List(
+      p.Stmt.Try(
+        List(raise(p.Term.IntS32Const(7), "int")),
+        List(handler(Some(i32), None, Nil, Some("int"))),
+        Nil
+      ),
+      remoteAlloc(context, named("mem", p.Spec.ContextType)),
+      ret
+    )
+    val out = StructuredExit(program(asHost(fn("driver", List(p.Arg(context)), body = body))), NoopLog).entry.required
+    assertEquals(survivingAsserts(out), 0)
+    assertEquals(survivingRaises(out), 0)
+    assertEquals(out.collectWhere[p.Stmt] { case t: p.Stmt.Try => t }, Nil)
+    assertEquals(foreignCalls(out).count(_ == "polyrt_remote_failed"), 1)
+  }
+
   test("an asserting entry gains a leading error-buffer arg and a drain return") {
     val out = lower(Nil, List(assertStmt(), ret))
     assertEquals(out.entry.args.headOption.map(_.named.tpe), Some(errT)) // the leading Ptr<i8> the dispatch binds

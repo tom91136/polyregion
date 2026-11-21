@@ -1088,10 +1088,8 @@ object StructuredExit extends ProgramPass {
       case p.MetaEntry(key, _) if key.startsWith(p.Conventions.LinkCallableMeta) =>
         key.stripPrefix(p.Conventions.LinkCallableMeta)
     }.toSet
-    val candidates = (program.entry.toList ::: program.functions).filter { f =>
-      isHost(f) && flow.raised(f.body).isEmpty
-    }
-    val asserting = candidates.filter(_.body.exists(mayAssert)).map(_.name).toSet
+    val candidates = (program.entry.toList ::: program.functions).filter(isHost)
+    val asserting  = candidates.filter(_.body.exists(mayAssert)).map(_.name).toSet
     val callees = candidates.map { f =>
       f.name -> f.collectWhere[p.Expr] { case p.Expr.Invoke(p.Type.FnRef(callee), _, _, _, _) => callee }.toSet
     }.toMap
