@@ -5,11 +5,14 @@ import scala.quoted.*
 object ConventionsCodeGen {
 
   inline def conventionsHeader: String = ${ headerImpl }
+  inline def hostAbiCmake: String      = ${ hostAbiCmakeImpl }
 
   private enum Kind { case Const, Macro, Abi, HostAbi, Reflect }
   private case class Entry(name: String, value: String, kind: Kind)
 
   def headerImpl(using Quotes): Expr[String] = Expr(render(extract))
+
+  def hostAbiCmakeImpl(using Quotes): Expr[String] = Expr(renderCmake(extract))
 
   private def constStrings(using Quotes)(mod: quotes.reflect.Symbol): List[(String, String)] = {
     import quotes.reflect.*
@@ -55,6 +58,15 @@ object ConventionsCodeGen {
       constStrings(runtimeAbi).map((n, v) => Entry(n, v, Kind.Abi)) ++
       constStrings(hostAbi).map((n, v) => Entry(n, v, Kind.HostAbi)) ++
       constStrings(reflect).map((n, v) => Entry(n, v, Kind.Reflect))
+  }
+
+  private def renderCmake(entries: List[Entry]): String = {
+    val symbols = entries.collect { case Entry(_, v, Kind.HostAbi) => s"  $v" }.mkString("\n")
+    s"""|# AUTO-GENERATED from PolyAST.Conventions.HostAbi via polyregion.ast.CodeGen. DO NOT EDIT.
+        |set(POLYREGION_HOST_ABI_SYMBOLS
+        |$symbols
+        |)
+        |""".stripMargin
   }
 
   private def render(entries: List[Entry]): String = {

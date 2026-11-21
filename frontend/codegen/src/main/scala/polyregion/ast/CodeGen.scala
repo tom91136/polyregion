@@ -467,6 +467,7 @@ private[polyregion] object CodeGen {
     println(s"Writing conventions to $target")
     Files.createDirectories(target.getParent)
     overwrite(target)(ConventionsCodeGen.conventionsHeader)
+    overwrite(target.resolveSibling("host_abi.cmake"))(ConventionsCodeGen.hostAbiCmake)
     println("Done")
   }
 
