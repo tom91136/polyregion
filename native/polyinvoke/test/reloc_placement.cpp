@@ -1,11 +1,13 @@
 #if defined(__linux__) && defined(__x86_64__)
 
   #include <algorithm>
+  #include <array>
   #include <chrono>
   #include <cstdint>
   #include <cstdio>
   #include <cstring>
   #include <fstream>
+  #include <optional>
   #include <string>
   #include <vector>
 
@@ -24,11 +26,19 @@ using namespace polyregion::concurrency_utils;
 using polyregion::polytest::cases::Context;
 using polyregion::polytest::cases::Task;
 
+extern "C" {
+struct dwarf_eh_bases {
+  void *tbase, *dbase, *func;
+};
+const void *_Unwind_Find_FDE(void *pc, dwarf_eh_bases *bases);
+}
+
 namespace {
 
 constexpr uint64_t HoleSpacing = 3ull << 30;
 constexpr uint64_t FragmentedSpan = 64ull << 30;
 constexpr size_t MaxHoles = 16;
+constexpr uint64_t ReportedPcOffset = 42;
 
 struct Range {
   uint64_t begin, end;
@@ -115,14 +125,27 @@ std::string buildObject() {
                                      0x8b, 0x00,                         //
                                      0x48, 0x8d, 0x0d, 0,    0,    0, 0, //
                                      0x03, 0x01,                         //
-                                     0x89, 0x03,                         //
+                                     0x48, 0x89, 0x03,                   //
+                                     0x48, 0x8d, 0x05, 0,    0,    0, 0, //
+                                     0x48, 0x89, 0x43, 0x08,             //
                                      0x5b,                               //
                                      0xc3};
+  std::vector<uint8_t> ehFrame = {0x14, 0,    0,    0,    0,    0,    0,    0,    0x01, 0x7a, 0x52, 0x00,
+                                  0x01, 0x78, 0x10, 0x01, 0x1b, 0x0c, 0x07, 0x08, 0x90, 0x01, 0,    0};
+  const auto le32 = [&](const uint32_t v) {
+    for (int i = 0; i < 4; ++i)
+      ehFrame.push_back(static_cast<uint8_t>(v >> (8 * i)));
+  };
+  le32(0x14);
+  le32(0x1c);
+  le32(0);
+  le32(static_cast<uint32_t>(text.size()));
+  ehFrame.insert(ehFrame.end(), 8, 0);
   const std::vector<uint8_t> rodata = {40, 0, 0, 0};
   std::vector<uint8_t> data(4088, 0);
   data[0] = 2;
 
-  constexpr char shstrRaw[] = "\0.text\0.rodata\0.data\0.rela.text\0.symtab\0.strtab\0.shstrtab";
+  constexpr char shstrRaw[] = "\0.text\0.rodata\0.data\0.eh_frame\0.rela.text\0.rela.eh_frame\0.symtab\0.strtab\0.shstrtab";
   const std::string shstr(shstrRaw, sizeof(shstrRaw));
   const auto shName = [&](const char *n) { return static_cast<uint32_t>(shstr.find(n, 1)); };
   constexpr char strtabRaw[] = "\0reloc_sum\0malloc";
@@ -134,12 +157,14 @@ std::string buildObject() {
     uint16_t shndx;
     uint64_t value, size;
   };
-  const Sym syms[] = {{0, 0, 0, 0, 0, 0}, {0, 3, 0, 2, 0, 0}, {0, 3, 0, 3, 0, 0}, {1, 0x12, 0, 1, 0, text.size()}, {11, 0x10, 0, 0, 0, 0}};
+  const Sym syms[] = {{0, 0, 0, 0, 0, 0},    {0, 3, 0, 2, 0, 0}, {0, 3, 0, 3, 0, 0}, {0, 3, 0, 1, 0, 0}, {1, 0x12, 0, 1, 0, text.size()},
+                      {11, 0x10, 0, 0, 0, 0}};
   struct Rela {
     uint64_t offset, info;
     int64_t addend;
   };
-  const Rela relas[] = {{10, (4ull << 32) | 4, -4}, {17, (1ull << 32) | 2, -4}, {26, (2ull << 32) | 2, -4}};
+  const Rela relas[] = {{10, (5ull << 32) | 4, -4}, {17, (1ull << 32) | 2, -4}, {26, (2ull << 32) | 2, -4}};
+  const Rela ehRelas[] = {{32, (3ull << 32) | 2, 0}};
 
   std::vector<uint8_t> out(64, 0);
   struct Sec {
@@ -156,8 +181,10 @@ std::string buildObject() {
       {shName(".text"), 1, 0x6, 16, 0, 0, 0, text},
       {shName(".rodata"), 1, 0x2, 4, 0, 0, 0, rodata},
       {shName(".data"), 1, 0x3, 4, 0, 0, 0, data},
-      {shName(".rela.text"), 4, 0x40, 8, 24, 5, 1, bytes(relas, sizeof(relas))},
-      {shName(".symtab"), 2, 0, 8, 24, 6, 3, bytes(syms, sizeof(syms))},
+      {shName(".eh_frame"), 1, 0x2, 8, 0, 0, 0, ehFrame},
+      {shName(".rela.text"), 4, 0x40, 8, 24, 7, 1, bytes(relas, sizeof(relas))},
+      {shName(".rela.eh_frame"), 4, 0x40, 8, 24, 7, 4, bytes(ehRelas, sizeof(ehRelas))},
+      {shName(".symtab"), 2, 0, 8, 24, 8, 4, bytes(syms, sizeof(syms))},
       {shName(".strtab"), 3, 0, 1, 0, 0, 0, std::vector<uint8_t>(strtab.begin(), strtab.end())},
       {shName(".shstrtab"), 3, 0, 1, 0, 0, 0, std::vector<uint8_t>(shstr.begin(), shstr.end())},
   };
@@ -190,7 +217,7 @@ std::string buildObject() {
 
   const uint8_t ident[16] = {0x7f, 'E', 'L', 'F', 2, 1, 1, 0};
   std::memcpy(out.data(), ident, 16);
-  const uint16_t type = 1, machine = 62, ehsize = 64, shentsize = 64, shnum = static_cast<uint16_t>(secs.size()), shstrndx = 7;
+  const uint16_t type = 1, machine = 62, ehsize = 64, shentsize = 64, shnum = static_cast<uint16_t>(secs.size()), shstrndx = 9;
   const uint32_t version = 1;
   std::memcpy(out.data() + 16, &type, 2);
   std::memcpy(out.data() + 18, &machine, 2);
@@ -203,25 +230,43 @@ std::string buildObject() {
   return {out.begin(), out.end()};
 }
 
-void runSectionsFarApart(Context &ctx, Backend, Platform &platform, Device &device, const ImageGroup &imageGroup) {
+std::array<uint64_t, 2> loadAndRun(Context &ctx, Platform &platform, Device &device, const ImageGroup &imageGroup, const bool fragment) {
   POLYTEST_REQUIRE_S(ctx, imageGroup.size() == 1, "expected exactly 1 image group, got {}", imageGroup.size());
   auto queue = device.createQueue(std::chrono::seconds(10));
-  auto out_d = device.template mallocDeviceTyped<int>(1, Access::RW);
+  auto out_d = device.template mallocDeviceTyped<uint64_t>(2, Access::RW);
   {
-    const FragmentedAddressSpace fragmented;
-    POLYTEST_REQUIRE_S(ctx, !fragmented.fillers.empty() && fragmented.holeCount >= 3,
-                       "address space fragmentation did not take effect: {} fillers, {} holes", fragmented.fillers.size(),
-                       fragmented.holeCount);
+    std::optional<FragmentedAddressSpace> fragmented;
+    if (fragment) {
+      fragmented.emplace();
+      POLYTEST_REQUIRE_S(ctx, !fragmented->fillers.empty() && fragmented->holeCount >= 3,
+                         "address space fragmentation did not take effect: {} fillers, {} holes", fragmented->fillers.size(),
+                         fragmented->holeCount);
+    }
     device.loadModule("reloc_sum", imageGroup[0].second);
     ArgBuffer buffer;
     prependTidArg(platform, buffer);
     buffer.append({{Type::Ptr, &out_d}, {Type::Void, {}}});
     waitAll([&](auto &h) { queue->enqueueInvokeAsync("reloc_sum", "reloc_sum", buffer, {}, h); });
   }
-  int out = 0;
-  waitAll([&](auto &h) { queue->enqueueDeviceToHostAsyncTyped(out_d, &out, 1, h); });
-  POLYTEST_CHECK_S(ctx, out == 42, "rodata + data read through relocations returned {}", out);
+  std::array<uint64_t, 2> out{};
+  waitAll([&](auto &h) { queue->enqueueDeviceToHostAsyncTyped(out_d, out.data(), 2, h); });
   device.freeDevice(out_d);
+  return out;
+}
+
+void runSectionsFarApart(Context &ctx, Backend, Platform &platform, Device &device, const ImageGroup &imageGroup) {
+  const auto out = loadAndRun(ctx, platform, device, imageGroup, true);
+  POLYTEST_CHECK_S(ctx, out[0] == 42, "rodata + data read through relocations returned {}", out[0]);
+}
+
+void runEhFrameRegistered(Context &ctx, Backend, Platform &platform, Device &device, const ImageGroup &imageGroup) {
+  const auto out = loadAndRun(ctx, platform, device, imageGroup, false);
+  POLYTEST_REQUIRE_S(ctx, out[1] != 0, "the function did not report its address");
+  dwarf_eh_bases bases{};
+  const void *fde = _Unwind_Find_FDE(reinterpret_cast<void *>(out[1]), &bases);
+  POLYTEST_REQUIRE_S(ctx, fde != nullptr, "no FDE is registered for the loaded function at {:#x}", out[1]);
+  POLYTEST_CHECK_S(ctx, reinterpret_cast<uint64_t>(bases.func) + ReportedPcOffset == out[1], "FDE starts at {:#x}, expected {:#x}",
+                   reinterpret_cast<uint64_t>(bases.func), out[1] - ReportedPcOffset);
 }
 
 std::vector<Task> discoverAll() {
@@ -229,7 +274,10 @@ std::vector<Task> discoverAll() {
                               const auto o = buildObject();
                               return std::vector<uint8_t>(o.begin(), o.end());
                             }()}};
-  return discoverMatrix({{"reloc-placement-far-sections", images, {Backend::RelocatableObject}, &runSectionsFarApart}});
+  return discoverMatrix({
+      {"reloc-placement-far-sections", images, {Backend::RelocatableObject}, &runSectionsFarApart},
+      {"reloc-eh-frame-registered", images, {Backend::RelocatableObject}, &runEhFrameRegistered},
+  });
 }
 
 } // namespace
