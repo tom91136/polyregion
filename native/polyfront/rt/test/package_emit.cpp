@@ -762,7 +762,7 @@ TEST_CASE("package root search rejects a package whose identity differs from its
   REQUIRE(writeBytes(directory, *encoded.value));
 
   const auto result = loadPackage("foo", {root.path.str().str()});
-  REQUIRE_FALSE(result);
+  CHECK_FALSE(result);
   CHECK(result.errors == std::vector<std::string>{"package identity differs: expected `foo`, got `bar`"});
 }
 
