@@ -13,9 +13,7 @@ import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
-import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 import polyregion.jvm.compiler.Target;
@@ -118,14 +116,25 @@ public final class Launch {
     }
   }
 
-  private static final Map<String, Plan> PLANS = new ConcurrentHashMap<>();
+  private static final ClassValue<Plan> PLANS =
+      new ClassValue<Plan>() {
+        @Override
+        protected Plan computeValue(Class<?> site) {
+          return decode(create(site));
+        }
+      };
 
   private static final Set<String> LOADED = ConcurrentHashMap.newKeySet();
 
   private static final ReentrantLock LOAD_LOCK = new ReentrantLock();
 
-  private static final Map<Class<?>, MethodHandle> REPLACE =
-      Collections.synchronizedMap(new WeakHashMap<Class<?>, MethodHandle>());
+  private static final ClassValue<MethodHandle> REPLACE =
+      new ClassValue<MethodHandle>() {
+        @Override
+        protected MethodHandle computeValue(Class<?> callable) {
+          return writeReplace(callable);
+        }
+      };
 
   private static Target target(byte value) {
     for (Target t : Target.VALUES) if (t.value() == value) return t;
@@ -206,12 +215,9 @@ public final class Launch {
         decodeGroups(site.binary()));
   }
 
-  private static LaunchSite instantiate(String name, ClassLoader loader) {
+  private static Class<?> siteClass(String name, ClassLoader loader) {
     try {
-      return Class.forName(name, true, loader)
-          .asSubclass(LaunchSite.class)
-          .getDeclaredConstructor()
-          .newInstance();
+      return Class.forName(name, true, loader);
     } catch (ClassNotFoundException e) {
       throw new RuntimeException(
           "Cannot find the launch site class "
@@ -219,39 +225,43 @@ public final class Launch {
               + "; is the polyregion annotation processor on the compiler's processor path, and is the call inside"
               + " an ordinary method?",
           e);
+    }
+  }
+
+  private static LaunchSite create(Class<?> site) {
+    try {
+      return site.asSubclass(LaunchSite.class).getDeclaredConstructor().newInstance();
     } catch (ReflectiveOperationException e) {
-      throw new RuntimeException("Cannot create the launch site " + name, e);
+      throw new RuntimeException("Cannot create the launch site " + site.getName(), e);
+    }
+  }
+
+  private static MethodHandle writeReplace(Class<?> callable) {
+    Method found = null;
+    for (Class<?> c = callable; c != null && found == null; c = c.getSuperclass()) {
+      try {
+        found = c.getDeclaredMethod("writeReplace");
+      } catch (NoSuchMethodException ignored) {
+      }
+    }
+    if (found == null)
+      throw new IllegalArgumentException(
+          "A launch callable must be a lambda expression, got " + callable.getName());
+    try {
+      found.setAccessible(true);
+      return MethodHandles.lookup().unreflect(found);
+    } catch (IllegalAccessException | SecurityException e) {
+      throw new RuntimeException(e);
     }
   }
 
   private static SerializedLambda serialised(Object callable) {
-    Class<?> cls = callable.getClass();
-    MethodHandle handle = REPLACE.get(cls);
-    if (handle == null) {
-      Method found = null;
-      for (Class<?> c = cls; c != null && found == null; c = c.getSuperclass()) {
-        try {
-          found = c.getDeclaredMethod("writeReplace");
-        } catch (NoSuchMethodException ignored) {
-          // keep going
-        }
-      }
-      if (found == null)
-        throw new IllegalArgumentException(
-            "A launch callable must be a lambda expression, got " + cls.getName());
-      try {
-        found.setAccessible(true);
-        handle = MethodHandles.lookup().unreflect(found);
-      } catch (IllegalAccessException | SecurityException e) {
-        throw new RuntimeException(e);
-      }
-      REPLACE.put(cls, handle);
-    }
+    MethodHandle handle = REPLACE.get(callable.getClass());
     try {
       Object replaced = handle.invoke(callable);
       if (!(replaced instanceof SerializedLambda))
         throw new IllegalArgumentException(
-            "A launch callable must be a lambda expression, got " + cls.getName());
+            "A launch callable must be a lambda expression, got " + callable.getClass().getName());
       return (SerializedLambda) replaced;
     } catch (RuntimeException | Error e) {
       throw e;
@@ -371,11 +381,7 @@ public final class Launch {
       }
     }
     String name = LaunchSite.nameOf(identity, parts);
-    Plan plan = PLANS.get(name);
-    if (plan == null) {
-      plan = decode(instantiate(name, loader != null ? loader : defaultLoader()));
-      PLANS.put(name, plan);
-    }
+    Plan plan = PLANS.get(siteClass(name, loader != null ? loader : defaultLoader()));
     if (plan.unsupported != null) throw new UnsupportedOperationException(plan.unsupported);
     if (plan.specs.length != args.length)
       throw new IllegalStateException(
@@ -391,12 +397,7 @@ public final class Launch {
   }
 
   static Object region(LaunchSite site, Object[] captured) {
-    String name = site.getClass().getName();
-    Plan plan = PLANS.get(name);
-    if (plan == null) {
-      plan = decode(site);
-      PLANS.put(name, plan);
-    }
+    Plan plan = PLANS.get(site.getClass());
     if (plan.unsupported != null) throw new UnsupportedOperationException(plan.unsupported);
     Object[][] each = new Object[plan.specs.length][];
     each[plan.specs.length - 1] = captured;

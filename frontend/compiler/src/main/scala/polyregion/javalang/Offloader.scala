@@ -316,8 +316,12 @@ object Offloader {
   private val UnsupportedMarker = "!"
   private val ReasonLimit       = 4000
 
-  def unsupported(fqcn: String, reason: String): Result[Executable] =
-    emitClass(fqcn, Array.emptyByteArray, UnsupportedMarker + reason.take(ReasonLimit))
+  def unsupported(
+      fqcn: String,
+      reason: String,
+      parent: Class[? <: AnyRef] = classOf[BinaryOffloadExecutable]
+  ): Result[Executable] =
+    emitClass(fqcn, Array.emptyByteArray, UnsupportedMarker + reason.take(ReasonLimit), parent)
       .map(Executable(fqcn, _))
 
   def optimise(

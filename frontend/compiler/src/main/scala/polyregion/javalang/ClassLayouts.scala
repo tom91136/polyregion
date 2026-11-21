@@ -1,7 +1,7 @@
 package polyregion.javalang
 
 import cats.syntax.all.*
-import net.bytebuddy.jar.asm.{ClassReader, ClassVisitor, FieldVisitor, MethodVisitor, Opcodes, Type}
+import net.bytebuddy.jar.asm.{AnnotationVisitor, ClassReader, ClassVisitor, FieldVisitor, MethodVisitor, Opcodes, Type}
 import org.jetbrains.java.decompiler.struct.gen.{CodeType, VarType}
 import polyregion.ast.{PolyAST as p, *}
 import polyregion.javalang.Interop.absent
@@ -51,8 +51,20 @@ object ClassLayouts {
       state: Boolean,
       member: Option[(String, String)],
       fields: List[(String, String)],
-      methods: List[(String, String, Int)]
+      methods: List[(String, String, Int)],
+      stubs: Map[(String, String), String]
   )
+
+  private class StubValueVisitor(key: (String, String), stubs: mutable.Map[(String, String), String])
+      extends AnnotationVisitor(Opcodes.ASM9) {
+    override def visit(name: String, value: Object): Unit = if (name == "value") stubs(key) = value.toString
+  }
+
+  private class StubMethodVisitor(name: String, desc: String, stubs: mutable.Map[(String, String), String])
+      extends MethodVisitor(Opcodes.ASM9) {
+    override def visitAnnotation(annotation: String, visible: Boolean): AnnotationVisitor =
+      if (annotation == InterfaceStub.Descriptor) StubValueVisitor((name, desc), stubs) else absent
+  }
 
   private class ShapeCollector extends ClassVisitor(Opcodes.ASM9) {
     val header  = mutable.ListBuffer.empty[(String, Option[String], Int, List[String])]
@@ -60,13 +72,14 @@ object ClassLayouts {
     val inners  = mutable.ListBuffer.empty[(String, String, String)]
     val fields  = mutable.ListBuffer.empty[(String, String)]
     val held    = mutable.ListBuffer.empty[String]
+    val stubs   = mutable.Map.empty[(String, String), String]
 
     override def visit(v: Int, a: Int, n: String, s: String, sup: String, itf: Array[String]): Unit =
       header += ((n, Option(sup), a, Option(itf).fold(List.empty[String])(_.toList)))
 
     override def visitMethod(a: Int, n: String, d: String, s: String, e: Array[String]): MethodVisitor = {
       methods += ((n, d, a))
-      absent
+      StubMethodVisitor(n, d, stubs)
     }
 
     override def visitInnerClass(n: String, outer: String, inner: String, a: Int): Unit =
@@ -94,7 +107,8 @@ object ClassLayouts {
       collector.held.nonEmpty,
       member,
       collector.fields.toList,
-      collector.methods.toList
+      collector.methods.toList,
+      collector.stubs.toMap
     )
   }
 
@@ -144,6 +158,9 @@ object ClassLayouts {
     shapeFor(method.owner, bytesOf).map { s =>
       s.access -> s.methods.collectFirst { case (method.name, method.desc, a) => a }
     }
+
+  def stubOf(method: MethodRef, bytesOf: ClassBytes): Result[Option[String]] =
+    shapeFor(method.owner, bytesOf).map(_.stubs.get((method.name, method.desc)))
 
   def superOf(internal: String, bytesOf: ClassBytes): Result[Option[String]] =
     shapeFor(internal, bytesOf).map(_.superName)

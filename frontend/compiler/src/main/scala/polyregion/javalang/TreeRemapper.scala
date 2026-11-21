@@ -1107,6 +1107,7 @@ object TreeRemapper {
     val impl   = cl.impl
     val values = cl.captures ++ samArgs
     for {
+      _   <- refuseStub(impl)
       rtn <- JavaTyper.typer(impl.getReturnType)
       recvAndValues <-
         if (impl.isStatic) (Option.empty[p.Term], values).success
@@ -1561,6 +1562,11 @@ object TreeRemapper {
         m
     }
 
+  private def refuseStub(sym: JSymbol.MethodSymbol): Result[Unit] =
+    InterfaceStub.identityOf(sym).traverse_ { identity =>
+      InterfaceStub.refusal(s"${ownerName(sym)}.${sym.name}", identity).fail
+    }
+
   private def plainInvoke(scope: Scope, buf: mutable.ListBuffer[p.Stmt], mi: MethodInvocationTree): Result[p.Expr] =
     boxIdentity(scope, buf, mi).getOrElse {
       for {
@@ -1581,9 +1587,7 @@ object TreeRemapper {
           case other => s"Unsupported method selector ${other.getKind}".fail
         }
         (sym, recv) = symAndRecv
-        _ <- InterfaceStub.identityOf(sym).traverse_ { identity =>
-          s"`${ownerName(sym)}.${sym.name}` launches `$identity` and cannot be called inside an offload region".fail
-        }
+        _   <- refuseStub(sym)
         rtn <- JavaTyper.typer(jcType(mi))
         e <-
           if (mi.getArguments.asScala.exists(isClosureTree(scope, _)))

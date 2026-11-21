@@ -2,8 +2,10 @@ package polyregion.javalang
 
 import cats.syntax.all.*
 import com.sun.source.tree.{ExpressionTree, MethodInvocationTree, MethodTree, ParenthesizedTree, Tree, TypeCastTree}
-import com.sun.tools.javac.code.Symbol as JSymbol
-import com.sun.tools.javac.tree.{JCTree, TreeInfo, TreeScanner}
+import com.sun.tools.javac.code.{Flags, Symbol as JSymbol}
+import com.sun.tools.javac.processing.JavacProcessingEnvironment
+import com.sun.tools.javac.util.{List as JList, Names, Position}
+import com.sun.tools.javac.tree.{JCTree, TreeInfo, TreeMaker, TreeScanner}
 import polyregion.ast.generated.PolyPackageWireSchema
 import polyregion.ast.pass.*
 import polyregion.intrinsic.IntrinsicTable
@@ -63,26 +65,37 @@ object LaunchSites {
       within: Option[JSymbol.MethodSymbol]
   )
 
-  private class StubScanner(within: Option[JSymbol.MethodSymbol], found: mutable.ListBuffer[Site]) extends TreeScanner {
+  private class StubScanner(
+      within: Option[JSymbol.MethodSymbol],
+      sites: mutable.ListBuffer[Site],
+      references: mutable.ListBuffer[Site]
+  ) extends TreeScanner {
     override def visitApply(a: JCTree.JCMethodInvocation): Unit = {
       TreeInfo.symbol(a.meth) match {
         case stub: JSymbol.MethodSymbol =>
-          InterfaceStub.identityOf(stub).foreach(id => found += Site(a, stub, id, within))
+          InterfaceStub.identityOf(stub).foreach(id => sites += Site(a, stub, id, within))
         case _ =>
+      }
+      TreeRemapper.dynamicSym(a).flatMap(TreeRemapper.metafactoryImpl(_)).foreach { impl =>
+        InterfaceStub.identityOf(impl).foreach(id => references += Site(a, impl, id, within))
       }
       super.visitApply(a)
     }
   }
 
-  def collect(scope: Tree): List[Site] = scope match {
+  case class Collected(sites: List[Site], references: List[Site])
+
+  def collect(scope: Tree): Collected = scope match {
     case cls: JCTree.JCClassDecl =>
-      val found = mutable.ListBuffer.empty[Site]
+      val sites      = mutable.ListBuffer.empty[Site]
+      val references = mutable.ListBuffer.empty[Site]
       cls.defs.asScala.foreach {
-        case m: JCTree.JCMethodDecl => m.accept(StubScanner(Option(m.sym), found))
-        case _                      =>
+        case m: JCTree.JCMethodDecl => m.accept(StubScanner(Option(m.sym), sites, references))
+        case _: JCTree.JCClassDecl  =>
+        case member                 => member.accept(StubScanner(None, sites, references))
       }
-      found.toList
-    case _ => Nil
+      Collected(sites.toList, references.toList)
+    case _ => Collected(Nil, Nil)
   }
 
   @tailrec
@@ -149,8 +162,12 @@ object LaunchSites {
     case Argument(_, Kind.Array(prim))  => s"[${prim.code}".success
     case Argument(tree, Kind.Callable) =>
       lambdaOf(tree)
-        .map((_, impl) => s"@${impl.owner.flatName.toString.replace('.', '/')}.${impl.name}")
-        .toRight(CompilerException("a launch callable must be a lambda expression"))
+        .toRight(CompilerException("a launch callable must be a lambda expression or a static method reference"))
+        .flatMap { (_, impl) =>
+          if (impl.isStatic || (impl.flags & Flags.SYNTHETIC) != 0)
+            s"@${impl.owner.flatName.toString.replace('.', '/')}.${impl.name}".success
+          else s"a launch callable cannot bind a receiver, `${impl.owner}.${impl.name}` is an instance method".fail
+        }
     case Argument(_, Kind.Context) => "".success
   }
 
@@ -421,11 +438,7 @@ object LaunchSites {
           lambdaOf(tree)
             .toRight(CompilerException("a launch callable must be a lambda expression"))
             .flatMap { (call, impl) =>
-              sources.localTrees
-                .get(impl)
-                .toRight(
-                  CompilerException(s"launch callable `${impl.name}` has no source: write it as a lambda expression")
-                )
+              treeOf(sources, impl)
                 .flatMap(tree =>
                   lowerCallable(sources, config, entryName, i, tree, impl, call.getArguments.size, Mode.Site)
                     .map(i -> _)
@@ -462,6 +475,36 @@ object LaunchSites {
       )
     } yield executable
   }
+
+  private def treeOf(sources: TreeRemapper.Sources, impl: JSymbol.MethodSymbol): Result[MethodTree] =
+    sources.localTrees.get(impl).fold(forwarderOf(sources, impl))(_.success)
+
+  private def forwarderOf(sources: TreeRemapper.Sources, impl: JSymbol.MethodSymbol): Result[MethodTree] =
+    sources.env match {
+      case javac: JavacProcessingEnvironment =>
+        Either.catchNonFatal {
+          val context = javac.getContext
+          val make    = TreeMaker.instance(context).at(Position.NOPOS)
+          val names   = Names.instance(context)
+          val forwarder =
+            JSymbol.MethodSymbol(
+              Flags.STATIC | Flags.SYNTHETIC,
+              names.fromString(s"${impl.name}$$ref"),
+              impl.`type`,
+              impl.owner
+            )
+          val params = impl.`type`.getParameterTypes.asScala.toList.zipWithIndex.map((tpe, i) =>
+            make.Param(names.fromString(s"p$i"), tpe, forwarder)
+          )
+          forwarder.params = JList.from(params.map(_.sym).asJava)
+          val args = params.map(param => make.Ident(param.sym): JCTree.JCExpression)
+          val call = make.App(make.QualIdent(impl), JList.from(args.asJava))
+          val stmt = if (impl.getReturnType.getKind == TypeKind.VOID) make.Exec(call) else make.Return(call)
+          val body = make.Block(0, JList.of[JCTree.JCStatement](stmt))
+          make.MethodDef(forwarder, body): MethodTree
+        }
+      case _ => s"launch callable `${impl.name}` has no source: write it as a lambda expression".fail
+    }
 
   private def specOf(environment: Option[Environment]): String =
     environment.fold("C0:") { e =>
@@ -507,7 +550,6 @@ object LaunchSites {
     } yield Offloader.Executable(fqcn, bytes)
   }
 
-  // a region is `polyregion.core.for_each(1, region)`; the result of a returning region travels in a cell the body fills
   def compileRegion(
       sources: TreeRemapper.Sources,
       config: LaunchConfig,

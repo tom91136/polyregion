@@ -1,5 +1,8 @@
 package polyregion.javalang
 
+import java.nio.file.{Files, Path}
+import scala.jdk.CollectionConverters.*
+
 class LaunchSiteSuite extends munit.FunSuite {
 
   private val runtimeClasses =
@@ -61,5 +64,149 @@ class LaunchSiteSuite extends munit.FunSuite {
                                 |""".stripMargin)
     assert(errors.contains("error: [PolyRegion] Cannot launch diag.Sites.Api.map"), errors)
     assert(errors.contains("a launch callable must be a lambda expression"), errors)
+  }
+
+  private val functional =
+    """    public interface Sum { int apply(int[] xs, int n); }
+      |""".stripMargin
+
+  test("a method reference naming an interface stub is a compile error naming the stub") {
+    val errors = diagnostics(s"""package diag;
+                                |
+                                |import polyregion.javalang.Interface;
+                                |
+                                |public class Sites {
+                                |$api
+                                |$functional
+                                |  public static int run(int[] xs) {
+                                |    Sum f = Api::sum;
+                                |    return f.apply(xs, 3);
+                                |  }
+                                |}
+                                |""".stripMargin)
+    assert(errors.contains("error: [PolyRegion] Cannot launch diag.Sites.Api.sum"), errors)
+    assert(errors.contains("cannot be referenced as a method"), errors)
+  }
+
+  test("a method reference naming an interface stub inside an offload region is a compile error") {
+    val errors = diagnostics(s"""package diag;
+                                |
+                                |import polyregion.javalang.Interface;
+                                |import polyregion.javalang.Runtime;
+                                |
+                                |public class Sites {
+                                |$api
+                                |$functional
+                                |  public static int run() {
+                                |    int[] xs = {1, 2, 3};
+                                |    return Runtime.offload(() -> {
+                                |      Sum f = Api::sum;
+                                |      return f.apply(xs, 3);
+                                |    });
+                                |  }
+                                |}
+                                |""".stripMargin)
+    assert(errors.contains("error: [PolyRegion] Cannot offload"), errors)
+    assert(
+      errors.contains("`diag.Sites.Api.sum` launches `demo:demo.sum` and cannot be called inside an offload region"),
+      errors
+    )
+  }
+
+  test("a launch callable that binds a receiver is a compile error naming the call") {
+    val errors = diagnostics(s"""package diag;
+                                |
+                                |import polyregion.javalang.Interface;
+                                |
+                                |public class Sites {
+                                |$api
+                                |  int add(int x) { return x + 1; }
+                                |
+                                |  public void run(int[] xs) {
+                                |    Api.map(xs, this::add);
+                                |  }
+                                |}
+                                |""".stripMargin)
+    assert(errors.contains("error: [PolyRegion] Cannot launch diag.Sites.Api.map"), errors)
+    assert(errors.contains("cannot bind a receiver"), errors)
+  }
+
+  test("a failure to find launch sites is a compile error") {
+    val failing = Processor(_ => throw RuntimeException("scan failed"))
+    val errors =
+      try {
+        JavaInMemory.compile(
+          "diag.Sites",
+          """package diag;
+            |
+            |public class Sites {
+            |  public static int run() { return 1; }
+            |}
+            |""".stripMargin,
+          Options,
+          List(failing)
+        )
+        ""
+      } catch { case e: RuntimeException => e.getMessage }
+    assert(errors.contains("error: [PolyRegion] Cannot find launch sites in diag.Sites"), errors)
+    assert(errors.contains("scan failed"), errors)
+  }
+
+  test("an interface call reached through a class-file helper inside an offload region is a compile error") {
+    val dir = Files.createTempDirectory("launch-sites")
+    try {
+      JavaInMemory
+        .compile(
+          "lib.Lib",
+          """package lib;
+            |
+            |import polyregion.javalang.Interface;
+            |
+            |public class Lib {
+            |  public static class Api {
+            |    @Interface("demo:demo.sum")
+            |    public static int sum(int[] xs, int n) { throw new UnsupportedOperationException(); }
+            |  }
+            |
+            |  public static class Helper {
+            |    public static int total(int[] xs) { return Api.sum(xs, xs.length); }
+            |  }
+            |}
+            |""".stripMargin,
+          Options
+        )
+        .classes
+        .foreach { (name, bytes) =>
+          val file = dir.resolve(name.replace('.', '/') + ".class")
+          Files.createDirectories(file.getParent)
+          Files.write(file, bytes)
+        }
+      val withLibrary = List("-g", "-classpath", s"$runtimeClasses${java.io.File.pathSeparator}$dir") ++
+        Option.when(java.lang.Runtime.version.feature >= 21)("-proc:full")
+      val errors =
+        try {
+          JavaInMemory.compile(
+            "diag.Sites",
+            """package diag;
+              |
+              |import polyregion.javalang.Runtime;
+              |
+              |public class Sites {
+              |  public static int run() {
+              |    int[] xs = {1, 2, 3};
+              |    return Runtime.offload(() -> lib.Lib.Helper.total(xs));
+              |  }
+              |}
+              |""".stripMargin,
+            withLibrary,
+            List(Processor())
+          )
+          ""
+        } catch { case e: RuntimeException => e.getMessage }
+      assert(
+        errors.contains("`lib.Lib.Api.sum` launches `demo:demo.sum` and cannot be called inside an offload region"),
+        errors
+      )
+    } finally Files.walk(dir).sorted(java.util.Comparator.reverseOrder[Path]).toList.asScala.foreach(Files.delete(_))
   }
 }

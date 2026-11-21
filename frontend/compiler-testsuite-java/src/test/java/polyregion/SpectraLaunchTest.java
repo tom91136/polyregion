@@ -8,6 +8,7 @@ import static polyregion.javalang.Runtime.offload;
 
 import java.util.Arrays;
 import java.util.Random;
+import java.util.function.IntSupplier;
 import org.junit.Test;
 import polyregion.jvm.runtime.Context;
 import polyregion.javalang.OffloadFunction;
@@ -15,6 +16,40 @@ import polyregion.javalang.OffloadFunction;
 public class SpectraLaunchTest {
 
   private static final int N = 4096;
+
+  private static final int[] FIELD_DATA = ints(30);
+
+  private static final int FIELD_TOTAL = Spectra.reduce(FIELD_DATA, N, 0, (a, b) -> a + b);
+
+  private static final int[] FIELD_SORTED;
+
+  static {
+    FIELD_SORTED = FIELD_DATA.clone();
+    Spectra.sort(FIELD_SORTED, N, (a, b) -> a < b);
+  }
+
+  private final int[] instanceData = ints(31);
+
+  private final int instanceTotal = Spectra.reduce(instanceData, N, 0, (a, b) -> a + b);
+
+  private final int[] instanceSorted;
+
+  {
+    instanceSorted = instanceData.clone();
+    Spectra.sort(instanceSorted, N, (a, b) -> a < b);
+  }
+
+  private static int sum(int[] xs) {
+    int total = 0;
+    for (int x : xs) total += x;
+    return total;
+  }
+
+  private static int[] sorted(int[] xs) {
+    int[] copy = xs.clone();
+    Arrays.sort(copy);
+    return copy;
+  }
 
   private static int[] ints(long seed) {
     Random random = new Random(seed);
@@ -183,6 +218,123 @@ public class SpectraLaunchTest {
       Spectra.sort(xs, N, (a, b) -> a < b);
       assertArrayEquals(expected, xs);
     }
+  }
+
+  @Test
+  public void staticInitialisersLaunch() {
+    assertEquals(sum(FIELD_DATA), FIELD_TOTAL);
+    assertArrayEquals(sorted(FIELD_DATA), FIELD_SORTED);
+  }
+
+  @Test
+  public void instanceInitialisersLaunch() {
+    assertEquals(sum(instanceData), instanceTotal);
+    assertArrayEquals(sorted(instanceData), instanceSorted);
+  }
+
+  static final class MemberClass {
+    static final int[] DATA = ints(32);
+    static final int TOTAL = Spectra.reduce(DATA, N, 0, (a, b) -> a + b);
+
+    static int total(int[] xs) {
+      return Spectra.reduce(xs, N, 0, (a, b) -> a + b);
+    }
+  }
+
+  final class InnerClass {
+    final int[] data = ints(33);
+    final int total = Spectra.reduce(data, N, 0, (a, b) -> a + b);
+
+    int totalOf(int[] xs) {
+      return Spectra.reduce(xs, N, 0, (a, b) -> a + b);
+    }
+  }
+
+  @Test
+  public void memberClassesLaunch() {
+    assertEquals(sum(MemberClass.DATA), MemberClass.TOTAL);
+    assertEquals(sum(ints(34)), MemberClass.total(ints(34)));
+  }
+
+  @Test
+  public void innerClassesLaunch() {
+    InnerClass inner = new InnerClass();
+    assertEquals(sum(inner.data), inner.total);
+    assertEquals(sum(ints(35)), inner.totalOf(ints(35)));
+  }
+
+  @Test
+  public void anonymousClassesLaunch() {
+    int[] xs = ints(36);
+    IntSupplier supplier =
+        new IntSupplier() {
+          @Override
+          public int getAsInt() {
+            return Spectra.reduce(xs, N, 0, (a, b) -> a + b);
+          }
+        };
+    assertEquals(sum(xs), supplier.getAsInt());
+  }
+
+  @Test
+  public void localClassesLaunch() {
+    int[] xs = ints(37);
+    class Local {
+      int total() {
+        return Spectra.reduce(xs, N, 0, (a, b) -> a + b);
+      }
+    }
+    assertEquals(sum(xs), new Local().total());
+  }
+
+  @Test
+  public void liftedLambdasLaunch() {
+    int[] xs = ints(38);
+    IntSupplier supplier = () -> Spectra.reduce(xs, N, 0, (a, b) -> a + b);
+    assertEquals(sum(xs), supplier.getAsInt());
+  }
+
+  private static boolean onGpu() {
+    return System.getProperty("polyregion.platform", "").equalsIgnoreCase("cuda");
+  }
+
+  @Test
+  public void copyNeedsNoCallable() {
+    int[] in = ints(39);
+    int[] out = new int[N];
+    long before = Context.current().stats().launches;
+    Spectra.copy(in, N, out);
+    assertArrayEquals(in, out);
+    if (onGpu())
+      assertTrue("the copy ran no kernel", Context.current().stats().launches - before > 0);
+  }
+
+  @Test
+  public void fillNeedsNoCallable() {
+    int[] out = new int[N];
+    long before = Context.current().stats().launches;
+    Spectra.fill(out, N, 7);
+    int[] expected = new int[N];
+    Arrays.fill(expected, 7);
+    assertArrayEquals(expected, out);
+    if (onGpu())
+      assertTrue("the fill ran no kernel", Context.current().stats().launches - before > 0);
+  }
+
+  @Test
+  public void aStaticMethodReferenceIsACallable() {
+    int[] xs = ints(40);
+    assertEquals(sum(xs), Spectra.reduce(xs, N, 0, Integer::sum));
+  }
+
+  private static int plus(int a, int b) {
+    return a + b;
+  }
+
+  @Test
+  public void aStaticMethodReferenceToASourceMethodIsACallable() {
+    int[] xs = ints(41);
+    assertEquals(sum(xs), Spectra.reduce(xs, N, 0, SpectraLaunchTest::plus));
   }
 
   private static void assertRejectedInRegion(String call, OffloadFunction<Integer> region) {

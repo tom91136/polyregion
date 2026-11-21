@@ -102,7 +102,9 @@ object Processor {
   }
 }
 
-class Processor extends AbstractProcessor {
+class Processor(scan: Tree => LaunchSites.Collected) extends AbstractProcessor {
+  def this() = this(LaunchSites.collect)
+
   import polyregion.ast.Env.debug
 
   private val symbolTable = mutable.Map.empty[String, TypeElement]
@@ -188,7 +190,12 @@ class Processor extends AbstractProcessor {
       else processingEnv.getMessager.printMessage(Diagnostic.Kind.WARNING, reason)
     }
 
-    private def emit(fqcn: String, label: String, compiled: Result[Offloader.Executable]): Unit = {
+    private def emit(
+        fqcn: String,
+        label: String,
+        compiled: Result[Offloader.Executable],
+        parent: Class[? <: AnyRef] = classOf[BinaryOffloadExecutable]
+    ): Unit = {
       val at  = fqcn.lastIndexOf('.')
       val pkg = fqcn.take(at)
       val nm  = fqcn.drop(at + 1)
@@ -196,7 +203,7 @@ class Processor extends AbstractProcessor {
         case Left(failure) =>
           report(label, failure)
           if (deferErrors)
-            Offloader.unsupported(fqcn, s"[PolyRegion] Cannot $label: ${failure.getMessage}") match {
+            Offloader.unsupported(fqcn, s"[PolyRegion] Cannot $label: ${failure.getMessage}", parent) match {
               case Right(stub) =>
                 writeClass(processingEnv, pkg, nm, stub.bytes)
                 generated += fqcn
@@ -274,21 +281,39 @@ class Processor extends AbstractProcessor {
           }
 
           val regionImpls = xs.flatMap { case (_, m: JCTree.JCMethodDecl) => Option(m.sym).toList; case _ => Nil }.toSet
-          val sites       = guard(Either.catchNonFatal(LaunchSites.collect(scope))).getOrElse(Nil)
-          val nested      = sites.flatMap(LaunchSites.callables).toSet
-          sites.filterNot(site => site.within.exists(w => regionImpls(w) || nested(w))).foreach { site =>
-            val label = s"launch ${site.stub.owner}.${site.stub.name}"
-            guard(LaunchSites.nameOf(site)) match {
-              case Left(failure)                           => report(label, failure)
-              case Right(fqcn) if generated.contains(fqcn) => debug(s"Skip already generated $fqcn")
-              case Right(fqcn) =>
-                debug(s"Write $fqcn")
-                emit(
-                  fqcn,
-                  label,
-                  guard(launchConfig.leftMap(CompilerException(_)).flatMap(LaunchSites.compile(sources, _, site, fqcn)))
+          guard(Either.catchNonFatal(scan(scope))) match {
+            case Left(failure) => report(s"find launch sites in ${e.getTypeElement}", failure)
+            case Right(collected) =>
+              val nested                                    = collected.sites.flatMap(LaunchSites.callables).toSet
+              def hostSide(site: LaunchSites.Site): Boolean = !site.within.exists(w => regionImpls(w) || nested(w))
+
+              collected.references.filter(hostSide(_)).foreach { reference =>
+                report(
+                  s"launch ${reference.stub.owner}.${reference.stub.name}",
+                  CompilerException(
+                    s"`${reference.stub.owner}.${reference.stub.name}` launches `${reference.identity}` " +
+                      "and cannot be referenced as a method, call it"
+                  )
                 )
-            }
+              }
+
+              collected.sites.filter(hostSide(_)).foreach { site =>
+                val label = s"launch ${site.stub.owner}.${site.stub.name}"
+                guard(LaunchSites.nameOf(site)) match {
+                  case Left(failure)                           => report(label, failure)
+                  case Right(fqcn) if generated.contains(fqcn) => debug(s"Skip already generated $fqcn")
+                  case Right(fqcn) =>
+                    debug(s"Write $fqcn")
+                    emit(
+                      fqcn,
+                      label,
+                      guard(
+                        launchConfig.leftMap(CompilerException(_)).flatMap(LaunchSites.compile(sources, _, site, fqcn))
+                      ),
+                      classOf[LaunchSite]
+                    )
+                }
+              }
           }
 
         case _ =>

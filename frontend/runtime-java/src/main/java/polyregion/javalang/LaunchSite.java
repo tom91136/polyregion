@@ -9,10 +9,8 @@ public abstract class LaunchSite {
 
   public static final String PACKAGE = "polyregion.$gen$";
 
-  // `<entry>|<result>|<arguments>`, see LaunchSites.descriptorOf
   public abstract String descriptor();
 
-  // the compiled groups, see LaunchSites.encodeGroups
   public abstract byte[] binary();
 
   public static String nameOf(String identity, List<String> parts) {

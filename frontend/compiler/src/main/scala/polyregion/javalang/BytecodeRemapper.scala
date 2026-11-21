@@ -157,6 +157,15 @@ object BytecodeRemapper {
 
     def accessOf(method: MethodRef): Result[(Int, Option[Int])] = ClassLayouts.accessOf(method, bytesOf)
 
+    def refuseStub(callee: MethodRef): Result[Unit] =
+      if (ClassLayouts.isPlatform(callee.owner.replace('.', '/'))) ().success
+      else
+        ClassLayouts.stubOf(callee, bytesOf).toOption.flatten.traverse_ { identity =>
+          ClassLayouts
+            .structName(callee.owner, bytesOf)
+            .flatMap(owner => InterfaceStub.refusal(s"$owner.${callee.name}", identity).fail)
+        }
+
     def commonAncestor(a: String, b: String): Result[Option[String]] = ClassLayouts.commonAncestor(a, b, bytesOf)
 
     def stateOf(internal: String): Result[Option[String]] = ClassLayouts.carriedState(internal, bytesOf)
@@ -281,6 +290,7 @@ object BytecodeRemapper {
     private def callStatic(callee: MethodRef, args: List[p.Term], buf: mutable.ListBuffer[p.Stmt]): Result[p.Term] = {
       val md = MethodDescriptor.parseDescriptor(callee.desc)
       for {
+        _      <- classes.refuseStub(callee)
         rtn    <- classes.returned(md.ret, callee.repr)
         params <- md.params.toList.traverse(classes.typeOf(_))
         lowered = args.zip(params).map((a, t) => coerce(buf, a, t))
@@ -386,11 +396,14 @@ object BytecodeRemapper {
     private def invoke(i: InvocationExprent, buf: mutable.ListBuffer[p.Stmt]): Result[p.Term] =
       if (i.getFunctype == InvocationExprent.Type.INIT) delegate(i, buf)
       else if (i.getInvocationType == InvocationExprent.InvocationType.DYNAMIC) dynamic(i)
-      else if (i.getInvocationType == InvocationExprent.InvocationType.STATIC)
-        i.getLstParameters.asScala.toList
-          .traverse(expr(_, buf))
-          .flatMap(callStatic(MethodRef(i.getClassname.replace('/', '.'), i.getName, i.getStringDescriptor), _, buf))
-      else
+      else if (i.getInvocationType == InvocationExprent.InvocationType.STATIC) {
+        val callee = MethodRef(i.getClassname.replace('/', '.'), i.getName, i.getStringDescriptor)
+        for {
+          _    <- classes.refuseStub(callee)
+          args <- i.getLstParameters.asScala.toList.traverse(expr(_, buf))
+          call <- callStatic(callee, args, buf)
+        } yield call
+      } else
         Option(i.getInstance).flatMap(closureOf(_, buf)) match {
           case Some(c) => c.flatMap(callClosure(_, i, buf))
           case None =>

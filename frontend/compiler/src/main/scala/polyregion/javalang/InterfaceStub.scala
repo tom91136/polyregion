@@ -8,6 +8,11 @@ object InterfaceStub {
 
   final val Annotation = "polyregion.javalang.Interface"
 
+  final val Descriptor: String = s"L${Annotation.replace('.', '/')};"
+
+  def refusal(callee: String, identity: String): String =
+    s"`$callee` launches `$identity` and cannot be called inside an offload region"
+
   def identityOf(sym: JSymbol): Option[String] =
     sym.getAnnotationMirrors.asScala.collectFirst {
       case annotation if annotation.getAnnotationType.toString == Annotation =>
