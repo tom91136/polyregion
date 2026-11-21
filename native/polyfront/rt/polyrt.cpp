@@ -451,7 +451,8 @@ template <class Fn> bool runtimeStatus(const char *operation, Fn &&fn) noexcept 
 } // namespace
 
 namespace {
-PolyrtStats snapshotStats(const polyregion::polyrt::ExecutionContext &execution) {
+PolyrtStats snapshotStats(polyregion::polyrt::ExecutionContext &execution) {
+  const std::scoped_lock lock(execution.transaction);
   const auto &counters = execution.counters;
   const auto &heap = execution.heapCounters;
   return {.launches = counters.launches.load(),
@@ -464,7 +465,8 @@ PolyrtStats snapshotStats(const polyregion::polyrt::ExecutionContext &execution)
           .remoteMallocs = counters.remoteMallocs.load(),
           .heapBytesLive = heap.live.load(),
           .heapBytesCommitted = heap.committed.load(),
-          .heapGrowths = heap.growths.load()};
+          .heapGrowths = heap.growths.load(),
+          .remoteAllocationsLive = execution.remoteAllocations.size()};
 }
 } // namespace
 
@@ -510,7 +512,7 @@ void polyregion::polyrt::copyToHost(DeviceQueue &queue, const uintptr_t src, con
 
 POLYREGION_EXPORT extern "C" bool polyrt_stats(void *context, PolyrtStats *stats) noexcept {
   if (!context || !stats) return false;
-  const auto *execution = resolveContext(context);
+  auto *execution = resolveContext(context);
   if (!execution) return false;
   *stats = snapshotStats(*execution);
   return true;
@@ -729,28 +731,38 @@ POLYREGION_EXPORT extern "C" bool polyrt_context_acquire(void *context) noexcept
     try {
       retryPendingCleanups(execution);
       execution.temporaryAllocationScopes.emplace_back();
+      execution.ownedAllocationScopes.emplace_back();
       activeTransactions.emplace_back(&execution);
     } catch (...) {
       while (execution.temporaryAllocationScopes.size() > depth)
         execution.temporaryAllocationScopes.pop_back();
+      while (execution.ownedAllocationScopes.size() > depth)
+        execution.ownedAllocationScopes.pop_back();
       execution.transaction.unlock();
       throw;
     }
   });
 }
 
-POLYREGION_EXPORT extern "C" bool polyrt_context_release(void *context) noexcept {
-  return runtimeStatus(__func__, [&] {
-    auto &execution = requireContext(context, __func__);
+static bool releaseTransaction(void *context, const bool failed, const char *operation) noexcept {
+  return runtimeStatus(operation, [&] {
+    auto &execution = requireContext(context, operation);
     const auto holder = std::find(activeTransactions.rbegin(), activeTransactions.rend(), &execution);
     if (holder == activeTransactions.rend()) throw std::logic_error("polyrt_context_release: no matching acquire on this thread");
     activeTransactions.erase(std::next(holder).base());
     const std::unique_lock transaction(execution.transaction, std::adopt_lock);
     const auto refused = std::exchange(foreignMarshalAttempted, false);
-    const auto temporaries = std::move(execution.temporaryAllocationScopes.back());
+    auto released = std::move(execution.temporaryAllocationScopes.back());
     execution.temporaryAllocationScopes.pop_back();
+    auto owned = std::move(execution.ownedAllocationScopes.back());
+    execution.ownedAllocationScopes.pop_back();
+    if (failed) released.insert(released.end(), owned.begin(), owned.end());
+    else if (!execution.ownedAllocationScopes.empty()) {
+      auto &parent = execution.ownedAllocationScopes.back();
+      parent.insert(parent.end(), owned.begin(), owned.end());
+    }
     std::exception_ptr failure;
-    for (const auto pointer : temporaries) {
+    for (const auto pointer : released) {
       const auto allocation = execution.remoteAllocations.find(pointer);
       if (allocation == execution.remoteAllocations.end()) continue;
       allocation->second.cleanupPending = true;
@@ -765,6 +777,12 @@ POLYREGION_EXPORT extern "C" bool polyrt_context_release(void *context) noexcept
     if (failure) std::rethrow_exception(failure);
     if (refused) throw std::runtime_error(foreignMarshalMessage);
   });
+}
+
+POLYREGION_EXPORT extern "C" bool polyrt_context_release(void *context) noexcept { return releaseTransaction(context, false, __func__); }
+
+POLYREGION_EXPORT extern "C" bool polyrt_context_release_failed(void *context) noexcept {
+  return releaseTransaction(context, true, __func__);
 }
 
 POLYREGION_EXPORT extern "C" const char *polyrt_error_message() noexcept { return runtimeErrorMessage; }
@@ -924,6 +942,8 @@ static void remoteFree(void *context, const uintptr_t ptr) {
   releaseRemote(execution, ptr);
   execution.remoteAllocations.erase(ptr);
   forgetTemporaryAllocation(execution, ptr);
+  for (auto &scope : execution.ownedAllocationScopes)
+    std::erase(scope, ptr);
 }
 
 static bool enqueueRemoteMemcpy(void *context, const uintptr_t dst, const uintptr_t src, const size_t bytes, const int32_t direction,
@@ -1345,7 +1365,12 @@ POLYREGION_EXPORT extern "C" bool polyrt_remote_malloc(void *context, const size
   if (result) *result = 0;
   return runtimeStatus(__func__, [&] {
     if (!result) throw std::invalid_argument("null result pointer");
+    auto &execution = requireContext(context, __func__);
+    const std::scoped_lock lock(execution.transaction);
+    if (!execution.ownedAllocationScopes.empty())
+      execution.ownedAllocationScopes.back().reserve(execution.ownedAllocationScopes.back().size() + 1);
     *result = remoteMalloc(context, bytes);
+    if (*result != 0 && !execution.ownedAllocationScopes.empty()) execution.ownedAllocationScopes.back().emplace_back(*result);
   });
 }
 

@@ -14,12 +14,18 @@ object RefusalProbe {
     val ctx    = rt.Context.create(device)
     try {
       val data = ByteBuffer.allocate(8).order(ByteOrder.nativeOrder).putLong(0x1000L).array
+      val held = ctx.stats().remoteAllocations
       try {
         ctx.callHost(Array.empty, "refuse@host", "refuse", Array(rt.Type.PTR.value), data)
         println("no exception")
       } catch {
         case e: rt.PolyregionRuntimeException => println(s"raised: ${e.getMessage}")
       }
+      (1 to 2).foreach { _ =>
+        try ctx.callHost(Array.empty, "refuse@host", "refuse", Array(rt.Type.PTR.value), data)
+        catch { case _: rt.PolyregionRuntimeException => }
+      }
+      println(s"owned: remoteAllocations=${ctx.stats().remoteAllocations - held}")
       val before = ctx.stats().remoteMallocs
       ctx.callHost(Array.empty, "usable@host", "usable", Array.empty, Array.empty)
       println(s"usable: remoteMallocs=${ctx.stats().remoteMallocs - before}")

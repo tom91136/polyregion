@@ -100,13 +100,14 @@ public final class Context implements AutoCloseable {
   }
 
   public static final class Stats {
-    public final long launches, hostToDevice, deviceToHost, remoteMallocs;
+    public final long launches, hostToDevice, deviceToHost, remoteMallocs, remoteAllocations;
 
-    Stats(long launches, long hostToDevice, long deviceToHost, long remoteMallocs) {
+    Stats(long launches, long hostToDevice, long deviceToHost, long remoteMallocs, long remoteAllocations) {
       this.launches = launches;
       this.hostToDevice = hostToDevice;
       this.deviceToHost = deviceToHost;
       this.remoteMallocs = remoteMallocs;
+      this.remoteAllocations = remoteAllocations;
     }
   }
 
@@ -303,7 +304,7 @@ public final class Context implements AutoCloseable {
   public Stats stats() {
     requireOpen();
     long[] values = stats0(handle);
-    return new Stats(values[0], values[1], values[2], values[3]);
+    return new Stats(values[0], values[1], values[2], values[3], values[4]);
   }
 
   public int select(ModuleImage[] images) {

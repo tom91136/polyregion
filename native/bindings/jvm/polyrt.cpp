@@ -176,9 +176,10 @@ struct Transaction {
   void end() {
     if (const auto ended = std::exchange(context, nullptr); ended) check(polyrt_context_release(ended));
   }
-  ~Transaction() {
-    if (context) polyrt_context_release(context);
+  void fail() {
+    if (const auto ended = std::exchange(context, nullptr); ended) polyrt_context_release_failed(ended);
   }
+  ~Transaction() { fail(); }
 };
 
 struct HostFailures {
@@ -434,9 +435,9 @@ jlongArray Context::stats0(JNIEnv *env, jclass, jlong context) {
     PolyrtStats stats{};
     check(polyrt_stats(toHandle(context), &stats));
     const jlong values[] = {static_cast<jlong>(stats.launches), static_cast<jlong>(stats.h2dCopies), static_cast<jlong>(stats.d2hCopies),
-                            static_cast<jlong>(stats.remoteMallocs)};
-    auto *array = env->NewLongArray(4);
-    env->SetLongArrayRegion(array, 0, 4, values);
+                            static_cast<jlong>(stats.remoteMallocs), static_cast<jlong>(stats.remoteAllocationsLive)};
+    auto *array = env->NewLongArray(5);
+    env->SetLongArrayRegion(array, 0, 5, values);
     return array;
   });
 }
@@ -534,7 +535,8 @@ void Context::callHost0(JNIEnv *env, jclass, jlong context,                     
     const HostFailures raising;
     if (!host.queue->invokeEntryBlocking(program, symbol, types, std::move(bytes)))
       throw std::runtime_error("Host program `" + program + "` has no entry `" + symbol + "`");
-    transaction.end();
+    if (raisedAssert.raised) transaction.fail();
+    else transaction.end();
     raiseAssert(env);
   });
 }

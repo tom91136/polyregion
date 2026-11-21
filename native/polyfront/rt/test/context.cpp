@@ -364,6 +364,35 @@ TEST_CASE("a recorded mirror refusal is left to the release when host failures a
   CHECK(polyrt_context_release(created.context));
 }
 
+TEST_CASE("a failed transaction releases the allocations its program still owns") {
+  const auto host = find(RelocatableBackend);
+  REQUIRE(host);
+  Created created(host);
+  const auto live = [&] {
+    PolyrtStats stats{};
+    REQUIRE(polyrt_stats(created.context, &stats));
+    return stats.remoteAllocationsLive;
+  };
+  REQUIRE(live() == 0);
+  for (int run = 0; run < 3; ++run) {
+    REQUIRE(polyrt_context_acquire(created.context));
+    uintptr_t kept = 0, freed = 0;
+    REQUIRE(polyrt_remote_malloc(created.context, 64, &kept));
+    REQUIRE(polyrt_remote_malloc(created.context, 64, &freed));
+    REQUIRE(polyrt_remote_free(created.context, freed));
+    CHECK(live() == 1);
+    CHECK(polyrt_context_release_failed(created.context));
+    CHECK(live() == 0);
+  }
+  REQUIRE(polyrt_context_acquire(created.context));
+  uintptr_t returned = 0;
+  REQUIRE(polyrt_remote_malloc(created.context, 64, &returned));
+  CHECK(polyrt_context_release(created.context));
+  CHECK(live() == 1);
+  CHECK(polyrt_remote_free(created.context, returned));
+  CHECK(live() == 0);
+}
+
 TEST_CASE("destroying a context that was not created reports an error") {
   CHECK_FALSE(polyrt_context_destroy(nullptr));
   CHECK_FALSE(lastError().empty());

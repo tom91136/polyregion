@@ -213,7 +213,12 @@ class ContextSuite extends munit.FunSuite {
 
   private def hostPointerLaunch: p.Program = {
     val (ctx, buf) = (p.Named("ctx", p.Spec.ContextType), p.Named("buf", PtrTpe))
-    hostProgram("refuse", List(ctx, buf), List(emptyLaunch(ctx, List(p.Term.Select(buf, Nil, buf.tpe)))))
+    val owned      = p.Named("owned", p.Spec.ContextType)
+    val allocation = p.Stmt.Var(
+      owned,
+      Some(p.Expr.SpecOp(p.Spec.RemoteAlloc(p.Term.Select(ctx, Nil, ctx.tpe), p.Term.IntU64Const(64))))
+    )
+    hostProgram("refuse", List(ctx, buf), List(allocation, emptyLaunch(ctx, List(p.Term.Select(buf, Nil, buf.tpe)))))
   }
 
   private def refusal(program: p.Program): String = {
@@ -638,5 +643,6 @@ class ContextSuite extends munit.FunSuite {
     val output = refusal(hostPointerLaunch)
     assert(output.contains("raised: ") && output.contains("created context cannot marshal"), output)
     assert(output.contains("usable: remoteMallocs=1"), output)
+    assert(output.contains("owned: remoteAllocations=0"), output)
   }
 }

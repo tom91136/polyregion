@@ -53,6 +53,7 @@ struct ExecutionContext {
   };
   std::map<uintptr_t, RemoteAllocation> remoteAllocations;
   std::vector<std::vector<uintptr_t>> temporaryAllocationScopes;
+  std::vector<std::vector<uintptr_t>> ownedAllocationScopes;
   std::vector<uintptr_t> errorBlocks;
   bool processMarshal = true;
 
@@ -140,6 +141,7 @@ extern "C" {
 struct PolyrtStats {
   uint64_t launches, arenaLaunches, arenaWindowMoves, d2dCopies, h2dCopies, d2hCopies, waits, remoteMallocs;
   uint64_t heapBytesLive, heapBytesCommitted, heapGrowths;
+  uint64_t remoteAllocationsLive;
 };
 
 // names are truncated to the array size
@@ -179,6 +181,7 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_context_available(void *cont
 // True means success. A failed status call leaves a thread-local diagnostic until the next status call on that thread.
 POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_context_acquire(void *context) noexcept;
 POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_context_release(void *context) noexcept;
+POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_context_release_failed(void *context) noexcept;
 POLYREGION_RT_PROTECT POLYREGION_EXPORT const char *polyrt_error_message() noexcept;
 [[noreturn]] POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_abort() noexcept;
 POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_remote_failed() noexcept;
