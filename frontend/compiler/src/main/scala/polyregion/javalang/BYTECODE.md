@@ -283,6 +283,46 @@ the deviation listed under "Supported subset" rather than a lowering bug, and it
 ordinary library code rather than only from a deliberately hostile fixture. The infinities are kept out
 of the generated pool for that reason; `NaN` agrees and stays in.
 
+## What the stdlib targets need
+
+`BytecodeOpcodeCensusSuite` reads the opcodes of every non-abstract, non-native method and reports, per corpus, how
+many methods use each construct and how many need at most a given set of them. It counts constructs, not signatures,
+so a method counted under "static calls only" can still take an object parameter. The corpora are the JDK classes the
+plan names as targets (`Math`, `Integer`, `Arrays`, `ArrayList`, `Optional`, `BitSet`, the stream plumbing), the
+matching Scala classes (`RichInt`, `Range`, `Tuple2`, `Option`), a seeded 600-class sample of `scala-library`, and
+the same sample of guava.
+
+| Methods whose body needs at most | JDK targets (957) | Scala targets (664) | scala-library (7158) | guava (5154) |
+| --- | --- | --- | --- | --- |
+| static calls | 46.1% | 31.5% | 25.1% | 9.4% |
+| + instance fields | 52.7% | 33.1% | 30.7% | 16.8% |
+| + static fields | 55.0% | 33.3% | 32.1% | 18.8% |
+| + allocation (`new`, constructors, arrays) | 63.1% | 41.6% | 44.0% | 39.2% |
+| + `LambdaMetafactory` | 63.1% | 41.6% | 44.6% | 39.9% |
+| + virtual, interface and special calls | 88.6% | 94.1% | 92.2% | 87.9% |
+
+The rest of each column is `throw`, `switch`, `try`, `synchronized` and `instanceof`, which are refused by name.
+
+Per construct, as a share of all methods (JDK targets, Scala targets):
+
+- `getfield` 17.7%, 3.9%; `putfield` 5.3%, 0.9%. Reads outnumber writes three to one, so read-only objects are the
+  common case.
+- `getstatic` 10.7%, 31.0%; `putstatic` 1.4%, 0.3%.
+- `new` 17.8%, 9.9%; `newarray` 5.0%, 0.6%; `multianewarray` 0% in both and 1 method in guava.
+- `invokedynamic`: `LambdaMetafactory` 1.5%, 0.8%; `StringConcatFactory` 0%, 1.2% (the JDK is built with inline
+  concatenation); every other bootstrap 0%, 0.5%.
+- `invokevirtual` 26.8%, 55.3%; `invokeinterface` 6.9%, 3.8%; `invokespecial` of a constructor 20.2%, 11.3%.
+
+What follows from it:
+
+- Fields add 2 to 7 points and allocation another 8 to 20. Neither moves the total far, because most stdlib
+  methods also call through a receiver.
+- Virtual and interface calls are worth 25 to 53 points on their own. Fields, allocation and lambdas are the
+  prerequisites that make a receiver usable, not the payoff.
+- Lambdas matter for the Scala targets and guava (1.8% of guava methods) and almost not at all for the JDK
+  targets.
+- String concatenation is refused everywhere because the device has no `String`.
+
 ## Not yet built
 
 Nothing new is needed downstream. `BytecodeRemapper.lower` produces a `PolyAST.Function`, and
