@@ -79,17 +79,6 @@ if(NOT SPECTRA_VENDOR_ONLY)
     endif()
     _spectra_target_location(_spectra_polytest Polyregion::polytest)
 
-    list(JOIN Polyregion_RUNTIME_LIBRARY_DIRS ":" _spectra_runtime_library_path)
-    if(APPLE)
-      set(_spectra_tool_library_env
-          "DYLD_FALLBACK_LIBRARY_PATH=${_spectra_runtime_library_path}:$ENV{DYLD_FALLBACK_LIBRARY_PATH}")
-    elseif(UNIX)
-      set(_spectra_tool_library_env
-          "LD_LIBRARY_PATH=${_spectra_runtime_library_path}:$ENV{LD_LIBRARY_PATH}")
-    else()
-      set(_spectra_tool_library_env "")
-    endif()
-
     set(_spectra_suite "${CMAKE_CURRENT_BINARY_DIR}/spectra.suite.env")
     set(_spectra_suite_profile "")
     if(SPECTRA_TEST_PROFILE)
@@ -630,7 +619,7 @@ if(NOT SPECTRA_VENDOR_ONLY AND SPECTRA_ENABLE_PACKAGE)
           OUTPUT "${_program}"
           BYPRODUCTS "${_base}.o"
           COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/fragments"
-          COMMAND ${CMAKE_COMMAND} -E env ${_spectra_tool_library_env} "POLYPASS_PLUGINS=${_spectra_polypass}"
+          COMMAND ${CMAKE_COMMAND} -E env "POLYPASS_PLUGINS=${_spectra_polypass}"
                   "${_spectra_polycpp}" --driver "${_spectra_clangxx}"
                   -std=c++17 -w -DNDEBUG ${_part_flags}
                   -I ${CMAKE_CURRENT_SOURCE_DIR}/include -I ${CMAKE_CURRENT_SOURCE_DIR}/src/implementation
@@ -644,7 +633,7 @@ if(NOT SPECTRA_VENDOR_ONLY AND SPECTRA_ENABLE_PACKAGE)
         set(_linked "${_base}.package.polyast")
         add_custom_command(
           OUTPUT "${_linked}"
-          COMMAND ${CMAKE_COMMAND} -E env ${_spectra_tool_library_env} "POLYPASS_PLUGINS=${_spectra_polypass}"
+          COMMAND ${CMAKE_COMMAND} -E env "POLYPASS_PLUGINS=${_spectra_polypass}"
                   "${_spectra_polyc}" package link-fragment "--capabilities=${_capability}"
                   "${_part_interface}"
                   ${_part_index} "${_program}" "${_linked}"
@@ -665,7 +654,7 @@ if(NOT SPECTRA_VENDOR_ONLY AND SPECTRA_ENABLE_PACKAGE)
     add_custom_command(
       OUTPUT "${_spectra_package}"
       COMMAND ${CMAKE_COMMAND} -E make_directory "${SPECTRA_PACKAGE_ROOT}"
-      COMMAND ${CMAKE_COMMAND} -E env ${_spectra_tool_library_env} "POLYPASS_PLUGINS=${_spectra_polypass}"
+      COMMAND ${CMAKE_COMMAND} -E env "POLYPASS_PLUGINS=${_spectra_polypass}"
               "${_spectra_polyc}" package pack
               "${_spectra_interface}"
               "${SPECTRA_PACKAGE_ROOT}" ${_spectra_linked_fragments}
@@ -678,7 +667,7 @@ if(NOT SPECTRA_VENDOR_ONLY AND SPECTRA_ENABLE_PACKAGE)
       add_custom_command(
         OUTPUT "${_spectra_core_package}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${SPECTRA_PACKAGE_ROOT}"
-        COMMAND ${CMAKE_COMMAND} -E env ${_spectra_tool_library_env} "POLYPASS_PLUGINS=${_spectra_polypass}"
+        COMMAND ${CMAKE_COMMAND} -E env "POLYPASS_PLUGINS=${_spectra_polypass}"
                 "${_spectra_polyc}" package pack
                 "${_spectra_core_interface}"
                 "${SPECTRA_PACKAGE_ROOT}" ${_spectra_core_fragments}
