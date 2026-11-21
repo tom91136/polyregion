@@ -1350,13 +1350,30 @@ object TreeRemapper {
       _ <- inlineCtor(scope, buf, ctor, tree, self, args)
     } yield selectExpr(Nil, self)
 
+  // an enum constant travels as its ordinal, so the state `Enum` declares never reaches a layout
+  private val EnumOrObject = Set("java.lang.Object", "java.lang.Enum")
+
+  private def superclassOf(deps: DepCollector, c: TypeElement): Result[Option[TypeElement]] =
+    Option(c.getSuperclass)
+      .flatMap(t => Option(deps.types.asElement(t)))
+      .collect { case s: TypeElement if !EnumOrObject(s.getQualifiedName.toString) => s }
+      .success
+
+  // the nearest class from `from` up whose instances carry fields a subclass layout would have to inherit
+  private def stateFrom(deps: DepCollector, from: TypeElement): Result[Option[TypeElement]] =
+    ClassLayouts.stateAlong(from)(c => JavaTyper.stateFields(c).nonEmpty.success)(superclassOf(deps, _))
+
+  private def stateAbove(deps: DepCollector, elem: TypeElement): Result[Option[TypeElement]] =
+    superclassOf(deps, elem).flatMap(_.fold(Option.empty[TypeElement].success)(stateFrom(deps, _)))
+
+  private def stateNames(c: TypeElement): String = JavaTyper.stateFields(c).map(_.getSimpleName).mkString(", ")
+
   private def superFieldsOf(scope: Scope, elem: JSymbol.ClassSymbol): Result[Unit] =
-    Option(elem.getSuperclass).map(scope.deps.types.asElement(_)).collect { case c: TypeElement => c } match {
-      case Some(sup) if JavaTyper.instanceFields(sup).nonEmpty =>
+    stateAbove(scope.deps, elem).flatMap {
+      case Some(sup) =>
         (s"Cannot allocate `${elem.flatName}`: its supertype `${sup.getQualifiedName}` carries instance " +
-          s"state (${JavaTyper.instanceFields(sup).map(_.getSimpleName).mkString(", ")}), " +
-          "which this layout has no room for").fail
-      case _ => ().success
+          s"state (${stateNames(sup)}), which this layout has no room for").fail
+      case None => ().success
     }
 
   private def inlineCtor(
@@ -1413,24 +1430,31 @@ object TreeRemapper {
     case declaring: JSymbol.ClassSymbol =>
       val owner    = within.getOrElse(declaring)
       val ownerTpe = deps.types.erasure(owner.asType)
-      deps.classTable.values.toList
-        .filter(c => c != owner && !c.getModifiers.contains(Modifier.ABSTRACT))
+      (deps.classTable.values.toList ++ deps.witnessed.toList)
+        .filter(c => !c.getModifiers.contains(Modifier.ABSTRACT))
         .filter(c => c.getKind == ElementKind.CLASS || c.getKind == ElementKind.ENUM || c.getKind == ElementKind.RECORD)
         .filter(c => deps.types.isSubtype(deps.types.erasure(c.asType), ownerTpe))
-        .filter(_.getQualifiedName.toString.nonEmpty)
-        .distinctBy(_.getQualifiedName.toString)
-        .sortBy(_.getQualifiedName.toString)
+        .distinctBy(JavaTyper.structName(_))
+        .sortBy(JavaTyper.structName(_))
         .traverse { c =>
-          c.getEnclosedElements.asScala.toList
-            .collectFirst {
-              case m: JSymbol.MethodSymbol
-                  if !m.getModifiers.contains(Modifier.ABSTRACT) && deps.elements.overrides(m, sym, c) =>
-                (c, m)
-            }
-            .failIfEmpty(
-              s"`${c.getQualifiedName}` is a candidate receiver of `${fullName(sym)}` but inherits its " +
-                "implementation rather than declaring one, which this lowering cannot dispatch to"
+          for {
+            above <- stateAbove(deps, c)
+            _ <- above.fold(().success)(s =>
+              (s"`${c.getQualifiedName}` is a candidate receiver of `${fullName(sym)}` but its superclass " +
+                s"`${s.getQualifiedName}` carries instance state (${stateNames(s)}), which its layout has no room for").fail
             )
+            impl <- c.getEnclosedElements.asScala.toList
+              .collectFirst {
+                case m: JSymbol.MethodSymbol
+                    if !m.getModifiers
+                      .contains(Modifier.ABSTRACT) && (m == sym || deps.elements.overrides(m, sym, c)) =>
+                  (c, m)
+              }
+              .failIfEmpty(
+                s"`${c.getQualifiedName}` is a candidate receiver of `${fullName(sym)}` but inherits its " +
+                  "implementation rather than declaring one, which this lowering cannot dispatch to"
+              )
+          } yield impl
         }
     case _ => s"Cannot resolve implementations of `${fullName(sym)}`: it is not owned by a class".fail
   }
@@ -1456,12 +1480,12 @@ object TreeRemapper {
         case c: JSymbol.ClassSymbol => Some(c)
         case _                      => None
       }).failIfEmpty(s"`${fullName(sym)}` is not owned by a class")
-      _ <-
-        if (JavaTyper.instanceFields(owner).isEmpty) ().success
-        else
-          (s"Cannot devirtualise `${fullName(sym)}`: `${owner.getSimpleName}` carries instance state " +
-            s"(${JavaTyper.instanceFields(owner).map(_.getSimpleName).mkString(", ")}), which the layout shared by " +
-            "its implementations has no room for").fail
+      _ <- stateFrom(scope.deps, owner).flatMap {
+        case None => ().success
+        case Some(c) =>
+          (s"Cannot devirtualise `${fullName(sym)}`: `${c.getSimpleName}` carries instance state " +
+            s"(${stateNames(c)}), which the layout shared by its implementations has no room for").fail
+      }
       ownerSym = p.Sym(JavaTyper.structName(owner))
       _        = scope.deps.dispatchClasses += owner
       _ = scope.deps.owners(ownerSym) =

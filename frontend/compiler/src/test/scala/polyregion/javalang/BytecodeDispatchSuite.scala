@@ -23,6 +23,10 @@ class BytecodeDispatchSuite extends munit.FunSuite {
       |  public static final class Leaf extends Base { }
       |  public static abstract class Stateful { int k; abstract int get(); }
       |  public static final class Impl extends Stateful { int get() { return k; } }
+      |  public static class Seed { int x; }
+      |  public static class Middle extends Seed { }
+      |  public static final class Bottom extends Middle { int get() { return x; } }
+      |  public final class Holder { int k; public class Inner { int m() { return k; } } }
       |  public static abstract class Template {
       |    abstract int part();
       |    final int whole() { return part() * 2; }
@@ -35,6 +39,8 @@ class BytecodeDispatchSuite extends munit.FunSuite {
       |  public static int stateful() { Stateful s = new Impl(); return s.get(); }
       |  public static int statefulBare(Stateful s) { return s.get(); }
       |  public static int templated() { Template t = new Half(); return t.whole(); }
+      |  public static int threeLevels() { return new Bottom().get(); }
+      |  public static int viaInner(Holder.Inner i) { return i.m(); }
       |  public static int viaStatic(int a) { return areaOf(a, a + 1) + areaOf(a + 1, a); }
       |}
       |""".stripMargin
@@ -126,6 +132,33 @@ class BytecodeDispatchSuite extends munit.FunSuite {
 
   test("an object whose superclass has state is refused where it is built") {
     assert(refusal("stateful").contains("declares instance state"))
+  }
+
+  test("state held anywhere on the superclass chain refuses the allocation") {
+    val message = refusal("threeLevels")
+    assert(message.contains("Unsupported allocation of `Disp$Bottom`"), message)
+    assert(message.contains("declares instance state"), message)
+  }
+
+  test("an owner whose only state is the outer instance of an inner class is refused") {
+    val sourced = (_: OpenSite) => List(Arm(p.Sym("Disp.Other"), p.Sym("Disp.Other.m"), Nil)).success
+    val r =
+      BytecodeResolver.resolve(List(MethodRef("Disp", "viaInner", descOf("viaInner"))), loaded.classes.get, sourced)
+    val message = r.left.map(_.getMessage).left.getOrElse(fail("expected a refusal"))
+    assert(message.contains("`Disp$Holder$Inner` carries instance state"), message)
+  }
+
+  test("a class both the source declares and the region builds is lowered from its source alone") {
+    val sourced = (site: OpenSite) =>
+      List(Arm(p.Sym("Disp.Square"), p.Sym("Disp.Square.area"), Nil)).filter(_ => site == Area).success
+    val r = BytecodeResolver
+      .resolve(List(MethodRef("Disp", "areaOf", descOf("areaOf"))), loaded.classes.get, sourced)
+      .fold(e => fail(e.getMessage), identity)
+    assertEquals(
+      r.dispatch(Area.callee).find(_.cls == p.Sym("Disp.Square")).map(_.impl),
+      Some(p.Sym("Disp.Square.area"))
+    )
+    assert(!r.functions.exists(_.name.repr == "Disp$Square.area"), r.functions.map(_.name.repr).toString)
   }
 
   test("an owner with instance state is refused for the candidates the source tier adds") {

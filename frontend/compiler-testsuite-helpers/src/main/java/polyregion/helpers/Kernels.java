@@ -199,6 +199,14 @@ public final class Kernels {
     return s.score(x);
   }
 
+  public static int callM(Plain p) {
+    return p.m();
+  }
+
+  public static int builtPlain() {
+    return callM(new Plain());
+  }
+
   public static int inheritedId() {
     Base b = new Leaf();
     return b.id();

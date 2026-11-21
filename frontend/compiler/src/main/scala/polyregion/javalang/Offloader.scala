@@ -326,9 +326,9 @@ object Offloader {
       resultTpe = rawEntry.rtn
       routed    = routeReturnThroughCapture(rawEntry.copy(decl = rawEntry.decl.copy(name = p.Sym(symbol))))
       slots <- slotsOf(routed, region.captures, resultTpe != p.Type.Unit0)
-      tagged             = region.tags.map((fqn, tag) => p.Sym(fqn) -> tag)
-      decorated          = raw.copy(defs = Devirtualise.decorate(raw.defs, region.owners, tagged), entry = Some(routed))
-      named              = Devirtualise(region.dispatch)(decorated, log)
+      tagged    = region.tags.map((fqn, tag) => p.Sym(fqn) -> tag)
+      decorated = raw.copy(defs = Devirtualise.decorate(raw.defs, region.owners, tagged), entry = Some(routed))
+      named <- Either.catchNonFatal(Devirtualise(region.dispatch)(decorated, log))
       passed             = runPasses(named, log)
       (monoToPoly, prog) = passed
       failures           = Verify(prog, log, verifyFunction = false).filter(_._2.nonEmpty)

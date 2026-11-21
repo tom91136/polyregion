@@ -48,6 +48,7 @@ object ClassLayouts {
       access: Int,
       superName: Option[String],
       interfaces: List[String],
+      state: Boolean,
       member: Option[(String, String)],
       fields: List[(String, String)],
       methods: List[(String, String, Int)]
@@ -58,6 +59,7 @@ object ClassLayouts {
     val methods = mutable.ListBuffer.empty[(String, String, Int)]
     val inners  = mutable.ListBuffer.empty[(String, String, String)]
     val fields  = mutable.ListBuffer.empty[(String, String)]
+    val held    = mutable.ListBuffer.empty[String]
 
     override def visit(v: Int, a: Int, n: String, s: String, sup: String, itf: Array[String]): Unit =
       header += ((n, Option(sup), a, Option(itf).fold(List.empty[String])(_.toList)))
@@ -74,6 +76,7 @@ object ClassLayouts {
       } inners += ((n, o, i))
 
     override def visitField(a: Int, n: String, d: String, s: String, v: Object): FieldVisitor = {
+      if ((a & Opcodes.ACC_STATIC) == 0) held += n
       if ((a & (Opcodes.ACC_STATIC | Opcodes.ACC_SYNTHETIC)) == 0) fields += n -> d
       absent
     }
@@ -84,7 +87,15 @@ object ClassLayouts {
     ClassReader(bytes).accept(collector, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES)
     val (self, parent, access, interfaces) = collector.header.headOption.getOrElse(("", None, 0, Nil))
     val member = collector.inners.collectFirst { case (n, outer, inner) if n == self => outer -> inner }
-    Shape(access, parent, interfaces, member, collector.fields.toList, collector.methods.toList)
+    Shape(
+      access,
+      parent,
+      interfaces,
+      collector.held.nonEmpty,
+      member,
+      collector.fields.toList,
+      collector.methods.toList
+    )
   }
 
   private def shapeFor(internal: String, bytesOf: ClassBytes): Result[Shape] =
@@ -155,15 +166,19 @@ object ClassLayouts {
   def isConcrete(internal: String, bytesOf: ClassBytes): Result[Boolean] =
     shapeFor(internal, bytesOf).map(s => (s.access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_INTERFACE)) == 0)
 
-  // the nearest class of the superclass chain, starting at the class itself, that declares instance fields
-  def carriedState(internal: String, bytesOf: ClassBytes): Result[Option[String]] =
-    shapeFor(internal, bytesOf).flatMap { shape =>
-      if (shape.fields.nonEmpty) Some(internal.replace('/', '.')).success
-      else
-        shape.superName
-          .filter(_ != "java/lang/Object")
-          .fold(Option.empty[String].success)(carriedState(_, bytesOf))
+  // the nearest class of a superclass chain, starting at `from`, that holds instance state; the one rule every layout
+  // that cannot inherit fields relies on, whether the chain is read from class files or from javac
+  def stateAlong[C](from: C)(holds: C => Result[Boolean])(parent: C => Result[Option[C]]): Result[Option[C]] =
+    holds(from).flatMap { held =>
+      if (held) Some(from).success
+      else parent(from).flatMap(_.fold(Option.empty[C].success)(stateAlong(_)(holds)(parent)))
     }
+
+  // fields of any kind count, synthetic ones such as the outer instance of an inner class included
+  def carriedState(internal: String, bytesOf: ClassBytes): Result[Option[String]] =
+    stateAlong(internal)(shapeFor(_, bytesOf).map(_.state))(
+      shapeFor(_, bytesOf).map(_.superName.filter(_ != "java/lang/Object"))
+    ).map(_.map(_.replace('/', '.')))
 
   // the nearest class or interface, other than Object, that both extend or implement
   def commonAncestor(a: String, b: String, bytesOf: ClassBytes): Result[Option[String]] = {

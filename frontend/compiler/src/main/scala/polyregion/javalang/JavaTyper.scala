@@ -29,6 +29,12 @@ object JavaTyper {
     }
   }
 
+  // every instance field, the synthetic captures and outer references of local and inner classes included
+  def stateFields(elem: TypeElement): List[VariableElement] = elem match {
+    case c: JSymbol.ClassSymbol => memberFields(c)
+    case _                      => instanceFields(elem)
+  }
+
   // javac marks the state a local class captures synthetic and getEnclosedElements hides it
   def structFieldElements(elem: TypeElement): List[VariableElement] = elem match {
     case c: JSymbol.ClassSymbol

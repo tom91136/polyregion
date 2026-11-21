@@ -122,25 +122,26 @@ object BytecodeResolver {
   private def classFileArms(
       site: OpenSite,
       allocated: List[String],
+      shadowed: Set[p.Sym],
       bytesOf: ClassBytes
   ): Result[List[(Arm, MethodRef)]] =
     allocated.distinct.sorted
       .filterNot(c => ClassLayouts.isPlatform(c.replace('.', '/')))
       .filter(c => c == site.owner || ClassLayouts.ancestors(c, bytesOf).contains(site.owner))
       .flatTraverse { cls =>
-        ClassLayouts.isConcrete(cls, bytesOf).flatMap { concrete =>
-          val impl = MethodRef(cls, site.name, site.desc, instance = true)
-          if (!concrete) List.empty[(Arm, MethodRef)].success
-          else
-            for {
-              access <- ClassLayouts.accessOf(impl, bytesOf)
-              _ <-
-                if (access._2.exists(m => (m & Opcodes.ACC_ABSTRACT) == 0)) ().success
-                else
-                  (s"`$cls` is a candidate receiver of `${site.repr}` but inherits its implementation rather " +
-                    "than declaring one, which this lowering cannot dispatch to").fail
-              name <- ClassLayouts.structName(cls, bytesOf)
-            } yield List(Arm(p.Sym(name), symbolOf(cls, site.name), List.range(0, site.arity)) -> impl)
+        (ClassLayouts.isConcrete(cls, bytesOf), ClassLayouts.structName(cls, bytesOf)).tupled.flatMap {
+          (concrete, name) =>
+            val impl = MethodRef(cls, site.name, site.desc, instance = true)
+            if (!concrete || shadowed(p.Sym(name))) List.empty[(Arm, MethodRef)].success
+            else
+              for {
+                access <- ClassLayouts.accessOf(impl, bytesOf)
+                _ <-
+                  if (access._2.exists(m => (m & Opcodes.ACC_ABSTRACT) == 0)) ().success
+                  else
+                    (s"`$cls` is a candidate receiver of `${site.repr}` but inherits its implementation rather " +
+                      "than declaring one, which this lowering cannot dispatch to").fail
+              } yield List(Arm(p.Sym(name), symbolOf(cls, site.name), List.range(0, site.arity)) -> impl)
         }
       }
 
@@ -157,7 +158,7 @@ object BytecodeResolver {
         _     <- stateless(site, bytesOf)
         owner <- ClassLayouts.structName(site.owner, bytesOf)
         own   <- sourced(site)
-        built <- classFileArms(site, allocated, bytesOf)
+        built <- classFileArms(site, allocated, own.map(_.cls).toSet, bytesOf)
         arms = (own ++ built.map(_._1)).distinctBy(_.cls).sortBy(_.cls.repr)
         _ <-
           if (arms.nonEmpty) ().success

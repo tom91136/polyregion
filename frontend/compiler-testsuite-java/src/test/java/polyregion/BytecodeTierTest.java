@@ -2,6 +2,7 @@ package polyregion;
 
 import org.junit.Test;
 import polyregion.helpers.Kernels;
+import polyregion.helpers.Plain;
 import polyregion.helpers.Shape;
 
 public class BytecodeTierTest extends BaseSuite {
@@ -152,6 +153,60 @@ public class BytecodeTierTest extends BaseSuite {
     public int area() {
       return base * height / 2;
     }
+  }
+
+  static final class Derived extends Plain {
+    @Override
+    public int m() {
+      return 2;
+    }
+  }
+
+  static class Seed {
+    int x;
+
+    Seed() {
+      x = 7;
+    }
+  }
+
+  static class Middle extends Seed {}
+
+  static final class Bottom extends Middle {
+    int get() {
+      return x;
+    }
+  }
+
+  @Test
+  public void aConcreteOwnerIsItsOwnCandidate() {
+    assertMatchesJdk("built in bytecode", () -> Kernels.builtPlain());
+    assertMatchesJdk("source subclass", () -> Kernels.callM(new Derived()));
+  }
+
+  @Test
+  public void aClassFileOwnerBuiltInSourceIsRefused() {
+    assertRejected("No constructor body available", () -> Kernels.callM(new Plain()));
+  }
+
+  @Test
+  public void anonymousSubclassesAreCandidates() {
+    int a = 4;
+    assertMatchesJdk(
+        "anonymous",
+        () ->
+            Kernels.areaOf(
+                new Shape() {
+                  @Override
+                  public int area() {
+                    return a * 11;
+                  }
+                }));
+  }
+
+  @Test
+  public void stateInheritedThroughAnIntermediateClassIsRefused() {
+    assertRejected("carries instance state", () -> new Bottom().get());
   }
 
   @Test
