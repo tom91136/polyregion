@@ -804,6 +804,8 @@ object PolyAST {
     inline val ExceptionCodeSuffix     = "#code"
     inline val ElementBoundary         = "#element"
     inline val BaseFieldPrefix         = "#base"
+    inline val DispatchTag             = "#tag"
+    inline val DispatchTagMeta         = "#dispatch_tag:"
     inline val EmptyStructStorageField = "#empty_struct_storage"
     inline val KernelBundleType        = "KernelBundle"
     inline val LinkImplementationMeta  = "#link_implementation:"
