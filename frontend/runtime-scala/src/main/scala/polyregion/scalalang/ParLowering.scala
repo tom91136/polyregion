@@ -16,14 +16,15 @@ object ParLowering {
     val AllOf: String           = "spectra:spectra.all_of"
     val CountIf: String         = "spectra:spectra.count_if"
     val Sort: String            = "spectra:spectra.sort"
+    val StableSort: String      = "spectra:spectra.stable_sort"
   }
 
   def toArray[T: Type](xs: Expr[Any])(using q: Quotes): Expr[Array[T]]    = Lowerer(q).toArray[T](xs)
   def foreach(xs: Expr[Any], f: Expr[Any])(using q: Quotes): Expr[Unit]   = Lowerer(q).foreach(xs, f)
   def sum[T: Type](xs: Expr[Any])(using q: Quotes): Expr[T]               = Lowerer(q).sum[T](xs)
   def product[T: Type](xs: Expr[Any])(using q: Quotes): Expr[T]           = Lowerer(q).product[T](xs)
-  def min[T: Type](xs: Expr[Any])(using q: Quotes): Expr[T]               = Lowerer(q).extremum[T](xs, "<")
-  def max[T: Type](xs: Expr[Any])(using q: Quotes): Expr[T]               = Lowerer(q).extremum[T](xs, ">")
+  def min[T: Type](xs: Expr[Any])(using q: Quotes): Expr[T]               = Lowerer(q).extremum[T](xs, "min")
+  def max[T: Type](xs: Expr[Any])(using q: Quotes): Expr[T]               = Lowerer(q).extremum[T](xs, "max")
   def size(xs: Expr[Any])(using q: Quotes): Expr[Int]                     = Lowerer(q).size(xs)
   def count(xs: Expr[Any], f: Expr[Any])(using q: Quotes): Expr[Int]      = Lowerer(q).count(xs, f)
   def exists(xs: Expr[Any], f: Expr[Any])(using q: Quotes): Expr[Boolean] = Lowerer(q).exists(xs, f)
@@ -141,6 +142,27 @@ class Lowerer(val q: Quotes) extends ParChain {
     else Literal(BooleanConstant(value != 0))
 
   private def infix(a: Term, name: String, b: Term): Term = Select.overloaded(a, name, Nil, List(b))
+
+  private def lessThan(tpe: TypeRepr, a: Term, b: Term): Term =
+    if (is(tpe, List(TypeRepr.of[Float], TypeRepr.of[Double]))) {
+      val no       = Literal(BooleanConstant(false))
+      val yes      = Literal(BooleanConstant(true))
+      val one      = literal(tpe, 1)
+      val negative = (x: Term) => infix(infix(one, "/", x), "<", literal(tpe, 0))
+      If(
+        infix(a, "<", b),
+        yes,
+        If(
+          infix(a, ">", b),
+          no,
+          If(
+            infix(b, "!=", b),
+            infix(a, "==", a),
+            If(infix(a, "!=", a), no, If(negative(a), Select.unique(negative(b), "unary_!"), no))
+          )
+        )
+      )
+    } else infix(a, "<", b)
 
   private def combine(elem: TypeRepr, result: TypeRepr)(op: (Term, Term) => Term): Term =
     lambda(List("a" -> elem, "b" -> elem), result)((_, xs) => op(xs(0), xs(1)))
@@ -372,10 +394,10 @@ class Lowerer(val q: Quotes) extends ParChain {
       )
     ).asExprOf[T]
 
-  private def reduceFirst[R: Type](frame: Frame, op: Term): Term = {
+  private def reduceFirst[R: Type](frame: Frame, op: Term, what: String): Term = {
     val owner = Symbol.spliceOwner
     '{
-      if (${ frame.length.asExprOf[Int] } == 0) throw UnsupportedOperationException("empty.reduce")
+      if (${ frame.length.asExprOf[Int] } == 0) throw UnsupportedOperationException(${ Expr(s"empty.$what") })
       else
         ${
           val first = program(frame.stages, owner)(
@@ -410,20 +432,24 @@ class Lowerer(val q: Quotes) extends ParChain {
     }.asTerm
   }
 
-  private def reduceAny[R: Type](xs: Expr[Any], op: Term): Term =
+  private def reduceAny[R: Type](xs: Expr[Any], op: Term, what: String): Term =
     bind(xs) { frame =>
-      if (!frame.filtered) reduceFirst[R](frame, op)
+      if (!frame.filtered) reduceFirst[R](frame, op, what)
       else
         materialise(frame) { (array, m) =>
-          reduceFirst[R](Frame(Bound.Held(array, frame.elem), m, frame.context, Nil, frame.elem), op)
+          reduceFirst[R](Frame(Bound.Held(array, frame.elem), m, frame.context, Nil, frame.elem), op, what)
         }
     }
 
-  def reduce[T: Type](xs: Expr[Any], op: Expr[Any]): Expr[T] = reduceAny[T](xs, stripped(op.asTerm)).asExprOf[T]
+  def reduce[T: Type](xs: Expr[Any], op: Expr[Any]): Expr[T] =
+    reduceAny[T](xs, stripped(op.asTerm), "reduceLeft").asExprOf[T]
 
-  def extremum[T: Type](xs: Expr[Any], compare: String): Expr[T] = {
-    val tpe = numeric[T](if (compare == "<") "min" else "max")
-    reduceAny[T](xs, combine(tpe)((a, b) => If(infix(a, compare, b), a, b))).asExprOf[T]
+  def extremum[T: Type](xs: Expr[Any], what: String): Expr[T] = {
+    val tpe = numeric[T](what)
+    val pick = combine(tpe) { (a, b) =>
+      if (what == "min") If(lessThan(tpe, b, a), b, a) else If(lessThan(tpe, a, b), b, a)
+    }
+    reduceAny[T](xs, pick, what).asExprOf[T]
   }
 
   private def counted(xs: Expr[Any], pred: Term => Term): Term =
@@ -493,13 +519,12 @@ class Lowerer(val q: Quotes) extends ParChain {
     stored(tpe)
     bind(xs) { frame =>
       materialise(frame) { (array, m) =>
-        val order = lt.fold {
-          combine(tpe, TypeRepr.of[Boolean])(infix(_, "<", _))
-        }(f => stripped(f.asTerm))
+        val order = lt.fold(combine(tpe, TypeRepr.of[Boolean])(lessThan(tpe, _, _)))(f => stripped(f.asTerm))
+        val sort  = if (lt.isDefined) ParLowering.Spectra.StableSort else ParLowering.Spectra.Sort
         Block(
           List('{
             if (${ m.asExprOf[Int] } > 1)
-              ${ call[Unit](ParLowering.Spectra.Sort, frame.context, List(array, m, order)).asExprOf[Unit] }
+              ${ call[Unit](sort, frame.context, List(array, m, order)).asExprOf[Unit] }
           }.asTerm),
           array
         )

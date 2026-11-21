@@ -40,6 +40,7 @@ trait ParChain {
     val map      = module.declaredMethod("map").head
     val filter   = module.declaredMethod("filter").head
     val bindings = mutable.ListBuffer.empty[Definition]
+    val contexts = mutable.ListBuffer.empty[Term]
 
     def go(term: Term): (Source, List[Stage], Term) = term match {
       case Inlined(_, bs, body) => bindings ++= bs; go(body)
@@ -53,6 +54,9 @@ trait ParChain {
       case Call(sym, targs, List(xs, context)) if sym == array => (Source.Elements(xs, targs.head.tpe), Nil, context)
       case Call(sym, _, List(xs, context)) if sym == range     => (Source.Indices(xs), Nil, context)
       case Call(sym, _, List(prev, context)) if sym == on =>
+        contexts += context
+        if (contexts.size > 1)
+          report.errorAndAbort("a .par chain selects its context once", context.pos)
         val (source, stages, _) = go(prev)
         (source, stages, context)
       case Call(sym, targs, List(prev, fn)) if sym == map =>

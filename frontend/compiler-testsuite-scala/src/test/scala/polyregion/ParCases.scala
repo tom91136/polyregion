@@ -372,6 +372,141 @@ abstract class ParCases extends munit.FunSuite {
     assertEquals(launches(ctx)(xs.par.on(ctx).sorted), 0L)
   }
 
+  private val total = Ordering.Double.TotalOrdering
+
+  private val totalFloat = Ordering.Float.TotalOrdering
+
+  private def bits(xs: Array[Double]): List[Long] = xs.map(java.lang.Double.doubleToLongBits(_)).toList
+
+  private def bits(x: Double): Long = java.lang.Double.doubleToLongBits(x)
+
+  private def bits(xs: Array[Float]): List[Int] = xs.map(java.lang.Float.floatToIntBits(_)).toList
+
+  private def bits(x: Float): Int = java.lang.Float.floatToIntBits(x)
+
+  private val awkward = Array(
+    Double.NaN,
+    2.0,
+    1.0,
+    0.0,
+    -0.0,
+    Double.NegativeInfinity,
+    3.5,
+    Double.NaN,
+    -1.0,
+    0.0,
+    -0.0,
+    Double.PositiveInfinity,
+    5.0,
+    4.0,
+    7.0,
+    6.0,
+    9.0,
+    8.0,
+    -3.0
+  )
+
+  private val awkwardFloats = awkward.map(_.toFloat)
+
+  check("sortWith is stable") { ctx =>
+    val xs = Array.tabulate(5000)(i => (i * 7919) % 5000)
+    assertEquals(
+      xs.par.on(ctx).sortWith((a, b) => a % 7 < b % 7).toList,
+      xs.sortWith((a, b) => a % 7 < b % 7).toList
+    )
+  }
+
+  check("sorted orders NaN last and negative zero first") { ctx =>
+    assertEquals(bits(awkward.par.on(ctx).sorted), bits(awkward.sorted(using total)))
+    assertEquals(bits(awkwardFloats.par.on(ctx).sorted), bits(awkwardFloats.sorted(using totalFloat)))
+    assertEquals(bits(Array(Double.NaN, 2.0, 1.0).par.on(ctx).sorted), bits(Array(1.0, 2.0, Double.NaN)))
+    assertEquals(bits(Array(0.0, -0.0).par.on(ctx).sorted), bits(Array(-0.0, 0.0)))
+  }
+
+  check("min and max follow the total order on NaN and signed zero") { ctx =>
+    assertEquals(bits(awkward.par.on(ctx).min), bits(awkward.min(using total)))
+    assertEquals(bits(awkward.par.on(ctx).max), bits(awkward.max(using total)))
+    assertEquals(bits(awkwardFloats.par.on(ctx).min), bits(awkwardFloats.min(using totalFloat)))
+    assertEquals(bits(awkwardFloats.par.on(ctx).max), bits(awkwardFloats.max(using totalFloat)))
+    assertEquals(bits(Array(-0.0, 0.0).par.on(ctx).min), bits(-0.0))
+    assertEquals(bits(Array(0.0, -0.0).par.on(ctx).min), bits(-0.0))
+    assertEquals(bits(Array(-0.0, 0.0).par.on(ctx).max), bits(0.0))
+    assertEquals(bits(Array(0.0, -0.0).par.on(ctx).max), bits(0.0))
+    assertEquals(bits(Array(1.0, Double.NaN, 2.0).par.on(ctx).max), bits(Double.NaN))
+    assertEquals(bits(Array(1.0, Double.NaN, 2.0).par.on(ctx).min), bits(1.0))
+  }
+
+  check("empty ranges") { ctx =>
+    assertEquals((5 until 5).par.on(ctx).map(_ + 1).sum, 0)
+    assertEquals((5 until 5).par.on(ctx).map(_ + 1).toArray.toList, Nil)
+    assertEquals((5 until 5).par.on(ctx).filter(_ > 0).toArray.toList, Nil)
+    assertEquals((5 until 5).par.on(ctx).count(_ > 0), 0)
+    assertEquals((5 until 5).par.on(ctx).exists(_ > 0), false)
+    assertEquals((5 until 5).par.on(ctx).forall(_ > 0), true)
+    intercept[UnsupportedOperationException]((5 until 5).par.on(ctx).max)
+  }
+
+  check("integer bounds") { ctx =>
+    val ints =
+      Array(Int.MaxValue, 1, Int.MinValue, 0, -1, Int.MaxValue, Int.MinValue, 7, 3, 2, 9, 8, 5, 4, 6, 11, 10, 13)
+    val longs = Array(
+      Long.MaxValue,
+      1L,
+      Long.MinValue,
+      0L,
+      -1L,
+      Long.MaxValue,
+      Long.MinValue,
+      7L,
+      3L,
+      2L,
+      9L,
+      8L,
+      5L,
+      4L,
+      6L,
+      11L,
+      10L,
+      13L
+    )
+    assertEquals(ints.par.on(ctx).sorted.toList, ints.sorted.toList)
+    assertEquals(ints.par.on(ctx).min, ints.min)
+    assertEquals(ints.par.on(ctx).max, ints.max)
+    assertEquals(ints.par.on(ctx).sum, ints.sum)
+    assertEquals(longs.par.on(ctx).sorted.toList, longs.sorted.toList)
+    assertEquals(longs.par.on(ctx).min, longs.min)
+    assertEquals(longs.par.on(ctx).max, longs.max)
+    assertEquals(longs.par.on(ctx).sum, longs.sum)
+    assertEquals(longs.par.on(ctx).map(_ + 1).sum, longs.map(_ + 1).sum)
+  }
+
+  check("empty reductions throw the sequential messages") { ctx =>
+    val xs = Array.ofDim[Int](0)
+    assertEquals(
+      intercept[UnsupportedOperationException](xs.par.on(ctx).min).getMessage,
+      intercept[UnsupportedOperationException](xs.min).getMessage
+    )
+    assertEquals(
+      intercept[UnsupportedOperationException](xs.par.on(ctx).max).getMessage,
+      intercept[UnsupportedOperationException](xs.max).getMessage
+    )
+    assertEquals(
+      intercept[UnsupportedOperationException](xs.par.on(ctx).reduce(_ + _)).getMessage,
+      intercept[UnsupportedOperationException](xs.reduce(_ + _)).getMessage
+    )
+  }
+
+  test("a second context selection is rejected") {
+    val errors = typeCheckErrors("""
+      import polyregion.par.*
+      val xs = Array(1, 2, 3)
+      val a = polyregion.jvm.runtime.Context.current()
+      xs.par.on(a).map(_ + 1).on(a).sum
+    """)
+    val messages = errors.map(_.message).mkString("\n")
+    assert(messages.contains("a .par chain selects its context once"), messages)
+  }
+
   test("a stored chain is rejected") {
     val errors = typeCheckErrors("""
       import polyregion.par.*
