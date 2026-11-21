@@ -595,6 +595,25 @@ inline PchUse acquirePch(const Task &task, const DriverConfig &cfg) {
   return {fmt::format("{}/{}", dir, manifest->pch), state};
 }
 
+// XXX Mach-O debug maps and PDBs record the driver's randomly named temporary objects, so compare two objects instead
+#if defined(__APPLE__) || defined(_WIN32)
+inline constexpr bool ReproSampleObject = true;
+#else
+inline constexpr bool ReproSampleObject = false;
+#endif
+inline constexpr size_t ReproCompiles = ReproSampleObject ? 2 : 1;
+
+inline std::string reproSampleCommand(const std::vector<std::string> &toks, const std::string &out, const std::string &sample) {
+  const auto command = toks ^ mk_string(" ", [&](const auto &t) { return t == out ? sample : t; });
+#ifdef _WIN32
+  // Flang rejects this Clang-only flag and already emits reproducible objects
+  const bool isPolyfc = toks ^ exists([](const auto &t) { return t.ends_with("polyfc") || t.ends_with("polyfc.exe"); });
+  return command + (isPolyfc ? " -c" : " -mno-incremental-linker-compatible -c");
+#else
+  return command + " -c";
+#endif
+}
+
 inline TaskOutcome compileTask(const Task &task, const DriverConfig &cfg) {
   if (task.runs.empty()) return {};
   removeArtifacts(task.dir);
@@ -628,23 +647,9 @@ inline TaskOutcome compileTask(const Task &task, const DriverConfig &cfg) {
   std::string reproReason;
   std::optional<StepResult> reproFailure;
   if (exit == 0 && repro) {
-#if defined(__APPLE__) || defined(_WIN32)
-    // XXX Mach-O debug maps and PDBs record the driver's randomly named temporary objects, so compare two objects instead
-    const std::string sample = out + ".repro.o";
-  #ifdef _WIN32
-    // Flang rejects this Clang-only flag and already emits reproducible objects
-    const bool isPolyfc = toks ^ exists([](const auto &t) { return t.ends_with("polyfc") || t.ends_with("polyfc.exe"); });
-    const auto rebuild = (toks ^ mk_string(" ", [&](const auto &t) { return t == out ? sample : t; }))
-                         + (isPolyfc ? " -c" : " -mno-incremental-linker-compatible -c");
-  #else
-    const auto rebuild = (toks ^ mk_string(" ", [&](const auto &t) { return t == out ? sample : t; })) + " -c";
-  #endif
-    const auto firstBuild = runStep(task, cfg, rebuild, target);
-#else
-    const auto &sample = out;
-    const auto &rebuild = cmd;
-    const StepResult firstBuild;
-#endif
+    const std::string sample = ReproSampleObject ? out + ".repro.o" : out;
+    const auto rebuild = ReproSampleObject ? reproSampleCommand(toks, out, sample) : cmd;
+    const auto firstBuild = ReproSampleObject ? runStep(task, cfg, rebuild, target) : StepResult{};
     const auto first = firstBuild.exitCode == 0 ? polyregion::read_string(sample) : std::string{};
     if (auto again = firstBuild.exitCode != 0 ? firstBuild : runStep(task, cfg, rebuild, target); again.exitCode != 0)
       reproReason = fmt::format("repro compile failed (exit {})", again.exitCode), reproFailure = std::move(again);

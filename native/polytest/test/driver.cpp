@@ -898,20 +898,20 @@ echo bin > "$out")sh");
 
   CHECK(detail::compileTask(task, cfg).status == TaskStatus::Pass);
   auto log = invocations();
-  REQUIRE(log.size() == 3);
+  REQUIRE(log.size() == 2 + detail::ReproCompiles);
   CHECK(log[0].find("-x c++-header") != std::string::npos);
   CHECK(usedPch(log[1]));
-  CHECK(log[1] == log[2]);
+  CHECK(log[log.size() - 2] == log.back());
 
   log = invocations();
   CHECK(detail::compileTask(task, cfg).status == TaskStatus::Pass);
-  CHECK(invocations().size() == log.size() + 2);
-  CHECK(usedPch(invocations().back()));
+  CHECK(invocations().size() == log.size() + 1 + detail::ReproCompiles);
+  CHECK(usedPch(invocations()[log.size()]));
 
   std::ofstream(dir.file("test_utils.h"), std::ios::app) << "// edited\n";
   log = invocations();
   CHECK(detail::compileTask(task, cfg).status == TaskStatus::Pass);
-  CHECK(invocations().size() == log.size() + 3);
+  CHECK(invocations().size() == log.size() + 2 + detail::ReproCompiles);
   CHECK(invocations()[log.size()].find("-x c++-header") != std::string::npos);
 
   std::ofstream(dir.file("test_utils.h"), std::ios::app) << "#ifdef STRICT_MODE\n#endif\n";
