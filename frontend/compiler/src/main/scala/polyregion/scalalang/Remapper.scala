@@ -821,8 +821,19 @@ object Remapper {
         case q.AppliedType(ctor, _) => ctor.typeSymbol.fullName == "scala.reflect.ClassTag"
         case _                      => false
       }
-      if (isClassTagTpe && tpeArgs.isEmpty && termArgss.isEmpty) {
-        return typedVar(termTpe)
+      // Stdlib Numeric instances (`Numeric.IntIsIntegral`) are opaque dictionaries the mirrors ignore, and reflecting on
+      // their module struct fails on the library's pickles, so they are replaced with an empty `Numeric[T]` struct.
+      val numericEvidence = term match {
+        case r: q.Ref if tpeArgs.isEmpty && termArgss.isEmpty && r.symbol.flags.is(q.Flags.Module) =>
+          termTpe.baseType(q.Symbol.requiredClass("scala.math.Numeric")) match {
+            case evidence @ q.AppliedType(_, _) => Some(evidence)
+            case _                              => None
+          }
+        case _ => None
+      }
+      val shortCircuit = if (isClassTagTpe && tpeArgs.isEmpty && termArgss.isEmpty) Some(termTpe) else numericEvidence
+      if (shortCircuit.isDefined) {
+        return typedVar(shortCircuit.get)
       }
 
       (tpeArgs, termArgss, term) match {

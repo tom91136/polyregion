@@ -241,14 +241,16 @@ class ClosureSuite extends BaseSuite {
     (0 until 5 by -1).foreach(_ => n(0) += 1)
     n(0)
   }
-  test("range-step-zero-runs-no-iterations") {
-    val n = offload1(using AssertTarget.Offload) {
-      val n = Array.ofDim[Int](1)
-      n(0) = 0
-      (0 until 4 by 0).foreach(_ => n(0) += 1)
-      n(0)
+  test("range-step-zero-throws") {
+    val e = intercept[IllegalArgumentException] {
+      offload1(using AssertTarget.Offload) {
+        val n = Array.ofDim[Int](1)
+        n(0) = 0
+        (0 until 4 by 0).foreach(_ => n(0) += 1)
+        n(0)
+      }
     }
-    assertEquals(n, 0)
+    assertEquals(e.getMessage, "step cannot be 0.")
   }
   testExpr("generic-body-apply") {
     def dup[T](x: T): (T, T) = (x, x)

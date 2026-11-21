@@ -16,49 +16,546 @@ object StdLib {
     def _2 = v2
   }
 
-  class Range(val start: Int, val end: Int, val step: Int, val isInclusive: Boolean) {
-    def by(step: Int): Range =
-      new Range(start, end, step, isInclusive)
+  class Range(val start: Int, val end: Int, val step: Int, val isInclusive: Boolean, val isEmpty: Boolean) {
+    def by(step: Int): Range = {
+      if (step == 0) intrinsics.raise("java.lang.IllegalArgumentException", "step cannot be 0.")
+      new Range(
+        start,
+        end,
+        step,
+        isInclusive,
+        (start > end && step > 0) || (start < end && step < 0) || (start == end && !isInclusive)
+      )
+    }
 
     def foreach[U](f: Int => U): Unit = {
-      val last: Long = if (isInclusive) end.toLong else if (step > 0) end.toLong - 1L else end.toLong + 1L
-      val count: Long =
-        if (step == 0) 0L
-        else if (step > 0) {
-          if (start.toLong > last) 0L else (last - start.toLong) / step.toLong + 1L
-        } else {
-          if (start.toLong < last) 0L else (start.toLong - last) / (-step.toLong) + 1L
-        }
+      val hi: Long = if (isInclusive) end.toLong else if (step > 0) end.toLong - 1L else end.toLong + 1L
+      val n: Long =
+        if (isEmpty) 0L
+        else if (step > 0) (hi - start.toLong) / step.toLong + 1L
+        else (start.toLong - hi) / (-step.toLong) + 1L
       var k = 0L
-      while (k < count) {
+      while (k < n) {
         f((start.toLong + k * step.toLong).toInt)
         k += 1L
       }
     }
+
+    def length: Int = {
+      val hi: Long = if (isInclusive) end.toLong else if (step > 0) end.toLong - 1L else end.toLong + 1L
+      val n: Long =
+        if (isEmpty) 0L
+        else if (step > 0) (hi - start.toLong) / step.toLong + 1L
+        else (start.toLong - hi) / (-step.toLong) + 1L
+      if (n > Int.MaxValue.toLong)
+        intrinsics.raise("java.lang.IllegalArgumentException", "seqs cannot contain more than Int.MaxValue elements.")
+      n.toInt
+    }
+
+    def size: Int = {
+      val hi: Long = if (isInclusive) end.toLong else if (step > 0) end.toLong - 1L else end.toLong + 1L
+      val n: Long =
+        if (isEmpty) 0L
+        else if (step > 0) (hi - start.toLong) / step.toLong + 1L
+        else (start.toLong - hi) / (-step.toLong) + 1L
+      if (n > Int.MaxValue.toLong)
+        intrinsics.raise("java.lang.IllegalArgumentException", "seqs cannot contain more than Int.MaxValue elements.")
+      n.toInt
+    }
+
+    def nonEmpty: Boolean = !isEmpty
+
+    def contains(x: Int): Boolean =
+      if (x == end && !isInclusive) false
+      else if (step > 0) {
+        if (x < start || x > end) false else step == 1 || (x.toLong - start.toLong) % step.toLong == 0L
+      } else {
+        if (x < end || x > start) false else step == -1 || (start.toLong - x.toLong) % (-step.toLong) == 0L
+      }
+
+    def apply(idx: Int): Int = {
+      val hi: Long = if (isInclusive) end.toLong else if (step > 0) end.toLong - 1L else end.toLong + 1L
+      val n: Long =
+        if (isEmpty) 0L
+        else if (step > 0) (hi - start.toLong) / step.toLong + 1L
+        else (start.toLong - hi) / (-step.toLong) + 1L
+      if (n > Int.MaxValue.toLong)
+        intrinsics.raise("java.lang.IllegalArgumentException", "seqs cannot contain more than Int.MaxValue elements.")
+      if (idx < 0 || idx >= n) intrinsics.raise("java.lang.IndexOutOfBoundsException", "index out of bounds")
+      (start.toLong + idx.toLong * step.toLong).toInt
+    }
+
+    def head: Int = {
+      if (isEmpty) intrinsics.raise("java.util.NoSuchElementException", "head on empty Range")
+      start
+    }
+
+    def last: Int = {
+      val hi: Long = if (isInclusive) end.toLong else if (step > 0) end.toLong - 1L else end.toLong + 1L
+      val n: Long =
+        if (isEmpty) 0L
+        else if (step > 0) (hi - start.toLong) / step.toLong + 1L
+        else (start.toLong - hi) / (-step.toLong) + 1L
+      if (isEmpty) intrinsics.raise("java.util.NoSuchElementException", "last on empty Range")
+      (start.toLong + (n - 1L) * step.toLong).toInt
+    }
+
+    def foldLeft[B](z: B)(op: (B, Int) => B): B = {
+      val hi: Long = if (isInclusive) end.toLong else if (step > 0) end.toLong - 1L else end.toLong + 1L
+      val n: Long =
+        if (isEmpty) 0L
+        else if (step > 0) (hi - start.toLong) / step.toLong + 1L
+        else (start.toLong - hi) / (-step.toLong) + 1L
+      var acc = z
+      var k   = 0L
+      while (k < n) {
+        acc = op(acc, (start.toLong + k * step.toLong).toInt)
+        k += 1L
+      }
+      acc
+    }
+
+    def exists(p: Int => Boolean): Boolean = {
+      val hi: Long = if (isInclusive) end.toLong else if (step > 0) end.toLong - 1L else end.toLong + 1L
+      val n: Long =
+        if (isEmpty) 0L
+        else if (step > 0) (hi - start.toLong) / step.toLong + 1L
+        else (start.toLong - hi) / (-step.toLong) + 1L
+      var found = false
+      var k     = 0L
+      while (k < n && !found) {
+        found = p((start.toLong + k * step.toLong).toInt)
+        k += 1L
+      }
+      found
+    }
+
+    def forall(p: Int => Boolean): Boolean = {
+      val hi: Long = if (isInclusive) end.toLong else if (step > 0) end.toLong - 1L else end.toLong + 1L
+      val n: Long =
+        if (isEmpty) 0L
+        else if (step > 0) (hi - start.toLong) / step.toLong + 1L
+        else (start.toLong - hi) / (-step.toLong) + 1L
+      var all = true
+      var k   = 0L
+      while (k < n && all) {
+        all = p((start.toLong + k * step.toLong).toInt)
+        k += 1L
+      }
+      all
+    }
+
+    def count(p: Int => Boolean): Int = {
+      val hi: Long = if (isInclusive) end.toLong else if (step > 0) end.toLong - 1L else end.toLong + 1L
+      val n: Long =
+        if (isEmpty) 0L
+        else if (step > 0) (hi - start.toLong) / step.toLong + 1L
+        else (start.toLong - hi) / (-step.toLong) + 1L
+      var found = 0
+      var k     = 0L
+      while (k < n) {
+        if (p((start.toLong + k * step.toLong).toInt)) found += 1
+        k += 1L
+      }
+      found
+    }
+
+    def reduce[B >: Int](op: (B, B) => B): B = {
+      val hi: Long = if (isInclusive) end.toLong else if (step > 0) end.toLong - 1L else end.toLong + 1L
+      val n: Long =
+        if (isEmpty) 0L
+        else if (step > 0) (hi - start.toLong) / step.toLong + 1L
+        else (start.toLong - hi) / (-step.toLong) + 1L
+      if (isEmpty) intrinsics.raise("java.lang.UnsupportedOperationException", "empty.reduceLeft")
+      var acc: B = start
+      var k      = 1L
+      while (k < n) {
+        acc = op(acc, (start.toLong + k * step.toLong).toInt)
+        k += 1L
+      }
+      acc
+    }
+
+    def reduceLeft[B >: Int](op: (B, Int) => B): B = {
+      val hi: Long = if (isInclusive) end.toLong else if (step > 0) end.toLong - 1L else end.toLong + 1L
+      val n: Long =
+        if (isEmpty) 0L
+        else if (step > 0) (hi - start.toLong) / step.toLong + 1L
+        else (start.toLong - hi) / (-step.toLong) + 1L
+      if (isEmpty) intrinsics.raise("java.lang.UnsupportedOperationException", "empty.reduceLeft")
+      var acc: B = start
+      var k      = 1L
+      while (k < n) {
+        acc = op(acc, (start.toLong + k * step.toLong).toInt)
+        k += 1L
+      }
+      acc
+    }
+
+    def map[B](f: Int => B): IndexedSeq[B] = {
+      val hi: Long = if (isInclusive) end.toLong else if (step > 0) end.toLong - 1L else end.toLong + 1L
+      val n: Long =
+        if (isEmpty) 0L
+        else if (step > 0) (hi - start.toLong) / step.toLong + 1L
+        else (start.toLong - hi) / (-step.toLong) + 1L
+      if (n > Int.MaxValue.toLong)
+        intrinsics.raise("java.lang.IllegalArgumentException", "seqs cannot contain more than Int.MaxValue elements.")
+      val out = intrinsics.array[B](n.toInt)
+      var k   = 0L
+      while (k < n) {
+        out.update(k.toInt, f((start.toLong + k * step.toLong).toInt))
+        k += 1L
+      }
+      new IndexedSeq[B](n.toInt, out)
+    }
+
+    def filter(pred: Int => Boolean): IndexedSeq[Int] = {
+      val hi: Long = if (isInclusive) end.toLong else if (step > 0) end.toLong - 1L else end.toLong + 1L
+      val n: Long =
+        if (isEmpty) 0L
+        else if (step > 0) (hi - start.toLong) / step.toLong + 1L
+        else (start.toLong - hi) / (-step.toLong) + 1L
+      if (n > Int.MaxValue.toLong)
+        intrinsics.raise("java.lang.IllegalArgumentException", "seqs cannot contain more than Int.MaxValue elements.")
+      val out = intrinsics.array[Int](n.toInt)
+      var k   = 0L
+      var m   = 0
+      while (k < n) {
+        val x = (start.toLong + k * step.toLong).toInt
+        if (pred(x)) { out.update(m, x); m += 1 }
+        k += 1L
+      }
+      new IndexedSeq[Int](m, out)
+    }
+
+    def sum[B >: Int](num: Numeric[B]): Int = {
+      val hi: Long = if (isInclusive) end.toLong else if (step > 0) end.toLong - 1L else end.toLong + 1L
+      val n: Long =
+        if (isEmpty) 0L
+        else if (step > 0) (hi - start.toLong) / step.toLong + 1L
+        else (start.toLong - hi) / (-step.toLong) + 1L
+      if (n > Int.MaxValue.toLong)
+        intrinsics.raise("java.lang.IllegalArgumentException", "seqs cannot contain more than Int.MaxValue elements.")
+      if (isEmpty) 0
+      else if (n == 1L) start
+      else ((n * (start.toLong + (start.toLong + (n - 1L) * step.toLong))) / 2L).toInt
+    }
   }
 
-  class Inclusive(val start: Int, val end: Int, val step: Int) {
-    def by(step: Int): Range =
-      new Range(start, end, step, isInclusive = true)
+  class Inclusive(val start: Int, val end: Int, val step: Int, val isEmpty: Boolean) {
+    def by(step: Int): Range = {
+      if (step == 0) intrinsics.raise("java.lang.IllegalArgumentException", "step cannot be 0.")
+      new Range(start, end, step, isInclusive = true, (start > end && step > 0) || (start < end && step < 0))
+    }
 
     def foreach[U](f: Int => U): Unit = {
-      val last: Long = end.toLong
-      val count: Long =
-        if (step == 0) 0L
-        else if (step > 0) {
-          if (start.toLong > last) 0L else (last - start.toLong) / step.toLong + 1L
-        } else {
-          if (start.toLong < last) 0L else (start.toLong - last) / (-step.toLong) + 1L
-        }
+      val hi: Long = end.toLong
+      val n: Long =
+        if (isEmpty) 0L
+        else if (step > 0) (hi - start.toLong) / step.toLong + 1L
+        else (start.toLong - hi) / (-step.toLong) + 1L
       var k = 0L
-      while (k < count) {
+      while (k < n) {
         f((start.toLong + k * step.toLong).toInt)
         k += 1L
       }
+    }
+
+    def length: Int = {
+      val hi: Long = end.toLong
+      val n: Long =
+        if (isEmpty) 0L
+        else if (step > 0) (hi - start.toLong) / step.toLong + 1L
+        else (start.toLong - hi) / (-step.toLong) + 1L
+      if (n > Int.MaxValue.toLong)
+        intrinsics.raise("java.lang.IllegalArgumentException", "seqs cannot contain more than Int.MaxValue elements.")
+      n.toInt
+    }
+
+    def size: Int = {
+      val hi: Long = end.toLong
+      val n: Long =
+        if (isEmpty) 0L
+        else if (step > 0) (hi - start.toLong) / step.toLong + 1L
+        else (start.toLong - hi) / (-step.toLong) + 1L
+      if (n > Int.MaxValue.toLong)
+        intrinsics.raise("java.lang.IllegalArgumentException", "seqs cannot contain more than Int.MaxValue elements.")
+      n.toInt
+    }
+
+    def nonEmpty: Boolean = !isEmpty
+
+    def contains(x: Int): Boolean =
+      if (step > 0) {
+        if (x < start || x > end) false else step == 1 || (x.toLong - start.toLong) % step.toLong == 0L
+      } else {
+        if (x < end || x > start) false else step == -1 || (start.toLong - x.toLong) % (-step.toLong) == 0L
+      }
+
+    def apply(idx: Int): Int = {
+      val hi: Long = end.toLong
+      val n: Long =
+        if (isEmpty) 0L
+        else if (step > 0) (hi - start.toLong) / step.toLong + 1L
+        else (start.toLong - hi) / (-step.toLong) + 1L
+      if (n > Int.MaxValue.toLong)
+        intrinsics.raise("java.lang.IllegalArgumentException", "seqs cannot contain more than Int.MaxValue elements.")
+      if (idx < 0 || idx >= n) intrinsics.raise("java.lang.IndexOutOfBoundsException", "index out of bounds")
+      (start.toLong + idx.toLong * step.toLong).toInt
+    }
+
+    def head: Int = {
+      if (isEmpty) intrinsics.raise("java.util.NoSuchElementException", "head on empty Range")
+      start
+    }
+
+    def last: Int = {
+      val hi: Long = end.toLong
+      val n: Long =
+        if (isEmpty) 0L
+        else if (step > 0) (hi - start.toLong) / step.toLong + 1L
+        else (start.toLong - hi) / (-step.toLong) + 1L
+      if (isEmpty) intrinsics.raise("java.util.NoSuchElementException", "last on empty Range")
+      (start.toLong + (n - 1L) * step.toLong).toInt
+    }
+
+    def foldLeft[B](z: B)(op: (B, Int) => B): B = {
+      val hi: Long = end.toLong
+      val n: Long =
+        if (isEmpty) 0L
+        else if (step > 0) (hi - start.toLong) / step.toLong + 1L
+        else (start.toLong - hi) / (-step.toLong) + 1L
+      var acc = z
+      var k   = 0L
+      while (k < n) {
+        acc = op(acc, (start.toLong + k * step.toLong).toInt)
+        k += 1L
+      }
+      acc
+    }
+
+    def exists(p: Int => Boolean): Boolean = {
+      val hi: Long = end.toLong
+      val n: Long =
+        if (isEmpty) 0L
+        else if (step > 0) (hi - start.toLong) / step.toLong + 1L
+        else (start.toLong - hi) / (-step.toLong) + 1L
+      var found = false
+      var k     = 0L
+      while (k < n && !found) {
+        found = p((start.toLong + k * step.toLong).toInt)
+        k += 1L
+      }
+      found
+    }
+
+    def forall(p: Int => Boolean): Boolean = {
+      val hi: Long = end.toLong
+      val n: Long =
+        if (isEmpty) 0L
+        else if (step > 0) (hi - start.toLong) / step.toLong + 1L
+        else (start.toLong - hi) / (-step.toLong) + 1L
+      var all = true
+      var k   = 0L
+      while (k < n && all) {
+        all = p((start.toLong + k * step.toLong).toInt)
+        k += 1L
+      }
+      all
+    }
+
+    def count(p: Int => Boolean): Int = {
+      val hi: Long = end.toLong
+      val n: Long =
+        if (isEmpty) 0L
+        else if (step > 0) (hi - start.toLong) / step.toLong + 1L
+        else (start.toLong - hi) / (-step.toLong) + 1L
+      var found = 0
+      var k     = 0L
+      while (k < n) {
+        if (p((start.toLong + k * step.toLong).toInt)) found += 1
+        k += 1L
+      }
+      found
+    }
+
+    def reduce[B >: Int](op: (B, B) => B): B = {
+      val hi: Long = end.toLong
+      val n: Long =
+        if (isEmpty) 0L
+        else if (step > 0) (hi - start.toLong) / step.toLong + 1L
+        else (start.toLong - hi) / (-step.toLong) + 1L
+      if (isEmpty) intrinsics.raise("java.lang.UnsupportedOperationException", "empty.reduceLeft")
+      var acc: B = start
+      var k      = 1L
+      while (k < n) {
+        acc = op(acc, (start.toLong + k * step.toLong).toInt)
+        k += 1L
+      }
+      acc
+    }
+
+    def reduceLeft[B >: Int](op: (B, Int) => B): B = {
+      val hi: Long = end.toLong
+      val n: Long =
+        if (isEmpty) 0L
+        else if (step > 0) (hi - start.toLong) / step.toLong + 1L
+        else (start.toLong - hi) / (-step.toLong) + 1L
+      if (isEmpty) intrinsics.raise("java.lang.UnsupportedOperationException", "empty.reduceLeft")
+      var acc: B = start
+      var k      = 1L
+      while (k < n) {
+        acc = op(acc, (start.toLong + k * step.toLong).toInt)
+        k += 1L
+      }
+      acc
+    }
+
+    def map[B](f: Int => B): IndexedSeq[B] = {
+      val hi: Long = end.toLong
+      val n: Long =
+        if (isEmpty) 0L
+        else if (step > 0) (hi - start.toLong) / step.toLong + 1L
+        else (start.toLong - hi) / (-step.toLong) + 1L
+      if (n > Int.MaxValue.toLong)
+        intrinsics.raise("java.lang.IllegalArgumentException", "seqs cannot contain more than Int.MaxValue elements.")
+      val out = intrinsics.array[B](n.toInt)
+      var k   = 0L
+      while (k < n) {
+        out.update(k.toInt, f((start.toLong + k * step.toLong).toInt))
+        k += 1L
+      }
+      new IndexedSeq[B](n.toInt, out)
+    }
+
+    def filter(pred: Int => Boolean): IndexedSeq[Int] = {
+      val hi: Long = end.toLong
+      val n: Long =
+        if (isEmpty) 0L
+        else if (step > 0) (hi - start.toLong) / step.toLong + 1L
+        else (start.toLong - hi) / (-step.toLong) + 1L
+      if (n > Int.MaxValue.toLong)
+        intrinsics.raise("java.lang.IllegalArgumentException", "seqs cannot contain more than Int.MaxValue elements.")
+      val out = intrinsics.array[Int](n.toInt)
+      var k   = 0L
+      var m   = 0
+      while (k < n) {
+        val x = (start.toLong + k * step.toLong).toInt
+        if (pred(x)) { out.update(m, x); m += 1 }
+        k += 1L
+      }
+      new IndexedSeq[Int](m, out)
+    }
+
+    def sum[B >: Int](num: Numeric[B]): Int = {
+      val hi: Long = end.toLong
+      val n: Long =
+        if (isEmpty) 0L
+        else if (step > 0) (hi - start.toLong) / step.toLong + 1L
+        else (start.toLong - hi) / (-step.toLong) + 1L
+      if (n > Int.MaxValue.toLong)
+        intrinsics.raise("java.lang.IllegalArgumentException", "seqs cannot contain more than Int.MaxValue elements.")
+      if (isEmpty) 0
+      else if (n == 1L) start
+      else ((n * (start.toLong + (start.toLong + (n - 1L) * step.toLong))) / 2L).toInt
+    }
+  }
+
+  class IndexedSeq[A](val length_ : Int, val data: intrinsics.TypedBuffer[A]) {
+    def length: Int       = length_
+    def size: Int         = length_
+    def isEmpty: Boolean  = length_ == 0
+    def nonEmpty: Boolean = length_ != 0
+
+    def apply(i: Int): A = {
+      if (i < 0 || i >= length_) intrinsics.raise("java.lang.IndexOutOfBoundsException", "index out of bounds")
+      data(i)
+    }
+
+    def foreach[U](f: A => U): Unit = {
+      var i = 0
+      while (i < length_) {
+        f(data(i))
+        i += 1
+      }
+    }
+
+    def foldLeft[B](z: B)(op: (B, A) => B): B = {
+      var acc = z
+      var i   = 0
+      while (i < length_) {
+        acc = op(acc, data(i))
+        i += 1
+      }
+      acc
+    }
+
+    def exists(p: A => Boolean): Boolean = {
+      var found = false
+      var i     = 0
+      while (i < length_ && !found) {
+        found = p(data(i))
+        i += 1
+      }
+      found
+    }
+
+    def forall(p: A => Boolean): Boolean = {
+      var all = true
+      var i   = 0
+      while (i < length_ && all) {
+        all = p(data(i))
+        i += 1
+      }
+      all
+    }
+
+    def count(p: A => Boolean): Int = {
+      var found = 0
+      var i     = 0
+      while (i < length_) {
+        if (p(data(i))) found += 1
+        i += 1
+      }
+      found
+    }
+
+    def sum[B >: A](num: Numeric[B]): B = {
+      var acc: B = intrinsics.zero[B]
+      var i      = 0
+      while (i < length_) {
+        acc = intrinsics.add[B](acc, data(i))
+        i += 1
+      }
+      acc
+    }
+
+    def map[B](f: A => B): IndexedSeq[B] = {
+      val out = intrinsics.array[B](length_)
+      var i   = 0
+      while (i < length_) {
+        out.update(i, f(data(i)))
+        i += 1
+      }
+      new IndexedSeq[B](length_, out)
+    }
+
+    def filter(pred: A => Boolean): IndexedSeq[A] = {
+      val out = intrinsics.array[A](length_)
+      var i   = 0
+      var m   = 0
+      while (i < length_) {
+        val x = data(i)
+        if (pred(x)) { out.update(m, x); m += 1 }
+        i += 1
+      }
+      new IndexedSeq[A](m, out)
     }
   }
 
   class Class[T] {}
+
+  class Numeric[T]
 
   class ClassTag[T] { // extends scala.Equals {
     // override def canEqual(that: Any): Boolean = true
@@ -71,12 +568,16 @@ object StdLib {
   class RichInt(val x: Int) {
     def min(that: Int)         = java.lang.Math.min(x, that)
     def max(that: Int)         = java.lang.Math.max(x, that)
-    def until(end: Int): Range = new Range(x, end, 1, isInclusive = false)
-    def until(end: Int, step: Int): Range =
-      new Range(x, end, step, isInclusive = false)
-    def to(end: Int): Inclusive = Inclusive(x, end, 1)
-    def to(end: Int, step: Int): Inclusive =
-      Inclusive(x, end, step)
+    def until(end: Int): Range = new Range(x, end, 1, isInclusive = false, x >= end)
+    def until(end: Int, step: Int): Range = {
+      if (step == 0) intrinsics.raise("java.lang.IllegalArgumentException", "step cannot be 0.")
+      new Range(x, end, step, isInclusive = false, (x > end && step > 0) || (x < end && step < 0) || x == end)
+    }
+    def to(end: Int): Inclusive = Inclusive(x, end, 1, x > end)
+    def to(end: Int, step: Int): Inclusive = {
+      if (step == 0) intrinsics.raise("java.lang.IllegalArgumentException", "step cannot be 0.")
+      Inclusive(x, end, step, (x > end && step > 0) || (x < end && step < 0))
+    }
   }
 
   class ArrayOps[A](val xs: scala.Array[A]) {
@@ -269,6 +770,16 @@ object StdLib {
         },
         { case (_ @ given Quotes, ys, _) => '{ () } }
       ),
+      witness[scala.collection.immutable.IndexedSeq[?], IndexedSeq[?]]( //
+        { case (q @ given Quotes, _) => '{ throw new java.lang.AssertionError("No") } },
+        { case (q @ given Quotes, _) => '{ throw new java.lang.AssertionError("No") } },
+        { case (q @ given Quotes, ys, _) => '{ throw new java.lang.AssertionError("No") } }
+      ),
+      witness[scala.math.Numeric[?], Numeric[?]]( //
+        { case (_ @ given Quotes, _) => '{ new Numeric[Any]() } },
+        { case (_ @ given Quotes, _) => '{ throw new java.lang.AssertionError("No") } },
+        { case (_ @ given Quotes, ys, _) => '{ () } }
+      ),
       witness[java.lang.Class[?], Class[?]]( //
         { case (_ @ given Quotes, _) => '{ new Class[Any]() } },
         { case (_ @ given Quotes, x) =>
@@ -279,7 +790,7 @@ object StdLib {
         { case (_ @ given Quotes, ys, _) => '{ () } }
       ),
       witness[scala.collection.immutable.Range, Range](
-        { case (_ @ given Quotes, r) => '{ new Range($r.start, $r.end, $r.step, $r.isInclusive) } },
+        { case (_ @ given Quotes, r) => '{ new Range($r.start, $r.end, $r.step, $r.isInclusive, $r.isEmpty) } },
         { case (_ @ given Quotes, r) =>
           '{
             if ($r.isInclusive) scala.collection.immutable.Range.inclusive($r.start, $r.end, $r.step)
@@ -289,7 +800,7 @@ object StdLib {
         { case (_ @ given Quotes, _, _) => '{ () } }
       ),
       witness[scala.collection.immutable.Range.Inclusive, Inclusive](
-        { case (_ @ given Quotes, r) => '{ Inclusive($r.start, $r.end, $r.step) } },
+        { case (_ @ given Quotes, r) => '{ Inclusive($r.start, $r.end, $r.step, $r.isEmpty) } },
         { case (_ @ given Quotes, r) => '{ scala.collection.immutable.Range.inclusive($r.start, $r.end, $r.step) } },
         { case (_ @ given Quotes, _, _) => '{ () } }
       ),

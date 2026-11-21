@@ -272,7 +272,14 @@ object compiletime {
                 //  Doing this may make the overload resolution less accurate.
                 //  We also discard the generic types here, to handle cases like Seq[A] =:= SeqOp[A, CC[_], C]
 
-                sourceSig.copy(receiver = None, tpeVars = Nil) ==
+                // a result typed by a class type parameter or constructor (`C`, `CC[B]`) is only known at the use site
+                val unresolvedRtn = sourceSig.rtn match {
+                  case p.Type.Var(_, _)                                 => true
+                  case p.Type.Struct(p.Sym("scala" :: "Any" :: Nil), _) => true
+                  case _                                                => false
+                }
+                val expected = if (unresolvedRtn) sourceSig.copy(rtn = reflectedSigWithSourceTpes.rtn) else sourceSig
+                expected.copy(receiver = None, tpeVars = Nil) ==
                   reflectedSigWithSourceTpes.copy(receiver = None, tpeVars = Nil)
               } match {
                 case sourceMirror :: Nil => // single match
