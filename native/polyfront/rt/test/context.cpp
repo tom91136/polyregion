@@ -441,6 +441,27 @@ TEST_CASE("a module store tolerates concurrent loads and lookups") {
   CHECK(failures == 0);
 }
 
+TEST_CASE("a module store resolves distinct symbols on a shared module concurrently") {
+  polyregion::invoke::detail::ModuleStore<int, int> store(
+      "test", [](const std::string &image) { return static_cast<int>(image.size()); },
+      [](const int module, const std::string &symbol, const std::vector<Type> &) { return module + static_cast<int>(symbol.size()); });
+  store.loadModule("shared", std::string(3, 'x'));
+  std::barrier start(8);
+  std::atomic<int> failures{0};
+  std::vector<std::thread> threads;
+  for (int t = 0; t < 8; ++t)
+    threads.emplace_back([&, t] {
+      start.arrive_and_wait();
+      for (int k = 0; k < 20000; ++k) {
+        const auto symbol = "s" + std::to_string(t) + "_" + std::to_string(k);
+        if (store.resolveFunction("shared", symbol, {}) != 3 + static_cast<int>(symbol.size())) ++failures;
+      }
+    });
+  for (auto &thread : threads)
+    thread.join();
+  CHECK(failures == 0);
+}
+
 TEST_CASE("contexts on separate threads launch concurrently") {
   const auto host = find(RelocatableBackend);
   REQUIRE(host);
