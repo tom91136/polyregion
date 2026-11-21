@@ -154,6 +154,15 @@ class ContextSuite extends munit.FunSuite {
 
   private def direct(bytes: Int): ByteBuffer = ByteBuffer.allocateDirect(bytes).order(ByteOrder.nativeOrder)
 
+  private def withRemote[A](bytes: Int)(body: (rt.Context, Long) => A): A = {
+    val ctx = rt.Context.create(hostDevice)
+    try {
+      val remote = ctx.malloc(bytes)
+      try body(ctx, remote)
+      finally ctx.free(remote)
+    } finally ctx.close()
+  }
+
   private def ptrArgs(ptr: Long): (Array[Byte], Array[Byte]) =
     (Array(rt.Type.PTR.value), ByteBuffer.allocate(8).order(ByteOrder.nativeOrder).putLong(ptr).array)
 
@@ -388,24 +397,41 @@ class ContextSuite extends munit.FunSuite {
     assertEquals(failures.size, 0, failures.toString)
   }
 
-  test("copies are bounded by the buffer and start at its position") {
-    val ctx = rt.Context.create(hostDevice)
-    try {
-      val remote = ctx.malloc(16)
-      try {
-        val small = direct(4)
-        intercept[rt.PolyregionRuntimeException](ctx.copyFromDevice(remote, small, 64))
-        intercept[rt.PolyregionRuntimeException](ctx.copyToDevice(small, remote, 64))
-        val source = direct(16)
-        (0 until 16).foreach(i => source.put(i, i.toByte))
-        source.position(8)
-        intercept[rt.PolyregionRuntimeException](ctx.copyToDevice(source, remote, 9))
-        ctx.copyToDevice(source, remote, 8)
-        val back = direct(8)
-        ctx.copyFromDevice(remote, back, 8)
-        (0 until 8).foreach(i => assertEquals(back.get(i), (8 + i).toByte))
-      } finally ctx.free(remote)
-    } finally ctx.close()
+  test("copyFromDevice rejects more bytes than the destination holds") {
+    withRemote(16) { (ctx, remote) =>
+      intercept[rt.PolyregionRuntimeException](ctx.copyFromDevice(remote, direct(4), 8))
+    }
+  }
+
+  test("copyToDevice rejects more bytes than the source holds") {
+    withRemote(16) { (ctx, remote) =>
+      intercept[rt.PolyregionRuntimeException](ctx.copyToDevice(direct(4), remote, 8))
+    }
+  }
+
+  test("copyToDevice counts the bytes from the source position") {
+    withRemote(16) { (ctx, remote) =>
+      val source = direct(16)
+      (0 until 16).foreach(i => source.put(i, i.toByte))
+      source.position(8)
+      intercept[rt.PolyregionRuntimeException](ctx.copyToDevice(source, remote, 9))
+      ctx.copyToDevice(source, remote, 8)
+      val back = direct(8)
+      ctx.copyFromDevice(remote, back, 8)
+      (0 until 8).foreach(i => assertEquals(back.get(i), (8 + i).toByte))
+    }
+  }
+
+  test("copyToDeviceAsync rejects more bytes than the source holds") {
+    withRemote(16) { (ctx, remote) =>
+      intercept[rt.PolyregionRuntimeException](ctx.copyToDevice(direct(4), remote, 8, (_: Throwable) => ()))
+    }
+  }
+
+  test("copyFromDeviceAsync rejects more bytes than the destination holds") {
+    withRemote(16) { (ctx, remote) =>
+      intercept[rt.PolyregionRuntimeException](ctx.copyFromDevice(remote, direct(4), 8, (_: Throwable) => ()))
+    }
   }
 
   test("a kernel launches on an NVIDIA device through a created context") {
