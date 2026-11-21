@@ -11,6 +11,7 @@ object ChildJvm {
     List[Class[?]](
       classOf[ChildJvm.type],
       classOf[polyregion.jvm.runtime.Context],
+      classOf[polyregion.scalalang.Platforms.type],
       classOf[scala.Predef.type],
       classOf[scala.collection.Seq[?]],
       classOf[scala.runtime.Scala3RunTime.type]

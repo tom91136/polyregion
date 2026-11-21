@@ -1,6 +1,7 @@
 package polyregion
 
 import polyregion.jvm.runtime as rt
+import polyregion.scalalang.Platforms
 
 import java.nio.file.{Files, Path}
 import java.nio.{ByteBuffer, ByteOrder}
@@ -13,7 +14,9 @@ object RefusalProbe {
     val device = rt.Context.platforms().flatMap(_.devices).find(_.platformKind == 2).get
     val ctx    = rt.Context.create(device)
     try {
-      val data = ByteBuffer.allocate(8).order(ByteOrder.nativeOrder).putLong(0x1000L).array
+      val host = ByteBuffer.allocateDirect(8)
+      val data =
+        ByteBuffer.allocate(8).order(ByteOrder.nativeOrder).putLong(Platforms.pointerOfDirectBuffer(host)).array
       val held = ctx.stats().remoteAllocations
       try {
         ctx.callHost(Array.empty, "refuse@host", "refuse", Array(rt.Type.PTR.value), data)
