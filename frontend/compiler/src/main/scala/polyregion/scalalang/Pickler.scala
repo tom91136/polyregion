@@ -7,6 +7,7 @@ import polyregion.jvm.twin.{FieldAccess, Layout, Marshal, TwinException}
 import polyregion.prism.{Prism, StdLib}
 
 import java.nio.{ByteBuffer, ByteOrder}
+import scala.annotation.tailrec
 import scala.quoted.*
 import polyregion.prism.StdLib.MutableSeq
 
@@ -254,6 +255,30 @@ object Pickler {
       '{ FieldAccess.of($owner.getClass, ${ Expr(m.name) }, ${ Expr(m.descriptor) }) }
     }
 
+    def isPlainArray(recv: q.Term, m: StructMapping.Member[q.Term]): Boolean = {
+      val sym = fieldSymbol(recv, m.name)
+      !sym.isNoSymbol && recv.tpe.widenTermRefByName.memberType(sym).widenTermRefByName.typeSymbol == q.defn.ArrayClass
+    }
+
+    @tailrec def stageable(owner: p.StructDef, member: String, comp: p.Type): Boolean = comp match {
+      case p.Type.Ptr(inner, _) => stageable(owner, member, inner)
+      case p.Type.Bool1 | p.Type.IntS8 | p.Type.IntU16 | p.Type.IntS16 | p.Type.IntS32 | p.Type.IntS64 |
+          p.Type.Float32 | p.Type.Float64 =>
+        true
+      case p.Type.Struct(name, _) if lut.get(name).exists(_.members.nonEmpty) =>
+        q.report.errorAndAbort(
+          s"Array member `$member` of `${owner.name.fqcn}` holds `${name.fqcn}` elements, " +
+            "only arrays of primitives and arrays of such arrays can be captured"
+        )
+      case _ => false
+    }
+
+    def planArray(recv: q.Term, mapping: StructMapping[q.Term], m: StructMapping.Member[q.Term]): Option[p.Type] =
+      m.tpe match {
+        case p.Type.Ptr(comp, _) if isPlainArray(recv, m) && stageable(mapping.source, m.name, comp) => Some(comp)
+        case _                                                                                       => None
+      }
+
     def readField(recv: q.Term, m: StructMapping.Member[q.Term]): q.Term =
       reachable(recv, m.name).getOrElse {
         recv.tpe.widenTermRefByName.memberType(fieldSymbol(recv, m.name)).widenTermRefByName.asType match {
@@ -362,6 +387,15 @@ object Pickler {
               }
             }
             writePrim(buffer, memberOffset, p.Type.IntS64, ptr)
+          case (_, p.Type.Ptr(_, _)) if planArray(rootAfterPrism.asTerm, mapping, member).isDefined =>
+            val array = '{ ${ readField(rootAfterPrism.asTerm, member).asExpr }.asInstanceOf[AnyRef] }
+            val where = Expr(s"member `${member.name}` of ${mapping.source.name.fqcn}")
+            writePrim(
+              buffer,
+              memberOffset,
+              p.Type.IntS64,
+              '{ if ($array == null) 0L else $m.array($array, $where, "") }
+            )
           case (_, p.Type.Struct(name, _)) if lut.get(name).exists(_.members.isEmpty) =>
             // zero-width slot, nothing to write
             '{ () }
@@ -435,6 +469,12 @@ object Pickler {
         }
     }
 
+    def readBackArray(array: Expr[AnyRef], comp: p.Type, m: Expr[Marshal]): Expr[Unit] = comp match {
+      case p.Type.Ptr(inner, _) =>
+        '{ $array.asInstanceOf[Array[AnyRef]].foreach(row => ${ readBackArray('row, inner, m) }) }
+      case _ => '{ $m.readBack($array) }
+    }
+
     def updateMapping[t: Type](
         root: Expr[t],
         ptr: Expr[Long],
@@ -452,6 +492,10 @@ object Pickler {
           mapping.members.map { member =>
             val memberOffset = Expr(member.offsetInBytes.toInt)
             ((root, member.tpe): @scala.unchecked) match {
+              case (_, p.Type.Ptr(_, _))
+                  if mapping.write.isEmpty && planArray(root.asTerm, mapping, member).isDefined =>
+                val array = '{ ${ readField(root.asTerm, member).asExpr }.asInstanceOf[AnyRef] }
+                '{ if ($array != null) ${ readBackArray(array, planArray(root.asTerm, mapping, member).get, m) } }
               case (_, p.Type.Ptr(comp, _)) =>
                 // Restore arrays only when root is a MutableSeq prism (parameterised type with
                 // a write witness); other Ptr fields (e.g. opaque singleton members) skip.
