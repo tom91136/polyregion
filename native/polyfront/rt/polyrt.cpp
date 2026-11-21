@@ -429,9 +429,10 @@ thread_local bool foreignMarshalAttempted = false;
 constexpr auto foreignMarshalMessage =
     "a created context cannot marshal pointer-bearing captures: the mirror tables belong to the default context";
 
-void rejectForeignMarshal() {
-  if (!std::exchange(foreignMarshalAttempted, false)) return;
-  throw std::runtime_error(foreignMarshalMessage);
+bool refusedForeignMarshal() {
+  if (!std::exchange(foreignMarshalAttempted, false)) return false;
+  foreignMarshalAttempted = true;
+  return true;
 }
 
 template <class Fn> bool runtimeStatus(const char *operation, Fn &&fn) noexcept {
@@ -1089,7 +1090,7 @@ static void remoteLaunch(void *context, const char *moduleName, const char *kern
                          const size_t gridZ, const size_t blockX, const size_t blockY, const size_t blockZ, const size_t localMemBytes,
                          const size_t argCount, const uint8_t *argTypes, void *const *argPtrs, const int64_t arenaRoot = 0) {
   auto &value = requireContext(context, __func__);
-  rejectForeignMarshal();
+  if (refusedForeignMarshal()) return;
   value.counters.launches.fetch_add(1, std::memory_order_relaxed);
   uintptr_t error = takesErrorBuffer(value.device, moduleName) ? polyregion::polyrt::acquireErrorBlock(value) : 0;
   try {
@@ -1198,7 +1199,7 @@ static void remoteLaunchMarshalled(void *context, const char *moduleName, const 
                                    const polyregion::runtime::TypeLayout *const *layouts) {
   namespace sma = polyregion::polyrt::sma;
   auto &execution = requireContext(context, __func__);
-  rejectForeignMarshal();
+  if (refusedForeignMarshal()) return;
   const std::scoped_lock transaction(execution.transaction);
   struct Mirror {
     uintptr_t remote = 0;
@@ -1214,6 +1215,9 @@ static void remoteLaunchMarshalled(void *context, const char *moduleName, const 
                            });
   const bool foreign = !execution.processMarshal && !hostThreaded && mode != sma::MirrorMode::Off;
   auto *marshal = !marshalling || hostThreaded || mode == sma::MirrorMode::Off || foreign ? nullptr : sma::captureMarshal();
+  const auto refuse = [&] {
+    if (!sma::foreignContextActive(__func__)) throw std::runtime_error(foreignMarshalMessage);
+  };
   std::vector<size_t> mirroredCaptures, ensuredPointers;
   std::optional<size_t> arenaCapture;
   sma::ArenaImage arena{};
@@ -1234,7 +1238,10 @@ static void remoteLaunchMarshalled(void *context, const char *moduleName, const 
     if (marshal) marshal->visitClear();
     for (size_t i = 0; i < argCount; ++i) {
       launchArgPtrs[i] = argPtrs[i];
-      if (foreign && mirrorKinds[i] == 1 && pointerBearing(layouts ? layouts[i] : nullptr)) throw std::runtime_error(foreignMarshalMessage);
+      if (foreign && mirrorKinds[i] == 1 && pointerBearing(layouts ? layouts[i] : nullptr)) {
+        refuse();
+        return;
+      }
       if (mirrorKinds[i] != 1 || !marshal || !pointerBearing(layouts ? layouts[i] : nullptr)) continue;
       if (mode == sma::MirrorMode::Arena) {
         if (arenaCapture) throw std::logic_error(fmt::format("{}: launch of {} has more than one arena capture", __func__, kernelName));
@@ -1252,7 +1259,11 @@ static void remoteLaunchMarshalled(void *context, const char *moduleName, const 
       if (launchArgPtrs[i] != argPtrs[i]) continue;
       if (mirrorKinds[i] == 3) {
         const auto pointer = *static_cast<const uintptr_t *>(argPtrs[i]);
-        if (foreign && pointer != 0 && !remoteAllocation(execution, pointer)) throw std::runtime_error(foreignMarshalMessage);
+        if (foreign && pointer != 0 && !remoteAllocation(execution, pointer)) {
+          refuse();
+          if (const auto failure = release()) std::rethrow_exception(failure);
+          return;
+        }
         if (!marshal || pointer == 0 || remoteAllocation(execution, pointer)) continue;
         if (const auto remote = marshal->ensure(reinterpret_cast<const void *>(pointer), mirrorSizes[i])) {
           marshalled[i] = remote;
