@@ -10,6 +10,7 @@
 #include "aspartame/all.hpp"
 #include "magic_enum/magic_enum.hpp"
 
+#include "polyfront/options.hpp"
 #include "polyfront/package.hpp"
 #include "polyregion/env_keys.h"
 
@@ -122,6 +123,12 @@ jobject Compiler::compile0(JNIEnv *env, jclass, //
   });
 }
 
+static std::vector<std::string> configuredCapabilities(const std::string &list) {
+  const auto configured = list ^ split(',') ^ filter([](const auto &c) { return !c.empty(); });
+  if (const auto errors = polyfront::capabilityErrors(configured); !errors.empty()) throw std::invalid_argument(errors | mk_string("\n"));
+  return configured;
+}
+
 jbyteArray Compiler::loadPackage0(JNIEnv *env, jclass, jstring name, jstring roots, jstring capabilities) {
   return wrapException(env, EX, [&] {
     namespace pkg = polyfront::package;
@@ -140,8 +147,8 @@ jbyteArray Compiler::loadPackage0(JNIEnv *env, jclass, jstring name, jstring roo
                              ? polyast::Package(archive.value->interface, polyast::Program({}, {}, {}, polyast::PassPhase::Initial(), {}))
                              : merged.front();
     std::unordered_set<std::string> available;
-    for (const auto &capability : fromJni(env, capabilities) ^ split(','))
-      if (!capability.empty()) available.emplace(capability.substr(0, capability.find('@')));
+    for (const auto &capability : configuredCapabilities(fromJni(env, capabilities)))
+      available.emplace(capability.substr(0, capability.find('@')));
     std::unordered_set<std::string> implementations;
     for (const auto &function : headers.program.functions)
       if (function.implements && function.requiredCapabilities ^ forall([&](const auto &c) { return available.count(c) > 0; }))
@@ -179,7 +186,7 @@ jobjectArray Compiler::compileInterface0(JNIEnv *env, jclass, jstring name, jstr
     if (!headers) fail(headers.errors);
     const auto selection = pkg::mergeSelections({&*headers.value});
 
-    const auto configured = fromJni(env, capabilities) ^ split(',') ^ filter([](const auto &c) { return !c.empty(); });
+    const auto configured = configuredCapabilities(fromJni(env, capabilities));
     std::vector<std::pair<ct::Target, std::string>> deviceTargets;
     for (const auto &raw : fromJni(env, targets) ^ split(',')) {
       if (raw.empty()) continue;
@@ -247,7 +254,7 @@ jstring Compiler::capabilitiesFor0(JNIEnv *env, jclass, jstring capabilities, js
     const auto name = fromJni(env, target);
     const auto spec = ct::TargetSpec::findByName(name);
     if (!spec) throw std::runtime_error("Unknown target `" + name + "`");
-    const auto configured = fromJni(env, capabilities) ^ split(',') ^ filter([](const auto &c) { return !c.empty(); });
+    const auto configured = configuredCapabilities(fromJni(env, capabilities));
     return toJni(env, polyfront::package::capabilitiesFor(configured, spec->codegen) ^ mk_string(","));
   });
 }

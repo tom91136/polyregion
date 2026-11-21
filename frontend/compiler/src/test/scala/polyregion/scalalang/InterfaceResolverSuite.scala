@@ -398,6 +398,17 @@ class InterfaceResolverSuite extends munit.FunSuite {
     assertEquals(InterfaceResolver.capabilitiesFor(configured, "cuda"), Set("foo.thrust", "plain"))
   }
 
+  test("a capability qualified by an unknown target is rejected by name") {
+    val error = intercept[Exception](InterfaceResolver.capabilitiesFor(Set("foo.thrust@cudaa"), "cuda"))
+    assert(error.getMessage.contains("foo.thrust@cudaa"), error.getMessage)
+    assert(error.getMessage.contains("cudaa"), error.getMessage)
+  }
+
+  test("a capability with an empty qualifier side is rejected by name") {
+    val error = intercept[Exception](InterfaceResolver.capabilitiesFor(Set("foo.thrust@"), "cuda"))
+    assert(error.getMessage.contains("foo.thrust@"), error.getMessage)
+  }
+
   test("reject a target no configured capability serves") {
     val errors = gatedImport("opencl").left.getOrElse(fail("expected an error"))
     assert(errors.exists(_.contains("bar.pick")), errors.toString)
