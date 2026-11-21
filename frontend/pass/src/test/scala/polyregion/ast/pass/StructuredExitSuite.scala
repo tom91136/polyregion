@@ -305,6 +305,46 @@ class StructuredExitSuite extends munit.FunSuite {
     assertEquals(foreignCalls(out.functions.head).count(_ == "polyrt_remote_failed"), 1)
   }
 
+  private def reportedExceptions(f: p.Function): Int = {
+    val calls = f.collectWhere[p.Expr] {
+      case p.Expr.ForeignCall("__polyregion_builtin_assert", code :: _, _)
+          if code == p.Term.IntU32Const(p.Enums.AssertCode.Exception.value) =>
+        ()
+    }
+    val messages = f.collectWhere[p.Expr] { case p.Expr.Cast(p.Term.StringConst("int"), _) => () }
+    if (calls.size == messages.size) calls.size else -1
+  }
+
+  test("a raise escaping a host helper after a remote operation is reported to the host") {
+    val context = named("ctx", p.Spec.ContextType)
+    val helperBody =
+      List(remoteAlloc(context, named("mem", p.Spec.ContextType)), raise(p.Term.IntS32Const(7), "int"), ret)
+    val helper =
+      asHost(fn("helper", List(p.Arg(context)), body = helperBody, visibility = p.Function.Visibility.Internal))
+    val call = p.Stmt.Var(
+      named("called", p.Type.Unit0),
+      Some(p.Expr.Invoke(p.Type.FnRef(helper.name), Nil, None, List(selectT(context)), p.Type.Unit0))
+    )
+    val driver = asHost(fn("driver", List(p.Arg(context)), body = List(call, ret)))
+    val out    = StructuredExit(program(driver, List(helper)), NoopLog)
+    assertEquals(reportedExceptions(out.functions.head), 1)
+  }
+
+  test("a raise escaping a host entry after a remote operation is reported to the host") {
+    val context = named("ctx", p.Spec.ContextType)
+    val body    = List(remoteAlloc(context, named("mem", p.Spec.ContextType)), raise(p.Term.IntS32Const(7), "int"), ret)
+    val out = StructuredExit(program(asHost(fn("driver", List(p.Arg(context)), body = body))), NoopLog).entry.required
+    assertEquals(reportedExceptions(out), 1)
+    assertEquals(out.decl.flatParams.map(_.named.symbol), List("ctx"))
+  }
+
+  test("a raise escaping a host entry with no remote operation is reported to the host") {
+    val body = List(raise(p.Term.IntS32Const(7), "int"), ret)
+    val out  = StructuredExit(program(asHost(fn("driver", body = body))), NoopLog).entry.required
+    assertEquals(reportedExceptions(out), 1)
+    assertEquals(out.decl.flatParams.map(_.named.symbol), Nil)
+  }
+
   test("a host function that catches a raise and has a remote operation is lowered") {
     val context = named("ctx", p.Spec.ContextType)
     val body = List(

@@ -563,12 +563,15 @@ object StructuredExit extends ProgramPass {
     private def assertTag: List[p.Stmt] =
       Option.when(tags.nonEmpty)(p.Stmt.Mut(tagSel, p.Expr.Alias(p.Term.IntS32Const(AssertTag)))).toList
 
-    private def reportAssert(code: p.Term, message: p.Term): List[p.Stmt] = {
-      val out = ListBuffer.empty[p.Stmt]
-      let(p.Type.Unit0, p.Expr.ForeignCall(HostAssertSym, List(code, message), p.Type.Unit0), out)
-      out += p.Stmt.Mut(asserted, p.Expr.Alias(p.Term.Bool1Const(true)))
-      out.toList ::: assertTag
+    private def reportCall(code: p.Term, message: p.Term): List[p.Stmt] = {
+      val out  = ListBuffer.empty[p.Stmt]
+      val text = if (message.tpe == ErrorPtr) message else let(ErrorPtr, p.Expr.Cast(message, ErrorPtr), out)
+      let(p.Type.Unit0, p.Expr.ForeignCall(HostAssertSym, List(code, text), p.Type.Unit0), out)
+      out.toList
     }
+
+    private def reportAssert(code: p.Term, message: p.Term): List[p.Stmt] =
+      reportCall(code, message) ::: p.Stmt.Mut(asserted, p.Expr.Alias(p.Term.Bool1Const(true))) :: assertTag
 
     private def lowerAssert(code: p.Term, message: p.Term): List[p.Stmt] = {
       val out = ListBuffer[p.Stmt](p.Stmt.Mut(asserted, p.Expr.Alias(p.Term.Bool1Const(true))))
@@ -974,6 +977,28 @@ object StructuredExit extends ProgramPass {
       if (report.isEmpty) Nil else List(p.Stmt.Cond(asserted, report, Nil))
     }
 
+    def hostEscapeReport: List[p.Stmt] = {
+      val code = p.Term.IntU32Const(p.Enums.AssertCode.Exception.value)
+      val chain = tags.zipWithIndex.foldRight(List.empty[p.Stmt]) { case ((Raised(exceptionKind, _), i), els) =>
+        ifThen(
+          p.Expr.IntrOp(p.Intr.LogicEq(tagSel, p.Term.IntS32Const(i + 1))),
+          reportCall(code, p.Term.StringConst(exceptionKind.sourceName)),
+          els
+        )
+      }
+      if (chain.isEmpty) Nil
+      else {
+        val cleanup = selectTag(tagSel, tags.map(x => x.thrown -> cleanupFor(x.thrown, slotOf(x.thrown))))
+        List(
+          p.Stmt.Cond(
+            asserted,
+            ifThen(p.Expr.IntrOp(p.Intr.LogicNeq(tagSel, p.Term.IntS32Const(AssertTag))), chain ::: cleanup, Nil),
+            Nil
+          )
+        )
+      }
+    }
+
     // the exit ends at the element boundary; the host reads the error buffer after the launch
     private def settle(body: List[p.Stmt]): List[p.Stmt] = {
       val raises = flow.raised(body).nonEmpty
@@ -1034,9 +1059,8 @@ object StructuredExit extends ProgramPass {
           case Exit.Buffer =>
             (if (e.rtn == p.Type.Unit0) p.Term.Unit0Const else p.Term.Poison(e.rtn), lower.escapeReport)
           case Exit.Report(propagates) =>
-            defaultTerm(e.rtn) -> Option
-              .when(propagates)(p.Stmt.Update(sel(raisedArg), p.Term.IntU32Const(0), asserted))
-              .toList
+            defaultTerm(e.rtn) -> (lower.hostEscapeReport :::
+              Option.when(propagates)(p.Stmt.Update(sel(raisedArg), p.Term.IntU32Const(0), asserted)).toList)
         }
         val epilogue = if (e.body.exists(flow.escapes)) drain ::: List(p.Stmt.Return(p.Expr.Alias(sentinel))) else Nil
         val decl = exit match {
@@ -1089,7 +1113,7 @@ object StructuredExit extends ProgramPass {
         key.stripPrefix(p.Conventions.LinkCallableMeta)
     }.toSet
     val candidates = (program.entry.toList ::: program.functions).filter(isHost)
-    val asserting  = candidates.filter(_.body.exists(mayAssert)).map(_.name).toSet
+    val asserting  = candidates.filter(f => f.body.exists(mayAssert) || flow.raised(f.body).nonEmpty).map(_.name).toSet
     val callees = candidates.map { f =>
       f.name -> f.collectWhere[p.Expr] { case p.Expr.Invoke(p.Type.FnRef(callee), _, _, _, _) => callee }.toSet
     }.toMap

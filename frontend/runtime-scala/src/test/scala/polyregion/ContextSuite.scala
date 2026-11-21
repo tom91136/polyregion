@@ -144,7 +144,12 @@ class ContextSuite extends munit.FunSuite {
     finally compiler.close()
   }
 
-  private def hostProgram(name: String, params: List[p.Named], body: List[p.Stmt]): p.Program = {
+  private def hostFunction(
+      name: String,
+      params: List[p.Named],
+      body: List[p.Stmt],
+      visibility: p.Function.Visibility = p.Function.Visibility.Exported
+  ): p.Function = {
     val decl = p.FunctionDecl(
       p.Sym(name),
       Nil,
@@ -155,20 +160,17 @@ class ContextSuite extends munit.FunSuite {
       p.Type.Unit0,
       p.Function.Affinity.Host
     )
-    p.Program(
-      Some(
-        p.Function(
-          decl,
-          body :+ p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const)),
-          p.Function.Visibility.Exported,
-          p.Function.FpMode.Relaxed,
-          p.CallConvention.RegularCall
-        )
-      ),
-      Nil,
-      Nil
+    p.Function(
+      decl,
+      body :+ p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const)),
+      visibility,
+      p.Function.FpMode.Relaxed,
+      p.CallConvention.RegularCall
     )
   }
+
+  private def hostProgram(name: String, params: List[p.Named], body: List[p.Stmt]): p.Program =
+    p.Program(Some(hostFunction(name, params, body)), Nil, Nil)
 
   private def usableProgram: p.Program = {
     val (ctx, mem) = (p.Named("ctx", p.Spec.ContextType), p.Named("mem", p.Spec.ContextType))
@@ -633,6 +635,51 @@ class ContextSuite extends munit.FunSuite {
           } finally ctx.free(remote)
         } finally ctx.close()
     }
+  }
+
+  private def raiseSeven: p.Stmt = p.Stmt.Raise(p.Term.IntS32Const(7), p.ExceptionKind(p.Type.IntS32, "int"), Nil)
+
+  private def allocation(ctx: p.Named): p.Stmt =
+    p.Stmt.Var(
+      p.Named("owned", p.Spec.ContextType),
+      Some(p.Expr.SpecOp(p.Spec.RemoteAlloc(p.Term.Select(ctx, Nil, ctx.tpe), p.Term.IntU64Const(64))))
+    )
+
+  private def hostRaise(name: String, program: p.Program): rt.PolyregionRuntimeException = {
+    val module = s"$name@host"
+    rt.Context.loadHostProgram(module, compile(program, ct.Target.LLVM_HOST, "native").program)
+    val ctx = rt.Context.create(hostDevice)
+    try intercept[rt.PolyregionRuntimeException](ctx.callHost(Array.empty, module, name, Array.empty, Array.empty))
+    finally ctx.close()
+  }
+
+  private def assertRaised(e: rt.PolyregionRuntimeException): Unit =
+    assert(e.getMessage.contains("EXCP") && e.getMessage.contains("int"), e.getMessage)
+
+  test("a raise escaping a host helper after a remote operation reaches the JVM") {
+    val ctx = p.Named("ctx", p.Spec.ContextType)
+    val helper =
+      hostFunction("raisingHelper", List(ctx), List(allocation(ctx), raiseSeven), p.Function.Visibility.Internal)
+    val call = p.Stmt.Var(
+      p.Named("called", p.Type.Unit0),
+      Some(
+        p.Expr.Invoke(p.Type.FnRef(helper.decl.name), Nil, None, List(p.Term.Select(ctx, Nil, ctx.tpe)), p.Type.Unit0)
+      )
+    )
+    val entry = hostFunction("raiseThroughHelper", List(ctx), List(call))
+    assertRaised(hostRaise("raiseThroughHelper", p.Program(Some(entry), List(helper), Nil)))
+  }
+
+  test("a raise escaping a host entry after a remote operation reaches the JVM") {
+    val ctx = p.Named("ctx", p.Spec.ContextType)
+    assertRaised(
+      hostRaise("raiseAfterAlloc", hostProgram("raiseAfterAlloc", List(ctx), List(allocation(ctx), raiseSeven)))
+    )
+  }
+
+  test("a raise escaping a host entry with no remote operation reaches the JVM") {
+    val ctx = p.Named("ctx", p.Spec.ContextType)
+    assertRaised(hostRaise("raiseOnly", hostProgram("raiseOnly", List(ctx), List(raiseSeven))))
   }
 
   test("a host program marshalling a host pointer through a created managed context raises and leaves it usable") {
