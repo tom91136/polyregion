@@ -14,6 +14,9 @@ class BytecodeLambdaSuite extends munit.FunSuite {
       |import java.util.function.IntUnaryOperator;
       |
       |public final class Lambdas {
+      |  interface Mixed { double apply(double x); default double apply(int x) { return x; } }
+      |  public static double defaulted(int a) { Mixed f = x -> x + 1.5; return f.apply(a); }
+      |  public static double sam(double a) { Mixed f = x -> x + 1.5; return f.apply(a); }
       |  public static int local(int a) { IntUnaryOperator f = x -> x + 1; return f.applyAsInt(a); }
       |  public static int capturing(int a, int b) {
       |    IntUnaryOperator f = x -> x * b;
@@ -89,7 +92,7 @@ class BytecodeLambdaSuite extends munit.FunSuite {
 
   test("a default method on a functional value is refused") {
     val message = refusal("composed")
-    assert(message.contains("on a functional value; only `test` is resolved"), message)
+    assert(message.contains("on a functional value; only `test(I)Z` is resolved"), message)
   }
 
   test("a lambda over boxed types is refused when its body is lowered") {
@@ -102,5 +105,14 @@ class BytecodeLambdaSuite extends munit.FunSuite {
   test("string concatenation is refused by name") {
     val message = refusal("concat")
     assert(message.contains("Unsupported string concatenation; PolyRegion has no device-side String"), message)
+  }
+
+  test("an overload of the interface method with the same arity is not the lambda") {
+    val message = refusal("defaulted")
+    assert(message.contains("on a functional value; only `apply(D)D` is resolved"), message)
+  }
+
+  test("the interface method itself is resolved") {
+    assertEquals(ok("sam").calls.size, 1)
   }
 }

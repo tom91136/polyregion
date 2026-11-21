@@ -117,7 +117,7 @@ object BytecodeRemapper {
   }
 
   // the classes one lowering reaches, each laid out once from its class file
-  private case class Closure(impl: MethodRef, captured: List[p.Term], sam: String, arity: Int)
+  private case class Closure(impl: MethodRef, captured: List[p.Term], sam: String, samDesc: String)
 
   private case class Selected(named: p.Named) {
     val term: p.Term.Select = p.Term.Select(named, Nil, named.tpe)
@@ -306,7 +306,7 @@ object BytecodeRemapper {
                 MethodRef(impl.classname.replace('/', '.'), impl.elementname, impl.descriptor),
                 captured,
                 i.getName,
-                MethodDescriptor.parseDescriptor(sam.getString).params.length
+                sam.getString
               )
             }
         case _ =>
@@ -315,8 +315,9 @@ object BytecodeRemapper {
       }
 
     private def callClosure(c: Closure, i: InvocationExprent, buf: mutable.ListBuffer[p.Stmt]): Result[p.Term] =
-      if (i.getName != c.sam || i.getLstParameters.size != c.arity)
-        s"Unsupported call `${i.getName}${i.getStringDescriptor}` on a functional value; only `${c.sam}` is resolved".fail
+      if (i.getName != c.sam || i.getStringDescriptor != c.samDesc)
+        (s"Unsupported call `${i.getName}${i.getStringDescriptor}` on a functional value; " +
+          s"only `${c.sam}${c.samDesc}` is resolved").fail
       else
         i.getLstParameters.asScala.toList
           .traverse(expr(_, buf))
