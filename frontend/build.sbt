@@ -543,7 +543,10 @@ lazy val cudaSuites =
     "SpectraLaunchSuite.scala",
     "TwinSuite.scala"
   )
-lazy val cudaSuiteSupport = Set("BaseSuite.scala", "DevirtFixtures.scala", "RangeSuiteBase.scala", "Toggles.scala")
+lazy val cudaSuiteSupport =
+  Set("BaseSuite.scala", "DevirtFixtures.scala", "RangeSuiteBase.scala", "Toggles.scala") ++ spectraSuiteBase
+lazy val hipSuites        = Set("SpectraHipLaunchSuite.scala")
+lazy val spectraSuiteBase = Set("SpectraLaunchBase.scala", "LaunchPoint.scala")
 
 def compilerTestsuiteSettings(projectName: String) = Seq(
   fork                      := true,
@@ -572,11 +575,19 @@ lazy val `compiler-testsuite-scala` = project
     commonSettings,
     polyregionSettings(),
     compilerTestsuiteSettings("compiler-testsuite-scala"),
-    Test / unmanagedSources / excludeFilter ~= (_ || new SimpleFileFilter(file => cudaSuites(file.getName)))
+    Test / unmanagedSources / excludeFilter ~= (_ || new SimpleFileFilter(file =>
+      cudaSuites(file.getName) || hipSuites(file.getName) || spectraSuiteBase(file.getName)
+    ))
   )
   .dependsOn(`runtime-scala`)
 
-def cudaSuiteProject(projectName: String, targets: Seq[String]) =
+def deviceSuiteProject(
+    projectName: String,
+    targets: Seq[String],
+    suites: Set[String],
+    support: Set[String],
+    packageSuites: Set[String]
+) =
   Project(projectName, file(projectName))
     .settings(
       commonSettings,
@@ -586,7 +597,7 @@ def cudaSuiteProject(projectName: String, targets: Seq[String]) =
         (ThisBuild / baseDirectory).value / "compiler-testsuite-scala" / "src" / "test" / "scala"
       ),
       Test / unmanagedSources / includeFilter := new SimpleFileFilter(file =>
-        cudaSuites(file.getName) || cudaSuiteSupport(file.getName)
+        suites(file.getName) || support(file.getName)
       ),
       Test / unmanagedSources ++= {
         if (polyregionLibraryPath.value.isEmpty) Nil
@@ -597,13 +608,26 @@ def cudaSuiteProject(projectName: String, targets: Seq[String]) =
       },
       Test / unmanagedSources / excludeFilter := {
         val base = (Test / unmanagedSources / excludeFilter).value
-        if (polyregionLibraryPath.value.isEmpty) base || "SpectraLaunchSuite.scala" else base
+        if (polyregionLibraryPath.value.isEmpty) base || new SimpleFileFilter(file => packageSuites(file.getName))
+        else base
       }
     )
     .dependsOn(`runtime-scala`)
 
+def cudaSuiteProject(projectName: String, targets: Seq[String]) =
+  deviceSuiteProject(projectName, targets, cudaSuites, cudaSuiteSupport, spectraSuiteBase + "SpectraLaunchSuite.scala")
+
 lazy val `compiler-testsuite-cuda`      = cudaSuiteProject("compiler-testsuite-cuda", Seq("host@native", "cuda@sm_80"))
 lazy val `compiler-testsuite-cuda-host` = cudaSuiteProject("compiler-testsuite-cuda-host", Seq("host@native"))
+
+lazy val `compiler-testsuite-hip` =
+  deviceSuiteProject(
+    "compiler-testsuite-hip",
+    Seq("host@native", "hip@gfx1036"),
+    hipSuites,
+    spectraSuiteBase,
+    hipSuites ++ spectraSuiteBase
+  )
 
 lazy val `compiler-testsuite-java` = project
   .settings(
