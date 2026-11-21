@@ -58,11 +58,20 @@ public final class FieldAccess {
   }
 
   static Field find(Class<?> owner, String name) {
-    for (Class<?> c = owner; c != null; c = c.getSuperclass())
-      try {
-        return c.getDeclaredField(name);
-      } catch (NoSuchFieldException ignored) {
+    String expanded = "$$" + name;
+    for (Class<?> c = owner; c != null; c = c.getSuperclass()) {
+      Field renamed = null;
+      for (Field f : c.getDeclaredFields()) {
+        if (f.getName().equals(name)) return f;
+        if (f.getName().endsWith(expanded)) {
+          if (renamed != null)
+            throw new TwinException(
+                "Class " + c.getName() + " has more than one field expanded from `" + name + "`");
+          renamed = f;
+        }
       }
+      if (renamed != null) return renamed;
+    }
     throw new TwinException(
         "Class " + owner.getName() + " has no field `" + name + "`, the layout does not match this class");
   }

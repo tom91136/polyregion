@@ -9,6 +9,28 @@ import java.nio.{ByteBuffer, ByteOrder}
 import scala.jdk.CollectionConverters.*
 
 object TwinSuite {
+  class Expanded {
+    private val a = 7
+    def viaLocal: Int = {
+      class Reader { def get: Int = a }
+      Reader().get
+    }
+  }
+  class Twice {
+    private val a = 1
+    def viaLocal: Int = {
+      class Reader { def get: Int = a }
+      Reader().get
+    }
+  }
+  class TwiceMore extends Twice {
+    private val a = 2
+    def more: Int = {
+      class Reader { def get: Int = a }
+      Reader().get
+    }
+  }
+
   val HostKind: Int        = 1
   val ObjectFmt: Int       = 2
   val ManagedKind: Int     = 2
@@ -510,6 +532,19 @@ class TwinSuite extends munit.FunSuite {
     mismatch(one(prim("a", 0, 8, "F")), classOf[Inner], "is 8 bytes in the layout")
     mismatch(one(Field("a", "", Kind.ARRAY, 0, 8, "")), classOf[Inner], "is an array in the layout")
     mismatch(one(Field("a", "", Kind.STRUCT, 0, 8, "")), classOf[Inner], "is an object in the layout")
+  }
+
+  test("a private field the compiler renamed for a nested class resolves by its source name") {
+    val x      = Expanded()
+    val access = FieldAccess.of(classOf[Expanded], "a", "I")
+    assertEquals(access.get(x), 7: Any)
+    assertEquals(x.viaLocal, 7)
+  }
+
+  test("a renamed private field resolves in the class that declares it") {
+    val x = TwiceMore()
+    assertEquals(FieldAccess.of(classOf[TwiceMore], "a", "I").get(x), 2: Any)
+    assertEquals(FieldAccess.of(classOf[Twice], "a", "I").get(x), 1: Any)
   }
 
   test("a private JDK field is refused without --add-opens and names the flag") {
