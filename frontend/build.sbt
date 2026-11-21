@@ -172,11 +172,25 @@ def nativeCompilerInputs(converter: xsbti.FileConverter): Seq[Attributed[xsbti.H
 
 lazy val processorDigest = taskKey[String]("Digest of what the annotation processor runs on")
 
+// kernels read JDK class files from the JVM that compiles them, so another JDK is another compilation
+lazy val jdkIdentity: String =
+  java.security.MessageDigest
+    .getInstance("SHA-256")
+    .digest(
+      Seq("java.vm.vendor", "java.vm.version", "java.runtime.version", "java.home")
+        .map(sys.props(_))
+        .mkString("|")
+        .getBytes
+    )
+    .map("%02x".format(_))
+    .mkString
+
 // regions are lowered to machine code while javac runs, so a rebuilt processor or native library has to recompile the
 // sources holding them, which zinc cannot see
 lazy val processorTracking = Seq(
   processorDigest := Def.uncached {
     val md = java.security.MessageDigest.getInstance("SHA-256")
+    md.update(jdkIdentity.getBytes)
     (compiler / Compile / fullClasspath).value.foreach(a => md.update(a.data.contentHashStr.getBytes))
     nativeCompilerInputFiles
       .sortBy(_.getName)
@@ -621,7 +635,8 @@ def compilerTestsuiteSettings(projectName: String) = Seq(
   },
   name := projectName,
   scalacOptions ++= Seq(
-    "-Yretain-trees" // XXX for the test kernels
+    "-Yretain-trees", // XXX for the test kernels
+    s"-Xmacro-settings:polyregion.jdk=$jdkIdentity"
   ),
   libraryDependencies ++= Seq(
     "org.scalameta" %% "munit" % munitVersion % Test

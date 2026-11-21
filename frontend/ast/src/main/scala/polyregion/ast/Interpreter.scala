@@ -581,7 +581,7 @@ object Interpreter {
 
     private def cast(v: V, from: p.Type, to: p.Type): V =
       if (isFloat(to) && !isFloat(from)) V.D(v.asI.toDouble)
-      else if (!isFloat(to) && isFloat(from)) V.I(narrow(v.asD.toLong, to))
+      else if (!isFloat(to) && isFloat(from)) V.I(narrow(if (sizeOf(to) >= 8) v.asD.toLong else v.asD.toInt.toLong, to))
       else if (isFloat(to)) V.D(v.asD)
       else V.I(narrow(v.asI, to))
   }
