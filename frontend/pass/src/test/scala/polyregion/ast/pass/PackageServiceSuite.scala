@@ -329,6 +329,22 @@ class PackageServiceSuite extends munit.FunSuite {
     assert(imported.isRight, imported)
   }
 
+  test("imports reject a caller overload that shares a name with an imported function") {
+    val overload = function(
+      decl(p.Sym("implementation.call"), p.Function.Affinity.Offload)
+        .copy(args = List(p.Arg(p.Named("x", p.Type.IntS32)))),
+      unitReturn
+    )
+    val kernel = function(
+      decl(p.Sym("kernel.device"), p.Function.Affinity.Offload),
+      List(invokeStmt(p.Sym("implementation.call")), unitReturn.head)
+    ).copy(convention = p.CallConvention.OffloadEntry)
+    assertEquals(
+      importCall(List(kernel, overload)),
+      Left(List("function `implementation.call` conflicts between package and caller"))
+    )
+  }
+
   test("imports allow host functions to call interface roots") {
     val caller = function(
       decl(p.Sym("host.caller"), p.Function.Affinity.Host),
