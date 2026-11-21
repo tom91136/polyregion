@@ -131,7 +131,8 @@ private[ast] object ScalaInterfaceCodeGen {
       arg.named.tpe match {
         case p.Type.Exec(Nil, List(p.Type.IntS64), rtn) =>
           s"inline ${arg.named.symbol}: (${List.fill(rank)("Long").mkString(", ")}) => ${tpe(rtn)}"
-        case other => s"${arg.named.symbol}: ${tpe(other)}"
+        case other @ p.Type.Exec(_, _, _) => s"inline ${arg.named.symbol}: ${tpe(other)}"
+        case other                        => s"${arg.named.symbol}: ${tpe(other)}"
       }
     }
     val arguments = ctxArg ++ (total :: rest.map { arg =>

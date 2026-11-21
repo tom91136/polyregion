@@ -72,7 +72,13 @@ object offload {
       (i: Long) => body(i / (n1 * n2), i / n2 % n1, i % n2)
     )
 
-  inline def transform_reduce[T](n0: Long, n1: Long, init: T, inline map: (Long, Long) => T, combine: (T, T) => T): T =
+  inline def transform_reduce[T](
+      n0: Long,
+      n1: Long,
+      init: T,
+      inline map: (Long, Long) => T,
+      inline combine: (T, T) => T
+  ): T =
     transform_reduce(Math.multiplyExact(n0, n1), init, (i: Long) => map(i / n1, i % n1), combine)
 
   inline def transform_reduce[T](
@@ -81,7 +87,7 @@ object offload {
       n2: Long,
       init: T,
       inline map: (Long, Long, Long) => T,
-      combine: (T, T) => T
+      inline combine: (T, T) => T
   ): T =
     transform_reduce(
       Math.multiplyExact(Math.multiplyExact(n0, n1), n2),
@@ -96,7 +102,7 @@ object offload {
       n1: Long,
       init: T,
       inline map: (Long, Long) => T,
-      combine: (T, T) => T
+      inline combine: (T, T) => T
   ): T =
     transform_reduce(context, Math.multiplyExact(n0, n1), init, (i: Long) => map(i / n1, i % n1), combine)
 
@@ -107,7 +113,7 @@ object offload {
       n2: Long,
       init: T,
       inline map: (Long, Long, Long) => T,
-      combine: (T, T) => T
+      inline combine: (T, T) => T
   ): T =
     transform_reduce(
       context,
