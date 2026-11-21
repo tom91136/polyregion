@@ -404,6 +404,16 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
       |}
       |""".stripMargin
 
+  private val launchSource =
+    """package polyregion.javalang;
+      |
+      |public final class Launch {
+      |  public static Object call(String identity, Object context, Object[] args) {
+      |    return null;
+      |  }
+      |}
+      |""".stripMargin
+
   test("Java projects declarations as annotated static stubs with generated callable types") {
     val source = InterfaceCodeGen.javaClass(interfaceDef, jvm)
 
@@ -412,8 +422,12 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
     assert(source.contains("import polyregion.javalang.Interface;"))
     assert(source.contains("public final class ExampleInterface {"))
     assert(!source.contains("polyregion_interface"))
-    assert(source.contains("@FunctionalInterface\n  public interface FnI_J {\n    long apply(int arg0);\n  }"))
-    assert(source.contains("public interface FnL_L<T0, R> {\n    R apply(T0 arg0);\n  }"))
+    assert(
+      source.contains(
+        "@FunctionalInterface\n  public interface FnI_J extends java.io.Serializable {\n    long apply(int arg0);\n  }"
+      )
+    )
+    assert(source.contains("public interface FnL_L<T0, R> extends java.io.Serializable {\n    R apply(T0 arg0);\n  }"))
     assert(
       source.contains(
         "@Interface(\"example:example.transform\")\n  public static void transform(int[] in, long[] out, int n, FnI_J op) {"
@@ -426,7 +440,7 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
     )
     assert(source.contains("public static int count(float[] in, int n) {"))
     assert(source.contains("public static <T> int count(T[] in, int n) {"))
-    assert(source.contains("throw new UnsupportedOperationException(\"compiler did not replace example.count\");"))
+    assert(source.contains("return (Integer) Launch.call(\"example:example.count\", null, new Object[] {in, n});"))
   }
 
   test("Java emits a cross product over int, long, float and double plus one reference form") {
@@ -486,6 +500,7 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
     val errors = javac(
       Map(
         "polyregion/javalang/Interface.java" -> annotationSource,
+        "polyregion/javalang/Launch.java"    -> launchSource,
         "example/bindings/ExampleInterface.java" -> InterfaceCodeGen
           .javaClass(interfaceDef.copy(declarations = List(fold)), jvm),
         "example/bindings/Caller.java" -> caller
@@ -526,6 +541,7 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
     val errors = javac(
       Map(
         "polyregion/javalang/Interface.java" -> annotationSource,
+        "polyregion/javalang/Launch.java"    -> launchSource,
         "example/bindings/ExampleInterface.java" -> InterfaceCodeGen
           .javaClass(interfaceDef.copy(declarations = List(mix)), jvm),
         "example/bindings/Caller.java" -> caller
@@ -567,6 +583,7 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
     val errors = javac(
       Map(
         "polyregion/javalang/Interface.java"     -> annotationSource,
+        "polyregion/javalang/Launch.java"        -> launchSource,
         "example/bindings/ExampleInterface.java" -> InterfaceCodeGen.javaClass(withScalar, jvm),
         "example/bindings/Caller.java"           -> caller
       )
@@ -593,10 +610,10 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
       p.Type.IntS32,
       p.Function.Affinity.Host
     )
-    val stubThrow = """throw new UnsupportedOperationException("compiler did not replace example.apply_once");"""
+    val stubCall = """return (Integer) Launch.call("example:example.apply_once", null, new Object[] {in, n, f});"""
     val source = InterfaceCodeGen
       .javaClass(p.Interface(p.Sym("example"), List(applyOnce)), jvm)
-      .replace(stubThrow, "return f.apply(in[0]);")
+      .replace(stubCall, "return f.apply(in[0]);")
     val caller =
       """package example.bindings;
         |
@@ -613,6 +630,7 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
     val result = compiled(
       Map(
         "polyregion/javalang/Interface.java"     -> annotationSource,
+        "polyregion/javalang/Launch.java"        -> launchSource,
         "example/bindings/ExampleInterface.java" -> source,
         "example/bindings/Caller.java"           -> caller
       )
@@ -696,8 +714,12 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
       ),
       source
     )
-    assert(source.contains("public interface FnLS_Z<T0> {\n    boolean apply(T0 arg0, short arg1);\n  }"))
-    assert(source.contains("public interface Fn_V {\n    void apply();\n  }"))
+    assert(
+      source.contains(
+        "public interface FnLS_Z<T0> extends java.io.Serializable {\n    boolean apply(T0 arg0, short arg1);\n  }"
+      )
+    )
+    assert(source.contains("public interface Fn_V extends java.io.Serializable {\n    void apply();\n  }"))
     assertEquals("@Interface".r.findAllIn(source).size, 1)
   }
 
@@ -825,6 +847,7 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
     val errors = javac(
       Map(
         "polyregion/javalang/Interface.java"  -> annotationSource,
+        "polyregion/javalang/Launch.java"     -> launchSource,
         "polyregion/jvm/runtime/Context.java" -> contextSource,
         "polyregion/Offload.java"             -> InterfaceCodeGen.javaClass(Core.interfaceDef, regionJava),
         "polyregion/Caller.java"              -> caller,

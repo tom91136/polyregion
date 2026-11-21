@@ -211,10 +211,18 @@ private[ast] object JavaInterfaceCodeGen {
       if (inline.length <= 100) inline
       else s"$prefix\n${rendered.map("      " + _).mkString(",\n")}) {"
     }
-    val fqn = decl.name.fqn.mkString(".")
-    val source = s"""  @Interface("${interfaceIdentity(interfaceDef, decl)}")
-                    |$signature
-                    |    throw new UnsupportedOperationException("compiler did not replace $fqn");
+    val identity  = interfaceIdentity(interfaceDef, decl)
+    val resultTpe = result(assignment, decl.rtn)
+    val values    = parameters.map(_._2).mkString(", ")
+    val call = s"""Launch.call("$identity", ${context.fold("null")(_ => ContextParameter)}, new Object[] {$values})"""
+    val statement = resultTpe match {
+      case "void" => s"$call;"
+      case tpe    => s"return (${Prims.values.find(_.name == tpe).fold(tpe)(_.boxed)}) $call;"
+    }
+    val unchecked = if (decl.tpeVars.exists(v => v.name == resultTpe)) "  @SuppressWarnings(\"unchecked\")\n" else ""
+    val source = s"""  @Interface("$identity")
+                    |$unchecked$signature
+                    |    $statement
                     |  }""".stripMargin
     Stub(source, parameters.flatMap(_._1._2))
   }
@@ -229,7 +237,7 @@ private[ast] object JavaInterfaceCodeGen {
     }
     val params = shape.args.zipWithIndex.map { case (code, i) => s"${named(code, s"T$i")} arg$i" }
     s"""  @FunctionalInterface
-       |  public interface ${shape.name}$generics {
+       |  public interface ${shape.name}$generics extends java.io.Serializable {
        |    ${named(shape.rtn, "R")} apply(${params.mkString(", ")});
        |  }""".stripMargin
   }
@@ -266,6 +274,7 @@ private[ast] object JavaInterfaceCodeGen {
     s"""package ${config.packageName};
        |
        |import $Annotation;
+       |import polyregion.javalang.Launch;
        |
        |public final class ${config.className} {
        |
