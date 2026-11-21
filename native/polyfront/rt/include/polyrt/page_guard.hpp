@@ -149,6 +149,7 @@ inline std::array<Range, MaxRanges> ranges{};
 inline std::atomic<size_t> rangeHighWater{0};
 inline std::array<Request, MaxRequests> requests{};
 inline std::atomic<FaultHandler> handler{nullptr};
+inline std::mutex installMutex;
 
 #ifdef _WIN32
 inline HANDLE wakeEvent = nullptr;
@@ -282,7 +283,6 @@ struct Chain {
 };
 
 inline Chain segvChain{}, busChain{};
-inline std::mutex installMutex;
 inline Chain &chain(const int signal) { return signal == SIGBUS ? busChain : segvChain; }
 
 inline void onFault(int signal, siginfo_t *info, void *context);
