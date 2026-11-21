@@ -8,23 +8,15 @@ private[scalalang] object InterfaceResolver {
 
   final case class Import(packageName: String, declaration: String, target: p.Expr.Invoke)
 
-  private def configured(name: String, property: String): Option[String] =
-    Option(System.getenv(name)).orElse(Option(System.getProperty(property))).map(_.trim).filter(_.nonEmpty)
-
-  def configuredCapabilityList: String =
-    configured("POLYFRONT_LIBRARY_CAPABILITIES", "polyregion.library.capabilities").getOrElse("")
-
-  def configuredCapabilities: Set[String] =
-    configuredCapabilityList.split(',').view.map(_.trim).filter(_.nonEmpty).toSet
-
   private lazy val compiler = polyregion.jvm.compiler.Compiler.create()
 
-  def configuredRoots: String = configured("POLYFRONT_LIBRARY_PATH", "polyregion.library.path").getOrElse("")
+  def capabilitiesFor(capabilities: Set[String], target: String): Set[String] =
+    compiler.capabilitiesFor(capabilities.toList.sorted.mkString(","), target).split(',').filter(_.nonEmpty).toSet
 
   def loadPackage(
       packageName: String,
-      roots: String = configuredRoots,
-      capabilities: Set[String] = configuredCapabilities
+      roots: String,
+      capabilities: Set[String]
   ): Either[List[String], p.Package] =
     for {
       bytes <-
@@ -114,22 +106,19 @@ private[scalalang] object InterfaceResolver {
   def importAll(
       imports: List[Import],
       callers: List[p.Function],
-      capabilities: Set[String] = configuredCapabilities,
-      typeSizes: Map[p.Type, Int] = Map.empty,
-      target: Option[String] = LaunchConfig.targetNames.headOption
-  ): Either[List[String], (List[p.Function], Set[p.StructDef])] =
-    if (imports.isEmpty) Right(Nil -> Set.empty)
-    else {
-      val available = target.fold(capabilities)(LaunchConfig.capabilitiesFor(capabilities, _))
-      imports.map(_.packageName).distinct.sorted.traverse(loadPackage(_, capabilities = capabilities)).flatMap {
-        packages =>
-          importPackages(
-            packages,
-            imports,
-            callers,
-            available,
-            typeSizes
+      roots: String,
+      capabilities: Set[String],
+      typeSizes: Map[p.Type, Int],
+      targets: List[String]
+  ): Either[List[String], Map[String, (List[p.Function], Set[p.StructDef])]] =
+    if (imports.isEmpty) Right(targets.map(_ -> (Nil -> Set.empty[p.StructDef])).toMap)
+    else
+      imports.map(_.packageName).distinct.sorted.traverse(loadPackage(_, roots, capabilities)).flatMap { packages =>
+        targets.distinct
+          .traverse(target =>
+            importPackages(packages, imports, callers, capabilitiesFor(capabilities, target), typeSizes)
+              .map(target -> _)
           )
+          .map(_.toMap)
       }
-    }
 }

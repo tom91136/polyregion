@@ -56,7 +56,12 @@ object CompilerTests {
     val compiled =
       try
         for {
-          (captures, prismRefs, monoMap, prog0) <- Compiler.compileExpr(using Quoted(q))(l, expr, StdLib.Tables)
+          (captures, prismRefs, monoMap, programs) <- Compiler.compileExpr(using Quoted(q))(
+            l,
+            expr,
+            StdLib.Tables,
+            polyregion.scalalang.LaunchConfig.Default
+          )
         } yield '{ () }
       catch {
         case e: Throwable => Left(e)

@@ -30,14 +30,9 @@ class InterfaceResolverSuite extends munit.FunSuite {
       List(pkg),
       List(InterfaceResolver.Import(pkg.interface.name.fqcn, declaration, target)),
       callers,
-      InterfaceResolver.configuredCapabilities,
+      Set.empty,
       Map.empty
     )
-
-  override def afterEach(context: AfterEach): Unit = {
-    System.clearProperty("polyregion.library.capabilities")
-    System.clearProperty("polyregion.library.path")
-  }
 
   test("read a generated interface identity") {
     assertEquals(InterfaceTestMacros.interfaceIdentityOf[FooApi.type], Some("foo" -> "bar.increment"))
@@ -47,15 +42,9 @@ class InterfaceResolverSuite extends munit.FunSuite {
     assertEquals(InterfaceTestMacros.interfaceIdentityOf[LookalikeApi.type], None)
   }
 
-  test("read configured library capabilities") {
-    System.setProperty("polyregion.library.capabilities", " host,fast,,host ")
-    assertEquals(InterfaceResolver.configuredCapabilities, Set("host", "fast"))
-  }
-
   test("reject a package identity that escapes its configured root") {
-    System.setProperty("polyregion.library.path", System.getProperty("java.io.tmpdir"))
     assertEquals(
-      InterfaceResolver.loadPackage("../outside").left.toOption,
+      InterfaceResolver.loadPackage("../outside", System.getProperty("java.io.tmpdir"), Set.empty).left.toOption,
       Some(List("invalid package identity `../outside`"))
     )
   }
@@ -392,7 +381,7 @@ class InterfaceResolverSuite extends munit.FunSuite {
         List(pkg),
         List(InterfaceResolver.Import("foo", "bar.pick", target0)),
         Nil,
-        LaunchConfig.capabilitiesFor(Set("foo.thrust@cuda", "foo.dpl@host"), target),
+        InterfaceResolver.capabilitiesFor(Set("foo.thrust@cuda", "foo.dpl@host"), target),
         Map.empty
       )
       .map(_._1.flatMap(_.body.collect { case p.Stmt.Return(p.Expr.Alias(p.Term.IntS32Const(value))) => value }))
@@ -401,6 +390,12 @@ class InterfaceResolverSuite extends munit.FunSuite {
   test("select the implementation whose capability names the target") {
     assertEquals(gatedImport("host").fold(errors => fail(errors.mkString("\n")), identity), List(1))
     assertEquals(gatedImport("cuda").fold(errors => fail(errors.mkString("\n")), identity), List(2))
+  }
+
+  test("a capability qualified by a target alias serves the target it names") {
+    val configured = Set("foo.dpl@native", "foo.thrust@cuda", "plain")
+    assertEquals(InterfaceResolver.capabilitiesFor(configured, "host"), Set("foo.dpl", "plain"))
+    assertEquals(InterfaceResolver.capabilitiesFor(configured, "cuda"), Set("foo.thrust", "plain"))
   }
 
   test("reject a target no configured capability serves") {

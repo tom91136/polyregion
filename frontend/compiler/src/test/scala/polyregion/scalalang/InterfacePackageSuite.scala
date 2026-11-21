@@ -32,10 +32,51 @@ class InterfacePackageSuite extends munit.FunSuite {
     )
   }
 
+  override def munitTimeout: scala.concurrent.duration.Duration = scala.concurrent.duration.Duration(10, "min")
+
+  private def importCopy(targets: List[String]) = {
+    val pointer = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global)
+    val invoke: p.Expr.Invoke = p.Expr.Invoke(
+      p.Type.FnRef(p.Sym("consumer.copy")),
+      Nil,
+      None,
+      List(
+        p.Term.Select(p.Named("in", pointer), Nil, pointer),
+        p.Term.IntS32Const(4),
+        p.Term.Select(p.Named("out", pointer), Nil, pointer)
+      ),
+      p.Type.Unit0
+    )
+    InterfaceResolver.importAll(
+      List(InterfaceResolver.Import("spectra", "spectra.copy", invoke)),
+      Nil,
+      libraryPath.get,
+      Set("spectra.thrust@cuda", "spectra.dpl@host"),
+      Map(p.Type.IntS32 -> 4),
+      targets
+    )
+  }
+
   test("the dist writes POLYPKG4 archives") {
     val magic = Files.newInputStream(Paths.get(libraryPath.get).resolve("spectra").resolve("lib.polyast"))
     try assertEquals(new String(magic.readNBytes(8), "US-ASCII"), "POLYPKG4")
     finally magic.close()
+  }
+
+  test("each configured target resolves the implementation its capability names") {
+    val resolved              = importCopy(List("host", "cuda")).fold(errors => fail(errors.mkString("\n")), identity)
+    def names(target: String) = resolved(target)._1.map(_.name.fqcn)
+    val host                  = names("host")
+    assert(host.exists(_.contains("dpl")), host.toString)
+    assert(!host.exists(_.contains("thrust")), host.toString)
+    val cuda = names("cuda")
+    assert(cuda.exists(_.contains("thrust")), cuda.toString)
+    assert(!cuda.exists(_.contains("dpl")), cuda.toString)
+  }
+
+  test("reject a target nothing serves") {
+    val errors = importCopy(List("host", "opencl")).left.getOrElse(fail("expected an error"))
+    assert(errors.exists(_.contains("spectra.copy")), errors.toString)
   }
 
   test("load the spectra package with the implementations its capabilities select") {
@@ -90,7 +131,10 @@ class InterfacePackageSuite extends munit.FunSuite {
 
   test("report a missing package") {
     val error =
-      InterfaceResolver.loadPackage("spectra.missing", libraryPath.get).left.getOrElse(fail("expected an error"))
+      InterfaceResolver
+        .loadPackage("spectra.missing", libraryPath.get, Set.empty)
+        .left
+        .getOrElse(fail("expected an error"))
     assert(error.exists(_.contains("spectra.missing")), error.toString)
   }
 }

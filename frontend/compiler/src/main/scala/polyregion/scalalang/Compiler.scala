@@ -123,11 +123,13 @@ object Compiler {
       missingDefDefs: Map[q.Symbol, q.DefDef],
       existing: List[p.Function],
       renameMap: Map[q.Symbol, p.Sym] = Map.empty,
-      callers: List[p.Function] = Nil
+      callers: List[p.Function] = Nil,
+      config: LaunchConfig = LaunchConfig.Default,
+      target: String = LaunchConfig.Default.targetNames.head
   )(
       fnLut: Map[p.Signature, (p.Function, Set[p.StructDef])],
       structDefs: Map[p.Sym, p.StructDef]
-  ): Result[(List[p.Function], Set[p.StructDef], Set[q.Symbol])] = {
+  ): Result[(List[p.Function], Set[p.StructDef], Set[q.Symbol], Boolean)] = {
     val interfaceImports = List.newBuilder[InterfaceResolver.Import]
     for {
       log <- sink.subLog(s"Compile ${deps.size} dependent function(s)").success
@@ -293,10 +295,19 @@ object Compiler {
           )
 
       }(_._1.nonEmpty)
+      requested = interfaceImports.result()
       imports <- InterfaceResolver
-        .importAll(interfaceImports.result(), callers ::: existing ::: fns)
+        .importAll(
+          requested,
+          callers ::: existing ::: fns,
+          config.roots,
+          config.capabilities.toSet,
+          Map.empty,
+          List(target)
+        )
+        .map(_(target))
         .leftMap(errors => CompilerException(errors.mkString("\n")))
-    } yield (imports._1 ::: fns, imports._2 ++ clsDeps, moduleSymDeps)
+    } yield (imports._1 ::: fns, imports._2 ++ clsDeps, moduleSymDeps, requested.nonEmpty)
   }
 
   private def showTree(using q: Quoted)(t: q.Tree): String =
@@ -672,12 +683,49 @@ object Compiler {
 
   def compileExpr(using
       q: Quoted
-  )(sink: Log, expr: Expr[Any], prisms: PrismTables, callable: Boolean = false): Result[
+  )(
+      sink: Log,
+      expr: Expr[Any],
+      prisms: PrismTables,
+      config: LaunchConfig,
+      callable: Boolean = false
+  ): Result[
     (                                       //
         List[(p.Named, q.Term)],            //
         Map[p.Sym, polyregion.prism.Prism], //
         Map[p.Sym, p.Sym],                  //
-        p.Program                           //
+        List[(String, p.Program)]           //
+    )
+  ] = {
+    val targets = config.targetNames
+    compileExprFor(sink, expr, prisms, config, callable, targets.head).flatMap {
+      case (captures, prismRefs, monoMap, program, imported) =>
+        val others =
+          if (!imported) targets.tail.map(_ -> program.success)
+          else
+            targets.tail.map(target => target -> compileExprFor(sink, expr, prisms, config, callable, target).map(_._4))
+        others
+          .traverse((target, result) => result.map(target -> _))
+          .map(rest => (captures, prismRefs, monoMap, (targets.head -> program) :: rest))
+    }
+  }
+
+  private def compileExprFor(using
+      q: Quoted
+  )(
+      sink: Log,
+      expr: Expr[Any],
+      prisms: PrismTables,
+      config: LaunchConfig,
+      callable: Boolean,
+      target: String
+  ): Result[
+    (                                       //
+        List[(p.Named, q.Term)],            //
+        Map[p.Sym, polyregion.prism.Prism], //
+        Map[p.Sym, p.Sym],                  //
+        p.Program,                          //
+        Boolean                             //
     )
   ] = for {
     log <- sink.subLog("Expr compiler").success
@@ -878,14 +926,16 @@ object Compiler {
 
     // We got a compiled fn now, now compile all dependencies. Pass the synthetic-name rename
     // map so anonymous-class overrides get distinct IR names per (class symbol, method).
-    (allRootDependentFns, allRootDependentStructs, allRootDependentModuleSymbols) <-
+    (allRootDependentFns, allRootDependentStructs, allRootDependentModuleSymbols, imported) <-
       compileAllDependencies(
         log,
         rootDependentFns,
         symbolToMacroDefinedDefDefs,
         exprDeps.resolvedFunctions,
         syntheticOverrideNames,
-        rootFn :: Nil
+        rootFn :: Nil,
+        config,
+        target
       )(prisms.functions, prisms.structDefs)
 
     _ = log.info("A ", rootDependentFns.map(x => x.toString).toList*)
@@ -1142,7 +1192,8 @@ object Compiler {
       }
     }.toMap,
     monomorphicToPolymorphicSym,
-    opt
+    opt,
+    imported
   )
 
 }
