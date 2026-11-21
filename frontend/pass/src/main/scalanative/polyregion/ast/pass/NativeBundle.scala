@@ -24,6 +24,11 @@ object NativeBundle {
 
   private lazy val registrationAllowed: Unit = BoehmGC.GC_allow_register_threads()
 
+  private def unregistrationFailure(): Option[String] = {
+    val unregistered = BoehmGC.GC_unregister_my_thread()
+    Option.when(unregistered != GCSuccess)(s"GC_unregister_my_thread failed with $unregistered")
+  }
+
   private def attached[A](failed: String => A)(body: => A): A = {
     registrationAllowed
     if (BoehmGC.GC_thread_is_registered() != 0) body
@@ -39,11 +44,12 @@ object NativeBundle {
         else {
           val result =
             try body
-            finally {
-              val unregistered = BoehmGC.GC_unregister_my_thread()
-              if (unregistered != GCSuccess)
-                throw IllegalStateException(s"GC_unregister_my_thread failed with $unregistered")
+            catch {
+              case thrown: Throwable =>
+                unregistrationFailure().foreach(message => thrown.addSuppressed(IllegalStateException(message)))
+                throw thrown
             }
+          unregistrationFailure().foreach(message => throw IllegalStateException(message))
           result
         }
       }
