@@ -43,14 +43,14 @@ object LambdaOutliner {
 
   def findMethod(
       reflector: Reflector,
-      cu: CompilationUnitTree,
+      scope: Tree,
       invokeFn: String,
       target: FnMetadata
   ): Result[MethodTree] =
     // first, search in the local CompilationUnit as $deserializeLambda$ and the corresponding synthetic static
     // method must be defined there we only need to match the method name as the generated name is unique
     // it's also not possible to reflect this method for the signatures because it's synthesised after RoundEnvironment
-    collectTree(cu) {
+    collectTree(scope) {
       case m: MethodTree if m.getName.toString == invokeFn => m :: Nil
       case _                                               => Nil
     } match {
@@ -87,7 +87,7 @@ object LambdaOutliner {
 
   def extractDeserializeLambdaMethods(
       allowedIfaceNames: Set[String],
-      cu: CompilationUnitTree
+      scope: Tree
   ): Result[List[(String, FnMetadata)]] = {
     // The general structure of $deserializeLambda$ looks like this:
     //  /*synthetic*/ private static $deserializeLambda$(final SerializedLambda l)
@@ -110,7 +110,7 @@ object LambdaOutliner {
     // }
 
     // find the correct synthetic $deserializeLambda$ method
-    val deserializeLambdaMethods = collectTree(cu) {
+    val deserializeLambdaMethods = collectTree(scope) {
       case m: MethodTree =>
         (
           m.getModifiers.getFlags.asScala.toSet,

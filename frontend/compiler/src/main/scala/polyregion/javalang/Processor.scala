@@ -14,7 +14,7 @@ import java.lang.reflect.*
 import javax.annotation.processing.*
 import javax.lang.model.SourceVersion
 import javax.lang.model.element.*
-import javax.tools.{Diagnostic, JavaFileObject, StandardLocation}
+import javax.tools.{Diagnostic, StandardLocation}
 import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
@@ -129,44 +129,52 @@ class Processor extends AbstractProcessor {
 
   override def getSupportedSourceVersion: SourceVersion = SourceVersion.latestSupported
 
-  private def declaredMethods(cu: CompilationUnitTree): List[(MethodSymbol, MethodTree)] = collectTree(cu) {
+  private def declaredMethods(tree: Tree): List[(MethodSymbol, MethodTree)] = collectTree(tree) {
     case m: JCTree.JCMethodDecl => Option(m.sym).map(_ -> m).toList
     case _                      => Nil
+  }
+
+  private def declaredClasses(tree: Tree): List[(TypeElement, ClassTree)] = collectTree(tree) {
+    case c: JCTree.JCClassDecl => Option(c.sym).map(_ -> c).toList
+    case _                     => Nil
   }
 
   private class RegionListener(trees: Trees) extends TaskListener {
 
     private val markerClosures = Set("polyregion.javalang.OffloadRunnable", "polyregion.javalang.OffloadFunction")
 
-    private val visited = mutable.Set.empty[JavaFileObject]
+    private val visited = mutable.Set.empty[TypeElement]
 
     private val pool = mutable.Set.empty[MethodTree]
 
     private val generated = mutable.Set.empty[String]
 
-    // a local class is lifted out of the unit by GENERATE, so its members are caught while still nested
+    // a member or local class is lifted out of the unit by GENERATE, so its members are caught while still nested
     private val nestedTrees = mutable.Map.empty[MethodSymbol, MethodTree]
+
+    // lowering rewrites a class declaration in place, so the lifted class keeps the tree seen after analysis
+    private val classTrees = mutable.Map.empty[TypeElement, ClassTree]
 
     override def started(e: TaskEvent): Unit = {
       debug(s"[STARTED]  =>  $e $visited")
       (e.getKind, Option(e.getCompilationUnit), e.getSourceFile) match {
 
         // compile at the start of GENERATE, the tree is gone by the time it finishes
-        case (TaskEvent.Kind.GENERATE, Some(cu), file) if !visited.contains(file) =>
-          visited += file
+        case (TaskEvent.Kind.GENERATE, Some(unit), _) if Option(e.getTypeElement).exists(visited.add) =>
+          val scope: Tree = classTrees.getOrElse(e.getTypeElement, unit)
 
           val reflector = LambdaOutliner.Reflector(symbolTable.toMap, methodTable.toMap)
 
           // bodies javac synthesises after processing (a lambda's impl method) are invisible to `methodTable`
           val localTrees = guard {
-            Either.catchNonFatal(declaredMethods(cu).toMap)
+            Either.catchNonFatal(declaredMethods(unit).toMap ++ declaredMethods(scope))
           }.getOrElse(Map.empty[MethodSymbol, MethodTree]) ++ nestedTrees
 
           // javac throws on some post-Lower nodes (`LetExpr is not part of a public API`), which would abort every region in the file
           val xs = guard {
-            LambdaOutliner.extractDeserializeLambdaMethods(markerClosures, cu).flatMap { xs =>
+            LambdaOutliner.extractDeserializeLambdaMethods(markerClosures, scope).flatMap { xs =>
               xs.traverse((invokeFn, meta) =>
-                LambdaOutliner.findMethod(reflector, cu, invokeFn, meta).map(m => meta.implCls -> m)
+                LambdaOutliner.findMethod(reflector, scope, invokeFn, meta).map(m => meta.implCls -> m)
               )
             }
           } match {
@@ -237,7 +245,10 @@ class Processor extends AbstractProcessor {
       debug(s"[  ENDED]  =>  $e")
       (e.getKind, Option(e.getCompilationUnit)) match {
         case (TaskEvent.Kind.ANALYZE, Some(cu)) =>
-          guard(Either.catchNonFatal(declaredMethods(cu).foreach(nestedTrees += _)))
+          guard(Either.catchNonFatal {
+            declaredMethods(cu).foreach(nestedTrees += _)
+            declaredClasses(cu).foreach(classTrees += _)
+          })
           ()
         case _ =>
       }

@@ -24,10 +24,10 @@ object JavaTyper {
       case f: VariableElement if f.getKind == ElementKind.FIELD && !f.getModifiers.contains(Modifier.STATIC) => f
     }
 
-  // javac marks captured state synthetic and getEnclosedElements hides it
+  // javac marks captured state and the enclosing instance of an inner class synthetic and getEnclosedElements hides it
   def structFieldElements(elem: TypeElement): List[VariableElement] = elem match {
-    case c: JSymbol.ClassSymbol
-        if elem.getNestingKind == NestingKind.LOCAL || elem.getNestingKind == NestingKind.ANONYMOUS =>
+    case c: JSymbol.ClassSymbol =>
+      c.complete()
       c.members().getSymbols().asScala.toList.reverse.collect {
         case v: JSymbol.VarSymbol if v.getKind == ElementKind.FIELD && !v.isStatic => v
       }
