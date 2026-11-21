@@ -699,6 +699,19 @@ if(NOT SPECTRA_VENDOR_ONLY AND SPECTRA_ENABLE_PACKAGE)
   endif()
   install(FILES "${_spectra_package}" DESTINATION "${CMAKE_INSTALL_LIBDIR}/polyregion/packages/spectra"
           COMPONENT spectra-package)
+  set(_spectra_capabilities_file "${CMAKE_CURRENT_BINARY_DIR}/spectra-capabilities")
+  if(NOT SPECTRA_PREBUILT_PACKAGE)
+    file(GENERATE OUTPUT "${_spectra_capabilities_file}" CONTENT "${_spectra_qualified_capabilities}\n")
+  elseif(EXISTS "${_spectra_package_dir}/capabilities")
+    set(_spectra_capabilities_file "${_spectra_package_dir}/capabilities")
+  else()
+    set(_spectra_capabilities_file)
+  endif()
+  if(_spectra_capabilities_file)
+    install(FILES "${_spectra_capabilities_file}"
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}/polyregion/packages/spectra" RENAME capabilities
+            COMPONENT spectra-package)
+  endif()
   if(_spectra_core_package)
     install(FILES "${_spectra_core_package}" DESTINATION "${CMAKE_INSTALL_LIBDIR}/polyregion/packages/polyregion.core"
             COMPONENT spectra-package)
