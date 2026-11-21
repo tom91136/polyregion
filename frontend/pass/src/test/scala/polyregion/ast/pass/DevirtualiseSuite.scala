@@ -106,12 +106,12 @@ class DevirtualiseSuite extends munit.FunSuite {
 
   private val table = Map(
     sym("Shape", "area") -> List(
-      Devirtualise.Candidate(circle, sym("Circle", "area"), 0),
-      Devirtualise.Candidate(rect, sym("Rect", "area"), 1)
+      Devirtualise.Candidate(circle, sym("Circle", "area"), 1),
+      Devirtualise.Candidate(rect, sym("Rect", "area"), 2)
     ),
     sym("Shape", "grow") -> List(
-      Devirtualise.Candidate(circle, sym("Circle", "grow"), 0),
-      Devirtualise.Candidate(rect, sym("Rect", "grow"), 1)
+      Devirtualise.Candidate(circle, sym("Circle", "grow"), 1),
+      Devirtualise.Candidate(rect, sym("Rect", "grow"), 2)
     )
   )
 
@@ -130,13 +130,18 @@ class DevirtualiseSuite extends munit.FunSuite {
     p.Stmt.Update(selectT(out), p.Term.IntS32Const(0), selectT("r"))
   )
 
-  private def lowered(in: p.Program): p.Program =
-    StructuredExit(FnInline(Devirtualise(table)(in, NoopLog), NoopLog), NoopLog)
+  private def lowered(in: p.Program, tbl: Map[p.Sym, List[Devirtualise.Candidate]] = table): p.Program =
+    StructuredExit(FnInline(Devirtualise(tbl)(in, NoopLog), NoopLog), NoopLog)
 
   private case class Run(out: Long, code: Int, message: String, rect: (Long, Long))
 
-  private def run(in: p.Program, tag: Int, scale: Long): Run = {
-    val prog = lowered(in)
+  private def run(
+      in: p.Program,
+      tag: Int,
+      scale: Long,
+      tbl: Map[p.Sym, List[Devirtualise.Candidate]] = table
+  ): Run = {
+    val prog = lowered(in, tbl)
     val vm   = Interpreter.Vm(prog)
     val dst  = vm.alloc(4L)
     val obj  = vm.alloc(12L)
@@ -170,8 +175,23 @@ class DevirtualiseSuite extends munit.FunSuite {
 
   test("a call dispatches on the receiver tag") {
     val in = program(areaBody)
-    assertEquals(run(in, 0, 2).out, 18L)
-    assertEquals(run(in, 1, 2).out, 30L)
+    assertEquals(run(in, 1, 2).out, 18L)
+    assertEquals(run(in, 2, 2).out, 30L)
+  }
+
+  test("tags start at one so a zeroed receiver matches no class and raises") {
+    val tags = Devirtualise.tagsOf(List(circle.name, rect.name))
+    val fromTags = Map(
+      sym("Shape", "area") -> List(
+        Devirtualise.Candidate(circle, sym("Circle", "area"), tags(circle.name)),
+        Devirtualise.Candidate(rect, sym("Rect", "area"), tags(rect.name))
+      )
+    )
+    assertEquals(tags.values.min, 1)
+    val zeroed = run(program(areaBody), 0, 2, fromTags)
+    assertEquals(zeroed.out, -1L)
+    assertEquals(zeroed.code, p.Enums.AssertCode.Error.value)
+    assertEquals(run(program(areaBody), tags(rect.name), 2, fromTags).out, 30L)
   }
 
   test("a tag outside the candidate set raises and no arm runs") {
@@ -199,15 +219,15 @@ class DevirtualiseSuite extends munit.FunSuite {
       )
     )
     val withCaller = in.copy(functions = caller :: in.functions)
-    assertEquals(run(withCaller, 0, 2).out, 18L)
-    assertEquals(run(withCaller, 1, 2).out, 30L)
+    assertEquals(run(withCaller, 1, 2).out, 18L)
+    assertEquals(run(withCaller, 2, 2).out, 30L)
     assertEquals(run(withCaller, 5, 2).code, p.Enums.AssertCode.Error.value)
   }
 
   test("a unit call dispatches and runs the selected arm only") {
     val grow = program(List(p.Stmt.Var(named("u", p.Type.Unit0), Some(invoke("grow", p.Type.Unit0)))))
-    assertEquals(run(grow, 1, 4).rect, (7L, 5L))
-    assertEquals(run(grow, 0, 4).rect, (3L, 5L))
+    assertEquals(run(grow, 2, 4).rect, (7L, 5L))
+    assertEquals(run(grow, 1, 4).rect, (3L, 5L))
     assertEquals(run(grow, 3, 4).code, p.Enums.AssertCode.Error.value)
   }
 
@@ -227,8 +247,8 @@ class DevirtualiseSuite extends munit.FunSuite {
     val pickRect = method(rect, "pick", List(p.Arg(k), p.Arg(j)), i32, List(ret(mul(selectT(k), selectT(j)))))
     val picks = Map(
       sym("Shape", "pick") -> List(
-        Devirtualise.Candidate(circle, sym("Circle", "pick"), 0, Some(List(1))),
-        Devirtualise.Candidate(rect, sym("Rect", "pick"), 1)
+        Devirtualise.Candidate(circle, sym("Circle", "pick"), 1, Some(List(1))),
+        Devirtualise.Candidate(rect, sym("Rect", "pick"), 2)
       )
     )
     val call = p.Expr.Invoke(
@@ -271,8 +291,8 @@ class DevirtualiseSuite extends munit.FunSuite {
       vm.call(p.Conventions.EntryName, args)
       vm.load(dst, i32) match { case V.I(v) => v; case _ => fail("non-integral") }
     }
-    assertEquals(run(0), 103L)
-    assertEquals(run(1), 200L)
+    assertEquals(run(1), 103L)
+    assertEquals(run(2), 200L)
   }
 
   test("an abstract struct is sized to hold its widest candidate and each candidate leads with the tag") {
@@ -282,7 +302,7 @@ class DevirtualiseSuite extends munit.FunSuite {
       p.StructDef(rect.name, Nil, List(named("w"), named("h")), List(shape))
     )
     val tags = Devirtualise.tagsOf(List(rect.name, circle.name))
-    assertEquals(tags, Map(circle.name -> 0, rect.name -> 1))
+    assertEquals(tags, Map(circle.name -> 1, rect.name -> 2))
     val out = Devirtualise
       .decorate(plain, Map(shape.name -> List(circle.name, rect.name)), tags)
       .map(d => d.name -> d.members)
@@ -300,7 +320,7 @@ class DevirtualiseSuite extends munit.FunSuite {
     val c = named("c", circle)
     val stamp = p.Stmt.Mut(
       p.Term.Select(c, List(p.PathStep.Field(p.Conventions.DispatchTag)), i32),
-      p.Expr.Alias(p.Term.IntS32Const(0))
+      p.Expr.Alias(p.Term.IntS32Const(1))
     )
     val build = List(
       p.Stmt.Var(c, None),

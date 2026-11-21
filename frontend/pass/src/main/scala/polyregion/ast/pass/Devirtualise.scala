@@ -8,10 +8,9 @@ object Devirtualise {
 
   case class Candidate(receiver: p.Type.Struct, impl: p.Sym, tag: Int, args: Option[List[Int]] = None)
 
-  def tagsOf(classes: Iterable[p.Sym]): Map[p.Sym, Int] = classes.toList.distinct.sortBy(_.fqcn).zipWithIndex.toMap
+  def tagsOf(classes: Iterable[p.Sym]): Map[p.Sym, Int] =
+    classes.toList.distinct.sortBy(_.fqcn).zipWithIndex.map((c, i) => c -> (i + 1)).toMap
 
-  // an abstract struct gets the tag, a word of slack and enough words to hold the largest candidate, so a by-value copy
-  // of it keeps every byte of whichever candidate sits in it; each candidate gets the tag as its first member
   def decorate(
       defs: List[p.StructDef],
       candidates: Map[p.Sym, List[p.Sym]],
