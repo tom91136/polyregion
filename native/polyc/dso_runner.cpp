@@ -1,11 +1,16 @@
 #include "dso_runner.h"
 
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <future>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 
@@ -44,13 +49,37 @@ struct DsoPassRunner::Impl {
   Vector<String> names;
   std::unordered_map<String, String> descrs;
   bool loaded = false;
+
+  std::thread anchor;
+  std::mutex anchorMutex;
+  std::condition_variable anchorChanged;
+  bool anchorReleased = false;
+
+  // XXX the plugin's collector registers the thread of its first call for good, so that call runs on a thread that outlives every caller
+  void initialiseOnAnchor(const std::function<void()> &first) {
+    std::promise<void> initialised;
+    anchor = std::thread([&] {
+      first();
+      initialised.set_value();
+      std::unique_lock lock(anchorMutex);
+      anchorChanged.wait(lock, [&] { return anchorReleased; });
+    });
+    initialised.get_future().wait();
+  }
 };
 
 DsoPassRunner::DsoPassRunner(std::string path) : impl(std::make_unique<Impl>()) {
   impl->path = std::move(path);
   impl->tag = "PolyPass[" + impl->path + "]";
 }
-DsoPassRunner::~DsoPassRunner() = default;
+DsoPassRunner::~DsoPassRunner() {
+  {
+    const std::scoped_lock lock(impl->anchorMutex);
+    impl->anchorReleased = true;
+  }
+  impl->anchorChanged.notify_all();
+  if (impl->anchor.joinable()) impl->anchor.join();
+}
 
 String DsoPassRunner::load() {
   if (impl->loaded) return {};
@@ -87,6 +116,11 @@ String DsoPassRunner::load() {
       impl->packageAbi && impl->linkPackage && impl->linkProgram && impl->selectImplementations && impl->packageErr && impl->packageFree;
   if (anyPackage && !completePackage) return fmt::format("dlsym polypackage_*: incomplete package capability in {}", impl->path);
   if (!completePass && !completePackage) return fmt::format("{} exposes neither polypass_* nor polypackage_*", impl->path);
+
+  impl->initialiseOnAnchor([&] {
+    if (completePass) impl->abi();
+    else impl->packageAbi();
+  });
 
   if (completePass) {
     if (const uint32_t v = impl->abi(); v != POLYPASS_ABI_VERSION)
