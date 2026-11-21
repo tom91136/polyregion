@@ -2,14 +2,14 @@
 #include <jni.h>
 namespace polyregion::generated::registry::Compiler {
 
+[[maybe_unused]] jstring capabilitiesFor0(JNIEnv *env, jclass, jstring capabilities, jstring target);
 [[maybe_unused]] jobject compile0(JNIEnv *env, jclass, jbyteArray function, jboolean emitAssembly, jobject options, jbyte opt);
 [[maybe_unused]] jobjectArray compileInterface0(JNIEnv *env, jclass, jstring name, jstring roots, jstring declaration, jstring entry,
-                                                jbyteArray request, jstring capabilities, jstring targets, jint stackDepth);
+                                                jbyteArray request, jstring capabilities, jstring targets, jbyte opt, jint stackDepth);
 [[maybe_unused]] jbyte hostTarget0(JNIEnv *env, jclass);
 [[maybe_unused]] jstring hostTriplet0(JNIEnv *env, jclass);
 [[maybe_unused]] jobjectArray layoutOf0(JNIEnv *env, jclass, jbyteArray structDef, jobject options);
 [[maybe_unused]] jbyteArray loadPackage0(JNIEnv *env, jclass, jstring name, jstring roots, jstring capabilities);
-[[maybe_unused]] jbyte moduleTarget0(JNIEnv *env, jclass, jint kind, jint format);
 [[maybe_unused]] jbyte targetByName0(JNIEnv *env, jclass, jstring name);
 
 static void unregisterMethods(JNIEnv *env) {
@@ -26,12 +26,15 @@ static void unregisterMethods(JNIEnv *env) {
   jclass found = env->FindClass("polyregion/jvm/compiler/Compiler");
   if (!found) return false;
   const static JNINativeMethod methods[8] = {
+      {.name = const_cast<char *>("capabilitiesFor0"),
+       .signature = const_cast<char *>("(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;"),
+       .fnPtr = reinterpret_cast<void *>(&capabilitiesFor0)},
       {.name = const_cast<char *>("compile0"),
        .signature = const_cast<char *>("([BZLpolyregion/jvm/compiler/Options;B)Lpolyregion/jvm/compiler/Compilation;"),
        .fnPtr = reinterpret_cast<void *>(&compile0)},
       {.name = const_cast<char *>("compileInterface0"),
        .signature = const_cast<char *>(
-           "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;[BLjava/lang/String;Ljava/lang/String;I)[[B"),
+           "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;[BLjava/lang/String;Ljava/lang/String;BI)[[B"),
        .fnPtr = reinterpret_cast<void *>(&compileInterface0)},
       {.name = const_cast<char *>("hostTarget0"), .signature = const_cast<char *>("()B"), .fnPtr = reinterpret_cast<void *>(&hostTarget0)},
       {.name = const_cast<char *>("hostTriplet0"),
@@ -43,9 +46,6 @@ static void unregisterMethods(JNIEnv *env) {
       {.name = const_cast<char *>("loadPackage0"),
        .signature = const_cast<char *>("(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)[B"),
        .fnPtr = reinterpret_cast<void *>(&loadPackage0)},
-      {.name = const_cast<char *>("moduleTarget0"),
-       .signature = const_cast<char *>("(II)B"),
-       .fnPtr = reinterpret_cast<void *>(&moduleTarget0)},
       {.name = const_cast<char *>("targetByName0"),
        .signature = const_cast<char *>("(Ljava/lang/String;)B"),
        .fnPtr = reinterpret_cast<void *>(&targetByName0)}};

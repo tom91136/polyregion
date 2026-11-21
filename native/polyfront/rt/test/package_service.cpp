@@ -255,6 +255,7 @@ TEST_CASE("package service links and compiles a typed consumer program") {
   CHECK_FALSE(compiled.value->hostObject.empty());
   REQUIRE(compiled.value->remoteModules.size() == 1);
   CHECK_FALSE(compiled.value->remoteModules.front().image.empty());
+  CHECK(compiled.value->remoteModules.front().target == static_cast<int32_t>(compiletime::Target::Source_C_Metal1_0));
   CHECK(std::string(compiled.value->remoteModules.front().image.begin(), compiled.value->remoteModules.front().image.end())
             .find(compiled.value->remoteModules.front().moduleName)
         != std::string::npos);

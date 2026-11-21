@@ -4974,31 +4974,36 @@ POLYREGION_EXPORT bool PackageLinkRequest::operator==(const PackageLinkRequest &
          && (pruneUnimplementedDeclarations == rhs.pruneUnimplementedDeclarations);
 }
 
-CompileModule::CompileModule(std::string moduleName, int32_t format, int32_t kind, std::vector<std::string> features,
+CompileModule::CompileModule(std::string moduleName, int32_t format, int32_t kind, int32_t target, std::vector<std::string> features,
                              std::vector<int8_t> image) noexcept
-    : moduleName(std::move(moduleName)), format(format), kind(kind), features(std::move(features)), image(std::move(image)) {}
+    : moduleName(std::move(moduleName)), format(format), kind(kind), target(target), features(std::move(features)),
+      image(std::move(image)) {}
 size_t CompileModule::hash_code() const {
   size_t seed = 0;
   seed ^= std::hash<decltype(moduleName)>()(moduleName) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   seed ^= std::hash<decltype(format)>()(format) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   seed ^= std::hash<decltype(kind)>()(kind) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(target)>()(target) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   seed ^= std::hash<decltype(features)>()(features) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   seed ^= std::hash<decltype(image)>()(image) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
   return seed;
 }
-CompileModule CompileModule::withModuleName(const std::string &v_) const { return CompileModule(v_, format, kind, features, image); }
-CompileModule CompileModule::withFormat(const int32_t &v_) const { return CompileModule(moduleName, v_, kind, features, image); }
-CompileModule CompileModule::withKind(const int32_t &v_) const { return CompileModule(moduleName, format, v_, features, image); }
+CompileModule CompileModule::withModuleName(const std::string &v_) const {
+  return CompileModule(v_, format, kind, target, features, image);
+}
+CompileModule CompileModule::withFormat(const int32_t &v_) const { return CompileModule(moduleName, v_, kind, target, features, image); }
+CompileModule CompileModule::withKind(const int32_t &v_) const { return CompileModule(moduleName, format, v_, target, features, image); }
+CompileModule CompileModule::withTarget(const int32_t &v_) const { return CompileModule(moduleName, format, kind, v_, features, image); }
 CompileModule CompileModule::withFeatures(const std::vector<std::string> &v_) const {
-  return CompileModule(moduleName, format, kind, v_, image);
+  return CompileModule(moduleName, format, kind, target, v_, image);
 }
 CompileModule CompileModule::withImage(const std::vector<int8_t> &v_) const {
-  return CompileModule(moduleName, format, kind, features, v_);
+  return CompileModule(moduleName, format, kind, target, features, v_);
 }
 POLYREGION_EXPORT bool CompileModule::operator!=(const CompileModule &rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool CompileModule::operator==(const CompileModule &rhs) const {
-  return (moduleName == rhs.moduleName) && (format == rhs.format) && (kind == rhs.kind) && (features == rhs.features)
-         && (image == rhs.image);
+  return (moduleName == rhs.moduleName) && (format == rhs.format) && (kind == rhs.kind) && (target == rhs.target)
+         && (features == rhs.features) && (image == rhs.image);
 }
 
 CompileRoot::CompileRoot(std::string name, std::vector<std::string> modules, std::vector<std::string> implementations,

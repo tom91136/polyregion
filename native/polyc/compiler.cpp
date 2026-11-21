@@ -519,15 +519,15 @@ polyast::Program namespaceRemoteEntries(polyast::Program program,
 } // namespace
 
 std::vector<int8_t> compiler::package::bitcodeToObject(const std::vector<int8_t> &bitcode, const compiletime::Target target,
-                                                       const std::string &arch) {
+                                                       const std::string &arch, const compiletime::OptLevel opt) {
   initialise();
   llvm::LLVMContext context;
   const auto buffer = llvm::MemoryBuffer::getMemBuffer(llvm::StringRef(reinterpret_cast<const char *>(bitcode.data()), bitcode.size()),
                                                        "host-program", false);
   auto module = llvm::parseBitcodeFile(buffer->getMemBufferRef(), context);
   if (!module) throw std::runtime_error("cannot read the host program bitcode: " + llvm::toString(module.takeError()));
-  auto compiled = backend::llvmc::compileModule(toLLVMBackendOptions(Options{.target = target, .arch = arch}).targetInfo(),
-                                                compiletime::OptLevel::O0, false, **module);
+  auto compiled =
+      backend::llvmc::compileModule(toLLVMBackendOptions(Options{.target = target, .arch = arch}).targetInfo(), opt, false, **module);
   if (!compiled.binary) throw std::runtime_error("cannot compile the host program: " + compiled.messages);
   return *compiled.binary;
 }
@@ -646,7 +646,7 @@ compiler::package::compile(polyast::ProgramLinkRequest request, const compiletim
     const auto format = runtime::moduleFormatOf(target);
     if (!format) continue;
     remoteModules.emplace_back(moduleName, static_cast<int32_t>(*format), static_cast<int32_t>(runtime::targetPlatformKind(target)),
-                               device->features, std::move(*device->binary));
+                               static_cast<int32_t>(magic_enum::enum_integer(target)), device->features, std::move(*device->binary));
   }
   return {.value = polyast::CompileBundle(std::move(*host->binary), std::move(remoteModules), std::move(implementations), std::move(unfit),
                                           std::move(compileRootInfo)),

@@ -3,11 +3,11 @@
 #include "msgpack.hpp"
 
 namespace polyregion::polyast {
-constexpr auto AdtHash = "7cdb7c998db4bf008849b2a931130126";
+constexpr auto AdtHash = "17e4f5d1e81121ff7d911fbb215cd1af";
 constexpr auto ProgramHash = "1948e5152fa5a509dd2e489b7b215ba2";
 constexpr auto PackageHash = "d9a4e0da0bed9419f721e7522f189132";
 constexpr auto PackageWireHash = "309ae338542b73ae2be6b62f410780d6";
-constexpr auto CompileWireHash = "761bad2d8b6004abf355f5063d0116a9";
+constexpr auto CompileWireHash = "f1300ddff6331e8ab1eec99ac66daa04";
 using msgpack::decodeMaybeInterned;
 using msgpack::encodeInterned;
 using msgpack::MsgpackReader;
@@ -3571,18 +3571,20 @@ CompileModule compilemodule_from_json(const json &j_) {
   auto moduleName = j_.at(0).get<std::string>();
   const auto format = j_.at(1).get<int32_t>();
   const auto kind = j_.at(2).get<int32_t>();
-  auto features = j_.at(3).get<std::vector<std::string>>();
-  auto image = j_.at(4).get<std::vector<int8_t>>();
-  return {std::move(moduleName), format, kind, std::move(features), std::move(image)};
+  const auto target = j_.at(3).get<int32_t>();
+  auto features = j_.at(4).get<std::vector<std::string>>();
+  auto image = j_.at(5).get<std::vector<int8_t>>();
+  return {std::move(moduleName), format, kind, target, std::move(features), std::move(image)};
 }
 
 json compilemodule_to_json(const CompileModule &x_) {
   const auto moduleName = x_.moduleName;
   const auto format = x_.format;
   const auto kind = x_.kind;
+  const auto target = x_.target;
   const auto features = x_.features;
   const auto image = x_.image;
-  return json::array({moduleName, format, kind, features, image});
+  return json::array({moduleName, format, kind, target, features, image});
 }
 
 CompileRoot compileroot_from_json(const json &j_) {
@@ -7254,10 +7256,11 @@ void packagelinkrequest_to_msgpack(MsgpackWriter &w_, const PackageLinkRequest &
 }
 
 CompileModule compilemodule_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 5) throw std::runtime_error("Expected CompileModule with 5 field(s)");
+  if (n_ != 6) throw std::runtime_error("Expected CompileModule with 6 field(s)");
   auto moduleName = r_.readString();
   const auto format = r_.readInt32();
   const auto kind = r_.readInt32();
+  const auto target = r_.readInt32();
   std::vector<std::string> features;
   {
     const auto features_size = r_.readArrayHeader();
@@ -7276,13 +7279,14 @@ CompileModule compilemodule_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
       image.emplace_back(image_elem);
     }
   }
-  return {std::move(moduleName), format, kind, std::move(features), std::move(image)};
+  return {std::move(moduleName), format, kind, target, std::move(features), std::move(image)};
 }
 
 void compilemodule_fields_to_msgpack(MsgpackWriter &w_, const CompileModule &x_) {
   w_.writeString(x_.moduleName);
   w_.writeInt32(x_.format);
   w_.writeInt32(x_.kind);
+  w_.writeInt32(x_.target);
   w_.writeArrayHeader(x_.features.size());
   for (const auto &v0_ : x_.features) {
     w_.writeString(v0_);
@@ -7299,7 +7303,7 @@ CompileModule compilemodule_from_msgpack(MsgpackReader &r_) {
 }
 
 void compilemodule_to_msgpack(MsgpackWriter &w_, const CompileModule &x_) {
-  w_.writeArrayHeader(5);
+  w_.writeArrayHeader(6);
   compilemodule_fields_to_msgpack(w_, x_);
 }
 

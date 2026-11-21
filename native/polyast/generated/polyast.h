@@ -11053,12 +11053,14 @@ struct POLYREGION_EXPORT CompileModule {
   std::string moduleName;
   int32_t format;
   int32_t kind;
+  int32_t target;
   std::vector<std::string> features;
   std::vector<int8_t> image;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
   [[nodiscard]] POLYREGION_EXPORT CompileModule withModuleName(const std::string &v_) const;
   [[nodiscard]] POLYREGION_EXPORT CompileModule withFormat(const int32_t &v_) const;
   [[nodiscard]] POLYREGION_EXPORT CompileModule withKind(const int32_t &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT CompileModule withTarget(const int32_t &v_) const;
   [[nodiscard]] POLYREGION_EXPORT CompileModule withFeatures(const std::vector<std::string> &v_) const;
   [[nodiscard]] POLYREGION_EXPORT CompileModule withImage(const std::vector<int8_t> &v_) const;
   template <typename T, typename U>
@@ -11082,11 +11084,11 @@ struct POLYREGION_EXPORT CompileModule {
     if constexpr (std::is_same_v<T, CompileModule>) {
       return f(*this);
     }
-    return CompileModule(moduleName, format, kind, features, image);
+    return CompileModule(moduleName, format, kind, target, features, image);
   }
   [[nodiscard]] POLYREGION_EXPORT bool operator!=(const CompileModule &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const CompileModule &) const;
-  CompileModule(std::string moduleName, int32_t format, int32_t kind, std::vector<std::string> features = {},
+  CompileModule(std::string moduleName, int32_t format, int32_t kind, int32_t target, std::vector<std::string> features = {},
                 std::vector<int8_t> image = {}) noexcept;
 };
 

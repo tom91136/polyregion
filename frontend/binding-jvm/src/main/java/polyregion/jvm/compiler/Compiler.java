@@ -28,9 +28,10 @@ public final class Compiler implements AutoCloseable {
       byte[] request,
       String capabilities,
       String targets,
+      byte opt,
       int stackDepth);
 
-  private static native byte moduleTarget0(int kind, int format);
+  private static native String capabilitiesFor0(String capabilities, String target);
 
   private static native byte targetByName0(String name);
 
@@ -83,13 +84,14 @@ public final class Compiler implements AutoCloseable {
       byte[] request,
       String capabilities,
       String targets,
+      Opt opt,
       int stackDepth) {
     return compileInterface0(
-        name, roots, declaration, entry, request, capabilities, targets, stackDepth);
+        name, roots, declaration, entry, request, capabilities, targets, opt.value, stackDepth);
   }
 
-  public Target moduleTarget(int kind, int format) {
-    return target(moduleTarget0(kind, format));
+  public String capabilitiesFor(String capabilities, String target) {
+    return capabilitiesFor0(capabilities, target);
   }
 
   public Target targetByName(String name) {

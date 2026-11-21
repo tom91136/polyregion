@@ -585,6 +585,7 @@ object PolyAST {
         moduleName: String,
         format: Int,
         kind: Int,
+        target: Int,
         features: List[String],
         image: ArraySeq[Byte]
     ) derives MsgPack.Codec

@@ -168,7 +168,7 @@ static ct::Target hostObjectTarget() {
 }
 
 jobjectArray Compiler::compileInterface0(JNIEnv *env, jclass, jstring name, jstring roots, jstring declaration, jstring entry,
-                                         jbyteArray request, jstring capabilities, jstring targets, jint stackDepth) {
+                                         jbyteArray request, jstring capabilities, jstring targets, jbyte opt, jint stackDepth) {
   return wrapException(env, EX, [&] {
     namespace pkg = polyfront::package;
     const auto fail = [](const std::vector<std::string> &errors) { throw std::runtime_error(errors | mk_string("\n")); };
@@ -192,6 +192,8 @@ jobjectArray Compiler::compileInterface0(JNIEnv *env, jclass, jstring name, jstr
     }
     const auto groups = pkg::capabilityGroups(configured, deviceTargets);
 
+    const auto hostTarget = hostObjectTarget();
+    const auto optLevel = fromJni(env, opt);
     const auto requestBytes = fromJni<char>(env, request);
     const auto entryName = fromJni(env, entry);
     std::vector<polyast::CompileBundle> bundles;
@@ -217,13 +219,13 @@ jobjectArray Compiler::compileInterface0(JNIEnv *env, jclass, jstring name, jstr
         if (!hydrated) fail(hydrated.errors);
         package = std::move(*hydrated.value);
       }
-      auto compiled = cp::package::compile(std::move(linkRequest), hostObjectTarget(), "native", group.targets,
+      auto compiled = cp::package::compile(std::move(linkRequest), hostTarget, "native", group.targets,
                                            stackDepth == 0 ? std::optional<int>{} : std::optional<int>{stackDepth});
       if (!compiled) fail(compiled.errors);
       auto slice = pkg::sliceBundle(*compiled.value, entryName, {});
       if (!slice) fail(slice.errors);
       if (slice.value->unfit.empty())
-        slice.value->hostObject = cp::package::bitcodeToObject(compiled.value->hostObject, ct::Target::Object_LLVM_HOST, "native");
+        slice.value->hostObject = cp::package::bitcodeToObject(compiled.value->hostObject, hostTarget, "native", optLevel);
       bundles.emplace_back(std::move(*slice.value));
     }
 
@@ -240,14 +242,13 @@ jobjectArray Compiler::compileInterface0(JNIEnv *env, jclass, jstring name, jstr
   });
 }
 
-jbyte Compiler::moduleTarget0(JNIEnv *env, jclass, jint kind, jint format) {
+jstring Compiler::capabilitiesFor0(JNIEnv *env, jclass, jstring capabilities, jstring target) {
   return wrapException(env, EX, [&] {
-    for (const auto target : magic_enum::enum_values<ct::Target>()) {
-      const auto candidate = runtime::moduleFormatOf(target);
-      if (candidate && static_cast<jint>(*candidate) == format && static_cast<jint>(runtime::targetPlatformKind(target)) == kind)
-        return static_cast<jbyte>(magic_enum::enum_integer(target));
-    }
-    throw std::runtime_error("No target produces a module of kind " + std::to_string(kind) + " and format " + std::to_string(format));
+    const auto name = fromJni(env, target);
+    const auto spec = ct::TargetSpec::findByName(name);
+    if (!spec) throw std::runtime_error("Unknown target `" + name + "`");
+    const auto configured = fromJni(env, capabilities) ^ split(',') ^ filter([](const auto &c) { return !c.empty(); });
+    return toJni(env, polyfront::package::capabilitiesFor(configured, spec->codegen) ^ mk_string(","));
   });
 }
 
