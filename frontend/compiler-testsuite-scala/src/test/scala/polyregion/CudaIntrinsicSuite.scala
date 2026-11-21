@@ -22,8 +22,7 @@ class CudaIntrinsicSuite extends BaseSuite {
       {
         case Left(e)   => throw e
         case Right(()) => latch.countDown()
-      },
-      "cuda@sm_89"
+      }
     ) { r(0) = f; () }
     assert(latch.await(60, TimeUnit.SECONDS))
     r(0)
@@ -39,8 +38,7 @@ class CudaIntrinsicSuite extends BaseSuite {
       { r =>
         outcome = Some(r)
         latch.countDown()
-      },
-      "cuda@sm_89"
+      }
     ) { sink(0) = f; () }
     assert(latch.await(60, TimeUnit.SECONDS))
     outcome.get

@@ -87,13 +87,13 @@ object compiletime {
 //    code
 //  }
 
-  private case class ReifiedConfig(target: ct.Target, arch: String, opt: ct.Opt)
+  private case class ReifiedConfig(name: String, target: ct.Target, arch: String, opt: ct.Opt)
 
-  private def reifiedConfigs(compiler: ct.Compiler, targets: String): Result[List[ReifiedConfig]] =
-    LaunchConfig.deviceTargets(if (targets.isEmpty) LaunchConfig.targets else targets).traverse { (name, arch) =>
+  private def reifiedConfigs(compiler: ct.Compiler, config: LaunchConfig): Result[List[ReifiedConfig]] =
+    config.targets.traverse { (name, arch) =>
       Either
         .catchNonFatal(compiler.targetByName(name))
-        .map(target => ReifiedConfig(target, arch, LaunchConfig.opt))
+        .map(target => ReifiedConfig(name, target, arch, config.opt))
     }
 
   private inline def checked(e: Result[Expr[Unit]]): Expr[Unit] = e match {
@@ -101,34 +101,32 @@ object compiletime {
     case Right(x) => x
   }
 
-  inline def offload0(inline ctx: rt.Context, inline cb: Callback[Unit], inline targets: String = "")(
+  inline def offload0(inline ctx: rt.Context, inline cb: Callback[Unit])(
       inline f: Any
-  ): Unit = ${ generate0('ctx, 'f, 'cb, 'targets) }
+  ): Unit = ${ generate0('ctx, 'f, 'cb) }
   private def generate0(using
       q: Quotes
-  )(ctx: Expr[rt.Context], f: Expr[Any], cb: Expr[Callback[Unit]], targets: Expr[String]) =
-    checked(generate(using Quoted(q))(targets.valueOrAbort, ctx, f, '{ rt.Dim3(1, 1, 1) }, cb))
+  )(ctx: Expr[rt.Context], f: Expr[Any], cb: Expr[Callback[Unit]]) =
+    checked(generate(using Quoted(q))(ctx, f, '{ rt.Dim3(1, 1, 1) }, cb))
 
   inline def offload1(
       inline ctx: rt.Context,
       inline rangeX: Range,
-      inline cb: Callback[Unit],
-      inline targets: String = ""
+      inline cb: Callback[Unit]
   )(
       inline f: Any
-  ): Unit = ${ generate1('ctx, 'f, 'rangeX, 'cb, 'targets) }
+  ): Unit = ${ generate1('ctx, 'f, 'rangeX, 'cb) }
   private def generate1(using
       q: Quotes
-  )(ctx: Expr[rt.Context], f: Expr[Any], rangeX: Expr[Range], cb: Expr[Callback[Unit]], targets: Expr[String]) =
-    checked(generate(using Quoted(q))(targets.valueOrAbort, ctx, f, '{ rt.Dim3($rangeX.size, 1, 1) }, cb))
+  )(ctx: Expr[rt.Context], f: Expr[Any], rangeX: Expr[Range], cb: Expr[Callback[Unit]]) =
+    checked(generate(using Quoted(q))(ctx, f, '{ rt.Dim3($rangeX.size, 1, 1) }, cb))
 
   inline def offload2(
       inline ctx: rt.Context,
       inline rangeX: Range,
       inline rangeY: Range,
-      inline cb: Callback[Unit],
-      inline targets: String = ""
-  )(inline f: Any): Unit = ${ generate2('ctx, 'f, 'rangeX, 'rangeY, 'cb, 'targets) }
+      inline cb: Callback[Unit]
+  )(inline f: Any): Unit = ${ generate2('ctx, 'f, 'rangeX, 'rangeY, 'cb) }
   private def generate2(using
       q: Quotes
   )(
@@ -136,10 +134,9 @@ object compiletime {
       f: Expr[Any],
       rangeX: Expr[Range],
       rangeY: Expr[Range],
-      cb: Expr[Callback[Unit]],
-      targets: Expr[String]
+      cb: Expr[Callback[Unit]]
   ) = checked(
-    generate(using Quoted(q))(targets.valueOrAbort, ctx, f, '{ rt.Dim3($rangeX.size, $rangeY.size, 1) }, cb)
+    generate(using Quoted(q))(ctx, f, '{ rt.Dim3($rangeX.size, $rangeY.size, 1) }, cb)
   )
 
   inline def offload3(
@@ -147,9 +144,8 @@ object compiletime {
       inline rangeX: Range,
       inline rangeY: Range,
       inline rangeZ: Range,
-      inline cb: Callback[Unit],
-      inline targets: String = ""
-  )(inline f: Any): Unit = ${ generate3('ctx, 'f, 'rangeX, 'rangeY, 'rangeZ, 'cb, 'targets) }
+      inline cb: Callback[Unit]
+  )(inline f: Any): Unit = ${ generate3('ctx, 'f, 'rangeX, 'rangeY, 'rangeZ, 'cb) }
   private def generate3(using
       q: Quotes
   )(
@@ -158,11 +154,9 @@ object compiletime {
       rangeX: Expr[Range],
       rangeY: Expr[Range],
       rangeZ: Expr[Range],
-      cb: Expr[Callback[Unit]],
-      targets: Expr[String]
+      cb: Expr[Callback[Unit]]
   ) = checked(
     generate(using Quoted(q))(
-      targets.valueOrAbort,
       ctx,
       f,
       '{ rt.Dim3($rangeX.size, $rangeY.size, $rangeZ.size) },
@@ -175,20 +169,21 @@ object compiletime {
   private def generate(using
       q: Quoted
   )(
-      targets: String,
       ctx: Expr[rt.Context],
       f: Expr[Any],
       dim: Expr[rt.Dim3],
       cb: Expr[Callback[Unit]]
   ) = {
-    val jit = LaunchConfig.jit
     val log = RenderedLog("")
     val result = for {
+      config <- LaunchConfig.fromSettings(LaunchConfig.macroSettings(using q.underlying)).leftMap(CompilerException(_))
+      jit = config.jit
 
       // Name actual => type actual
       // configs               <- reifyConfigFromTpe[C](using q.underlying)()
 
-      (captures, prismRefs, monoMap, prog0) <- Compiler.compileExpr(log, f, StdLib.Tables)
+      (captures, prismRefs, monoMap, programs) <- Compiler.compileExpr(log, f, StdLib.Tables, config)
+      prog0 = programs.head._2
 
       resolveStructDef = (s: p.Type.Struct) => prog0.defs.find(_.name == s.name)
 
@@ -205,14 +200,18 @@ object compiletime {
       entry0 <- prog0.entry.failIfEmpty("compiled expression has no program entry")
       entry           = entry0.copy(decl = entry0.decl.copy(name = p.Sym(s"lambda${ProgramCounter.getAndIncrement()}")))
       prog: p.Program = prog0.copy(entry = Some(entry))
+      programFor      = programs.map((name, program) => name -> program.copy(entry = Some(entry))).toMap
 
       _ = debug(log.render(1).mkString("\n"))
       _ = debug(entry.repr)
       _ = debug(prog.functions.map(_.repr).mkString("\n"))
 
-      serialisedAst <- Either.catchNonFatal(MsgPack.encode(CodeGen.programVersioned(prog)))
-      compiler = ct.Compiler.create()
-      configs <- reifiedConfigs(compiler, targets)
+      serialisedAsts <- programFor.toList.traverse((name, program) =>
+        Either.catchNonFatal(name -> MsgPack.encode(CodeGen.programVersioned(program)))
+      )
+      serialisedAstFor = serialisedAsts.toMap
+      compiler         = ct.Compiler.create()
+      configs <- reifiedConfigs(compiler, config)
 
       compilations <-
         if (jit) Nil.success
@@ -220,17 +219,23 @@ object compiletime {
           configs.traverse(c =>
             Either
               .catchNonFatal(
-                compiler.compile(serialisedAst, emitAssembly = true, ct.Options.of(c.target, c.arch), c.opt.value)
+                compiler.compile(
+                  serialisedAstFor(c.name),
+                  emitAssembly = true,
+                  ct.Options.of(c.target, c.arch),
+                  c.opt.value
+                )
               )
               .map(c -> _)
           )
       perConfigLayouts <-
         if (jit)
-          Either.catchNonFatal(MsgPack.encode(CodeGen.structDefsVersioned(prog.defs))).flatMap { structDefsAst =>
-            configs.traverse(c =>
-              Either.catchNonFatal(c -> compiler.layoutOf(structDefsAst, ct.Options.of(c.target, c.arch)))
-            )
-          }
+          configs.traverse(c =>
+            Either.catchNonFatal {
+              val structDefsAst = MsgPack.encode(CodeGen.structDefsVersioned(programFor(c.name).defs))
+              c -> compiler.layoutOf(structDefsAst, ct.Options.of(c.target, c.arch))
+            }
+          )
         else compilations.map((c, comp) => c -> comp.layouts).success
 
     } yield {
@@ -257,14 +262,19 @@ object compiletime {
 
       val modulesExpr: Expr[Array[rt.ModuleImage]] =
         if (jit) {
-          val serialisedAstExpr = Expr(serialisedAst)
-          val jitConfigs        = Expr(configs.map(config => (config.target.name, config.arch, config.opt.value)))
+          val distinctAsts = configs.map(c => serialisedAstFor(c.name).toList).distinct
+          val astsExpr     = Expr(distinctAsts.map(_.toArray))
+          val jitConfigs = Expr(
+            configs.map(c =>
+              (c.target.name, c.arch, c.opt.value, distinctAsts.indexOf(serialisedAstFor(c.name).toList))
+            )
+          )
           '{
             val jitCompiler = ct.Compiler.create()
-            val ast         = $serialisedAstExpr
-            $jitConfigs.map { case (targetName, arch, opt) =>
+            val asts        = $astsExpr
+            $jitConfigs.map { case (targetName, arch, opt, ast) =>
               val target = ct.Target.valueOf(targetName)
-              val comp   = jitCompiler.compile(ast, emitAssembly = false, ct.Options.of(target, arch), opt)
+              val comp   = jitCompiler.compile(asts(ast), emitAssembly = false, ct.Options.of(target, arch), opt)
               rt.ModuleImage($moduleName, target, comp.features, comp.program)
             }.toArray
           }
@@ -312,14 +322,15 @@ object compiletime {
 
               ${
 
-                val lut         = prog.defs.map(s => s.name -> s).toMap
-                val lutWithRefs = lut.map((s, sd) => s -> (sd, prismRefs.get(s)))
                 q.Match(
                   'found.asTerm,
                   perConfigLayouts.zipWithIndex.map { case ((config, configLayouts), i) =>
-                    val layouts0 = configLayouts.map(l => p.Sym(l.name) -> l).toMap
+                    val configDefs  = programFor(config.name).defs
+                    val lut         = configDefs.map(s => s.name -> s).toMap
+                    val lutWithRefs = lut.map((s, sd) => s -> (sd, prismRefs.get(s)))
+                    val layouts0    = configLayouts.map(l => p.Sym(l.name) -> l).toMap
 
-                    val layouts = prog.defs.flatMap { sd =>
+                    val layouts = configDefs.flatMap { sd =>
                       layouts0.get(sd.name).map(layout => sd -> (StructLayouts.of(sd, layout), prismRefs.get(sd.name)))
                     }.toMap
                     val allReprsInCaptures = capturesWithStructDefs

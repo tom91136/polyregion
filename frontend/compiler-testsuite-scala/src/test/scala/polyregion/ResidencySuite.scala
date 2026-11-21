@@ -28,7 +28,7 @@ class ResidencySuite extends munit.FunSuite {
 
   private inline def bump(xs: Buffer[Double], n: Int): Unit = {
     var outcome: Either[Throwable, Unit] = null
-    compiletime.offload0(Host.context, outcome = _, "host@native") {
+    compiletime.offload0(Host.context, outcome = _) {
       var i = 0
       while (i < n) {
         xs(i) = xs(i) + 1.0
@@ -91,7 +91,7 @@ class ResidencySuite extends munit.FunSuite {
     val copied: Buffer[Double]   = ys
     Host.context.resident(resident) {
       var outcome: Either[Throwable, Unit] = null
-      compiletime.offload0(Host.context, outcome = _, "host@native") {
+      compiletime.offload0(Host.context, outcome = _) {
         var i = 0
         while (i < n) {
           resident(i) = resident(i) + copied(i)
@@ -115,7 +115,7 @@ class ResidencySuite extends munit.FunSuite {
     try {
       var outcome: Either[Throwable, Unit] = null
       Host.context.resident(captured) {
-        compiletime.offload0(other, outcome = _, "host@native") {
+        compiletime.offload0(other, outcome = _) {
           var i = 0
           while (i < n) {
             captured(i) = captured(i) + 1.0
@@ -139,7 +139,7 @@ class ResidencySuite extends munit.FunSuite {
 
   private inline def bumpInts(xs: Buffer[Int], n: Int): Unit = {
     var outcome: Either[Throwable, Unit] = null
-    compiletime.offload0(Host.context, outcome = _, "host@native") {
+    compiletime.offload0(Host.context, outcome = _) {
       var i = 0
       while (i < n) {
         xs(i) = xs(i) + 1

@@ -19,7 +19,7 @@ class JvmIntrinsicSuite extends BaseSuite {
       .typeCheckErrors("""
         import polyregion.scalalang.*
         import polyregion.scalalang.blocking.Host
-        compiletime.offload0(Host.context, _ => (), "host@native") { val r = java.lang.Math.random(); () }
+        compiletime.offload0(Host.context, _ => ()) { val r = java.lang.Math.random(); () }
       """)
       .map(_.message)
     assert(errors.exists(_.contains("unsupported JVM intrinsic java/lang/Math.random()D")), errors.toString)

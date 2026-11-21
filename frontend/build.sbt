@@ -25,6 +25,34 @@ lazy val exportMavenRepo  = taskKey[File]("Publish the JVM SDK artefacts as a Ma
 lazy val genCodegen       = taskKey[Unit]("Run polyregion.ast.CodeGen to (re)generate native C++/JNI sources.")
 lazy val genEw            = taskKey[Unit]("Run ewgen.Main to (re)generate the polyinvoke wrangler sources.")
 
+lazy val polyregionTargets = settingKey[Seq[String]]("Offload targets as <target>@<arch>, handed to the Scala macros.")
+lazy val polyregionOpt     = settingKey[String]("Optimisation level of offloaded code (O0, O1, O2, O3, Ofast).")
+lazy val polyregionJit     = settingKey[Boolean]("Compile offloaded regions at run time instead of ahead of time.")
+lazy val polyregionLibraryPath = settingKey[String]("Package roots the launch macros resolve interfaces against.")
+lazy val polyregionCapabilities =
+  settingKey[Seq[String]]("Package capabilities, optionally qualified as <capability>@<target>.")
+
+def envValue(name: String): Option[String] = sys.env.get(name).map(_.trim).filter(_.nonEmpty)
+
+def envList(name: String): Option[Seq[String]] =
+  envValue(name).map(_.split(',').toSeq.map(_.trim).filter(_.nonEmpty)).filter(_.nonEmpty)
+
+def polyregionSettings(defaultTargets: Seq[String] = Seq("host@native")) = Seq(
+  polyregionTargets      := envList("POLYREGION_TARGETS").getOrElse(defaultTargets),
+  polyregionOpt          := envValue("POLYREGION_OPT").getOrElse("O2"),
+  polyregionJit          := envValue("POLYREGION_JIT").exists(_.toBooleanOption.contains(true)),
+  polyregionLibraryPath  := envValue("POLYFRONT_LIBRARY_PATH").getOrElse(""),
+  polyregionCapabilities := envList("POLYFRONT_LIBRARY_CAPABILITIES").getOrElse(Nil),
+  scalacOptions += {
+    val settings =
+      polyregionTargets.value.map(target => s"polyregion.targets=$target") ++
+        Seq(s"polyregion.opt=${polyregionOpt.value}", s"polyregion.jit=${polyregionJit.value}") ++
+        Some(polyregionLibraryPath.value).filter(_.nonEmpty).map(path => s"polyregion.library.path=$path") ++
+        polyregionCapabilities.value.map(capability => s"polyregion.library.capabilities=$capability")
+    s"-Xmacro-settings:${settings.mkString(",")}"
+  }
+)
+
 def findBdwgcPrefix: File = {
   val nativeDir = (file(".") / ".." / "native").getAbsoluteFile
   Option(nativeDir.listFiles())
@@ -131,6 +159,7 @@ lazy val `runtime-java` = project
 lazy val `runtime-scala` = project
   .settings(
     commonSettings,
+    polyregionSettings(),
     name := "runtime-scala",
     javacOptions ++= Seq("-proc:none"),
     Test / fork              := true,
@@ -458,29 +487,53 @@ lazy val compiler = project
   )
   .dependsOn(ast.jvm(scala3Version), pass.jvm(scala3Version), `binding-jvm`)
 
+lazy val cudaSuites =
+  Set("CudaIntrinsicSuite.scala", "RecursionSuite.scala", "SpectraLaunchSuite.scala", "TwinSuite.scala")
+lazy val cudaSuiteSupport = Set("BaseSuite.scala", "Toggles.scala")
+
+def compilerTestsuiteSettings(projectName: String) = Seq(
+  fork                      := true,
+  Test / parallelExecution  := false,
+  Test / testForkedParallel := false,
+  Test / javaOptions += Def.uncached(s"-XX:ErrorFile=${target.value}/hs_err_pid%p.log"),
+  nativeCompilerInputsTask := Def.uncached {
+    nativeCompilerInputs(fileConverter.value)
+  },
+  Test / unmanagedJars ++= nativeCompilerInputsTask.value,
+  javacOptions ++= Seq("-proc:none"),
+  commands += Command.command("testUntilFailed") { state =>
+    s"$projectName/testFull" :: "testUntilFailed" :: state
+  },
+  name := projectName,
+  scalacOptions ++= Seq(
+    "-Yretain-trees" // XXX for the test kernels
+  ),
+  libraryDependencies ++= Seq(
+    "org.scalameta" %% "munit" % munitVersion % Test
+  )
+)
+
 lazy val `compiler-testsuite-scala` = project
   .settings(
     commonSettings,
-    fork                      := true,
-    Test / parallelExecution  := false,
-    Test / testForkedParallel := false,
-    Test / javaOptions += Def.uncached(s"-XX:ErrorFile=${target.value}/hs_err_pid%p.log"),
-    nativeCompilerInputsTask := Def.uncached {
-      nativeCompilerInputs(fileConverter.value)
-    },
-    Test / unmanagedJars ++= nativeCompilerInputsTask.value,
-    javacOptions ++= Seq("-proc:none"),
-    commands += Command.command("testUntilFailed") { state =>
-      "testFull" :: "testUntilFailed" :: state
-    },
-    name := "compiler-testsuite-scala",
-    Test / unmanagedSources += (ThisBuild / baseDirectory).value / ".." / "spectra" / "generated" / "scala" / "polyregion" / "spectra.scala",
-    scalacOptions ++= Seq(
-      "-Yretain-trees" // XXX for the test kernels
+    polyregionSettings(),
+    compilerTestsuiteSettings("compiler-testsuite-scala"),
+    Test / unmanagedSources / excludeFilter ~= (_ || new SimpleFileFilter(file => cudaSuites(file.getName)))
+  )
+  .dependsOn(`runtime-scala`)
+
+lazy val `compiler-testsuite-cuda` = project
+  .settings(
+    commonSettings,
+    polyregionSettings(Seq("host@native", "cuda@sm_80")),
+    compilerTestsuiteSettings("compiler-testsuite-cuda"),
+    Test / unmanagedSourceDirectories := Seq(
+      (ThisBuild / baseDirectory).value / "compiler-testsuite-scala" / "src" / "test" / "scala"
     ),
-    libraryDependencies ++= Seq(
-      "org.scalameta" %% "munit" % munitVersion % Test
-    )
+    Test / unmanagedSources / includeFilter := new SimpleFileFilter(file =>
+      cudaSuites(file.getName) || cudaSuiteSupport(file.getName)
+    ),
+    Test / unmanagedSources += (ThisBuild / baseDirectory).value / ".." / "spectra" / "generated" / "scala" / "polyregion" / "spectra.scala"
   )
   .dependsOn(`runtime-scala`)
 
@@ -507,6 +560,7 @@ lazy val mainCls = Some("polyregion.examples.CheckApi")
 lazy val `examples-scala` = project
   .settings(
     commonSettings,
+    polyregionSettings(),
     name := "examples-scala",
     fork := true,
     nativeCompilerInputsTask := Def.uncached {
@@ -527,6 +581,7 @@ lazy val `benchmarks-scala` = project
   .enablePlugins(JmhPlugin)
   .settings(
     commonSettings,
+    polyregionSettings(),
     name := "benchmarks-scala",
     fork := true,
     nativeCompilerInputsTask := Def.uncached {
@@ -569,6 +624,7 @@ lazy val root = project
     `runtime-java`,
     compiler,
     `compiler-testsuite-scala`,
+    `compiler-testsuite-cuda`,
     `compiler-testsuite-java`,
     `examples-scala`,
     `benchmarks-scala`

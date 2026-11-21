@@ -54,8 +54,7 @@ trait BaseSuite extends munit.FunSuite {
         {
           case Left(e)   => throw e
           case Right(()) => latch.countDown()
-        },
-        "host@native"
+        }
       ) { f; () }
       assert(latch.await(5, TimeUnit.SECONDS))
   }
@@ -72,8 +71,7 @@ trait BaseSuite extends munit.FunSuite {
         {
           case Left(e)   => throw e
           case Right(()) => latch.countDown()
-        },
-        "host@native"
+        }
       ) { r(0) = f; () }
       assert(latch.await(5, TimeUnit.SECONDS))
       r(0)

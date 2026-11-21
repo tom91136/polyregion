@@ -27,7 +27,7 @@ class RecursionSuite extends munit.FunSuite {
     val ctx      = blocking.CUDA.devices.head.context
     val result   = mutable.ListBuffer(-1)
     val outcomes = LinkedBlockingQueue[Either[Throwable, Unit]]()
-    compiletime.offload0(ctx, r => outcomes.put(r), "cuda@sm_89") {
+    compiletime.offload0(ctx, r => outcomes.put(r)) {
       result(0) = RecursionSuite.down(depth); ()
     }
     Option(outcomes.poll(60, TimeUnit.SECONDS)).get.map(_ => result(0))

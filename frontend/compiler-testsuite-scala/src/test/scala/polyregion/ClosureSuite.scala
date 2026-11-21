@@ -15,6 +15,15 @@ class ClosureSuite extends BaseSuite {
     val f = (x: Int) => x + y
     f(40)
   }
+  testExpr("lambda-capture-used-directly-and-in-nested-lambda") {
+    val y = 2
+    val z = y * 10
+    val f = (x: Int) => {
+      val g = (w: Int) => w + y
+      g(x) + z
+    }
+    f(40) + y
+  }
   testExpr("lambda-value-two-args") {
     val f = (x: Int, y: Int) => x * y
     f(6, 7)
