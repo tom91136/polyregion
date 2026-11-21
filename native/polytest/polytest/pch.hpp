@@ -44,9 +44,7 @@ struct Manifest {
   std::vector<std::string> macroReads;
 };
 
-inline std::string digest(std::string_view s) {
-  return fmt::format("{:016x}", llvm::xxh3_64bits(reinterpret_cast<const std::uint8_t *>(s.data()), s.size()));
-}
+inline std::string digest(std::string_view s) { return fmt::format("{:016x}", llvm::xxh3_64bits(llvm::StringRef(s.data(), s.size()))); }
 
 inline std::optional<Dep> statDep(const std::string &path) {
   llvm::sys::fs::file_status status;
