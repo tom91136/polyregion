@@ -2,6 +2,7 @@ package polyregion
 
 import polyregion.jvm.runtime as rt
 import polyregion.par.*
+import polyregion.scalalang.LaunchRuntime
 
 import scala.compiletime.testing.typeCheckErrors
 
@@ -34,6 +35,12 @@ abstract class ParCases extends munit.FunSuite {
         finally if (backend.owned) ctx.get.close()
       }
     }
+
+  private def launches(f: => Unit): Long = {
+    val before = LaunchRuntime.launchCount
+    f
+    LaunchRuntime.launchCount - before
+  }
 
   private def ints(n: Int): Array[Int] = Array.tabulate(n)(i => (i * 7 + 3) % 101 - 40)
 
@@ -273,6 +280,52 @@ abstract class ParCases extends munit.FunSuite {
     assertEquals((0 until 1000).par.count(_ % 3 == 0), (0 until 1000).count(_ % 3 == 0))
   }
 
+  check("map, map and sum are one launch") { ctx =>
+    val xs = ints(1000)
+    assertEquals(launches(xs.par.on(ctx).map(_ + 1).map(_ * 2).sum), 1L)
+  }
+
+  check("filter, map and sum are one launch") { ctx =>
+    val xs = ints(1000)
+    assertEquals(launches(xs.par.on(ctx).filter(_ > 0).map(_ * 2).sum), 1L)
+  }
+
+  check("map, filter and count are one launch") { ctx =>
+    val xs = ints(1000)
+    assertEquals(launches(xs.par.on(ctx).map(_ * 3).filter(_ > 0).count(_ % 2 == 0)), 1L)
+    assertEquals(launches(xs.par.on(ctx).map(_ * 3).filter(_ > 0).exists(_ > 100)), 1L)
+    assertEquals(launches(xs.par.on(ctx).map(_ * 3).filter(_ > 0).forall(_ > 0)), 1L)
+  }
+
+  check("map and map to an array is one launch") { ctx =>
+    val xs = ints(1000)
+    assertEquals(launches(xs.par.on(ctx).map(_ + 1).map(_ * 2).toArray), 1L)
+  }
+
+  check("a filter to an array is one launch without a map and two with one") { ctx =>
+    val xs = ints(1000)
+    assertEquals(launches(xs.par.on(ctx).filter(_ > 0).toArray), 1L)
+    assertEquals(launches(xs.par.on(ctx).filter(_ > 0).map(_ * 2).toArray), 2L)
+  }
+
+  check("sorted copies without a launch other than the sort") { ctx =>
+    val xs = ints(1000)
+    assertEquals(launches(xs.par.on(ctx).sorted), 1L)
+    assertEquals(launches(xs.par.on(ctx).map(_ + 1).sorted), 2L)
+  }
+
+  check("a range reduction and a range map to an array are one launch") { ctx =>
+    assertEquals(launches((0 until 1000).par.on(ctx).map(_ * 2).sum), 1L)
+    assertEquals(launches((0 until 1000).par.on(ctx).map(_ * 2).toArray), 1L)
+    assertEquals(launches((0 until 1000).par.on(ctx).filter(_ % 3 == 0).toArray), 2L)
+  }
+
+  check("reduce without a neutral element is one launch") { ctx =>
+    val xs = ints(1000)
+    assertEquals(launches(xs.par.on(ctx).map(_ + 100).reduce(_ + _)), 1L)
+    assertEquals(launches(xs.par.on(ctx).filter(_ > 0).reduce(_ + _)), 2L)
+  }
+
   check("a million elements") { ctx =>
     val xs = Array.tabulate(1000000)(i => (i * 31) % 1009)
     assertEquals(xs.par.on(ctx).map(_ + 1).sum, xs.map(_ + 1).sum)
@@ -286,6 +339,13 @@ abstract class ParCases extends munit.FunSuite {
     assertEquals(fs.par.on(ctx).map(_ * 2f).sum, fs.map(_ * 2f).sum)
     assertEquals(fs.par.on(ctx).filter(_ > 100f).toArray.toList, fs.filter(_ > 100f).toList)
     assertEquals(fs.par.on(ctx).min, fs.min)
+  }
+
+  check("an empty chain launches nothing") { ctx =>
+    val xs = Array.ofDim[Int](0)
+    assertEquals(launches(xs.par.on(ctx).map(_ + 1).sum), 0L)
+    assertEquals(launches(xs.par.on(ctx).map(_ + 1).toArray), 0L)
+    assertEquals(launches(xs.par.on(ctx).sorted), 0L)
   }
 
   test("a stored chain is rejected") {

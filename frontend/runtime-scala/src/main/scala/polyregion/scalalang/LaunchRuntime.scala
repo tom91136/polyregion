@@ -7,6 +7,7 @@ import polyregion.jvm.twin.{Marshal, Twins}
 
 import java.nio.{ByteBuffer, ByteOrder}
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.locks.ReentrantLock
 
 object LaunchRuntime {
@@ -72,6 +73,10 @@ object LaunchRuntime {
 
   private val sites = ConcurrentHashMap[String, Site]()
 
+  private val launched = AtomicLong(0)
+
+  def launchCount: Long = launched.get
+
   def marshal(site: Site): Marshal = Marshal.inPlace(site.twins, Platforms.directBufferFromPointer(_, _))
 
   private def scalar(m: Marshal, bytes: Int)(write: ByteBuffer => Unit): Arg = {
@@ -131,6 +136,7 @@ object LaunchRuntime {
   def invoke(ctx: rt.Context, site: Site, marshal: Marshal, args: Array[Arg]): Unit = {
     val group = site.select(ctx)
     group.load()
+    launched.incrementAndGet()
     val types = Array.fill[Byte](args.length)(rt.Type.PTR.value)
     val data  = ByteBuffer.allocate(8 * args.length).order(ByteOrder.nativeOrder)
     args.foreach(arg => data.putLong(arg.address))
