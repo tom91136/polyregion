@@ -24,6 +24,12 @@ class BytecodeAllocSuite extends munit.FunSuite {
       |  public static int boxes(int n) { Box[] bs = new Box[n]; return n; }
       |  public static int platform() { return new java.util.ArrayList<Integer>().size(); }
       |  public static Box leak(int a) { return new Box(a); }
+      |  public static final class Holder { Box kept; }
+      |  static Box global;
+      |  public static void toStatic(int a) { global = new Box(a); }
+      |  public static void keep(Holder h, Box b) { h.kept = b; }
+      |  public static void viaCallee(Holder h, int a) { keep(h, new Box(a)); }
+      |  public static void intoArray(Box[] bs, int a) { bs[0] = new Box(a); }
       |}
       |""".stripMargin
 
@@ -124,5 +130,24 @@ class BytecodeAllocSuite extends munit.FunSuite {
 
   test("an object cannot be returned") {
     assert(refusal("leak").contains("cannot be returned"))
+  }
+
+  test("a stack object stored to a static is refused") {
+    assert(refusal("toStatic").contains("Unsupported field access `Alloc.global`"))
+  }
+
+  test("a stack object stored into a field of an argument is refused") {
+    assert(refusal("keep").contains("Unsupported field access `Alloc$Holder.kept`"))
+  }
+
+  test("a stack object handed to a callee that stores it is refused once the callee is lowered") {
+    BytecodeResolver.resolve(List(MethodRef("Alloc", "viaCallee", descOf("viaCallee"))), loaded.classes.get) match {
+      case Left(e)  => assert(e.getMessage.contains("Unsupported field access `Alloc$Holder.kept`"), e.getMessage)
+      case Right(r) => fail(s"lowered:\n${r.functions.map(_.repr).mkString("\n")}")
+    }
+  }
+
+  test("a stack object stored into an array of objects is refused") {
+    assert(refusal("intoArray").contains("Alloc$Box"))
   }
 }
