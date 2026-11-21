@@ -346,4 +346,65 @@ class InterfaceResolverSuite extends munit.FunSuite {
       Some(List(i32))
     )
   }
+
+  private def gatedImport(target: String): Either[List[String], List[Int]] = {
+    val i32        = p.Type.IntS32
+    val publicName = p.Sym("bar.pick")
+    val publicDecl = p.FunctionDecl(
+      publicName,
+      Nil,
+      None,
+      List(p.Arg(p.Named("x", i32))),
+      Nil,
+      Nil,
+      i32,
+      p.Function.Affinity.Host
+    )
+    def implementation(name: String, capability: String, result: Int) = p.Function(
+      publicDecl.copy(name = p.Sym(name)),
+      List(p.Stmt.Return(p.Expr.Alias(p.Term.IntS32Const(result)))),
+      p.Function.Visibility.Exported,
+      p.Function.FpMode.Relaxed,
+      p.CallConvention.RegularCall,
+      Some(publicName),
+      List(capability)
+    )
+    val pkg = p.Package(
+      p.Interface(p.Sym("foo"), List(publicDecl)),
+      p.Program(
+        None,
+        List(
+          implementation("bar.implementation.pick_thrust", "foo.thrust", 2),
+          implementation("bar.implementation.pick_dpl", "foo.dpl", 1)
+        ),
+        Nil
+      )
+    )
+    val target0: p.Expr.Invoke = p.Expr.Invoke(
+      p.Type.FnRef(p.Sym("foo.resolved.pick")),
+      Nil,
+      None,
+      List(p.Term.IntS32Const(0)),
+      i32
+    )
+    InterfaceResolver
+      .importPackages(
+        List(pkg),
+        List(InterfaceResolver.Import("foo", "bar.pick", target0)),
+        Nil,
+        LaunchConfig.capabilitiesFor(Set("foo.thrust@cuda", "foo.dpl@host"), target),
+        Map.empty
+      )
+      .map(_._1.flatMap(_.body.collect { case p.Stmt.Return(p.Expr.Alias(p.Term.IntS32Const(value))) => value }))
+  }
+
+  test("select the implementation whose capability names the target") {
+    assertEquals(gatedImport("host").fold(errors => fail(errors.mkString("\n")), identity), List(1))
+    assertEquals(gatedImport("cuda").fold(errors => fail(errors.mkString("\n")), identity), List(2))
+  }
+
+  test("reject a target no configured capability serves") {
+    val errors = gatedImport("opencl").left.getOrElse(fail("expected an error"))
+    assert(errors.exists(_.contains("bar.pick")), errors.toString)
+  }
 }

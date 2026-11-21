@@ -93,41 +93,4 @@ class InterfacePackageSuite extends munit.FunSuite {
       InterfaceResolver.loadPackage("spectra.missing", libraryPath.get).left.getOrElse(fail("expected an error"))
     assert(error.exists(_.contains("spectra.missing")), error.toString)
   }
-
-  override def munitTimeout: scala.concurrent.duration.Duration = scala.concurrent.duration.Duration(10, "min")
-
-  private def importCopy(target: String) = {
-    val pointer = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global)
-    val invoke: p.Expr.Invoke = p.Expr.Invoke(
-      p.Type.FnRef(p.Sym("consumer.copy")),
-      Nil,
-      None,
-      List(
-        p.Term.Select(p.Named("in", pointer), Nil, pointer),
-        p.Term.IntS32Const(4),
-        p.Term.Select(p.Named("out", pointer), Nil, pointer)
-      ),
-      p.Type.Unit0
-    )
-    InterfaceResolver.importAll(
-      List(InterfaceResolver.Import("spectra", "spectra.copy", invoke)),
-      Nil,
-      Set("spectra.thrust@cuda", "spectra.dpl@host"),
-      Map(p.Type.IntS32 -> 4),
-      Some(target)
-    )
-  }
-
-  test("select the implementation whose capability names the target, reject a target nothing serves") {
-    def names(target: String) =
-      importCopy(target).fold(errors => fail(errors.mkString("\n")), _._1.map(_.name.fqcn))
-    val host = names("host")
-    assert(host.exists(_.contains("dpl")), host.toString)
-    assert(!host.exists(_.contains("thrust")), host.toString)
-    val cuda = names("cuda")
-    assert(cuda.exists(_.contains("thrust")), cuda.toString)
-    assert(!cuda.exists(_.contains("dpl")), cuda.toString)
-    val errors = importCopy("opencl").left.getOrElse(fail("expected an error"))
-    assert(errors.exists(_.contains("spectra.copy")), errors.toString)
-  }
 }
