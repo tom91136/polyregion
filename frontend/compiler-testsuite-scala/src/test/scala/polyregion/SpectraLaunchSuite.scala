@@ -6,6 +6,8 @@ import polyregion.scalalang.blocking.Host
 
 import scala.compiletime.testing.typeCheckErrors
 
+case class LaunchPoint(x: Int, y: Int)
+
 class SpectraLaunchSuite extends munit.FunSuite {
 
   private def device(accept: rt.DeviceInfo => Boolean): Option[rt.DeviceInfo] =
@@ -112,6 +114,15 @@ class SpectraLaunchSuite extends munit.FunSuite {
   test("spectra.sort sorts on CUDA")(cuda(sortCase))
   test("spectra.transform maps on CUDA")(cuda(transformCase))
   test("spectra.reduce reduces on CUDA")(cuda(reduceCase))
+
+  test("a struct-array launch argument is rejected at expansion") {
+    val errors = typeCheckErrors("""
+      val points = Array(LaunchPoint(1, 2), LaunchPoint(3, 4))
+      spectra.sort(Host.context, points, points.length, (a: LaunchPoint, b: LaunchPoint) => a.x < b.x)
+    """)
+    val messages = errors.map(_.message).mkString("\n")
+    assert(messages.contains("launch argument of type scala.Array[polyregion.LaunchPoint] is not supported"), messages)
+  }
 
   test("a spectra call inside an offload region is rejected naming both functions") {
     val errors = typeCheckErrors("""
