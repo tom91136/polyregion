@@ -1471,6 +1471,8 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
     // - AArch64 Mach-O: Large emits MOVZ/MOVK via Mach-O-specific absolute relocations; keep it.
     const auto isSpirv = info.triple.isSPIRV();
     const auto codeModel = [&] {
+      // XXX JITLink resolves GOTOFF64 against an empty GOT to address 0, which Medium emits for large data
+      if (info.triple.getArch() == llvm::Triple::x86_64 && info.triple.isOSBinFormatELF()) return llvm::CodeModel::Small;
       if (info.triple.getArch() != llvm::Triple::aarch64) return llvm::CodeModel::Medium;
       return info.triple.isOSBinFormatCOFF() ? llvm::CodeModel::Small : llvm::CodeModel::Large;
     }();
