@@ -159,14 +159,15 @@ struct PolyrtDeviceInfo {
   int32_t deviceKind;
   int32_t cudaArchitectureMajor;
   int32_t cudaArchitectureMinor;
+  int32_t systemPaging;
   uint64_t globalMemoryBytes;
   uint64_t computeUnits;
   char name[128];
 };
 
 static_assert(sizeof(PolyrtPlatformInfo) == 76 && offsetof(PolyrtPlatformInfo, name) == 12);
-static_assert(sizeof(PolyrtDeviceInfo) == 168 && offsetof(PolyrtDeviceInfo, globalMemoryBytes) == 24
-              && offsetof(PolyrtDeviceInfo, computeUnits) == 32 && offsetof(PolyrtDeviceInfo, name) == 40);
+static_assert(sizeof(PolyrtDeviceInfo) == 176 && offsetof(PolyrtDeviceInfo, globalMemoryBytes) == 32
+              && offsetof(PolyrtDeviceInfo, computeUnits) == 40 && offsetof(PolyrtDeviceInfo, name) == 48);
 
 // a handle from polyrt_context_create is freed by polyrt_context_destroy, never polyrt_context_release
 POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_platform_count(int32_t *count) noexcept;

@@ -12,6 +12,7 @@ public final class DeviceInfo {
   public final int deviceKind;
   public final int cudaArchitectureMajor;
   public final int cudaArchitectureMinor;
+  public final boolean systemPaging;
   public final long globalMemoryBytes;
   public final long computeUnits;
   public final String name;
@@ -25,6 +26,7 @@ public final class DeviceInfo {
       int deviceKind,
       int cudaArchitectureMajor,
       int cudaArchitectureMinor,
+      boolean systemPaging,
       long globalMemoryBytes,
       long computeUnits,
       String name) {
@@ -36,6 +38,7 @@ public final class DeviceInfo {
     this.deviceKind = deviceKind;
     this.cudaArchitectureMajor = cudaArchitectureMajor;
     this.cudaArchitectureMinor = cudaArchitectureMinor;
+    this.systemPaging = systemPaging;
     this.globalMemoryBytes = globalMemoryBytes;
     this.computeUnits = computeUnits;
     this.name = Objects.requireNonNull(name);

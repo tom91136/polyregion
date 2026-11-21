@@ -666,6 +666,7 @@ POLYREGION_EXPORT extern "C" bool polyrt_device_info(const int32_t platform, con
                                                                                                      : polyregion::polyrt::DeviceKind::GPU),
              .cudaArchitectureMajor = static_cast<int32_t>(target.cudaArchitectureMajor()),
              .cudaArchitectureMinor = static_cast<int32_t>(target.cudaArchitectureMinor()),
+             .systemPaging = hasFeature(target, polyregion::runtime::SystemPagingFeature),
              .globalMemoryBytes = target.globalMemoryBytes(),
              .computeUnits = target.computeUnits(),
              .name = {}};
@@ -1253,6 +1254,17 @@ static bool pointerBearing(const polyregion::runtime::TypeLayout *layout) {
                    });
 }
 
+static bool holdsHostPointer(polyregion::polyrt::ExecutionContext &execution, const char *self,
+                             const polyregion::runtime::TypeLayout *layout) {
+  return layout && view(layout->members, layout->members + layout->memberCount) | exists([&](const auto &member) {
+                     if (!layout->armLive(member, self)) return false;
+                     if (member.ptrIndirection == 0) return holdsHostPointer(execution, self + member.offsetInBytes, member.type);
+                     uintptr_t pointer = 0;
+                     std::memcpy(&pointer, self + member.offsetInBytes, sizeof(pointer));
+                     return pointer != 0 && !remoteAllocation(execution, pointer);
+                   });
+}
+
 static void remoteLaunchMarshalled(void *context, const char *moduleName, const char *kernelName, const size_t gridX, const size_t gridY,
                                    const size_t gridZ, const size_t blockX, const size_t blockY, const size_t blockZ,
                                    const size_t localMemBytes, const size_t argCount, const uint8_t *argTypes, void *const *argPtrs,
@@ -1296,11 +1308,12 @@ static void remoteLaunchMarshalled(void *context, const char *moduleName, const 
     return failure;
   };
   try {
-    const auto hostPointers = iota(size_t{0}, argCount) | exists([&](const size_t i) {
-                                return (mirrorKinds[i] == 1 && layouts && pointerBearing(layouts[i]))
-                                       || (mirrorKinds[i] == 3 && *static_cast<const uintptr_t *>(argPtrs[i]) != 0
-                                           && !remoteAllocation(execution, *static_cast<const uintptr_t *>(argPtrs[i])));
-                              });
+    const auto hostPointers =
+        iota(size_t{0}, argCount) | exists([&](const size_t i) {
+          return (mirrorKinds[i] == 1 && holdsHostPointer(execution, static_cast<const char *>(argPtrs[i]), layouts ? layouts[i] : nullptr))
+                 || (mirrorKinds[i] == 3 && *static_cast<const uintptr_t *>(argPtrs[i]) != 0
+                     && !remoteAllocation(execution, *static_cast<const uintptr_t *>(argPtrs[i])));
+        });
     if (hostPointers && !marshal && !foreign && !hostThreaded && mode != sma::MirrorMode::Off
         && !hasFeature(*execution.device, polyregion::runtime::SystemPagingFeature)) {
       if (!refuseInTransaction(__func__, unmirroredPointersMessage)) throw std::runtime_error(unmirroredPointersMessage);

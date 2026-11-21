@@ -529,6 +529,57 @@ TEST_CASE("a launch with host pointers is refused when no capture marshal can mi
   }
 }
 
+TEST_CASE("a by-value aggregate is refused only for the host pointers it holds") {
+  WithStubDevice device(false, false);
+  WithStubManagedPlatform platform;
+  StubQueue queue(std::chrono::seconds(1));
+  polyregion::polyrt::ExecutionContext context{polyregion::polyrt::currentPlatform.get(), device.stub, &queue};
+  device.stub->advertised = std::vector<std::string>{"paging:Managed"};
+  struct Unregistered {
+    polyregion::polyrt::sma::CaptureMarshal *previous = polyregion::polyrt::sma::captureMarshal();
+    Unregistered() { polyregion::polyrt::sma::registerCaptureMarshal(nullptr); }
+    ~Unregistered() { polyregion::polyrt::sma::registerCaptureMarshal(previous); }
+  } unregistered;
+  const polyregion::runtime::AggregateMember member{.name = "pointer",
+                                                    .offsetInBytes = 0,
+                                                    .sizeInBytes = sizeof(uintptr_t),
+                                                    .ptrIndirection = 1,
+                                                    .componentSize = 1,
+                                                    .type = nullptr,
+                                                    .readOnly = 0,
+                                                    .resolvePtrSizeInBytes = nullptr};
+  const polyregion::runtime::TypeLayout layout{.name = "holder",
+                                               .sizeInBytes = sizeof(uintptr_t),
+                                               .alignmentInBytes = alignof(uintptr_t),
+                                               .attrs = polyregion::runtime::LayoutAttrs::None,
+                                               .memberCount = 1,
+                                               .members = &member};
+  const std::array<const polyregion::runtime::TypeLayout *, 1> layouts{&layout};
+  std::array<uint8_t, 8> local{};
+  uintptr_t holder = 0;
+  const std::array<uint8_t, 1> types{static_cast<uint8_t>(Type::Ptr)};
+  const std::array<void *, 1> arguments{&holder};
+  const std::array<size_t, 1> mirrorSizes{sizeof(holder)};
+  const std::array<uint8_t, 1> mirrorKinds{1};
+
+  SECTION("a host pointer is refused") {
+    holder = reinterpret_cast<uintptr_t>(local.data());
+    CHECK_FALSE(polyrt_remote_launch_marshalled(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
+                                                arguments.data(), mirrorSizes.data(), mirrorKinds.data(), layouts.data()));
+    CHECK(std::string(polyrt_error_message()).find("no capture marshal") != std::string::npos);
+    CHECK(queue.invokedTypes.empty());
+  }
+
+  SECTION("a device pointer passes through") {
+    auto remote = remoteAlloc(&context, local.size());
+    holder = remote;
+    REQUIRE(polyrt_remote_launch_marshalled(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
+                                            arguments.data(), mirrorSizes.data(), mirrorKinds.data(), layouts.data()));
+    CHECK(queue.invokedTypes == std::vector{Type::Ptr, Type::Void});
+    REQUIRE(polyrt_remote_free(&context, remote));
+  }
+}
+
 TEST_CASE("mirror tables refuse a transaction on a created context") {
   WithStubDevice device(false, false);
   WithStubManagedPlatform platform;

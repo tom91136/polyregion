@@ -150,8 +150,9 @@ public final class Context implements AutoCloseable {
                 (int) device[3],
                 (int) device[4],
                 (int) device[5],
-                device[6],
+                device[6] != 0,
                 device[7],
+                device[8],
                 deviceName0(p, d));
       }
       platforms[p] = new PlatformInfo(p, (int) info[0], (int) info[1], platformName0(p), devices);

@@ -327,10 +327,11 @@ jlongArray Context::deviceInfo0(JNIEnv *env, jclass, jint platform, jint device)
                             info.deviceKind,
                             info.cudaArchitectureMajor,
                             info.cudaArchitectureMinor,
+                            info.systemPaging,
                             static_cast<jlong>(info.globalMemoryBytes),
                             static_cast<jlong>(info.computeUnits)};
-    auto *array = env->NewLongArray(8);
-    env->SetLongArrayRegion(array, 0, 8, values);
+    auto *array = env->NewLongArray(9);
+    env->SetLongArrayRegion(array, 0, 9, values);
     return array;
   });
 }
