@@ -838,6 +838,8 @@ polyast::CompileResult compiler::emit(Staged staged, const compiletime::OptLevel
   return c;
 }
 
+void compiler::loadPlugins() { sharedPlugins(); }
+
 polyast::CompileResult compiler::compile(const polyast::Program &program, const Options &options, const compiletime::OptLevel &opt) {
   return emit(stage(program, options), opt);
 }

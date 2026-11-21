@@ -12,6 +12,8 @@ final class SignalNatives {
 
   static native String changed();
 
+  static native boolean handled(int signal);
+
   static native String nestedGuards();
 
   static native ByteBuffer buffer(long base, long bytes);

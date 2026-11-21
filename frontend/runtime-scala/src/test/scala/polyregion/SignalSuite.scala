@@ -51,9 +51,14 @@ object LinkerProbe {
     val program = Files.readAllBytes(Path.of(sys.env("LINKER_PROBE_PROGRAM")))
     SignalNatives.snapshot()
     Compiler.create().compile(program, false, Options.of(Target.LLVM_AMDGCN, "gfx1036"), 12)
-    val changed = SignalNatives.changed()
-    println(s"changed=$changed")
-    sys.exit(if (changed.isEmpty && NullChecks.survive()) 0 else 1)
+    val gcRestartSignal = 24
+    val linux           = System.getProperty("os.name") == "Linux"
+    val changed =
+      SignalNatives.changed().split(",").filter(_.nonEmpty).filterNot(linux && _ == gcRestartSignal.toString)
+    println(s"changed=${changed.mkString(",")}")
+    val restartHandled = !linux || SignalNatives.handled(gcRestartSignal)
+    println(s"restartHandled=$restartHandled")
+    sys.exit(if (changed.isEmpty && restartHandled && NullChecks.survive()) 0 else 1)
   }
 }
 
@@ -135,7 +140,10 @@ class SignalSuite extends munit.FunSuite {
         Map("LINKER_PROBE_PROGRAM" -> program.toString, "SIGNAL_PROBE_LIB" -> probeLibrary.toString)
       )
       assertEquals(code, 0, output)
-      assert(output.contains("changed=\n") && output.contains("survived"), output)
+      assert(
+        output.contains("changed=\n") && output.contains("restartHandled=true") && output.contains("survived"),
+        output
+      )
     } finally Files.deleteIfExists(program)
   }
 

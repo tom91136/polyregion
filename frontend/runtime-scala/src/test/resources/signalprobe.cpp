@@ -81,6 +81,12 @@ JNIEXPORT jstring JNICALL Java_polyregion_SignalNatives_changed(JNIEnv *env, jcl
       differing([](const size_t i, const struct sigaction &current) { return sameAction(current, snapshotted[i]); }).c_str());
 }
 
+JNIEXPORT jboolean JNICALL Java_polyregion_SignalNatives_handled(JNIEnv *, jclass, jint signal) {
+  struct sigaction current{};
+  sigaction(signal, nullptr, &current);
+  return current.sa_handler != SIG_DFL;
+}
+
 JNIEXPORT jstring JNICALL Java_polyregion_SignalNatives_nestedGuards(JNIEnv *env, jclass) {
   Java_polyregion_SignalNatives_snapshot(env, nullptr);
   std::string during;

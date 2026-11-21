@@ -54,6 +54,8 @@ struct POLYREGION_EXPORT Staged {
 POLYREGION_EXPORT std::vector<polyast::StructLayout> layoutOf(const std::vector<polyast::StructDef> &sdefs, const Options &options);
 POLYREGION_EXPORT std::vector<polyast::StructLayout> layoutOf(const polyast::Bytes &bytes, const Options &options);
 
+POLYREGION_EXPORT void loadPlugins();
+
 POLYREGION_EXPORT polyast::Program runPipeline(const polyast::Program &program, const std::string &spec = {});
 // stage runs the PolyPass pipeline and must stay on one thread; emit is the code generator and may run concurrently
 POLYREGION_EXPORT Staged stage(const polyast::Program &program, const Options &options);
