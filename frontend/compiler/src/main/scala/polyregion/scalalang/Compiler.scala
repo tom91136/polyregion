@@ -825,7 +825,7 @@ object Compiler {
     // `given Monoid[Int] = new Monoid { ... }`); they're the concrete dispatch targets for
     // abstract trait method calls and don't show up directly in exprDeps.classes since they're
     // only the runtime types of given fields, not statically-named call receivers.
-    allClassSymbols = {
+    declaredClasses = {
       val direct = exprDeps.classes.keys.toList
       val nested = direct.flatMap(c =>
         Try(q.collectTree[q.Symbol](c.tree) {
@@ -837,6 +837,23 @@ object Compiler {
       )
       (direct ++ nested).distinct
     }
+    virtualCalls = {
+      val known = (declaredClasses ++ Dispatch.compilationUnit).distinct
+      def referent(t: p.Type): Option[p.Sym] = t match {
+        case p.Type.Struct(name, _)                => Some(name)
+        case p.Type.Ptr(p.Type.Struct(name, _), _) => Some(name)
+        case _                                     => None
+      }
+      exprDeps.functions.toList.flatMap { (method, ivks) =>
+        val receivers = ivks.flatMap(_.receiver.flatMap(r => referent(r.tpe)))
+        val arms      = Dispatch.classesOf(method, known)
+        Option.when(!receivers.exists(prisms.structDefs.contains) && Dispatch.isVirtual(method, arms))(
+          (method, arms, receivers)
+        )
+      }
+    }
+    armClasses      = virtualCalls.flatMap(_._2.map(_._1))
+    allClassSymbols = (declaredClasses ++ armClasses).distinct
     depsWithOverrides = exprDeps.functions.flatMap { (sym, ivks) =>
       val symOwner = sym.maybeOwner
       val overridesFromHierarchy = allClassSymbols
@@ -913,8 +930,26 @@ object Compiler {
       fn
     })
 
+    dispatchSites = virtualCalls.map { (method, arms, receivers) =>
+      Dispatch.Site(
+        p.Sym(method.fullName),
+        receivers,
+        arms.map((cls, impl) =>
+          Dispatch.Arm(structName0(cls), syntheticOverrideNames.getOrElse(impl, p.Sym(impl.fullName)))
+        )
+      )
+    }
+    dispatchTags  = Dispatch.tagsOf(dispatchSites)
+    dispatchTable = Dispatch.table(dispatchSites, dispatchTags)
+
     exprDeps <- exprDeps
-      .copy(functions = depsWithOverrides)
+      .copy(
+        functions = depsWithOverrides,
+        classes = exprDeps.classes ++ armClasses
+          .filterNot(exprDeps.classes.contains)
+          .distinct
+          .map(c => c -> Set[p.Type.Struct](p.Type.Struct(structName0(c), Nil)))
+      )
       .success
 
     // The methods in a prism will have the receiver set to the mirrored class.
@@ -973,144 +1008,23 @@ object Compiler {
       symbol.fullName.replace('.', '_') -> removeThisFromRef(symbol)
     }.toMap ++ exprThisCls.map((clsDef, _) => "this" -> q.This(clsDef.symbol)).toMap
 
-    // Build a dispatch table for abstract trait methods. For each (abstract method, concrete
-    // class extending its declarer with applied type args), map (abstract method name, parent
-    // applied as IR struct) -> (concrete method name, concrete class struct). At IR rewrite
-    // time this lets us redirect `monoid.mempty()` (where monoid: Monoid[Int]) to
-    // `anon$1.mempty(monoid.cast[anon$1])`, treating the unique anonymous-class override as
-    // the static dispatch target.
-    dispatchTable: Map[(p.Sym, p.Type.Struct), (p.Sym, p.Type.Struct)] = {
-      val entries = abstractDefs.flatMap { abstractDefDef =>
-        val abstractSym      = abstractDefDef.symbol
-        val abstractOwnerSym = abstractSym.maybeOwner
-        if (abstractOwnerSym.isNoSymbol) Nil
-        else
-          allClassSymbols.flatMap { classSym =>
-            val classTypeRef = Try(classSym.typeRef)
-            val baseClasses  = classTypeRef.map(_.baseClasses).getOrElse(Nil)
-            val isSubclass = !classSym.isNoSymbol && classSym.isClassDef && classSym != abstractOwnerSym &&
-              baseClasses.contains(abstractOwnerSym)
-            if (!isSubclass) Nil
-            else {
-              val classType = classTypeRef.get
-              val overrideSymOpt = Try(classSym.tree).toOption.collect { case cd: q.ClassDef => cd } match {
-                case Some(cd) =>
-                  cd.body.collectFirst {
-                    case dd: q.DefDef if dd.name == abstractDefDef.name => dd.symbol
-                  }
-                case None => None
-              }
-              overrideSymOpt match {
-                case Some(overrideSym) if !overrideSym.isNoSymbol && overrideSym != abstractSym =>
-                  val parentRepr = classType.baseType(abstractOwnerSym)
-                  val parentTry = Retyper.typer0(parentRepr).toOption.flatMap {
-                    case ((_, s: p.Type.Struct), _) => Some(s)
-                    case _                          => None
-                  }
-                  val classTry = Retyper.typer0(classType).toOption.flatMap {
-                    case ((_, s: p.Type.Struct), _) => Some(s)
-                    case _                          => None
-                  }
-                  (parentTry, classTry) match {
-                    case (Some(parentStruct), Some(classStruct)) =>
-                      // If the override symbol got a synthetic rename (because its class fullName
-                      // collides with sibling anon classes), use the synthetic name as the dispatch
-                      // target so it matches the renamed compiled function.
-                      val concreteName =
-                        syntheticOverrideNames.getOrElse(overrideSym, p.Sym(overrideSym.fullName))
-                      val key: (p.Sym, p.Type.Struct) =
-                        (p.Sym(abstractSym.fullName), parentStruct)
-                      val value: (p.Sym, p.Type.Struct) = (concreteName, classStruct)
-                      List(key -> value)
-                    case _ => Nil
-                  }
-                case _ => Nil
-              }
-            }
-          }
-      }
-      entries.toMap
-    }
-    _ = log.info(
-      s"Dispatch table",
-      dispatchTable.toList.map { case ((abs, recv), (concrete, cls)) =>
-        s"${abs.repr} on ${recv.repr} -> ${concrete.repr} on ${cls.repr}"
-      }*
-    )
-
-    // Apply dispatch: walk every Invoke and redirect abstract calls to their concrete
-    // implementations, inserting an upcast on the receiver so the concrete fn's signature
-    // accepts it. The verifier accepts struct downcasts when the source has the target as
-    // a parent (anon$1 has Monoid as a parent).
-    rewriteDispatch = (fn: p.Function) => {
-      // Walk the body and rewrite Stmt.Var/Stmt.Return that wrap a dispatch-eligible Invoke. We
-      // bind the upcast receiver to a fresh Stmt.Var (Cast is compound, so it cannot live in a
-      // Term position) and rebind the Invoke to use the cast result.
-      var counter                         = 0
-      def freshName(tpe: p.Type): p.Named = { counter += 1; p.Named(s"_dispatch_recv_${counter}", tpe) }
-      def patchInvoke(ivk: p.Expr.Invoke, prelude: scala.collection.mutable.ListBuffer[p.Stmt]): p.Expr.Invoke =
-        ivk.receiver.map(_.tpe) match {
-          case Some(s: p.Type.Struct) =>
-            dispatchTable.get((ivk.calleeName, s)) match {
-              case Some((concreteName, classStruct)) =>
-                ivk.receiver match {
-                  case Some(r) =>
-                    val tmp = freshName(classStruct)
-                    prelude += p.Stmt.Var(tmp, Some(p.Expr.Cast(r, classStruct)))
-                    val tmpSel: p.Term.Select = p.Term.Select(tmp, Nil, classStruct)
-                    ivk.copy(callee = p.Type.FnRef(concreteName), receiver = Some(tmpSel))
-                  case None => ivk.copy(callee = p.Type.FnRef(concreteName))
-                }
-              case None => ivk
-            }
-          case _ => ivk
-        }
-      def walk(stmts: List[p.Stmt]): List[p.Stmt] = stmts.flatMap {
-        case p.Stmt.Var(n, Some(ivk: p.Expr.Invoke), m) =>
-          val prelude = scala.collection.mutable.ListBuffer.empty[p.Stmt]
-          val newIvk  = patchInvoke(ivk, prelude)
-          prelude.toList :+ p.Stmt.Var(n, Some(newIvk), m)
-        case p.Stmt.Return(ivk: p.Expr.Invoke) =>
-          val prelude = scala.collection.mutable.ListBuffer.empty[p.Stmt]
-          val newIvk  = patchInvoke(ivk, prelude)
-          prelude.toList :+ p.Stmt.Return(newIvk)
-        case p.Stmt.Cond(c, t, f)              => p.Stmt.Cond(c, walk(t), walk(f)) :: Nil
-        case p.Stmt.While(c, b)                => p.Stmt.While(c, walk(b)) :: Nil
-        case p.Stmt.ForRange(i, lb, ub, st, b) => p.Stmt.ForRange(i, lb, ub, st, walk(b)) :: Nil
-        case other                             => other :: Nil
-      }
-      fn.copy(body = walk(fn.body))
-    }
-
-    rootFn0              = rewriteDispatch(rootFn)
-    allRootDependentFns0 = allRootDependentFns.map(rewriteDispatch)
-    resolvedFunctions0   = exprDeps.resolvedFunctions.map(rewriteDispatch)
-
-    // The dispatch rewrite introduces Casts to anonymous-class structs that weren't part of
-    // the original struct deps (the anon classes are only the runtime types of given fields,
-    // not directly captured types). Synthesise their StructDefs (empty bodies, parents from
-    // the class hierarchy) so the LLVM backend can resolve the type at the Cast site.
-    dispatchAnonStructDefs <- dispatchTable.values
-      .map(_._2)
-      .toList
-      .distinct
-      .traverse { classStruct =>
-        // We can't go from a Type.Struct back to a q.Symbol cleanly, so synthesise the StructDef
-        // directly from the Type.Struct. Anon classes used in dispatch are opaque (no fields),
-        // matching how Monoid is handled.
-        p.StructDef(classStruct.name, Nil, Nil, Nil).success
-      }
-
     (entryFn, programFns) <-
-      if (!callable) (rootFn0, abstractFnsWithAssertBody ::: allRootDependentFns0 ::: resolvedFunctions0).success
-      else
-        lambdaEntry(rootFn0, abstractFnsWithAssertBody ::: allRootDependentFns0 ::: resolvedFunctions0)
+      if (!callable) (rootFn, abstractFnsWithAssertBody ::: allRootDependentFns ::: exprDeps.resolvedFunctions).success
+      else lambdaEntry(rootFn, abstractFnsWithAssertBody ::: allRootDependentFns ::: exprDeps.resolvedFunctions)
 
     unopt = dropClosureReceivers(
-      p.Program(
-        Some(entryFn),
-        IntrinsicTable.dedupe(programFns),
-        ((rootDependentStructs ++ allRootDependentStructs).toList ++ dispatchAnonStructDefs).distinct
+      Devirtualise(dispatchTable)(
+        p.Program(
+          Some(entryFn),
+          IntrinsicTable.dedupe(programFns),
+          Dispatch.decorate(
+            (rootDependentStructs ++ allRootDependentStructs).toList.distinct,
+            dispatchSites,
+            dispatchTags
+          ),
+          metadata = Dispatch.tagMetadata(dispatchTags)
+        ),
+        log
       )
     )
     _ = log.info(

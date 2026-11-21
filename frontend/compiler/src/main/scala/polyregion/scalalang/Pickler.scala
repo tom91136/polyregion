@@ -83,7 +83,9 @@ object Pickler {
       sizeInBytes: Long,
       write: Option[(p.Mirror, A => A)],
       read: Option[(p.Mirror, A => A)],
-      members: List[StructMapping.Member[A]]
+      members: List[StructMapping.Member[A]],
+      tagOffset: Int,
+      tag: Int
   )
   private object StructMapping {
     case class Member[A](name: String, tpe: p.Type, sizeInBytes: Long, offsetInBytes: Long, descriptor: String)
@@ -99,7 +101,7 @@ object Pickler {
     val (layout, maybePrism) =
       layouts.getOrElse(sdef, q.report.errorAndAbort(s"Unseen sdef ${sdef.repr}, known reprs: ${layouts}"))
     val layoutTable = layout.fields.map(f => f.name -> f).toMap
-    val members = sdef.members.map { named =>
+    val members = sdef.members.filterNot(_.symbol.startsWith("#")).map { named =>
       layoutTable
         .get(named.symbol)
         .map(f => StructMapping.Member[q.Term](named.symbol, named.tpe, f.size, f.offset, f.descriptor))
@@ -113,7 +115,7 @@ object Pickler {
       )
     }.unzip
 
-    StructMapping(sdef, layout.size, write, read, members)
+    StructMapping(sdef, layout.size, write, read, members, layout.tagOffset, layout.tag)
   }
 
   def deriveAllRepr(using
@@ -121,7 +123,8 @@ object Pickler {
   )( //
       lut: Map[p.Sym, (p.StructDef, Option[Prism])],
       sdef: p.StructDef,
-      repr: q.TypeRepr
+      repr: q.TypeRepr,
+      tags: Map[p.Sym, Int] = Map.empty
   ): Map[p.StructDef, q.TypeRepr] = {
     def go(using q: Quoted)(sdef: p.StructDef, repr: q.TypeRepr, added: Set[p.Sym]): List[(p.StructDef, q.TypeRepr)] = {
       val added0 = added + sdef.name
@@ -149,7 +152,13 @@ object Pickler {
             case _                                    => Nil
           }
         }
-      (sdef, repr.widenTermRefByName) :: sdef.members.flatMap {
+      def descendCandidates: List[(p.StructDef, q.TypeRepr)] =
+        if (Dispatch.isRoot(sdef, tags))
+          Dispatch.candidateReprs(repr, tags).flatMap { (name, candidate) =>
+            lut.get(name).filterNot(x => added0.contains(x._1.name)).toList.flatMap((d, _) => go(d, candidate, added0))
+          }
+        else Nil
+      (sdef, repr.widenTermRefByName) :: descendCandidates ::: sdef.members.flatMap {
         case p.Named(member, p.Type.Struct(name, _), _)           => descend(name, member)
         case p.Named(_, p.Type.Ptr(p.Type.Struct(name, _), _), _) => descendArrayElement(name)
         case _                                                    => Nil
@@ -184,7 +193,8 @@ object Pickler {
       lut: Map[p.Sym, p.StructDef],
       layouts: Map[p.StructDef, (Layout, Option[Prism])],
       reprs: Map[p.StructDef, q.TypeRepr],
-      residentPointer: Expr[Any => Long]
+      residentPointer: Expr[Any => Long],
+      tags: Map[p.Sym, Int] = Map.empty
   ) = {
     given Quotes = q.underlying
 
@@ -362,7 +372,50 @@ object Pickler {
         }
     }
 
+    def isRoot(mapping: StructMapping[q.Term]): Boolean = mapping.tagOffset >= 0 && mapping.tag < 0
+
+    case class Candidate(mapping: Option[StructMapping[q.Term]], repr: q.TypeRepr, tag: Int)
+
+    def candidatesOf(mapping: StructMapping[q.Term]): List[Candidate] =
+      reprs
+        .get(mapping.source)
+        .toList
+        .flatMap(Dispatch.candidateReprs(_, tags))
+        .map((name, repr) => Candidate(mappings.get(name), repr, tags(name)))
+        .sortBy(_.tag)
+
+    def writeTag(buffer: Expr[ByteBuffer], base: Expr[Int], mapping: StructMapping[q.Term]): Expr[Unit] =
+      if (mapping.tagOffset < 0) '{ () }
+      else '{ $buffer.putInt($base + ${ Expr(mapping.tagOffset) }, ${ Expr(mapping.tag) }) }
+
     def fillMapping[t: Type](
+        root: Expr[t],
+        rootAfterPrism: Expr[t],
+        m: Expr[Marshal],
+        buffer: Expr[ByteBuffer],
+        base: Expr[Int],
+        mapping: StructMapping[q.Term]
+    ): Expr[Unit] =
+      if (!isRoot(mapping)) fillConcrete(root, rootAfterPrism, m, buffer, base, mapping)
+      else
+        candidatesOf(mapping).foldRight(writeTag(buffer, base, mapping)) { (candidate, otherwise) =>
+          candidate.repr.asType match {
+            case '[c] =>
+              '{
+                ($root: @unchecked) match {
+                  case typed: c =>
+                    ${
+                      candidate.mapping.fold(writeTag(buffer, base, mapping.copy(tag = candidate.tag)))(
+                        fillMapping[c]('typed, 'typed, m, buffer, base, _)
+                      )
+                    }
+                  case _ => $otherwise
+                }
+              }
+          }
+        }
+
+    def fillConcrete[t: Type](
         root: Expr[t],
         rootAfterPrism: Expr[t],
         m: Expr[Marshal],
@@ -412,7 +465,7 @@ object Pickler {
           case (_, _) =>
             writePrim(buffer, memberOffset, member.tpe, readField(rootAfterPrism.asTerm, member).asExpr)
         }
-      },
+      } :+ writeTag(buffer, base, mapping),
       '{ () }
     )
 
@@ -447,6 +500,17 @@ object Pickler {
             $seq(i) = ${
               val elementOffset = '{ ${ Expr(elementSizeInBytes) } * i }
               comp match {
+                case p.Type.Struct(name, _) if mappings.get(name).exists(isRoot(_)) =>
+                  val structMapping = mappings(name)
+                  '{
+                    val existing = $seq(i)
+                    Option(existing).foreach(e =>
+                      ${
+                        updateMapping[t]('e, '{ arrPtr + ${ elementOffset }.toLong }, m, structMapping)
+                      }
+                    )
+                    existing
+                  }
                 case p.Type.Struct(name, _) if lut.contains(name) =>
                   // Element bytes live INLINE at arrBuffer[i*structSize]. Reconstruct the struct
                   // directly via readMapping using the inline element address — bypassing callRead
@@ -477,6 +541,28 @@ object Pickler {
     }
 
     def updateMapping[t: Type](
+        root: Expr[t],
+        ptr: Expr[Long],
+        m: Expr[Marshal],
+        mapping: StructMapping[q.Term]
+    ): Expr[Unit] =
+      if (!isRoot(mapping)) updateConcrete(root, ptr, m, mapping)
+      else
+        candidatesOf(mapping).foldRight('{ () }) { (candidate, otherwise) =>
+          candidate.repr.asType match {
+            case '[c] =>
+              candidate.mapping.fold(otherwise)(cm =>
+                '{
+                  ($root: @unchecked) match {
+                    case typed: c => ${ updateMapping[c]('typed, ptr, m, cm) }
+                    case _        => $otherwise
+                  }
+                }
+              )
+          }
+        }
+
+    def updateConcrete[t: Type](
         root: Expr[t],
         ptr: Expr[Long],
         m: Expr[Marshal],

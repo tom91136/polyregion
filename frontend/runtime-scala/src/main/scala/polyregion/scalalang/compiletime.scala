@@ -186,6 +186,7 @@ object compiletime {
       prog0 = programs.head._2
 
       resolveStructDef = (s: p.Type.Struct) => prog0.defs.find(_.name == s.name)
+      tags             = Dispatch.tagsFrom(prog0)
 
       // Match up the struct types from the capture args so that we know how to copy the structs during argument pickling.
       capturesWithStructDefs <- captures.traverse {
@@ -331,20 +332,30 @@ object compiletime {
                     val layouts0    = configLayouts.map(l => p.Sym(l.name) -> l).toMap
 
                     val layouts = configDefs.flatMap { sd =>
-                      layouts0.get(sd.name).map(layout => sd -> (StructLayouts.of(sd, layout), prismRefs.get(sd.name)))
+                      layouts0
+                        .get(sd.name)
+                        .map(layout =>
+                          sd -> (
+                            StructLayouts
+                              .of(sd.copy(members = Dispatch.hostMembers(sd)), layout, tag = tags.get(sd.name)),
+                            prismRefs.get(sd.name)
+                          )
+                        )
                     }.toMap
                     val allReprsInCaptures = capturesWithStructDefs
                       .collect { case (_, Some(sdef), term) =>
-                        Pickler.deriveAllRepr(lutWithRefs, sdef, term.tpe)
+                        Pickler.deriveAllRepr(lutWithRefs, sdef, term.tpe, tags)
                       }
                       .reduceLeftOption(_ ++ _)
                       .getOrElse(Map.empty)
+                      .filter((sd, _) => layouts.contains(sd) || !tags.contains(sd.name))
 
                     val (defs, write, read, update) = Pickler.generateAll(
                       lut,
                       layouts,
                       allReprsInCaptures,
-                      '{ polyregion.scalalang.Residents.pointerOf($ctx, _) }
+                      '{ polyregion.scalalang.Residents.pointerOf($ctx, _) },
+                      tags
                     )
 
                     q.CaseDef(
