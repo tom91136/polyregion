@@ -1189,6 +1189,34 @@ TEST_CASE("C source bounds local names and retains source names on request", "[b
   }
 }
 
+TEST_CASE("opencl source kernel takes module captures, term captures, then arguments", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Origin moduleOrigin(SourcePosition("captures.cpp", 2, 3), std::string("module_capture"), Sym({"source"}));
+  const Origin termOrigin(SourcePosition("captures.cpp", 3, 3), std::string("term_capture"), Sym({"source"}));
+  const Origin inputOrigin(SourcePosition("captures.cpp", 4, 3), std::string("input"), Sym({"source"}));
+  const Named moduleCapture("a_module_capture_symbol", Type::IntS64(), moduleOrigin);
+  const Named termCapture("a_term_capture_symbol", Type::IntS64(), termOrigin);
+  const Named input("an_input_symbol", Type::IntS32(), inputOrigin);
+  const Function entry(FunctionDecl(Sym({"kernel"}), {}, std::optional<Arg>{}, {Arg(input, {})}, {Arg(moduleCapture, {})},
+                                    {Arg(termCapture, {})}, Type::Unit0(), FunctionAffinity::Offload()),
+                       {}, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), CallConvention::OffloadEntry().widen());
+  const Program p(entry, {}, {}, PassPhase::Initial(), {});
+  polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
+  opts.pipelineSpec = "FullOpt(level=0)";
+
+  const ScopedEnv verbose(polyregion::env::PolycVerboseNames, std::string("1"));
+  const auto result = polyregion::compiler::compile(p, opts, OptLevel::O0);
+  REQUIRE(result.binary);
+  const std::string source(result.binary->begin(), result.binary->end());
+  CHECK_THAT(source, Catch::Matchers::ContainsSubstring("module_capture"));
+  CHECK_THAT(source, Catch::Matchers::ContainsSubstring("term_capture"));
+  CHECK_THAT(source, Catch::Matchers::ContainsSubstring("input"));
+  CHECK(source.find("module_capture") < source.find("term_capture"));
+  CHECK(source.find("term_capture") < source.find("input"));
+}
+
 TEST_CASE("opencl source accepts configured subgroup emulation", "[backend]") {
   polyregion::compiler::initialise();
   using namespace polyregion::polyast::dsl;
