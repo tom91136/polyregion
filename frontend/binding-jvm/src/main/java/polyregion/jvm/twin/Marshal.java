@@ -76,8 +76,8 @@ public final class Marshal implements AutoCloseable {
   }
 
   /** A marshal whose pointers are host addresses: nothing is uploaded and no queue is involved. */
-  public static Marshal inPlace(HostView foreign) {
-    Marshal m = new Marshal(null, null, foreign);
+  public static Marshal inPlace(Twins twins, HostView foreign) {
+    Marshal m = new Marshal(null, twins, foreign);
     m.shared = Boolean.TRUE;
     return m;
   }

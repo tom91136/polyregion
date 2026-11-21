@@ -3,7 +3,7 @@ package polyregion.scalalang
 import polyregion.ast.{MsgPack, PolyAST as p}
 import polyregion.jvm.compiler.Target
 import polyregion.jvm.runtime as rt
-import polyregion.jvm.twin.Marshal
+import polyregion.jvm.twin.{Marshal, Twins}
 
 import java.nio.{ByteBuffer, ByteOrder}
 import java.util.concurrent.ConcurrentHashMap
@@ -14,69 +14,80 @@ object LaunchRuntime {
     def address: Long
   }
 
-  private case class Cell(buffer: ByteBuffer) extends Arg {
-    val address: Long = Platforms.pointerOfDirectBuffer(buffer)
-  }
+  private case class Cell(buffer: ByteBuffer, address: Long) extends Arg
 
   private case class Pointer(address: Long) extends Arg
 
   private val Targets: Map[Byte, Target] = Target.VALUES.map(target => target.value() -> target).toMap
 
-  class Group(val program: String, bundle: Array[String], targets: Array[Byte]) {
+  class Group(val program: String, bundle: Array[String], val hostOnly: Boolean) {
     private lazy val decoded: p.Compile.Bundle =
       MsgPack.decode[MsgPack.Versioned[p.Compile.Bundle]](java.util.Base64.getDecoder.decode(bundle.mkString)) match {
         case Left(error)      => throw error
         case Right(versioned) => versioned.t
       }
 
-    private lazy val modules: Array[rt.ModuleImage] = decoded.remoteModules
-      .zip(targets)
-      .map { (module, target) =>
-        rt.ModuleImage(
-          module.moduleName,
-          Targets.getOrElse(target, throw IllegalStateException(s"unknown target $target")),
-          module.features.toArray,
-          module.image.toArray
-        )
-      }
-      .toArray
+    private lazy val modules: Array[rt.ModuleImage] = decoded.remoteModules.map { module =>
+      rt.ModuleImage(
+        module.moduleName,
+        Targets.getOrElse(module.target.toByte, throw IllegalStateException(s"unknown target ${module.target}")),
+        module.features.toArray,
+        module.image.toArray
+      )
+    }.toArray
 
-    def accepts(ctx: rt.Context): Boolean = modules.isEmpty || ctx.select(modules) >= 0
+    def accepts(ctx: rt.Context): Boolean = hostOnly || ctx.select(modules) >= 0
 
     def load(): Unit =
-      if (loaded.add(program) && !rt.Context.hostProgramLoaded(program))
+      ensureLoaded(program, rt.Context.hostProgramLoaded(program))(
         rt.Context.loadHostProgram(program, decoded.hostObject.toArray)
+      )
 
     def call(ctx: rt.Context, entry: String, types: Array[Byte], data: Array[Byte]): Unit =
       ctx.callHost(modules, program, entry, types, data)
   }
 
-  class Site(val entry: String, groups: Array[Group]) {
-    def select(ctx: rt.Context): Group = groups
+  class Site(val entry: String, groups: Array[Group], layouts: String) {
+    private val ordered = groups.sortBy(_.hostOnly)
+
+    val twins: Twins = Twins.decode(layouts)
+
+    def select(ctx: rt.Context): Group = ordered
       .find(_.accepts(ctx))
       .getOrElse(throw rt.PolyregionRuntimeException(s"No compiled variant of `$entry` accepts $ctx"))
   }
 
   private val loaded = ConcurrentHashMap.newKeySet[String]()
 
+  private val loadLock = Object()
+
+  private[scalalang] def ensureLoaded(program: String, isLoaded: => Boolean)(load: => Unit): Unit =
+    if (!loaded.contains(program))
+      loadLock.synchronized {
+        if (!loaded.contains(program)) {
+          if (!isLoaded) load
+          loaded.add(program)
+        }
+      }
+
   private val sites = ConcurrentHashMap[String, Site]()
 
-  def marshal(): Marshal = Marshal.inPlace(Platforms.directBufferFromPointer(_, _))
+  def marshal(site: Site): Marshal = Marshal.inPlace(site.twins, Platforms.directBufferFromPointer(_, _))
 
-  private def scalar(bytes: Int)(write: ByteBuffer => Unit): Arg = {
+  private def scalar(m: Marshal, bytes: Int)(write: ByteBuffer => Unit): Arg = {
     val buffer = Marshal.allocate(bytes)
     write(buffer)
-    Cell(buffer)
+    Cell(buffer, m.stage(buffer))
   }
 
-  def int(x: Int): Arg         = scalar(4)(_.putInt(0, x))
-  def long(x: Long): Arg       = scalar(8)(_.putLong(0, x))
-  def float(x: Float): Arg     = scalar(4)(_.putFloat(0, x))
-  def double(x: Double): Arg   = scalar(8)(_.putDouble(0, x))
-  def short(x: Short): Arg     = scalar(2)(_.putShort(0, x))
-  def byte(x: Byte): Arg       = scalar(1)(_.put(0, x))
-  def char(x: Char): Arg       = scalar(2)(_.putChar(0, x))
-  def boolean(x: Boolean): Arg = scalar(1)(_.put(0, if (x) 1.toByte else 0.toByte))
+  def int(m: Marshal, x: Int): Arg         = scalar(m, 4)(_.putInt(0, x))
+  def long(m: Marshal, x: Long): Arg       = scalar(m, 8)(_.putLong(0, x))
+  def float(m: Marshal, x: Float): Arg     = scalar(m, 4)(_.putFloat(0, x))
+  def double(m: Marshal, x: Double): Arg   = scalar(m, 8)(_.putDouble(0, x))
+  def short(m: Marshal, x: Short): Arg     = scalar(m, 2)(_.putShort(0, x))
+  def byte(m: Marshal, x: Byte): Arg       = scalar(m, 1)(_.put(0, x))
+  def char(m: Marshal, x: Char): Arg       = scalar(m, 2)(_.putChar(0, x))
+  def boolean(m: Marshal, x: Boolean): Arg = scalar(m, 1)(_.put(0, if (x) 1.toByte else 0.toByte))
 
   def array(m: Marshal, xs: Array[?]): Arg = Pointer(m.array(xs))
 
@@ -98,11 +109,11 @@ object LaunchRuntime {
 
   def environment(m: Marshal, size: Int): EnvironmentBuilder = EnvironmentBuilder(m, size)
 
-  def result(bytes: Int): Arg = scalar(bytes)(_ => ())
+  def result(m: Marshal, bytes: Int): Arg = scalar(m, bytes)(_ => ())
 
   private def read(x: Arg): ByteBuffer = x match {
-    case Cell(buffer) => buffer
-    case Pointer(_)   => throw IllegalArgumentException("a pointer holds no result")
+    case Cell(buffer, _) => buffer
+    case Pointer(_)      => throw IllegalArgumentException("a pointer holds no result")
   }
 
   def resultInt(x: Arg): Int         = read(x).getInt(0)
@@ -114,7 +125,8 @@ object LaunchRuntime {
   def resultChar(x: Arg): Char       = read(x).getChar(0)
   def resultBoolean(x: Arg): Boolean = read(x).get(0) != 0
 
-  def site(entry: String, groups: Array[Group]): Site = sites.computeIfAbsent(entry, _ => Site(entry, groups))
+  def site(entry: String, groups: Array[Group], layouts: String): Site =
+    sites.computeIfAbsent(entry, _ => Site(entry, groups, layouts))
 
   def invoke(ctx: rt.Context, site: Site, marshal: Marshal, args: Array[Arg]): Unit = {
     val group = site.select(ctx)

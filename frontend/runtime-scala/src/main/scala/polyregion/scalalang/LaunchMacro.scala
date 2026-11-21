@@ -3,7 +3,7 @@ package polyregion.scalalang
 import cats.syntax.all.*
 import polyregion.ast.generated.PolyPackageWireSchema
 import polyregion.ast.{MsgPack, PolyAST as p, *}
-import polyregion.jvm.twin.Marshal
+import polyregion.jvm.twin.{Layout, Marshal}
 import polyregion.jvm.{compiler as ct, runtime as rt}
 import polyregion.prism.StdLib
 
@@ -72,7 +72,8 @@ object LaunchMacro {
         case _           => "launch arguments are not a literal sequence".fail
       }
       arguments <- exprs.traverse(expr => classify(expr))
-      generated <- build[R](using Q)(packageName, declaration, context, arguments, LaunchConfig.targets)
+      config    <- LaunchConfig.fromSettings(LaunchConfig.macroSettings).leftMap(CompilerException(_))
+      generated <- build[R](using Q)(packageName, declaration, context, arguments, config)
     } yield generated
     result.fold(
       error => report.errorAndAbort(Option(error.getMessage).getOrElse(error.toString)),
@@ -87,7 +88,7 @@ object LaunchMacro {
       declaration: String,
       context: Expr[rt.Context],
       arguments: List[Argument],
-      targets: String
+      config: LaunchConfig
   ): Result[Expr[R]] = {
     given Quotes  = q.underlying
     val id        = Counter.getAndIncrement()
@@ -96,7 +97,7 @@ object LaunchMacro {
     for {
       callables <- arguments.zipWithIndex
         .collect { case (Argument(expr, Kind.Callable), index) => index -> expr }
-        .traverse { case (index, expr) => compileCallable(log, entryName, index, expr).map(index -> _) }
+        .traverse { case (index, expr) => compileCallable(log, config, entryName, index, expr).map(index -> _) }
       callableByIndex = callables.toMap
       rtn <- returnType(Type.of[R])
       argumentTypes = arguments.zipWithIndex.map {
@@ -123,8 +124,16 @@ object LaunchMacro {
         typeSizes.distinct
       )
       bytes   <- Either.catchNonFatal(MsgPack.encode(MsgPack.Versioned(PolyPackageWireSchema.Hash, request)))
-      bundles <- compileBundles(packageName, declaration, entryName, bytes, targets)
-    } yield emit[R](context, entryName, arguments, callableByIndex, bundles, rtn.map(_._3))
+      bundles <- compileBundles(packageName, declaration, entryName, bytes, config)
+    } yield emit[R](
+      context,
+      entryName,
+      arguments,
+      callableByIndex,
+      Layout.encodeAll(java.util.List.of()),
+      bundles,
+      rtn.map(_._3)
+    )
   }
 
   private def returnType(using q: Quotes)(tpe: Type[?]): Result[Option[(p.Type, Int, String)]] = {
@@ -161,12 +170,16 @@ object LaunchMacro {
       q: Quoted
   )(
       log: Log,
+      config: LaunchConfig,
       entryName: String,
       index: Int,
       expr: Expr[Any]
   ): Result[Callable] =
-    Compiler.compileExpr(log, expr, StdLib.Tables, callable = true).flatMap { (captures, _, _, program) =>
+    Compiler.compileExpr(log, expr, StdLib.Tables, config, callable = true).flatMap { (captures, _, _, programs) =>
       for {
+        program <-
+          if (programs.map(_._2).distinct.size == 1) programs.head._2.success
+          else "a launch callable resolves interface calls differently per target, which is not supported".fail
         entry <- program.entry.toRight(CompilerException("callable has no entry"))
         _ <-
           if (entry.moduleCaptures.nonEmpty)
@@ -185,7 +198,7 @@ object LaunchMacro {
           if (named.isEmpty) None.success
           else {
             val definition = p.StructDef(p.Sym(s"${entryName}_env$index"), Nil, named, Nil)
-            layoutOf(definition).map { layout =>
+            layoutOf(definition, config).map { layout =>
               val offsets = layout.members.map(m => m.name -> m.offsetInBytes.toInt).toMap
               Some(
                 Environment(
@@ -221,13 +234,28 @@ object LaunchMacro {
       )
     }
 
-  private def layoutOf(definition: p.StructDef): Result[ct.Layout] = {
+  private[scalalang] def layoutOf(definition: p.StructDef, config: LaunchConfig): Result[ct.Layout] = {
     val compiler = ct.Compiler.create()
     try
-      Either.catchNonFatal {
-        val encoded = MsgPack.encode(CodeGen.structDefsVersioned(List(definition)))
-        compiler.layoutOf(encoded, ct.Options.of(ct.Target.LLVM_HOST, "native")).head
-      }
+      for {
+        encoded <- Either.catchNonFatal(MsgPack.encode(CodeGen.structDefsVersioned(List(definition))))
+        layouts <- (LaunchConfig.Default.targets ::: config.targets).distinct.traverse { (name, arch) =>
+          Either.catchNonFatal {
+            val layout = compiler.layoutOf(encoded, ct.Options.of(compiler.targetByName(name), arch)).head
+            s"$name@$arch" -> layout
+          }
+        }
+        shape = (layout: ct.Layout) =>
+          (
+            layout.sizeInBytes,
+            layout.alignment,
+            layout.members.map(m => (m.name, m.offsetInBytes, m.sizeInBytes)).toList
+          )
+        agreed <-
+          if (layouts.map(entry => shape(entry._2)).distinct.size == 1) layouts.head._2.success
+          else
+            s"the layout of `${definition.name.repr}` differs between the targets ${layouts.map(_._1).mkString(", ")}".fail
+      } yield agreed
     finally compiler.close()
   }
 
@@ -236,20 +264,21 @@ object LaunchMacro {
       declaration: String,
       entryName: String,
       request: Array[Byte],
-      targets: String
-  ): Result[List[(String, Array[Byte], p.Compile.Bundle, Array[Byte])]] = {
+      config: LaunchConfig
+  ): Result[List[(String, Array[Byte], p.Compile.Bundle)]] = {
     val compiler = ct.Compiler.create()
     try
       for {
         raw <- Either.catchNonFatal(
           compiler.compileInterface(
             packageName,
-            InterfaceResolver.configuredRoots,
+            config.roots,
             declaration,
             entryName,
             request,
-            InterfaceResolver.configuredCapabilityList,
-            targets,
+            config.capabilityList,
+            config.targetList,
+            config.opt,
             0
           )
         )
@@ -261,16 +290,7 @@ object LaunchMacro {
           if (usable.isEmpty)
             s"`$declaration` cannot be linked for the configured targets: ${bundles.flatMap(_._2.unfit).distinct.mkString("; ")}".fail
           else ().success
-        grouped <- usable.zipWithIndex.traverse { case ((bytes, bundle), group) =>
-          Either
-            .catchNonFatal(
-              bundle.remoteModules
-                .map(module => compiler.moduleTarget(module.kind, module.format).value())
-                .toArray
-            )
-            .map(targets => (s"$entryName@g$group", bytes, bundle, targets))
-        }
-      } yield grouped
+      } yield usable.zipWithIndex.map { case ((bytes, bundle), group) => (s"$entryName@g$group", bytes, bundle) }
     finally compiler.close()
   }
 
@@ -281,32 +301,39 @@ object LaunchMacro {
       entryName: String,
       arguments: List[Argument],
       callables: Map[Int, Callable],
-      groups: List[(String, Array[Byte], p.Compile.Bundle, Array[Byte])],
+      layouts: String,
+      groups: List[(String, Array[Byte], p.Compile.Bundle)],
       rtn: Option[String]
   ): Expr[R] = {
     val entry = Expr(entryName)
-    val groupExprs = groups.map { (program, bytes, _, targets) =>
+    val groupExprs = groups.map { (program, bytes, bundle) =>
       val chunks = java.util.Base64.getEncoder.encodeToString(bytes).grouped(30000).toList.map(Expr(_))
-      '{ LaunchRuntime.Group(${ Expr(program) }, ${ Expr.ofList(chunks) }.toArray, ${ Expr(targets) }) }
+      '{
+        LaunchRuntime.Group(
+          ${ Expr(program) },
+          ${ Expr.ofList(chunks) }.toArray,
+          ${ Expr(bundle.remoteModules.isEmpty) }
+        )
+      }
     }
     def staged(marshal: Expr[Marshal]): List[Expr[LaunchRuntime.Arg]] = arguments.zipWithIndex.collect {
-      case (Argument(expr, Kind.Prim(_, _, name)), _) => primitive(expr, name)
+      case (Argument(expr, Kind.Prim(_, _, name)), _) => primitive(marshal, expr, name)
       case (Argument(expr, Kind.Arr(_, _, _)), _) => '{ LaunchRuntime.array($marshal, ${ expr.asExprOf[Array[?]] }) }
       case (Argument(_, Kind.Callable), index) if callables(index).environment.nonEmpty =>
         environment(marshal, callables(index).environment.get)
     }
-    val resultCell: Option[Expr[LaunchRuntime.Arg]] = rtn.map { name =>
+    def resultCell(marshal: Expr[Marshal]): Option[Expr[LaunchRuntime.Arg]] = rtn.map { name =>
       val size = prims.collectFirst { case (_, _, size, n) if n == name => size }.get
-      '{ LaunchRuntime.result(${ Expr(size) }) }
+      '{ LaunchRuntime.result($marshal, ${ Expr(size) }) }
     }
     '{
       val ctx     = $context
-      val site    = LaunchRuntime.site($entry, ${ Expr.ofList(groupExprs) }.toArray)
-      val marshal = LaunchRuntime.marshal()
+      val site    = LaunchRuntime.site($entry, ${ Expr.ofList(groupExprs) }.toArray, ${ Expr(layouts) })
+      val marshal = LaunchRuntime.marshal(site)
       try {
         val args = ${ Expr.ofList(staged('marshal)) }
         ${
-          resultCell match {
+          resultCell('marshal) match {
             case None =>
               '{
                 LaunchRuntime.invoke(ctx, site, marshal, args.toArray)
@@ -355,15 +382,17 @@ object LaunchMacro {
       case "boolean" => '{ $builder.boolean($offset, ${ value.asExprOf[Boolean] }) }
     }
 
-  private def primitive(using Quotes)(expr: Expr[Any], name: String): Expr[LaunchRuntime.Arg] = name match {
-    case "int"     => '{ LaunchRuntime.int(${ expr.asExprOf[Int] }) }
-    case "long"    => '{ LaunchRuntime.long(${ expr.asExprOf[Long] }) }
-    case "float"   => '{ LaunchRuntime.float(${ expr.asExprOf[Float] }) }
-    case "double"  => '{ LaunchRuntime.double(${ expr.asExprOf[Double] }) }
-    case "short"   => '{ LaunchRuntime.short(${ expr.asExprOf[Short] }) }
-    case "byte"    => '{ LaunchRuntime.byte(${ expr.asExprOf[Byte] }) }
-    case "char"    => '{ LaunchRuntime.char(${ expr.asExprOf[Char] }) }
-    case "boolean" => '{ LaunchRuntime.boolean(${ expr.asExprOf[Boolean] }) }
+  private def primitive(using
+      Quotes
+  )(marshal: Expr[Marshal], expr: Expr[Any], name: String): Expr[LaunchRuntime.Arg] = name match {
+    case "int"     => '{ LaunchRuntime.int($marshal, ${ expr.asExprOf[Int] }) }
+    case "long"    => '{ LaunchRuntime.long($marshal, ${ expr.asExprOf[Long] }) }
+    case "float"   => '{ LaunchRuntime.float($marshal, ${ expr.asExprOf[Float] }) }
+    case "double"  => '{ LaunchRuntime.double($marshal, ${ expr.asExprOf[Double] }) }
+    case "short"   => '{ LaunchRuntime.short($marshal, ${ expr.asExprOf[Short] }) }
+    case "byte"    => '{ LaunchRuntime.byte($marshal, ${ expr.asExprOf[Byte] }) }
+    case "char"    => '{ LaunchRuntime.char($marshal, ${ expr.asExprOf[Char] }) }
+    case "boolean" => '{ LaunchRuntime.boolean($marshal, ${ expr.asExprOf[Boolean] }) }
   }
 
   private def readResult(using Quotes)(name: String, cell: Expr[LaunchRuntime.Arg]): Expr[Any] = name match {
