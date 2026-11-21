@@ -71,12 +71,14 @@ public final class Launch {
     final char code;
     final int size;
     final Field[] fields;
+    final long value;
 
-    Spec(char shape, char code, int size, Field[] fields) {
+    Spec(char shape, char code, int size, Field[] fields, long value) {
       this.shape = shape;
       this.code = code;
       this.size = size;
       this.fields = fields;
+      this.value = value;
     }
   }
 
@@ -84,14 +86,22 @@ public final class Launch {
     final String unsupported;
     final String entry;
     final char result;
+    final char regionResult;
     final Spec[] specs;
     final Group[] groups;
     final Twins twins = Twins.decode(Layout.encodeAll(Collections.<Layout>emptyList()));
 
-    Plan(String unsupported, String entry, char result, Spec[] specs, Group[] groups) {
+    Plan(
+        String unsupported,
+        String entry,
+        char result,
+        char regionResult,
+        Spec[] specs,
+        Group[] groups) {
       this.unsupported = unsupported;
       this.entry = entry;
       this.result = result;
+      this.regionResult = regionResult;
       this.specs = specs;
       this.groups = groups;
     }
@@ -150,9 +160,9 @@ public final class Launch {
   private static Plan decode(LaunchSite site) {
     String descriptor = site.descriptor();
     if (descriptor.startsWith("!"))
-      return new Plan(descriptor.substring(1), "", 'V', new Spec[0], new Group[0]);
-    String[] parts = descriptor.split("\\|", 3);
-    if (parts.length != 3) throw new IllegalStateException("Malformed descriptor: " + descriptor);
+      return new Plan(descriptor.substring(1), "", 'V', 'V', new Spec[0], new Group[0]);
+    String[] parts = descriptor.split("\\|", 4);
+    if (parts.length < 3) throw new IllegalStateException("Malformed descriptor: " + descriptor);
     String[] args = parts[2].isEmpty() ? new String[0] : parts[2].split(";");
     Spec[] specs = new Spec[args.length];
     for (int i = 0; i < args.length; i++) {
@@ -160,7 +170,10 @@ public final class Launch {
       switch (arg.charAt(0)) {
         case 'P':
         case 'A':
-          specs[i] = new Spec(arg.charAt(0), arg.charAt(1), 0, new Field[0]);
+          specs[i] = new Spec(arg.charAt(0), arg.charAt(1), 0, new Field[0], 0);
+          break;
+        case 'L':
+          specs[i] = new Spec('L', arg.charAt(1), 0, new Field[0], Long.parseLong(arg.substring(2)));
           break;
         case 'C':
           int colon = arg.indexOf(':');
@@ -178,13 +191,19 @@ public final class Launch {
                     field.charAt(kind),
                     Integer.parseInt(field.substring(kind + 1)));
           }
-          specs[i] = new Spec('C', 'V', size, decoded);
+          specs[i] = new Spec('C', 'V', size, decoded, 0);
           break;
         default:
           throw new IllegalStateException("Malformed descriptor: " + descriptor);
       }
     }
-    return new Plan(null, parts[0], parts[1].charAt(0), specs, decodeGroups(site.binary()));
+    return new Plan(
+        null,
+        parts[0],
+        parts[1].charAt(0),
+        parts.length == 4 ? parts[3].charAt(0) : 'V',
+        specs,
+        decodeGroups(site.binary()));
   }
 
   private static LaunchSite instantiate(String name, ClassLoader loader) {
@@ -362,12 +381,36 @@ public final class Launch {
       throw new IllegalStateException(
           "`" + identity + "` was compiled for " + plan.specs.length + " arguments, called with " + args.length);
 
+    Object[][] captured = new Object[args.length][];
+    for (int i = 0; i < args.length; i++)
+      if (lambdas[i] != null) {
+        captured[i] = new Object[lambdas[i].getCapturedArgCount()];
+        for (int c = 0; c < captured[i].length; c++) captured[i][c] = lambdas[i].getCapturedArg(c);
+      }
+    return execute(plan, context, args, captured);
+  }
+
+  static Object region(LaunchSite site, Object[] captured) {
+    String name = site.getClass().getName();
+    Plan plan = PLANS.get(name);
+    if (plan == null) {
+      plan = decode(site);
+      PLANS.put(name, plan);
+    }
+    if (plan.unsupported != null) throw new UnsupportedOperationException(plan.unsupported);
+    Object[][] each = new Object[plan.specs.length][];
+    each[plan.specs.length - 1] = captured;
+    return execute(plan, null, new Object[plan.specs.length], each);
+  }
+
+  private static Object execute(Plan plan, Context context, Object[] args, Object[][] captured) {
     Context ctx = context != null ? context : Context.current();
     Group group = plan.select(ctx);
     ensureLoaded(group);
 
     List<Long> pointers = new ArrayList<>();
     ByteBuffer cell = null;
+    ByteBuffer regionCell = null;
     try (Marshal m =
         Marshal.inPlace(
             plan.twins,
@@ -377,13 +420,14 @@ public final class Launch {
                 return Natives.PLATFORMS.directBufferFromPointer(pointer, size);
               }
             })) {
-      for (int i = 0; i < args.length; i++) {
+      for (int i = 0; i < plan.specs.length; i++) {
         Spec spec = plan.specs[i];
         switch (spec.shape) {
           case 'P':
+          case 'L':
             {
               ByteBuffer scalar = Marshal.allocate(sizeOf(spec.code));
-              put(scalar, 0, spec.code, args[i]);
+              put(scalar, 0, spec.code, spec.shape == 'L' ? literal(spec) : args[i]);
               pointers.add(m.stage(scalar));
               break;
             }
@@ -392,20 +436,30 @@ public final class Launch {
             break;
           default:
             if (spec.size > 0) {
-              Object[] captured = new Object[lambdas[i].getCapturedArgCount()];
-              for (int c = 0; c < captured.length; c++) captured[c] = lambdas[i].getCapturedArg(c);
               ByteBuffer env = Marshal.allocate(spec.size);
               for (Field field : spec.fields) {
-                Object value = captured[field.capture];
                 switch (field.kind) {
+                  case 'r':
+                    regionCell = Marshal.allocate(sizeOf(plan.regionResult));
+                    env.putLong(field.offset, m.stage(regionCell));
+                    break;
                   case 'a':
-                    env.putLong(field.offset, value == null ? 0L : m.array(value));
-                    break;
+                    {
+                      Object value = captured[i][field.capture];
+                      env.putLong(field.offset, value == null ? 0L : m.array(value));
+                      break;
+                    }
                   case 'l':
-                    env.putInt(field.offset, value == null ? 0 : Array.getLength(value));
-                    break;
+                    {
+                      Object value = captured[i][field.capture];
+                      env.putInt(field.offset, value == null ? 0 : Array.getLength(value));
+                      break;
+                    }
                   default:
-                    put(env, field.offset, field.kind, value);
+                    {
+                      Object value = captured[i][field.capture];
+                      put(env, field.offset, field.kind, value instanceof Enum ? ((Enum<?>) value).ordinal() : value);
+                    }
                 }
               }
               pointers.add(m.stage(env));
@@ -423,6 +477,18 @@ public final class Launch {
       ctx.callHost(group.modules, group.program, plan.entry, types, data.array());
       m.settle();
     }
+    if (regionCell != null) return get(regionCell, plan.regionResult);
     return cell == null ? null : get(cell, plan.result);
+  }
+
+  private static Object literal(Spec spec) {
+    switch (spec.code) {
+      case 'I':
+        return (int) spec.value;
+      case 'J':
+        return spec.value;
+      default:
+        throw new IllegalStateException("Unsupported literal code `" + spec.code + "`");
+    }
   }
 }

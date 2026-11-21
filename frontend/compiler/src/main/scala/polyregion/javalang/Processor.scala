@@ -261,7 +261,15 @@ class Processor extends AbstractProcessor {
             if (generated.contains(fqcn)) debug(s"Skip already generated $fqcn")
             else {
               debug(s"Write $fqcn")
-              emit(fqcn, s"offload $cls.${x.getName}", guard(Offloader.compile(sources, x, fqcn)))
+              emit(
+                fqcn,
+                s"offload $cls.${x.getName}",
+                guard(
+                  launchConfig
+                    .fold(_ => Right(None), LaunchSites.compileRegion(sources, _, x, fqcn))
+                    .flatMap(_.fold(Offloader.compile(sources, x, fqcn))(Right(_)))
+                )
+              )
             }
           }
 

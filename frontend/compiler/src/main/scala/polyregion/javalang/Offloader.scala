@@ -43,7 +43,7 @@ object Offloader {
   }
 
   // a class named only by a field never reaches a signature and would resolve to an opaque shell
-  private[javalang] def withFieldStructs(
+  def withFieldStructs(
       program: p.Program,
       classTable: Map[String, TypeElement],
       outerRefs: Set[(String, String)]
@@ -70,11 +70,11 @@ object Offloader {
     go(program.defs).map(defs => program.copy(defs = defs.distinct))
   }
 
-  private val ResultCapture = "#result"
+  val ResultCapture: String = "#result"
   private val ErrorCapture  = p.Conventions.ErrorArg
 
   // the JNI layer copies arguments in but never out, so the result goes through a one-element output buffer
-  private def routeReturnThroughCapture(entry: p.Function): p.Function =
+  def routeReturnThroughCapture(entry: p.Function): p.Function =
     if (entry.rtn == p.Type.Unit0) entry
     else {
       val slot                  = p.Named(ResultCapture, p.Type.Ptr(entry.rtn, p.Type.Space.Global))
@@ -289,17 +289,17 @@ object Offloader {
     }
   }
 
-  private[javalang] def emitClass(
+  def emitClass(
       fqcn: String,
       image: Array[Byte],
       descriptor: String,
-      parent: Class[?] = classOf[BinaryOffloadExecutable]
+      parent: Class[? <: AnyRef] = classOf[BinaryOffloadExecutable]
   ): Result[Array[Byte]] =
     Either.catchNonFatal {
       val chunks = java.util.Base64.getEncoder.encodeToString(image).grouped(ChunkSize).toList
       // unpinned, ByteBuddy stamps the build JVM's class-file version
       ByteBuddy(ClassFileVersion.JAVA_V8)
-        .subclass(parent.asInstanceOf[Class[AnyRef]])
+        .subclass(parent)
         .name(fqcn)
         .modifiers(Visibility.PUBLIC, TypeManifestation.FINAL)
         .defineField("$BINARY$", classOf[Array[Byte]], Visibility.PUBLIC, Ownership.STATIC, FieldManifestation.FINAL)
@@ -320,7 +320,7 @@ object Offloader {
     emitClass(fqcn, Array.emptyByteArray, UnsupportedMarker + reason.take(ReasonLimit))
       .map(Executable(fqcn, _))
 
-  private[javalang] def optimise(
+  def optimise(
       region: TreeRemapper.Region,
       raw: p.Program,
       entry: p.Function,

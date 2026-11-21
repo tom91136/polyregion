@@ -4,6 +4,7 @@ import polyregion.javalang.Interop.absent
 
 import java.io.ByteArrayOutputStream
 import java.net.URI
+import javax.annotation.processing.Processor as JavacProcessor
 import javax.tools.*
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
@@ -52,7 +53,7 @@ object JavaInMemory {
       className: String,
       code: String,
       options: List[String] = DefaultOptions,
-      processors: List[javax.annotation.processing.Processor] = Nil
+      processors: List[JavacProcessor] = Nil
   ): Loaded = {
     val javac = ToolProvider.getSystemJavaCompiler
     require(Option(javac).isDefined, "no system Java compiler; the tests need a JDK rather than a JRE")

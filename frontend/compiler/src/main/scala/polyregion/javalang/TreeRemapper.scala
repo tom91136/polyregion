@@ -249,10 +249,10 @@ object TreeRemapper {
   private val MetafactoryOwner = "java.lang.invoke.LambdaMetafactory"
 
   // LambdaToMethod runs before GENERATE, so a lambda is an invokedynamic whose bootstrap args name the impl method
-  private[javalang] def dynamicSym(mi: MethodInvocationTree): Option[JSymbol.DynamicMethodSymbol] =
+  def dynamicSym(mi: MethodInvocationTree): Option[JSymbol.DynamicMethodSymbol] =
     symOf(mi.getMethodSelect).collect { case d: JSymbol.DynamicMethodSymbol => d }
 
-  private[javalang] def metafactoryImpl(d: JSymbol.DynamicMethodSymbol): Option[JSymbol.MethodSymbol] = {
+  def metafactoryImpl(d: JSymbol.DynamicMethodSymbol): Option[JSymbol.MethodSymbol] = {
     val bsm     = Option(d.bsm).map(_.baseSymbol())
     val bsmName = bsm.fold("")(_.name.toString)
     val isFactory = bsm.exists(b => ownerName(b) == MetafactoryOwner) &&
@@ -1581,7 +1581,7 @@ object TreeRemapper {
           case other => s"Unsupported method selector ${other.getKind}".fail
         }
         (sym, recv) = symAndRecv
-        _ <- LaunchSites.identityOf(sym).traverse_ { identity =>
+        _ <- InterfaceStub.identityOf(sym).traverse_ { identity =>
           s"`${ownerName(sym)}.${sym.name}` launches `$identity` and cannot be called inside an offload region".fail
         }
         rtn <- JavaTyper.typer(jcType(mi))
