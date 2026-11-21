@@ -56,6 +56,12 @@ class InterfacePackageSuite extends munit.FunSuite {
     assert(gated.exists(_.body.nonEmpty))
   }
 
+  test("omit capability-gated spectra implementations when the capability is not configured") {
+    val gated = load("spectra").program.functions.filter(f => f.implements.nonEmpty && f.requiredCapabilities.nonEmpty)
+    assert(gated.nonEmpty)
+    assert(gated.forall(_.body.isEmpty))
+  }
+
   test("load the polyregion.core package") {
     val pkg   = load("polyregion.core")
     val names = pkg.interface.declarations.map(_.name.fqcn).toSet
