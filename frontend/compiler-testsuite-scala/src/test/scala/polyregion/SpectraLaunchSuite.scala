@@ -62,6 +62,46 @@ class SpectraLaunchSuite extends munit.FunSuite {
     assertEquals(xs.toList, (0 to 9).reverse.toList)
   }
 
+  private def pointerCaptureCase(ctx: rt.Context): Unit = {
+    val xs     = Array.tabulate(1000)(identity)
+    val out    = new Array[Int](xs.length)
+    val offset = Array(7)
+    spectra.transform(ctx, xs, out, xs.length, (x: Int) => x + offset(0))
+    assertEquals(out.toList, xs.map(_ + 7).toList)
+  }
+
+  private def nestedPointerCase(ctx: rt.Context): Unit = {
+    val xs    = Array.tabulate(1000)(identity)
+    val out   = new Array[Int](xs.length)
+    val scale = 3
+    val low   = Array(5, 6)
+    val high  = Array(100, 200)
+    spectra.transform(ctx, xs, out, xs.length, (x: Int) => x * scale + low(1) + high(0))
+    assertEquals(out.toList, xs.map(_ * 3 + 6 + 100).toList)
+  }
+
+  private def mirrorsOrRefuses(device: Option[rt.DeviceInfo])(f: rt.Context => Unit): Unit =
+    withContext(device) { ctx =>
+      scala.util.Try(f(ctx)).failed.foreach {
+        case refused: rt.PolyregionRuntimeException =>
+          assert(refused.getMessage.contains("created context"), refused.getMessage)
+        case other => throw other
+      }
+    }
+
+  private def cudaDevice = device(d => d.platformKind == 2 && d.cudaArchitectureMajor > 0)
+
+  test("a pointer-bearing capture mirrors on the default CUDA context")(cudaDefault(pointerCaptureCase))
+  test("a nested pointer in the environment mirrors on the default CUDA context")(cudaDefault(nestedPointerCase))
+  test("a pointer-bearing capture mirrors or is refused on a created CUDA context")(
+    mirrorsOrRefuses(cudaDevice)(pointerCaptureCase)
+  )
+  test("a nested pointer in the environment mirrors or is refused on a created CUDA context")(
+    mirrorsOrRefuses(cudaDevice)(nestedPointerCase)
+  )
+  test("a pointer-bearing capture reads the host array in place on the host")(host(pointerCaptureCase))
+  test("a nested pointer in the environment reads the host arrays in place on the host")(host(nestedPointerCase))
+
   test("spectra.sort sorts on the host")(host(sortCase))
   test("spectra.transform captures a scalar and an array on the host")(host(captureCase))
   test("spectra.sort orders by a capturing comparator on the host")(host(sortDescendingCase))
@@ -77,13 +117,27 @@ class SpectraLaunchSuite extends munit.FunSuite {
     val errors = typeCheckErrors("""
       val xs = Array(1, 2, 3, 4)
       val ys = new Array[Int](4)
-      compiletime.offload0(Host.context, _ => (), "host@native") {
+      compiletime.offload0(Host.context, _ => ()) {
         spectra.copy(xs, 4, ys)
         ()
       }
     """)
     val messages = errors.map(_.message).mkString("\n")
     assert(messages.contains("offload function"), messages)
+    assert(messages.contains("calls host function `polyregion.spectra$.copy`"), messages)
+  }
+
+  test("a spectra call with a side-effecting argument inside an offload region is still rejected") {
+    val errors = typeCheckErrors("""
+      val xs = Array(1, 2, 3, 4)
+      val ys = new Array[Int](4)
+      var calls = 0
+      compiletime.offload0(Host.context, _ => ()) {
+        spectra.copy(xs, { calls += 1; 4 }, ys)
+        ()
+      }
+    """)
+    val messages = errors.map(_.message).mkString("\n")
     assert(messages.contains("calls host function `polyregion.spectra$.copy`"), messages)
   }
 }
