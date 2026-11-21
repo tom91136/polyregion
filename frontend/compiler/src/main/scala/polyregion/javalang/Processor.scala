@@ -157,17 +157,15 @@ class Processor extends AbstractProcessor {
 
     override def started(e: TaskEvent): Unit = {
       debug(s"[STARTED]  =>  $e $visited")
-      (e.getKind, Option(e.getCompilationUnit), e.getSourceFile) match {
+      (e.getKind, Option(e.getTypeElement).flatMap(elem => classTrees.get(elem).map(elem -> _))) match {
 
         // compile at the start of GENERATE, the tree is gone by the time it finishes
-        case (TaskEvent.Kind.GENERATE, Some(unit), _) if Option(e.getTypeElement).exists(visited.add) =>
-          val scope: Tree = classTrees.getOrElse(e.getTypeElement, unit)
-
+        case (TaskEvent.Kind.GENERATE, Some((elem, scope))) if visited.add(elem) =>
           val reflector = LambdaOutliner.Reflector(symbolTable.toMap, methodTable.toMap)
 
           // bodies javac synthesises after processing (a lambda's impl method) are invisible to `methodTable`
           val localTrees = guard {
-            Either.catchNonFatal(declaredMethods(unit).toMap ++ declaredMethods(scope))
+            Either.catchNonFatal(declaredMethods(scope).toMap)
           }.getOrElse(Map.empty[MethodSymbol, MethodTree]) ++ nestedTrees
 
           // javac throws on some post-Lower nodes (`LetExpr is not part of a public API`), which would abort every region in the file

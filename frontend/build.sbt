@@ -185,8 +185,7 @@ lazy val jdkIdentity: String =
     .map("%02x".format(_))
     .mkString
 
-// regions are lowered to machine code while javac runs, so a rebuilt processor or native library has to recompile the
-// sources holding them, which zinc cannot see
+// regions lower while javac runs, so a rebuilt processor or native library must recompile the sources holding them
 lazy val processorTracking = Seq(
   processorDigest := Def.uncached {
     val md = java.security.MessageDigest.getInstance("SHA-256")
@@ -569,8 +568,7 @@ lazy val compiler = project
       "com.lihaoyi"   %% "pprint"     % "0.9.6",
       "org.scalameta" %% "munit"      % munitVersion % Test,
       // the IR tier reads class files through Vineflower's Statement/Exprent tree, which is no stable API
-      ("org.vineflower" % "vineflower" % "1.12.0").classifier("slim"),
-      // corpora for the bytecode census, pinned so the lowered-count floors stay meaningful
+      ("org.vineflower"  % "vineflower"      % "1.12.0").classifier("slim"),
       "org.scala-lang"  %% "scala3-compiler" % scala3Version % Test,
       "com.google.guava" % "guava"           % "33.5.0-jre"  % Test
     ),
