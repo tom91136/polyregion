@@ -38,9 +38,11 @@ object NullChecks {
 
 object SignalProbe {
   def main(args: Array[String]): Unit = {
-    Context.platforms()
-    val loaded = Files.readString(Path.of("/proc/self/maps")).contains("libpocl")
-    println(s"pocl=$loaded")
+    val platforms = Context.platforms()
+    val maps      = Path.of("/proc/self/maps")
+    val loaded =
+      if (Files.exists(maps)) Files.readString(maps).contains("libpocl") else platforms.exists(_.name == "OpenCL")
+    println(s"opencl=$loaded")
     sys.exit(if (NullChecks.survive()) 0 else 1)
   }
 }
@@ -119,7 +121,7 @@ class SignalSuite extends munit.FunSuite {
       "polyregion.SignalProbe",
       ChildJvm.pocl() + ("POLYINVOKE_DISABLE_BACKENDS" -> "HSA,HIP,LevelZero")
     )
-    assume(output.contains("pocl=true") || code != 0, s"pocl is not loadable here:\n$output")
+    assume(output.contains("opencl=true") || code != 0, s"no OpenCL driver is loadable here:\n$output")
     assertEquals(code, 0, output)
     assert(output.contains("survived"), output)
   }
@@ -198,14 +200,17 @@ class SignalSuite extends munit.FunSuite {
     library
   }
 
+  private val PreloadVariable =
+    if (System.getProperty("os.name").toLowerCase.contains("mac")) "DYLD_INSERT_LIBRARIES" else "LD_PRELOAD"
+
   private def libjsig: Option[Path] =
-    Some(Path.of(System.getProperty("java.home"), "lib", "libjsig.so")).filter(Files.exists(_))
+    Some(Path.of(System.getProperty("java.home"), "lib", System.mapLibraryName("jsig"))).filter(Files.exists(_))
 
   private def probe(mode: String, preload: Option[Path]): (Int, String) =
     ChildJvm.run(
       "polyregion.GuardProbe",
       Map("SIGNAL_PROBE_LIB" -> probeLibrary.toString, "SIGNAL_PROBE_MODE" -> mode)
-        ++ preload.map("LD_PRELOAD" -> _.toString)
+        ++ preload.map(PreloadVariable -> _.toString)
     )
 
   for ((name, jsig) <- List("without libjsig" -> false, "with libjsig" -> true)) {
