@@ -225,6 +225,7 @@ public final class Context implements AutoCloseable {
         bytes,
         () -> {
           try {
+            Queue.hook.at("copy.completing");
             cb.complete(null);
           } finally {
             Reference.reachabilityFence(region);
@@ -242,6 +243,7 @@ public final class Context implements AutoCloseable {
         bytes,
         () -> {
           try {
+            Queue.hook.at("copy.completing");
             cb.complete(null);
           } finally {
             Reference.reachabilityFence(region);

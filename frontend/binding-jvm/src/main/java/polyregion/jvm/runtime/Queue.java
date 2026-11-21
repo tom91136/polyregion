@@ -136,6 +136,12 @@ public final class Queue implements AutoCloseable {
     }
   }
 
+  interface Hook {
+    void at(String point);
+  }
+
+  static volatile Hook hook = point -> {};
+
   private static final IdentityHashMap<ByteBuffer, Queue> OWNERS = new IdentityHashMap<>();
 
   private static final class CompletionThread extends Thread {
@@ -196,6 +202,7 @@ public final class Queue implements AutoCloseable {
     synchronized (lock) {
       Entry found = entries.get(host);
       if (found != null) {
+        hook.at("acquire.found");
         found.pending++;
         return found;
       }
@@ -203,6 +210,7 @@ public final class Queue implements AutoCloseable {
     if (!upload) throw new IllegalArgumentException("Not resident: " + host);
     requireUnowned(host);
     context.requireOpen();
+    hook.at("allocate");
     ByteBuffer region = host.slice();
     long bytes = region.capacity();
     boolean shared = context.sharedAddressSpace();
@@ -280,8 +288,10 @@ public final class Queue implements AutoCloseable {
     Completion done =
         failure -> {
           settle(entry);
+          hook.at("settled");
           settled.complete(failure);
         };
+    hook.at("copy.begin");
     if (entry.shared) done.complete(null);
     else
       try {
@@ -290,6 +300,7 @@ public final class Queue implements AutoCloseable {
       } catch (RuntimeException e) {
         done.complete(e);
       }
+    hook.at("copy.end");
     return entry.pointer;
   }
 
