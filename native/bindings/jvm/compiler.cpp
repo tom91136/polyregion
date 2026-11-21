@@ -107,7 +107,7 @@ jobjectArray Compiler::layoutOf0(JNIEnv *env, jclass, jbyteArray structDef, jobj
 
 jobject Compiler::compile0(JNIEnv *env, jclass, //
                            jbyteArray function, jboolean, jobject options, jbyte opt) {
-  return wrapException(env, EX, [&] {
+  return wrapBackend(env, EX, [&] {
     auto c = cp::compile(fromJni<char>(env, function), fromJni(env, options), fromJni(env, opt));
     if (!c.binary) throw std::logic_error(c.messages);
     auto *bin = env->NewByteArray(jsize(c.binary->size()));
@@ -176,7 +176,7 @@ static ct::Target hostObjectTarget() {
 
 jobjectArray Compiler::compileInterface0(JNIEnv *env, jclass, jstring name, jstring roots, jstring declaration, jstring entry,
                                          jbyteArray request, jstring capabilities, jstring targets, jbyte opt, jint stackDepth) {
-  return wrapException(env, EX, [&] {
+  return wrapBackend(env, EX, [&] {
     namespace pkg = polyfront::package;
     const auto fail = [](const std::vector<std::string> &errors) { throw std::runtime_error(errors | mk_string("\n")); };
     const auto archive = pkg::loadPackage(fromJni(env, name), pkg::splitPackageRoots(fromJni(env, roots)));

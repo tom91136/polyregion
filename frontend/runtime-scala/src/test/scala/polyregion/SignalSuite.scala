@@ -1,5 +1,7 @@
 package polyregion
 
+import polyregion.ast.{CodeGen, MsgPack, PolyAST as p}
+import polyregion.jvm.compiler.{Compiler, Options, Target}
 import polyregion.jvm.runtime.Context
 
 import java.nio.file.{Files, Path}
@@ -39,6 +41,14 @@ object SignalProbe {
     Context.platforms()
     val loaded = Files.readString(Path.of("/proc/self/maps")).contains("libpocl")
     println(s"pocl=$loaded")
+    sys.exit(if (NullChecks.survive()) 0 else 1)
+  }
+}
+
+object LinkerProbe {
+  def main(args: Array[String]): Unit = {
+    val program = Files.readAllBytes(Path.of(sys.env("LINKER_PROBE_PROGRAM")))
+    Compiler.create().compile(program, false, Options.of(Target.LLVM_AMDGCN, "gfx1036"), 12)
     sys.exit(if (NullChecks.survive()) 0 else 1)
   }
 }
@@ -94,6 +104,23 @@ class SignalSuite extends munit.FunSuite {
     assume(output.contains("pocl=true") || code != 0, s"pocl is not loadable here:\n$output")
     assertEquals(code, 0, output)
     assert(output.contains("survived"), output)
+  }
+
+  test("a JVM that links an AMDGCN kernel keeps its own SIGSEGV handler") {
+    val entry = p.Function(
+      p.FunctionDecl(p.Sym("probe"), Nil, None, Nil, Nil, Nil, p.Type.Unit0, p.Function.Affinity.Offload),
+      p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const)) :: Nil,
+      p.Function.Visibility.Exported,
+      p.Function.FpMode.Relaxed,
+      p.CallConvention.OffloadEntry
+    )
+    val program = Files.createTempFile("probe", ".polyast")
+    try {
+      Files.write(program, MsgPack.encode(CodeGen.programVersioned(p.Program(Some(entry), List(entry), Nil))))
+      val (code, output) = ChildJvm.run("polyregion.LinkerProbe", Map("LINKER_PROBE_PROGRAM" -> program.toString))
+      assertEquals(code, 0, output)
+      assert(output.contains("survived"), output)
+    } finally Files.deleteIfExists(program)
   }
 
   private var probeDir: Option[Path] = None
