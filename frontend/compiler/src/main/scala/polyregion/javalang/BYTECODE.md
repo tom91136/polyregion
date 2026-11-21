@@ -62,6 +62,12 @@ Two places where the JVM's semantics are reproduced exactly, because getting the
   that does not use `this`, and `Math::abs`-style references) binds a closure to the local it is assigned to. The
   interface method called on it becomes a call to the body with the captured values first. A functional value
   that is stored, passed, returned, or called through any other interface method is refused.
+- Receivers. A call through an object is lowered where nothing can override it: the class is final, or the method is
+  final or private, and it is declared in the class the instruction names. The callee is lowered with its object as
+  the first argument (`MethodRef.instance`). Any other `invokevirtual`, `invokeinterface` and `invokespecial` is
+  refused with `Unsupported call ...; a call through a receiver needs the receiver's class, which the bytecode tier
+  cannot resolve statically`. The shared `Devirtualise` pass needs the candidate classes of an open receiver, and the
+  tier has no closed set of them yet: the classes of the compilation are source trees, not class files.
 - Static calls. A call to a static method is lowered to an `Invoke` of `owner.name`, and the callee is
   lowered from its own class file in turn (`BytecodeResolver.resolve` walks the closure, deduplicated by
   owner, name and descriptor). Overloads share a symbol and differ by signature.
