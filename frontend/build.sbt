@@ -532,6 +532,7 @@ lazy val cudaSuites =
     "CudaIntrinsicSuite.scala",
     "DevirtSuite.scala",
     "ExceptionClassSuite.scala",
+    "ParCudaSuite.scala",
     "RangeAccessSuite.scala",
     "RangeFoldSuite.scala",
     "RangeLengthSuite.scala",
@@ -544,7 +545,8 @@ lazy val cudaSuites =
     "TwinSuite.scala"
   )
 lazy val cudaSuiteSupport =
-  Set("BaseSuite.scala", "DevirtFixtures.scala", "RangeSuiteBase.scala", "Toggles.scala") ++ spectraSuiteBase
+  Set("BaseSuite.scala", "DevirtFixtures.scala", "ParCases.scala", "RangeSuiteBase.scala", "Toggles.scala") ++
+    spectraSuiteBase
 lazy val hipSuites        = Set("SpectraHipLaunchSuite.scala")
 lazy val spectraSuiteBase = Set("SpectraLaunchBase.scala", "LaunchPoint.scala")
 
