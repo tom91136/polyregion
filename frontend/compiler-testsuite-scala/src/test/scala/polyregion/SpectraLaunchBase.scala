@@ -78,13 +78,8 @@ trait SpectraLaunchBase extends munit.FunSuite {
     assertEquals(out.toList, xs.map(_ * 3 + 6 + 100).toList)
   }
 
-  private def refusal(f: => Unit): Unit =
-    scala.util.Try(f).failed.foreach {
-      case refused: rt.PolyregionRuntimeException =>
-        val message = refused.getMessage
-        assert(message.contains("created context") || message.contains("no capture marshal"), message)
-      case other => throw other
-    }
+  // XXX flip when JVM launches register a capture marshal
+  private val JvmCaptureMarshal = false
 
   private def launched(f: rt.Context => Unit): rt.Context => Unit = ctx => {
     val before = ctx.stats().launches
@@ -92,30 +87,46 @@ trait SpectraLaunchBase extends munit.FunSuite {
     assert(ctx.stats().launches > before, "the call did not launch on the device")
   }
 
-  protected def mirrorsOrRefuses(device: Option[rt.DeviceInfo])(f: rt.Context => Unit): Unit =
-    withContext(device)(ctx => refusal(f(ctx)))
+  private def refusedWith(expected: String)(f: => Unit): Unit = {
+    val refused = intercept[rt.PolyregionRuntimeException](f)
+    assert(refused.getMessage.contains(expected), refused.getMessage)
+  }
 
-  protected def defaultMirrorsOrRefuses(f: rt.Context => Unit): Unit = discreteDefault(ctx => refusal(f(ctx)))
+  protected def mirrorsOrRefuses(device: Option[rt.DeviceInfo])(f: rt.Context => Unit): Unit =
+    withContext(device)(ctx =>
+      scala.util.Try(f(ctx)).failed.foreach {
+        case refused: rt.PolyregionRuntimeException =>
+          assert(refused.getMessage.contains("created context"), refused.getMessage)
+        case other => throw other
+      }
+    )
 
   private def launchedOnDefault(f: rt.Context => Unit): Unit = discreteDefault(launched(f))
 
-  protected def deviceTests(
-      kind: String,
-      created: => Option[rt.DeviceInfo],
-      defaultMayRefuse: Boolean = false
-  ): Unit = {
-    val mirrors = if (defaultMayRefuse) "mirrors or is refused" else "mirrors"
-    val onDefault: (rt.Context => Unit) => Unit =
-      if (defaultMayRefuse) f => defaultMirrorsOrRefuses(f) else f => launchedOnDefault(f)
-    test(s"a pointer-bearing capture $mirrors on the default $kind context")(onDefault(pointerCaptureCase(_)))
-    test(s"a nested pointer in the environment $mirrors on the default $kind context")(onDefault(nestedPointerCase(_)))
+  private def pointerBearingOnDefault(device: Option[rt.DeviceInfo])(f: rt.Context => Unit): Unit = {
+    assume(device.isDefined, "no matching device")
+    discreteDefault(ctx =>
+      if (device.get.systemPaging || JvmCaptureMarshal) launched(f)(ctx)
+      else refusedWith("no capture marshal")(f(ctx))
+    )
+  }
+
+  protected def deviceTests(kind: String, created: => Option[rt.DeviceInfo]): Unit = {
+    test(s"a pointer-bearing capture on the default $kind context follows the device paging")(
+      pointerBearingOnDefault(created)(pointerCaptureCase(_))
+    )
+    test(s"a nested pointer in the environment on the default $kind context follows the device paging")(
+      pointerBearingOnDefault(created)(nestedPointerCase(_))
+    )
     test(s"a pointer-bearing capture mirrors or is refused on a created $kind context")(
       mirrorsOrRefuses(created)(pointerCaptureCase(_))
     )
     test(s"a nested pointer in the environment mirrors or is refused on a created $kind context")(
       mirrorsOrRefuses(created)(nestedPointerCase(_))
     )
-    test(s"spectra.transform captures a scalar and an array on $kind")(onDefault(captureCase(_)))
+    test(s"spectra.transform captures a scalar and an array on the default $kind context per the device paging")(
+      pointerBearingOnDefault(created)(captureCase(_))
+    )
     test(s"spectra.sort orders by a capturing comparator on $kind")(launchedOnDefault(sortDescendingCase(_)))
     test(s"spectra.sort sorts on $kind")(withContext(created)(launched(sortCase(_))))
     test(s"spectra.transform maps on $kind")(withContext(created)(launched(transformCase(_))))
