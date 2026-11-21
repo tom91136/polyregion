@@ -113,12 +113,12 @@ class BytecodeJarDifferentialSuite extends munit.FunSuite {
         eligibleRefs += ref
         BytecodeResolver.resolve(List(ref), classes) match {
           case Left(e) => refused += ref.repr -> e.getMessage
-          case Right(fn :: callees) =>
+          case Right(BytecodeResolver.Resolved(fn :: callees, _)) =>
             resolve(owner, name, desc, (access & Opcodes.ACC_STATIC) != 0) match {
               case Right((m, r)) => out += Candidate(owner, name, desc, fn, callees, m, r)
               case Left(why)     => unexecutable += ref.repr -> why
             }
-          case Right(Nil) => refused += ref.repr -> "the resolver returned no function"
+          case Right(_) => refused += ref.repr -> "the resolver returned no function"
         }
       }
     }

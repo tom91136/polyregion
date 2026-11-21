@@ -6,8 +6,6 @@ class BytecodeDiagnosticSuite extends munit.FunSuite {
 
   private val UnsupportedSource =
     """
-      |import java.util.function.IntUnaryOperator;
-      |
       |public final class Unsupported {
       |  static int counter = 3;
       |  private int field = 7;
@@ -22,10 +20,9 @@ class BytecodeDiagnosticSuite extends munit.FunSuite {
       |  public static int switched(int a) {
       |    switch (a) { case 0: return 10; case 1: return 20; case 2: return 30; default: return 40; }
       |  }
-      |  public static int allocates(int n) { int[] xs = new int[n]; xs[0] = 1; return xs[0]; }
+      |  public static int allocates(int n) { int[][] xs = new int[n][n]; xs[0][0] = 1; return xs[0][0]; }
       |  public static int lengthOf(int[] xs) { return xs.length; }
       |  public static int staticField(int a) { return counter + a; }
-      |  public static int lambda(int a) { IntUnaryOperator f = x -> x + 1; return f.applyAsInt(a); }
       |  public static int nulls(int[] xs) { return xs == null ? 0 : 1; }
       |  public static int locked(int a) { synchronized (Unsupported.class) { return a + 1; } }
       |}
@@ -49,16 +46,15 @@ class BytecodeDiagnosticSuite extends munit.FunSuite {
     assert(message.contains(fragment), s"`$name` failed with `$message`, which does not mention `$fragment`")
   }
 
-  test("instance methods that read a field")(refuses("instanceMethod", "Unsupported field access `Unsupported.field`"))
+  test("instance methods that read a field")(refuses("instanceMethod", "uses its receiver"))
   test("calls returning objects")(refuses("viaString", "java.lang.String"))
   test("string constants")(refuses("strings", "String"))
   test("string concatenation")(refuses("concat", "String"))
   test("exception handlers")(refuses("guarded", "catch"))
   test("switch")(refuses("switched", "switch"))
-  test("array allocation")(refuses("allocates", "allocation"))
+  test("multi-dimensional array allocation")(refuses("allocates", "multi-dimensional array allocation"))
   test("array length")(refuses("lengthOf", "length"))
   test("static fields")(refuses("staticField", "Unsupported field access `Unsupported.counter`"))
-  test("lambdas")(refuses("lambda", "Cannot lower the JVM type `java.util.function.IntUnaryOperator`"))
   test("reference comparisons")(refuses("nulls", "device heap"))
   test("monitors")(refuses("locked", "synchronized"))
 

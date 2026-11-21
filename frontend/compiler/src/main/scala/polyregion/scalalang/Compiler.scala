@@ -141,11 +141,16 @@ object Compiler {
         owner   <- BytecodeResolver.locate(sym.owner.fullName.stripSuffix("$"), bytes)
         ref     <- BytecodeResolver.descriptorFor(owner, sym.name, signature.args, signature.rtn, bytes)
         lowered <- BytecodeResolver.resolveRoot(ref, bytes)
-      } yield {
-        val (root, closure) = lowered
-        if (root.name != target.calleeName) BytecodeResolver.callableAs(root, target.calleeName, None) :: closure
-        else closure
-      }
+        (root, closure) = lowered
+        _ <-
+          if (closure.structs.isEmpty) ().success
+          else
+            (s"Cannot lower the Java static `${sym.fullName}` from its class file: it builds objects of " +
+              s"${closure.structs.map(_.name.repr).mkString(", ")}, and Scala programs carry no class file layouts").fail
+      } yield
+        if (root.name != target.calleeName)
+          BytecodeResolver.callableAs(root, target.calleeName, None) :: closure.functions
+        else closure.functions
     }
   }
 

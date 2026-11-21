@@ -899,17 +899,7 @@ object TreeRemapper {
     case _ => false
   }
 
-  private def zeroOf(tpe: p.Type): Result[p.Term] = tpe match {
-    case p.Type.Bool1   => p.Term.Bool1Const(false).success
-    case p.Type.IntS8   => p.Term.IntS8Const(0).success
-    case p.Type.IntS16  => p.Term.IntS16Const(0).success
-    case p.Type.IntU16  => p.Term.IntU16Const(0.toChar).success
-    case p.Type.IntS32  => p.Term.IntS32Const(0).success
-    case p.Type.IntS64  => p.Term.IntS64Const(0L).success
-    case p.Type.Float32 => p.Term.Float32Const(0f).success
-    case p.Type.Float64 => p.Term.Float64Const(0d).success
-    case other          => s"No zero for ${other.repr}".fail
-  }
+  private def zeroOf(tpe: p.Type): Result[p.Term] = Scalar.zero(tpe).failIfEmpty(s"No zero for ${tpe.repr}")
 
   private def countedLoop(scope: Scope, buf: mutable.ListBuffer[p.Stmt], len: p.Term)(
       fill: (mutable.ListBuffer[p.Stmt], p.Term.Select) => Result[Unit]
@@ -1588,7 +1578,8 @@ object TreeRemapper {
       argLengths: List[Option[p.Term]],
       rtn: p.Type
   ): Result[p.Expr] =
-    if (recv.isEmpty && isBytecodeCallee(scope.deps, sym)) bytecodeCall(scope.deps, sym, args, rtn).success
+    if (recv.isEmpty && isBytecodeCallee(scope.deps, sym))
+      bytecodeCall(scope.deps, sym, args.map(byReference(scope, buf, _)), rtn).success
     else if (sym.name.toString == "<init>")
       if (args.isEmpty) (p.Expr.Alias(p.Term.Unit0Const): p.Expr).success
       else s"Unsupported constructor delegation to `${fullName(sym)}`".fail
@@ -2262,9 +2253,9 @@ object TreeRemapper {
       plan = Some(Plan(planStatics(deps), planLengths(deps)))
       entryAndStatics <- compileMethod(entry, deps, Role.Entry, plan)
       (entryFn, _, captures) = entryAndStatics
-      sourceFns   <- compileTransitive(trees, deps, entrySym, plan = plan)
-      bytecodeFns <- BytecodeResolver.resolve(deps.bytecodeRoots.toList, deps.classBytes)
-      depFns = IntrinsicTable.dedupe(sourceFns ++ bytecodeFns ++ deps.nativeFns.toList)
+      sourceFns <- compileTransitive(trees, deps, entrySym, plan = plan)
+      bytecode  <- BytecodeResolver.resolve(deps.bytecodeRoots.toList, deps.classBytes)
+      depFns = IntrinsicTable.dedupe(sourceFns ++ bytecode.functions ++ deps.nativeFns.toList)
       signatureStructs <- structSyms(entryFn :: depFns).flatTraverse { sym =>
         val fqn = sym.fqn.mkString(".")
         classTable.get(fqn) match {
@@ -2276,7 +2267,8 @@ object TreeRemapper {
       allocatedStructs <- deps.witnessed.toList.traverse { elem =>
         JavaTyper.lowerStruct(elem, deps.taggedTypes.contains(elem.getQualifiedName.toString), deps.outerRefs.toSet)
       }
-      structs = signatureStructs ++ allocatedStructs
+      sourced = (signatureStructs ++ allocatedStructs).map(_.name).toSet
+      structs = signatureStructs ++ allocatedStructs ++ bytecode.structs.filterNot(d => sourced(d.name))
     } yield Region(p.Program(Some(entryFn), depFns, structs.distinct), captures, deps.tagOf.toMap, deps.outerRefs.toSet)
   }
 }

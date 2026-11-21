@@ -10,7 +10,9 @@ import scala.annotation.tailrec
 // the fallback resolver: a callee with no source tree is lowered from its class file, together with the static methods it calls
 object BytecodeResolver {
 
-  type ClassBytes = String => Option[Array[Byte]]
+  type ClassBytes = ClassLayouts.ClassBytes
+
+  case class Resolved(functions: List[p.Function], structs: List[p.StructDef])
 
   @tailrec def lowerable(t: p.Type): Boolean = t match {
     case p.Type.Ptr(component, _) => lowerable(component)
@@ -64,7 +66,7 @@ object BytecodeResolver {
   private def lowerRef(ref: MethodRef, origin: MethodRef, bytesOf: ClassBytes): Result[BytecodeRemapper.Lowered] =
     bytesOf(ref.owner)
       .failIfEmpty(s"No class file for `${ref.owner}` while lowering `${ref.repr}`")
-      .flatMap(BytecodeRemapper.lowerWithCalls(_, ref.name, ref.desc))
+      .flatMap(BytecodeRemapper.lowerWithCalls(_, ref.name, ref.desc, bytesOf))
       .leftMap { e =>
         val cause = s"Cannot lower `${ref.repr}` from its class file: ${e.getMessage}"
         CompilerException(
@@ -97,17 +99,20 @@ object BytecodeResolver {
     go(todo, seen, Nil)
   }
 
-  private def functionsOf(lowered: List[BytecodeRemapper.Lowered]): List[p.Function] =
-    IntrinsicTable.dedupe(lowered.flatMap(l => l.fn :: l.helpers))
+  private def resolvedOf(lowered: List[BytecodeRemapper.Lowered]): Resolved =
+    Resolved(
+      IntrinsicTable.dedupe(lowered.flatMap(l => l.fn :: l.helpers)),
+      lowered.flatMap(_.structs).distinctBy(_.name)
+    )
 
-  def resolve(roots: List[MethodRef], bytesOf: ClassBytes): Result[List[p.Function]] =
-    walk(roots.map(r => r -> r), Set.empty, bytesOf).map(functionsOf(_))
+  def resolve(roots: List[MethodRef], bytesOf: ClassBytes): Result[Resolved] =
+    walk(roots.map(r => r -> r), Set.empty, bytesOf).map(resolvedOf(_))
 
   // the root's own function is returned apart from the closure it heads
-  def resolveRoot(root: MethodRef, bytesOf: ClassBytes): Result[(p.Function, List[p.Function])] = for {
+  def resolveRoot(root: MethodRef, bytesOf: ClassBytes): Result[(p.Function, Resolved)] = for {
     head <- lowerRef(root, root, bytesOf)
     rest <- walk(head.calls.map(_ -> root), Set(root), bytesOf)
-  } yield head.fn -> functionsOf(head :: rest)
+  } yield head.fn -> resolvedOf(head :: rest)
 
   // the Scala frontend knows a callee by its lowered signature rather than by a JVM descriptor
   def descriptorFor(
@@ -122,8 +127,8 @@ object BytecodeResolver {
       all   <- Vineflower.staticDescriptors(bytes, name)
       matching = all.filter { d =>
         val md = MethodDescriptor.parseDescriptor(d)
-        md.params.toList.traverse(BytecodeRemapper.typeOf(_)) == Right(params) &&
-        BytecodeRemapper.typeOf(md.ret) == Right(rtn)
+        md.params.toList.traverse(ClassLayouts.typeOf(_)) == Right(params) &&
+        ClassLayouts.typeOf(md.ret) == Right(rtn)
       }
       desc <- matching match {
         case d :: Nil => d.success

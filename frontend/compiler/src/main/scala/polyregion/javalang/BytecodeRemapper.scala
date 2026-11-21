@@ -6,6 +6,7 @@ import org.jetbrains.java.decompiler.modules.decompiler.StatEdge
 import org.jetbrains.java.decompiler.modules.decompiler.exps.FunctionExprent.FunctionType
 import org.jetbrains.java.decompiler.modules.decompiler.exps.*
 import org.jetbrains.java.decompiler.modules.decompiler.stats.*
+import org.jetbrains.java.decompiler.struct.consts.{LinkConstant, PrimitiveConstant}
 import org.jetbrains.java.decompiler.struct.gen.{CodeType, MethodDescriptor, VarType}
 import polyregion.ast.{PolyAST as p, *}
 import polyregion.intrinsic.IntrinsicTable
@@ -18,28 +19,9 @@ object BytecodeRemapper {
 
   private val Global = p.Type.Space.Global
 
+  private val RefInvokeStatic = 6
+
   def symbolOf(owner: String, name: String): p.Sym = p.Sym(s"$owner.$name")
-
-  private def nameOf(t: VarType): String =
-    Option(t.value).filter(_ => t.`type` == CodeType.OBJECT).fold(String.valueOf(t))(_.replace('/', '.'))
-
-  def typeOf(t: VarType): Result[p.Type] = {
-    val base = t.`type` match {
-      case CodeType.BOOLEAN                    => p.Type.Bool1.success
-      case CodeType.BYTE | CodeType.BYTECHAR   => p.Type.IntS8.success
-      case CodeType.SHORT | CodeType.SHORTCHAR => p.Type.IntS16.success
-      case CodeType.CHAR                       => p.Type.IntU16.success
-      case CodeType.INT                        => p.Type.IntS32.success
-      case CodeType.LONG                       => p.Type.IntS64.success
-      case CodeType.FLOAT                      => p.Type.Float32.success
-      case CodeType.DOUBLE                     => p.Type.Float64.success
-      case CodeType.VOID                       => p.Type.Unit0.success
-      case CodeType.NULL                       => "Unsupported `null`; PolyRegion has no device heap".fail
-      case _ =>
-        s"Cannot lower the JVM type `${nameOf(t)}`; only primitives and their arrays travel to a device".fail
-    }
-    base.map(b => (1 to t.arrayDim).foldLeft(b)((c, _) => p.Type.Ptr(c, Global)))
-  }
 
   // the JVM computes on int, long, float and double only, narrower integrals are truncated back by i2b/i2c/i2s
   private def widen(t: p.Type): p.Type = t match {
@@ -133,12 +115,54 @@ object BytecodeRemapper {
     go(root, Nil)
   }
 
-  private class Lowerer(rtn: p.Type, register: Boolean) {
+  // the classes one lowering reaches, each laid out once from its class file
+  private case class Closure(impl: MethodRef, captured: List[p.Term], sam: String, arity: Int)
+
+  private case class Selected(named: p.Named) {
+    val term: p.Term.Select = p.Term.Select(named, Nil, named.tpe)
+  }
+
+  private class Classes(own: String, ownBytes: Array[Byte], others: ClassLayouts.ClassBytes) {
+    private val seen = mutable.LinkedHashMap.empty[String, p.StructDef]
+
+    val bytesOf: ClassLayouts.ClassBytes = name => if (name == own) Some(ownBytes) else others(name)
+
+    def structs: List[p.StructDef] = seen.values.toList
+
+    def struct(internal: String): Result[p.StructDef] =
+      seen
+        .get(internal)
+        .fold(ClassLayouts.structOf(internal, bytesOf).map { d =>
+          seen(internal) = d; d
+        })(_.success)
+
+    def reference(internal: String): Result[p.Type] =
+      if (ClassLayouts.isPlatform(internal))
+        (s"Cannot lower the JVM type `${internal.replace('/', '.')}`; only primitives, their arrays and classes " +
+          "outside the JDK travel to a device").fail
+      else struct(internal).map(d => p.Type.Ptr(p.Type.Struct(d.name, Nil), p.Type.Space.Private))
+
+    def typeOf(t: VarType): Result[p.Type] =
+      if (t.arrayDim == 0 && t.`type` == CodeType.OBJECT) reference(t.value) else ClassLayouts.typeOf(t)
+
+    // an object lives in the frame of the method that built it, so it cannot leave through a return
+    def returned(t: VarType, what: String): Result[p.Type] = typeOf(t).flatMap {
+      case p.Type.Ptr(p.Type.Struct(name, _), _) =>
+        s"Cannot lower `$what`: an object of `${name.repr}` cannot be returned, its storage ends with the call".fail
+      case other => other.success
+    }
+
+    def superOf(internal: String): Result[Option[String]] = ClassLayouts.superOf(internal, bytesOf)
+  }
+
+  private class Lowerer(rtn: p.Type, register: Boolean, classes: Classes, owner: String, receiver: Option[String]) {
 
     private val ids = Iterator.from(0)
     val declared    = mutable.LinkedHashMap.empty[String, p.Named]
     val calls       = mutable.LinkedHashSet.empty[MethodRef]
     val helpers     = mutable.ListBuffer.empty[p.Function]
+
+    private val closures = mutable.Map.empty[(Int, Int), Closure]
 
     private val jmp: p.Term.Select = p.Term.Select(p.Named("#jmp", p.Type.IntS32), Nil, p.Type.IntS32)
 
@@ -172,7 +196,13 @@ object BytecodeRemapper {
     }
 
     private def varOf(v: VarExprent): Result[p.Term.Select] =
-      typeOf(v.getVarType).map(t => slot(v.getIndex, v.getVersion, t))
+      if (closures.contains((v.getIndex, v.getVersion)))
+        ("A functional value has no device representation, so it only lowers where it is called directly " +
+          "in the method that creates it; it cannot be stored, passed, or returned").fail
+      else
+        receiver.filter(_ => v.getIndex == 0).fold(classes.typeOf(v.getVarType))(_.fail).map { t =>
+          slot(v.getIndex, v.getVersion, t)
+        }
 
     private def constOf(c: ConstExprent): Result[p.Term] = {
       def num: Result[Scalar] = Option(c.getValue: Any) match {
@@ -185,7 +215,7 @@ object BytecodeRemapper {
             case None    => s"Unsupported constant `${other.getClass.getName}`".fail
           }
       }
-      typeOf(c.getConstType).flatMap { t =>
+      ClassLayouts.typeOf(c.getConstType).flatMap { t =>
         num.flatMap(v =>
           Scalar.constant(t) match {
             case Some(lower) => lower(v).success
@@ -195,37 +225,212 @@ object BytecodeRemapper {
       }
     }
 
-    private def invoke(i: InvocationExprent, buf: mutable.ListBuffer[p.Stmt]): Result[p.Term] =
-      if (i.getInvocationType != InvocationExprent.InvocationType.STATIC) unsupported(i)
-      else {
-        val owner = i.getClassname.replace('/', '.')
-        val md    = MethodDescriptor.parseDescriptor(i.getStringDescriptor)
-        for {
-          params <- md.params.toList.traverse(typeOf(_))
-          rtn    <- typeOf(md.ret)
-          args   <- i.getLstParameters.asScala.toList.traverse(expr(_, buf))
-          lowered = args.zip(params).map((a, t) => coerce(buf, a, t))
-          callee  = MethodRef(owner, i.getName, i.getStringDescriptor)
-          call <- Natives.resolve(callee, lowered) match {
-            case Some(IntrinsicTable.Resolved.Inline(expr)) => expr.success
-            case Some(IntrinsicTable.Resolved.Call(fn, invoke)) =>
-              helpers += fn
-              invoke.success
-            case None =>
-              calls += callee
-              p.Expr.Invoke(p.Type.FnRef(symbolOf(owner, i.getName)), Nil, None, lowered, rtn).success
-          }
-        } yield bind(buf, call)
+    private def arguments(
+        desc: String,
+        exprs: List[Exprent],
+        buf: mutable.ListBuffer[p.Stmt]
+    ): Result[List[p.Term]] =
+      for {
+        params <- MethodDescriptor.parseDescriptor(desc).params.toList.traverse(classes.typeOf(_))
+        args   <- exprs.traverse(expr(_, buf))
+      } yield args.zip(params).map((a, t) => coerce(buf, a, t))
+
+    // a constructor is the one instance method called without a receiver lookup: the callee is known and `self` goes first
+    private def construct(
+        internal: String,
+        desc: String,
+        self: p.Term,
+        exprs: List[Exprent],
+        buf: mutable.ListBuffer[p.Stmt]
+    ): Result[Unit] = {
+      val target = internal.replace('/', '.')
+      arguments(desc, exprs, buf).map { args =>
+        calls += MethodRef(target, "<init>", desc)
+        val call = p.Expr.Invoke(p.Type.FnRef(symbolOf(target, "<init>")), Nil, None, self :: args, p.Type.Unit0)
+        buf += p.Stmt.Var(fresh(p.Type.Unit0), Some(call))
+        ()
       }
+    }
+
+    private def delegate(i: InvocationExprent, buf: mutable.ListBuffer[p.Stmt]): Result[p.Term] =
+      if (i.getClassname == "java/lang/Object") p.Term.Unit0Const.success
+      else if (i.getClassname.replace('/', '.') != owner)
+        (s"Unsupported call to the superclass constructor `${i.getClassname.replace('/', '.')}.<init>${i.getStringDescriptor}`; " +
+          "a superclass carries layout the struct of its subclass has no room for").fail
+      else
+        for {
+          self <- expr(i.getInstance, buf)
+          _    <- construct(i.getClassname, i.getStringDescriptor, self, i.getLstParameters.asScala.toList, buf)
+        } yield p.Term.Unit0Const
+
+    private def callStatic(callee: MethodRef, args: List[p.Term], buf: mutable.ListBuffer[p.Stmt]): Result[p.Term] = {
+      val md = MethodDescriptor.parseDescriptor(callee.desc)
+      for {
+        rtn    <- classes.returned(md.ret, callee.repr)
+        params <- md.params.toList.traverse(classes.typeOf(_))
+        lowered = args.zip(params).map((a, t) => coerce(buf, a, t))
+        call <- Natives.resolve(callee, lowered) match {
+          case Some(IntrinsicTable.Resolved.Inline(expr)) => expr.success
+          case Some(IntrinsicTable.Resolved.Call(fn, invoke)) =>
+            helpers += fn
+            invoke.success
+          case None =>
+            calls += callee
+            p.Expr.Invoke(p.Type.FnRef(symbolOf(callee.owner, callee.name)), Nil, None, lowered, rtn).success
+        }
+      } yield bind(buf, call)
+    }
+
+    private def isLambda(i: InvocationExprent): Boolean =
+      i.getInvocationType == InvocationExprent.InvocationType.DYNAMIC &&
+        Option(i.getBootstrapMethod).exists(_.classname == "java/lang/invoke/LambdaMetafactory")
+
+    // a functional value only exists as the lambda a local was bound to, and is resolved where it is called
+    private def closureOf(e: Exprent, buf: mutable.ListBuffer[p.Stmt]): Option[Result[Closure]] = e match {
+      case i: InvocationExprent if isLambda(i) => Some(closure(i, buf))
+      case v: VarExprent                       => closures.get((v.getIndex, v.getVersion)).map(_.success)
+      case _                                   => None
+    }
+
+    private def closure(i: InvocationExprent, buf: mutable.ListBuffer[p.Stmt]): Result[Closure] =
+      i.getBootstrapArguments.asScala.toList match {
+        case (sam: PrimitiveConstant) :: (impl: LinkConstant) :: _ if impl.index1 == RefInvokeStatic =>
+          i.getLstParameters.asScala.toList
+            .traverse(expr(_, buf).map(snapshot(buf, _)))
+            .map { captured =>
+              Closure(
+                MethodRef(impl.classname.replace('/', '.'), impl.elementname, impl.descriptor),
+                captured,
+                i.getName,
+                MethodDescriptor.parseDescriptor(sam.getString).params.length
+              )
+            }
+        case _ =>
+          (s"Unsupported lambda `${i.getName}`: only a lambda over a static method lowers, " +
+            "which excludes references to instance methods and lambdas that use `this`").fail
+      }
+
+    private def callClosure(c: Closure, i: InvocationExprent, buf: mutable.ListBuffer[p.Stmt]): Result[p.Term] =
+      if (i.getName != c.sam || i.getLstParameters.size != c.arity)
+        s"Unsupported call `${i.getName}${i.getStringDescriptor}` on a functional value; only `${c.sam}` is resolved".fail
+      else
+        i.getLstParameters.asScala.toList
+          .traverse(expr(_, buf))
+          .flatMap(args => callStatic(c.impl, c.captured ::: args, buf))
+
+    private def dynamic(i: InvocationExprent): Result[p.Term] = {
+      val bootstrap = Option(i.getBootstrapMethod)
+      bootstrap.map(b => s"${b.classname}.${b.elementname}") match {
+        case Some(
+              "java/lang/invoke/StringConcatFactory.makeConcatWithConstants" |
+              "java/lang/invoke/StringConcatFactory.makeConcat"
+            ) =>
+          "Unsupported string concatenation; PolyRegion has no device-side String".fail
+        case Some(name) if isLambda(i) =>
+          ("A functional value has no device representation, so it only lowers where it is called directly " +
+            s"in the method that creates it; it cannot be stored, passed, or returned (`$name`)").fail
+        case other =>
+          s"Unsupported dynamic call site `${i.getName}` bootstrapped by `${other.fold("")(_.replace('/', '.'))}`".fail
+      }
+    }
+
+    private def invoke(i: InvocationExprent, buf: mutable.ListBuffer[p.Stmt]): Result[p.Term] =
+      if (i.getFunctype == InvocationExprent.Type.INIT) delegate(i, buf)
+      else if (i.getInvocationType == InvocationExprent.InvocationType.DYNAMIC) dynamic(i)
+      else if (i.getInvocationType == InvocationExprent.InvocationType.STATIC)
+        i.getLstParameters.asScala.toList
+          .traverse(expr(_, buf))
+          .flatMap(callStatic(MethodRef(i.getClassname.replace('/', '.'), i.getName, i.getStringDescriptor), _, buf))
+      else
+        Option(i.getInstance).flatMap(closureOf(_, buf)) match {
+          case Some(c) => c.flatMap(callClosure(_, i, buf))
+          case None    => Option(i.getInstance).fold(unsupported(i))(expr(_, buf).flatMap(_ => unsupported(i)))
+        }
+
+    private def fieldSelect(f: FieldExprent, buf: mutable.ListBuffer[p.Stmt]): Result[p.Term.Select] = {
+      val where                                 = s"${f.getClassname.replace('/', '.')}.${f.getName}"
+      def refused(why: String): Result[Nothing] = s"Unsupported field access `$where`; $why".fail
+      if (f.isStatic) refused("static fields have no device storage")
+      else
+        for {
+          ref  <- classes.reference(f.getClassname)
+          sdef <- classes.struct(f.getClassname)
+          member <- sdef.members
+            .find(_.symbol == f.getName)
+            .fold(refused("the layout of its class does not carry it"))(_.success)
+          base <- expr(f.getInstance, buf)
+          sel <- base match {
+            case s: p.Term.Select if s.tpe == ref => s.success
+            case other                            => refused(s"the receiver is `${other.tpe.repr}`, not `${ref.repr}`")
+          }
+        } yield p.Term.Select(sel.root, sel.steps :+ p.PathStep.Deref :+ p.PathStep.Field(member.symbol), member.tpe)
+    }
+
+    private def newObject(n: NewExprent, buf: mutable.ListBuffer[p.Stmt]): Result[p.Term] = {
+      val internal = n.getNewType.value
+      val what     = internal.replace('/', '.')
+      for {
+        _      <- classes.reference(internal)
+        sdef   <- classes.struct(internal)
+        ctor   <- Option(n.getConstructor).failIfEmpty(s"Unsupported allocation of `$what`")
+        parent <- classes.superOf(internal)
+        _ <-
+          if (parent.contains("java/lang/Object")) ().success
+          else
+            (s"Unsupported allocation of `$what`: its superclass `${parent.fold("")(_.replace('/', '.'))}` " +
+              "carries layout the struct has no room for").fail
+        struct = p.Type.Struct(sdef.name, Nil)
+        obj    = fresh(struct)
+        _      = buf += p.Stmt.Var(obj, None)
+        _ = sdef.members.foreach { m =>
+          zeroOf(m.tpe).foreach { z =>
+            buf += p.Stmt.Mut(p.Term.Select(obj, List(p.PathStep.Field(m.symbol)), m.tpe), p.Expr.Alias(z))
+          }
+        }
+        self = bind(
+          buf,
+          p.Expr.RefTo(p.Term.Select(obj, Nil, struct), None, struct, p.Type.Space.Private, p.Region.Rooted(obj))
+        )
+        _ <- construct(internal, ctor.getStringDescriptor, self, ctor.getLstParameters.asScala.toList, buf)
+      } yield self
+    }
+
+    private def zeroOf(t: p.Type): Option[p.Term] = t match {
+      case p.Type.Ptr(comp, space) => Some(p.Term.NullPtrConst(comp, space, p.Region.Opaque))
+      case other                   => Scalar.zero(other)
+    }
+
+    private def newArray(n: NewExprent, buf: mutable.ListBuffer[p.Stmt]): Result[p.Term] = {
+      val what     = ClassLayouts.readable(n.getNewType)
+      val elements = n.getLstArrayElements.asScala.toList
+      for {
+        _ <-
+          if (n.getNewType.arrayDim == 1) ().success
+          else s"Unsupported multi-dimensional array allocation of `$what`".fail
+        comp <- ClassLayouts.typeOf(n.getNewType.decreaseArrayDim()).leftMap { e =>
+          CompilerException(s"Unsupported array allocation of `$what`: ${e.getMessage}", e)
+        }
+        len <-
+          if (n.isDirectArrayInit) (p.Term.IntS32Const(elements.size): p.Term).success
+          else expr(n.getLstDims.get(0), buf).map(coerce(buf, _, p.Type.IntS32))
+        slot = fresh(p.Type.Ptr(comp, Global))
+        _    = buf += p.Stmt.Var(slot, Some(p.Expr.Alloc(comp, len, Global, p.Region.Opaque)))
+        sel  = Selected(slot)
+        _ <- elements.zipWithIndex.traverse_ { (e, i) =>
+          expr(e, buf).map(v => buf += p.Stmt.Update(sel.term, p.Term.IntS32Const(i), coerce(buf, v, comp)))
+        }
+      } yield sel.term
+    }
 
     private def unsupported(e: Exprent): Result[Nothing] = e match {
       case i: InvocationExprent =>
-        s"Unsupported call `${i.getClassname.replace('/', '.')}.${i.getName}${i.getStringDescriptor}`".fail
+        (s"Unsupported call `${i.getClassname.replace('/', '.')}.${i.getName}${i.getStringDescriptor}`; " +
+          "a call through a receiver needs the receiver's class, which the bytecode tier cannot resolve statically").fail
       case f: FieldExprent =>
         s"Unsupported field access `${f.getClassname.replace('/', '.')}.${f.getName}`".fail
       case n: NewExprent =>
         val what = if (n.getNewType.arrayDim > 0) "array allocation" else "allocation"
-        s"Unsupported $what of `${nameOf(n.getNewType)}`".fail
+        s"Unsupported $what of `${n.getNewType.value.replace('/', '.')}`".fail
       case c: ConstExprent if c.getConstType == VarType.VARTYPE_STRING =>
         "Unsupported `String` constant; PolyRegion has no device-side String".fail
       case other => s"Unsupported expression `${other.getClass.getSimpleName}`".fail
@@ -402,6 +607,8 @@ object BytecodeRemapper {
             val read = bind(buf, p.Expr.Index(sel, idx, comp))
             update(read, (value, b) => b += p.Stmt.Update(sel, idx, coerce(b, value, comp)))
           }
+        case f: FieldExprent =>
+          fieldSelect(f, buf).flatMap(sel => update(sel, (value, b) => b += p.Stmt.Mut(sel, p.Expr.Alias(value))))
         case other => s"Unsupported increment target `${other.getClass.getSimpleName}`".fail
       }
     }
@@ -427,12 +634,12 @@ object BytecodeRemapper {
       case FunctionType.CAST =>
         for {
           a <- expr(f.getLstOperands.get(0), buf)
-          t <- typeOf(f.getLstOperands.get(1).getExprType)
+          t <- ClassLayouts.typeOf(f.getLstOperands.get(1).getExprType)
         } yield coerce(buf, a, t)
       case ft if Option(ft.castType).isDefined =>
         for {
           a <- expr(f.getLstOperands.get(0), buf)
-          t <- typeOf(ft.castType)
+          t <- ClassLayouts.typeOf(ft.castType)
         } yield coerce(buf, a, t)
       case FunctionType.ARRAY_LENGTH =>
         "Unsupported `length` of an array; PolyRegion carries array lengths as separate arguments".fail
@@ -449,6 +656,8 @@ object BytecodeRemapper {
         arrayParts(a, buf).map((sel, idx, comp) => bind(buf, p.Expr.Index(sel, idx, comp)))
       case a: AssignmentExprent => assign(a, buf)
       case i: InvocationExprent => invoke(i, buf)
+      case f: FieldExprent      => fieldSelect(f, buf).map(snapshot(buf, _))
+      case n: NewExprent        => if (n.getNewType.arrayDim > 0) newArray(n, buf) else newObject(n, buf)
       case other                => unsupported(other)
     }
 
@@ -457,17 +666,23 @@ object BytecodeRemapper {
         expr(a.getRight, buf).flatMap { r =>
           Option(a.getCondType).fold(r.success)(ft => apply(ft, current, r, buf))
         }
+      // Java evaluates the target of a compound assignment before the right hand side
+      def store(target: Result[p.Term.Select]): Result[p.Term] =
+        for {
+          sel <- target
+          r   <- value(if (Option(a.getCondType).isEmpty) sel else snapshot(buf, sel))
+        } yield {
+          val stored = coerce(buf, r, sel.tpe)
+          buf += p.Stmt.Mut(sel, p.Expr.Alias(stored))
+          stored
+        }
       a.getLeft match {
-        case v: VarExprent =>
-          for {
-            sel <- varOf(v)
-            // Java evaluates the target of a compound assignment before the right hand side
-            r <- value(if (Option(a.getCondType).isEmpty) sel else snapshot(buf, sel))
-          } yield {
-            val stored = coerce(buf, r, sel.tpe)
-            buf += p.Stmt.Mut(sel, p.Expr.Alias(stored))
-            stored
+        case v: VarExprent if closureOf(a.getRight, buf).exists(_ => Option(a.getCondType).isEmpty) =>
+          closureOf(a.getRight, buf).get.map { c =>
+            closures((v.getIndex, v.getVersion)) = c
+            p.Term.Unit0Const
           }
+        case v: VarExprent => store(varOf(v))
         case l: ArrayExprent =>
           for {
             parts <- arrayParts(l, buf)
@@ -478,7 +693,8 @@ object BytecodeRemapper {
             buf += p.Stmt.Update(sel, idx, stored)
             stored
           }
-        case other => unsupported(other)
+        case f: FieldExprent => store(fieldSelect(f, buf))
+        case other           => unsupported(other)
       }
     }
 
@@ -622,79 +838,100 @@ object BytecodeRemapper {
       v <- (e :: e.getAllExprents(true).asScala.toList).collect { case v: VarExprent => v }
     } yield v
 
-  def lower(classBytes: Array[Byte], name: String, desc: String): Result[p.Function] =
-    lowerWithCalls(classBytes, name, desc).map(_.fn)
+  def lower(
+      classBytes: Array[Byte],
+      name: String,
+      desc: String,
+      classes: ClassLayouts.ClassBytes = _ => None
+  ): Result[p.Function] =
+    lowerWithCalls(classBytes, name, desc, classes).map(_.fn)
 
   // calls are the static callees no intrinsic covers, helpers the table functions the body invokes
-  case class Lowered(fn: p.Function, calls: List[MethodRef], helpers: List[p.Function])
+  case class Lowered(fn: p.Function, calls: List[MethodRef], helpers: List[p.Function], structs: List[p.StructDef])
 
-  def lowerWithCalls(classBytes: Array[Byte], name: String, desc: String): Result[Lowered] =
-    Vineflower.structure(classBytes, name, desc)(lowerMethod(_, name))
+  def lowerWithCalls(
+      classBytes: Array[Byte],
+      name: String,
+      desc: String,
+      classes: ClassLayouts.ClassBytes = _ => None
+  ): Result[Lowered] =
+    Vineflower.structure(classBytes, name, desc)(lowerMethod(_, name, classBytes, classes))
 
-  private def lowerMethod(m: Vineflower.Method, name: String): Result[Lowered] = for {
-    owner    <- m.cl.qualifiedName.replace('/', '.').success
-    isStati  <- m.mt.hasModifier(CodeConstants.ACC_STATIC).success
-    slotVars <- varsOf(m.root).success
-    _        <-
-      // a `this`-free instance method is a static one with a slot reserved, the shape of every Scala `object` method
-      if (!isStati && slotVars.exists(_.getIndex == 0))
-        s"`$owner.$name` is not static and uses its receiver; instance methods need a receiver struct".fail
-      else ().success
-    rtn      <- typeOf(m.md.ret)
-    argTypes <- m.md.params.toList.traverse(typeOf(_))
-    register = needsRegister(m.root)
-    lowerer  = Lowerer(rtn, register)
-    base     = if (isStati) 0 else 1
-    slots = argTypes
-      .foldLeft((List.empty[(Int, p.Type)], base)) { case ((acc, at), t) => ((at, t) :: acc, at + words(t)) }
-      ._1
-      .reverse
-    args = slots.map((at, t) => p.Arg(p.Named(s"a$at", t)))
-    // Vineflower narrows a parameter to what it inferred, so the copy lands in the variable the body reads
-    entries <- slots.traverse { (at, declaredTpe) =>
-      slotVars.filter(_.getIndex == at).minByOption(_.getVersion) match {
-        case None    => (at, 0, declaredTpe).success
-        case Some(v) => typeOf(v.getVarType).map(t => (at, v.getVersion, t))
-      }
-    }
-    body <- lowerer.statement(m.root, Nil)
-  } yield {
-    val copies = entries.zip(args).map { (entry, arg) =>
-      val (at, version, tpe) = entry
-      val target             = lowerer.slot(at, version, tpe)
-      val src                = p.Term.Select(arg.named, Nil, arg.named.tpe)
-      p.Stmt.Mut(target, if (target.tpe == src.tpe) p.Expr.Alias(src) else p.Expr.Cast(src, target.tpe))
-    }
-    val prologue = mutable.ListBuffer.empty[p.Stmt]
-    if (register)
-      prologue += p.Stmt.Var(
-        p.Named("#jmp", p.Type.IntS32),
-        Some(p.Expr.Alias(p.Term.IntS32Const(0))),
-        isMutable = true
-      )
-    // PolyAST scopes a Var to its block and a slot written in a loop is read after it, so slots are hoisted
-    lowerer.declared.values.foreach(n => prologue += p.Stmt.Var(n, None, isMutable = true))
-    val fn = p.Function(
-      decl = p.FunctionDecl(
-        name = symbolOf(owner, name),
-        tpeVars = Nil,
-        receiver = None,
-        args = args,
-        moduleCaptures = Nil,
-        termCaptures = Nil,
-        rtn = rtn,
-        affinity = p.Function.Affinity.Offload
-      ),
-      body = prologue.toList ++ copies ++ body ++ Option.when(
-        rtn == p.Type.Unit0 && !body.lastOption.exists { case _: p.Stmt.Return => true; case _ => false }
-      )(
-        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
-      ),
-      visibility = p.Function.Visibility.Exported,
-      fpMode = p.Function.FpMode.Relaxed,
-      convention = p.CallConvention.RegularCall
+  private def lowerMethod(
+      m: Vineflower.Method,
+      name: String,
+      classBytes: Array[Byte],
+      others: ClassLayouts.ClassBytes
+  ): Result[Lowered] = {
+    val owner    = m.cl.qualifiedName.replace('/', '.')
+    val isStatic = m.mt.hasModifier(CodeConstants.ACC_STATIC)
+    val isInit   = name == "<init>"
+    val classes  = Classes(owner, classBytes, others)
+    // a `this`-free instance method is a static one with a slot reserved, the shape of every Scala `object` method
+    val receiver = Option.unless(isStatic || isInit)(
+      s"`$owner.$name` is not static and uses its receiver; instance methods need a receiver struct"
     )
-    Lowered(fn, lowerer.calls.toList, lowerer.helpers.toList)
+    for {
+      slotVars <- varsOf(m.root).success
+      _        <- receiver.filter(_ => slotVars.exists(_.getIndex == 0)).fold(().success)(_.fail)
+      rtn      <- classes.returned(m.md.ret, s"$owner.$name${m.mt.getDescriptor}")
+      self     <- if (isInit) classes.reference(m.cl.qualifiedName).map(List(_)) else List.empty[p.Type].success
+      declared <- m.md.params.toList.traverse(classes.typeOf(_))
+      argTypes = self ::: declared
+      register = needsRegister(m.root)
+      lowerer  = Lowerer(rtn, register, classes, owner, receiver)
+      base     = if (isStatic || isInit) 0 else 1
+      slots = argTypes
+        .foldLeft((List.empty[(Int, p.Type)], base)) { case ((acc, at), t) => ((at, t) :: acc, at + words(t)) }
+        ._1
+        .reverse
+      args = slots.map((at, t) => p.Arg(p.Named(s"a$at", t)))
+      // Vineflower narrows a parameter to what it inferred, so the copy lands in the variable the body reads
+      entries <- slots.traverse { (at, declaredTpe) =>
+        slotVars.filter(_.getIndex == at).minByOption(_.getVersion) match {
+          case None    => (at, 0, declaredTpe).success
+          case Some(v) => classes.typeOf(v.getVarType).map(t => (at, v.getVersion, t))
+        }
+      }
+      body <- lowerer.statement(m.root, Nil)
+    } yield {
+      val copies = entries.zip(args).map { (entry, arg) =>
+        val (at, version, tpe) = entry
+        val target             = lowerer.slot(at, version, tpe)
+        val src                = p.Term.Select(arg.named, Nil, arg.named.tpe)
+        p.Stmt.Mut(target, if (target.tpe == src.tpe) p.Expr.Alias(src) else p.Expr.Cast(src, target.tpe))
+      }
+      val prologue = mutable.ListBuffer.empty[p.Stmt]
+      if (register)
+        prologue += p.Stmt.Var(
+          p.Named("#jmp", p.Type.IntS32),
+          Some(p.Expr.Alias(p.Term.IntS32Const(0))),
+          isMutable = true
+        )
+      // PolyAST scopes a Var to its block and a slot written in a loop is read after it, so slots are hoisted
+      lowerer.declared.values.foreach(n => prologue += p.Stmt.Var(n, None, isMutable = true))
+      val fn = p.Function(
+        decl = p.FunctionDecl(
+          name = symbolOf(owner, name),
+          tpeVars = Nil,
+          receiver = None,
+          args = args,
+          moduleCaptures = Nil,
+          termCaptures = Nil,
+          rtn = rtn,
+          affinity = p.Function.Affinity.Offload
+        ),
+        body = prologue.toList ++ copies ++ body ++ Option.when(
+          rtn == p.Type.Unit0 && !body.lastOption.exists { case _: p.Stmt.Return => true; case _ => false }
+        )(
+          p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+        ),
+        visibility = p.Function.Visibility.Exported,
+        fpMode = p.Function.FpMode.Relaxed,
+        convention = p.CallConvention.RegularCall
+      )
+      Lowered(fn, lowerer.calls.toList, lowerer.helpers.toList, classes.structs)
+    }
   }
 
   private def words(t: p.Type): Int = t match {

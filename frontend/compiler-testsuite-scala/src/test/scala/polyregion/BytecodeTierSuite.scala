@@ -47,6 +47,30 @@ class BytecodeTierSuite extends BaseSuite {
     xs(0) + xs(1) + xs(2)
   }
 
+  testExpr("scratch-array")(Kernels.scratch(6))
+  testExpr("zeroed-array")(Kernels.zeroed(6))
+  testExpr("array-initialiser")(Kernels.literal())
+  testExpr("lambda-called-where-made")(Kernels.lambdaLocal(5))
+  testExpr("lambda-capturing")(Kernels.lambdaCapturing(5, 3))
+  testExpr("lambda-method-reference")(Kernels.lambdaReference(-5))
+
+  test("a static that builds objects names the layout gap") {
+    val errors = typeCheckErrors("""
+      offload0(using AssertTarget.Offload) { Kernels.viaPoint(3, 4); () }
+    """)
+    assert(
+      errors.exists(m => m.message.contains("viaPoint") && m.message.contains("polyregion.helpers.Point")),
+      errors.map(_.message).mkString("\n")
+    )
+  }
+
+  test("a lambda that escapes its method is named") {
+    val errors = typeCheckErrors("""
+      offload0(using AssertTarget.Offload) { Kernels.lambdaEscapes(3); () }
+    """)
+    assert(errors.exists(_.message.contains("functional value")), errors.map(_.message).mkString("\n"))
+  }
+
   test("unsupported bytecode is named") {
     val errors = typeCheckErrors("""
       offload0(using AssertTarget.Offload) { Kernels.throwing(3); () }

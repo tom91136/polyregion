@@ -92,4 +92,43 @@ public class BytecodeTierTest extends BaseSuite {
     assertMatchesJdk("floorMod", () -> Math.floorMod(x, y));
     assertMatchesJdk("floorDiv", () -> Math.floorDiv(x, y));
   }
+
+  @Test
+  public void objectsLiveInsideBytecode() {
+    int x = 3;
+    int y = 4;
+    assertMatchesJdk("fields", () -> Kernels.viaPoint(x, y));
+    assertMatchesJdk("delegating constructor", () -> Kernels.chained(x));
+  }
+
+  @Test
+  public void scratchArrays() {
+    int n = 6;
+    assertMatchesJdk("loop", () -> Kernels.scratch(n));
+    assertMatchesJdk("zero filled", () -> Kernels.zeroed(n));
+    assertMatchesJdk("initialiser", () -> Kernels.literal());
+  }
+
+  @Test
+  public void escapingAllocationsAreRefused() {
+    int n = 4;
+    assertRejected("escapes", () -> Kernels.leakArray(n));
+    assertRejected("cannot be returned", () -> Kernels.lengthSquared(Kernels.leakPoint(n)));
+  }
+
+  @Test
+  public void lambdasCalledWhereTheyAreMade() {
+    int a = 5;
+    int b = 3;
+    assertMatchesJdk("plain", () -> Kernels.lambdaLocal(a));
+    assertMatchesJdk("capturing", () -> Kernels.lambdaCapturing(a, b));
+    assertMatchesJdk("method reference", () -> Kernels.lambdaReference(-a));
+  }
+
+  @Test
+  public void unsupportedDynamicCallSitesAreNamed() {
+    int a = 5;
+    assertRejected("functional value", () -> Kernels.lambdaEscapes(a));
+    assertRejected("string concatenation", () -> Kernels.concatenated(a));
+  }
 }

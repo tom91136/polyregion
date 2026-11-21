@@ -34,7 +34,9 @@ class BytecodeNativesSuite extends munit.FunSuite {
   private def methodOf(name: String) = clazz.getDeclaredMethods.find(_.getName == name).get
 
   private def resolved(name: String): Result[List[p.Function]] =
-    BytecodeResolver.resolve(List(MethodRef("Natives", name, AsmType.getMethodDescriptor(methodOf(name)))), classes)
+    BytecodeResolver
+      .resolve(List(MethodRef("Natives", name, AsmType.getMethodDescriptor(methodOf(name)))), classes)
+      .map(_.functions)
 
   private val doubles  = List(0d, -0d, 1d, -1d, 0.5d, 2.5d, -2.5d, 1e30, -1e30, Double.NaN, 0.49999999999999994, 1d / 3)
   private val ints     = List(0, 1, -1, 7, -7, 255, 0x0f0f0f0f, Int.MaxValue, Int.MinValue)
@@ -101,7 +103,7 @@ class BytecodeNativesSuite extends munit.FunSuite {
     val ref         = MethodRef("Natives", "viaHelper", AsmType.getMethodDescriptor(methodOf("viaHelper")))
     val (root, all) = BytecodeResolver.resolveRoot(ref, classes).fold(e => fail(e.getMessage), identity)
     assertEquals(root.name, BytecodeRemapper.symbolOf("Natives", "viaHelper"))
-    assert(all.contains(root))
-    assert(all.sizeIs > 1)
+    assert(all.functions.contains(root))
+    assert(all.functions.sizeIs > 1)
   }
 }

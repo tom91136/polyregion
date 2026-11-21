@@ -15,7 +15,9 @@ wired into both frontends as the fallback resolver for a callee with no javac tr
 - `static` methods, and instance methods that never read their receiver. The second case is not a
   convenience: every method on a Scala `object` has exactly that shape, so without it no scalac
   output could be lowered at all.
-- Parameters and return types that are primitives or arrays of primitives.
+- Parameters and return types that are primitives or arrays of primitives. A parameter may also be an object of a
+  class outside the JDK, passed as a `Ptr(Struct, Private)`, the convention of javalang's own callees. An object is
+  never returned: its storage is the frame of the method that built it.
 - Numeric constants of every primitive width.
 - Locals, including slots reused at different types and the temporaries Vineflower synthesises.
 - Arithmetic: `+ - * / %` and unary `-` for `int`, `long`, `float`, `double`.
@@ -44,6 +46,22 @@ Two places where the JVM's semantics are reproduced exactly, because getting the
 - `>>>` is lowered as a cast to `IntU32`/`IntU64`, a `BZSR`, and a cast back, so the sign bit cannot
   be dragged into the result.
 
+- Instance fields. `getfield` and `putfield` on an object parameter or a local object become a `Deref` and `Field`
+  path on the pointer, including `+=` and `++`. The layout is `ClassLayouts.structOf`: the instance fields the class
+  file declares, in order, without synthetic ones, and without any field the layout cannot carry (objects and arrays
+  of objects), which is refused where it is accessed. A class javac has a symbol for gets its struct from
+  `JavaTyper.lowerStruct` instead and keeps it: `TreeRemapper` only adds bytecode structs for names it has none for,
+  and names follow javac (`Outer.Inner` for a member class).
+- Allocation. `new C(args)` for a class whose superclass is `Object` is a zeroed stack struct, a reference to it,
+  and a call to the constructor lowered as `C.<init>(this, args)`, with `this(...)` delegation as a plain call and
+  `super()` to `Object` dropped. `new T[n]` and `new T[] {...}` of a primitive `T` is a global `Alloc`; zero fill is
+  `ZeroAlloc`'s and an escaping array is `EscapeAnalysis`'s refusal (`allocation ... escapes: ...`). Objects never
+  reach the heap, so the ways one could escape (return, a field, an array of objects, a static) are refused
+  by type where they occur.
+- Lambdas. A `LambdaMetafactory` call site over a static method (every non-capturing lambda, and a capturing one
+  that does not use `this`, and `Math::abs`-style references) binds a closure to the local it is assigned to. The
+  interface method called on it becomes a call to the body with the captured values first. A functional value
+  that is stored, passed, returned, or called through any other interface method is refused.
 - Static calls. A call to a static method is lowered to an `Invoke` of `owner.name`, and the callee is
   lowered from its own class file in turn (`BytecodeResolver.resolve` walks the closure, deduplicated by
   owner, name and descriptor). Overloads share a symbol and differ by signature.
@@ -166,9 +184,9 @@ Every refusal names the construct in the user's vocabulary, not as an opcode num
 | Construct | Diagnostic |
 | --- | --- |
 | instance method using `this` | ``` `Owner.m` is not static and uses its receiver; instance methods need a receiver struct ``` |
-| non-static call | ``` Unsupported call `Owner.callee(I)I` ``` |
-| field access | ``` Unsupported field access `Owner.field` ``` |
-| allocation | ``` Unsupported array allocation of `int[]` ``` |
+| call through a receiver | ``` Unsupported call `Owner.callee(I)I`; a call through a receiver needs the receiver's class, which the bytecode tier cannot resolve statically ``` |
+| static field, or a field the layout cannot carry | ``` Unsupported field access `Owner.field`; static fields have no device storage ``` |
+| allocation | ``` Unsupported multi-dimensional array allocation of `int[][]` ```, ``` Unsupported allocation of `Owner$C`: its superclass `B` carries layout the struct has no room for ``` |
 | `xs.length` | ``` Unsupported `length` of an array; PolyRegion carries array lengths as separate arguments ``` |
 | `switch` | ``` Unsupported `switch` ``` |
 | `try`/`catch`, `finally` | ``` Unsupported `try`/`catch`; PolyRegion kernels cannot throw ``` |
@@ -177,12 +195,15 @@ Every refusal names the construct in the user's vocabulary, not as an opcode num
 | `String` constant or concatenation | ``` Unsupported `String` constant; PolyRegion has no device-side String ``` |
 | `instanceof` | ``` Unsupported `instanceof`; PolyRegion has no device heap ``` |
 | null comparison | ``` Unsupported `null`; PolyRegion has no device heap ``` |
-| non-primitive type | ``` Cannot lower the JVM type `java.util.List`; only primitives and their arrays travel to a device ``` |
+| non-primitive type | ``` Cannot lower the JVM type `java.util.List`; only primitives, their arrays and classes outside the JDK travel to a device ``` |
+| returned object | ``` Cannot lower `Owner.m()LC;`: an object of `C` cannot be returned, its storage ends with the call ``` |
+| functional value that is stored, passed or returned | ``` A functional value has no device representation, so it only lowers where it is called directly in the method that creates it ``` |
 | unstructurable method | ``` Vineflower could not recover structured control flow for `Owner.m`; the method keeps an unstructured region ``` |
 | decompiler warning | ``` Vineflower reported <comment> while decompiling `Owner.m` ``` |
 
-A lambda is refused at its functional interface type rather than at its bootstrap method, because the
-`invokedynamic` has already become a value of that type by the time the tree is handed over.
+A lambda that is not called where it is made is refused where its value is used: Vineflower hands over the
+call site as a dynamic `InvocationExprent` carrying its bootstrap method and arguments, so no class-level
+pipeline is needed to read the target.
 
 The last two rows are the ones that matter for trusting the rest. Vineflower reports a structuring
 failure by leaving a `GeneralStatement` in the tree, and reports anything else it is unhappy about by
@@ -353,11 +374,10 @@ bytecode-specific:
 
 A lambda's call site names `LambdaMetafactory.metafactory` or `altMetafactory` as its bootstrap, and
 the class file's `BootstrapMethods` attribute already carries the implementation `MethodHandle` as a
-static argument, so the target is resolvable without running the bootstrap. Under Vineflower the
-resolution has already happened: `LambdaProcessor` turns the call site into a `ClassNode` of type
-`LAMBDA` carrying `content_method_name` and `content_method_descriptor`, which is the method to lower
-and inline. That processor is part of `ClassesProcessor`, not of `codeToJava`, so taking this path
-means running enough of the class-level pipeline to have the lambda nodes.
+static argument, so the target is resolvable without running the bootstrap. `codeToJava` keeps the call
+site as a dynamic invocation whose bootstrap arguments are the interface method type and the handle;
+`BytecodeRemapper` reads the handle, requires a static implementation, and lowers the call to the interface
+method as a call to it. `LambdaProcessor` and the rest of `ClassesProcessor` are not involved.
 
 Refused by name, with the reason:
 

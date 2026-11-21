@@ -14,6 +14,18 @@ object Scalar {
     case _         => None
   }
 
+  def zero(tpe: p.Type): Option[p.Term] = tpe match {
+    case p.Type.Bool1   => Some(p.Term.Bool1Const(false))
+    case p.Type.IntS8   => Some(p.Term.IntS8Const(0))
+    case p.Type.IntS16  => Some(p.Term.IntS16Const(0))
+    case p.Type.IntU16  => Some(p.Term.IntU16Const(0.toChar))
+    case p.Type.IntS32  => Some(p.Term.IntS32Const(0))
+    case p.Type.IntS64  => Some(p.Term.IntS64Const(0L))
+    case p.Type.Float32 => Some(p.Term.Float32Const(0f))
+    case p.Type.Float64 => Some(p.Term.Float64Const(0d))
+    case _              => None
+  }
+
   def constant(tpe: p.Type): Option[Scalar => p.Term] = tpe match {
     case p.Type.Bool1   => Some(n => p.Term.Bool1Const(n.toInt != 0))
     case p.Type.IntS8   => Some(n => p.Term.IntS8Const(n.toInt.toByte))
