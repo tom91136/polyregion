@@ -176,10 +176,11 @@ struct Transaction {
   void end() {
     if (const auto ended = std::exchange(context, nullptr); ended) check(polyrt_context_release(ended));
   }
-  void fail() {
-    if (const auto ended = std::exchange(context, nullptr); ended) polyrt_context_release_failed(ended);
+  std::string fail() {
+    if (const auto ended = std::exchange(context, nullptr); ended && !polyrt_context_release_failed(ended)) return polyrt_error_message();
+    return {};
   }
-  ~Transaction() { fail(); }
+  ~Transaction() { (void)fail(); }
 };
 
 struct HostFailures {
@@ -535,8 +536,9 @@ void Context::callHost0(JNIEnv *env, jclass, jlong context,                     
     const HostFailures raising;
     if (!host.queue->invokeEntryBlocking(program, symbol, types, std::move(bytes)))
       throw std::runtime_error("Host program `" + program + "` has no entry `" + symbol + "`");
-    if (raisedAssert.raised) transaction.fail();
-    else transaction.end();
+    if (raisedAssert.raised) {
+      if (const auto released = transaction.fail(); !released.empty()) raisedAssert.message += "; release after failure: " + released;
+    } else transaction.end();
     raiseAssert(env);
   });
 }

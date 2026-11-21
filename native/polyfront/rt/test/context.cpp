@@ -393,6 +393,18 @@ TEST_CASE("a failed transaction releases the allocations its program still owns"
   CHECK(live() == 0);
 }
 
+TEST_CASE("a failed release still reports a pending mirror refusal") {
+  const auto host = find(RelocatableBackend);
+  REQUIRE(host);
+  Created created(host);
+  REQUIRE(polyrt_context_acquire(created.context));
+  REQUIRE(polyregion::polyrt::sma::foreignContextActive("probe"));
+  CHECK_FALSE(polyrt_context_release_failed(created.context));
+  CHECK(lastError().find("created context") != std::string::npos);
+  REQUIRE(polyrt_context_acquire(created.context));
+  CHECK(polyrt_context_release(created.context));
+}
+
 TEST_CASE("destroying a context that was not created reports an error") {
   CHECK_FALSE(polyrt_context_destroy(nullptr));
   CHECK_FALSE(lastError().empty());
