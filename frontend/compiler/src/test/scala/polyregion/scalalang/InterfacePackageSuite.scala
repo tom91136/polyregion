@@ -8,10 +8,10 @@ import java.util.Comparator
 
 class InterfacePackageSuite extends munit.FunSuite {
 
-  private val libraryPath = Option(System.getenv("POLYFRONT_LIBRARY_PATH")).map(_.trim).filter(_.nonEmpty)
+  private val libraryPath = Option(System.getProperty("polyregion.library.path")).map(_.trim).filter(_.nonEmpty)
 
   override def beforeEach(context: BeforeEach): Unit =
-    assume(libraryPath.isDefined, "POLYFRONT_LIBRARY_PATH does not point at a dist package directory")
+    assume(libraryPath.isDefined, "no package directory is available")
 
   private def load(name: String, capabilities: Set[String] = Set.empty): p.Package =
     InterfaceResolver

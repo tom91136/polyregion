@@ -274,9 +274,6 @@ test-scala *args='':
     for package_service in "$PWD/native/polyc/libpolypass.so" "$PWD/native/polyc/libpolypass.dylib" "$PWD/native/polyc/libpolypass.dll"; do
         if [ -s "$package_service" ]; then export POLYPASS_PLUGINS="${POLYPASS_PLUGINS:-$package_service}"; break; fi
     done
-    if [ -z "${POLYFRONT_LIBRARY_PATH:-}" ] && [ -d "{{ dist_dir }}/lib/polyregion/packages" ]; then
-        export POLYFRONT_LIBRARY_PATH="{{ dist_dir }}/lib/polyregion/packages"
-    fi
     cd frontend && {{ sbt }} 'pass/testFull' 'codegen/testFull' 'compiler/testFull' 'runtime-scala/testFull' 'ewgen/testFull' 'compiler-testsuite-scala/testFull' {{ args }}
 
 # Run the native ctest suite; device targets skip without a GPU/emulator. Extra ctest flags via *args.

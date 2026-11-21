@@ -37,12 +37,44 @@ def envValue(name: String): Option[String] = sys.env.get(name).map(_.trim).filte
 def envList(name: String): Option[Seq[String]] =
   envValue(name).map(_.split(',').toSeq.map(_.trim).filter(_.nonEmpty)).filter(_.nonEmpty)
 
-def polyregionSettings(defaultTargets: Seq[String] = Seq("host@native")) = Seq(
-  polyregionTargets      := envList("POLYREGION_TARGETS").getOrElse(defaultTargets),
-  polyregionOpt          := envValue("POLYREGION_OPT").getOrElse("O2"),
-  polyregionJit          := envValue("POLYREGION_JIT").exists(_.toBooleanOption.contains(true)),
-  polyregionLibraryPath  := envValue("POLYFRONT_LIBRARY_PATH").getOrElse(""),
-  polyregionCapabilities := envList("POLYFRONT_LIBRARY_CAPABILITIES").getOrElse(Nil),
+def defaultDist: File = {
+  val os = sys.props("os.name").toLowerCase
+  val arch = envValue("POLYREGION_ARCH").orElse(envValue("ARCH")).getOrElse {
+    sys.props("os.arch") match {
+      case "amd64" | "x86_64"              => "x86_64"
+      case "aarch64" if os.contains("mac") => "arm64"
+      case other                           => other
+    }
+  }
+  val kind = if (os.contains("windows") || envValue("POLYREGION_LLVM_DYLIB").contains("OFF")) "static" else "dylib"
+  nativeDir / "out" / s"polyregion-${envValue("BUILD_TYPE").getOrElse("Release")}-$arch-$kind-dist"
+}
+
+def distPackageRoots: Option[String] = {
+  val nativeLibDirs = envValue("POLYREGION_NATIVE_LIB_DIR").toSeq.flatMap(_.split(java.io.File.pathSeparator))
+  (nativeLibDirs.map(dir => file(dir.trim)) :+ (defaultDist / "lib"))
+    .map(_ / "polyregion" / "packages")
+    .find(_.isDirectory)
+    .map(_.getAbsolutePath)
+}
+
+def packageCapabilities(roots: String): Seq[String] =
+  Option(file(roots).listFiles()).toSeq.flatten.sortBy(_.getName).map(_ / "capabilities").filter(_.isFile).flatMap {
+    manifest =>
+      IO.read(manifest).split(',').toSeq.map(_.trim).filter(_.nonEmpty)
+  }
+
+lazy val polyregionLibrarySettings = Seq(
+  polyregionLibraryPath := envValue("POLYFRONT_LIBRARY_PATH").orElse(distPackageRoots).getOrElse(""),
+  polyregionCapabilities := envList("POLYFRONT_LIBRARY_CAPABILITIES").getOrElse(
+    packageCapabilities(polyregionLibraryPath.value)
+  )
+)
+
+def polyregionSettings(defaultTargets: Seq[String] = Seq("host@native")) = polyregionLibrarySettings ++ Seq(
+  polyregionTargets := envList("POLYREGION_TARGETS").getOrElse(defaultTargets),
+  polyregionOpt     := envValue("POLYREGION_OPT").getOrElse("O2"),
+  polyregionJit     := envValue("POLYREGION_JIT").exists(_.toBooleanOption.contains(true)),
   scalacOptions += {
     val settings =
       polyregionTargets.value.map(target => s"polyregion.targets=$target") ++
@@ -161,6 +193,10 @@ lazy val `runtime-scala` = project
     commonSettings,
     polyregionSettings(),
     name := "runtime-scala",
+    Test / unmanagedSources / excludeFilter := {
+      val base = (Test / unmanagedSources / excludeFilter).value
+      if (polyregionLibraryPath.value.isEmpty) base || "OffloadSurface.scala" else base
+    },
     javacOptions ++= Seq("-proc:none"),
     Test / fork              := true,
     Test / parallelExecution := false,
@@ -470,7 +506,10 @@ lazy val pass = (projectMatrix in file("pass"))
 lazy val compiler = project
   .settings(
     commonSettings,
-    name                := "compiler",
+    polyregionLibrarySettings,
+    name        := "compiler",
+    Test / fork := true,
+    Test / javaOptions += s"-Dpolyregion.library.path=${polyregionLibraryPath.value}",
     assembly / artifact := (assembly / artifact).value.withClassifier(Some("assembly")),
     javacOptions ++= Seq("-proc:none"),
     scalacOptions ~= (_.filterNot(_.startsWith("-release:"))),
