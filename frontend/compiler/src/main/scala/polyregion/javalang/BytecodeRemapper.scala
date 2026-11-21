@@ -75,7 +75,10 @@ object BytecodeRemapper {
   private def descend(s: Statement): List[Statement] = s :: stats(s).flatMap(descend(_))
 
   private def isJump(e: StatEdge): Boolean =
-    e.explicit && e.getType != StatEdge.TYPE_REGULAR && !e.getDestination.isInstanceOf[DummyExitStatement]
+    e.explicit && e.getType != StatEdge.TYPE_REGULAR && (e.getDestination match {
+      case _: DummyExitStatement => false
+      case _                     => true
+    })
 
   private def exitEdge(s: Statement): Option[StatEdge] =
     s.getSuccessorEdges(Statement.STATEDGE_DIRECT_ALL).asScala.toList match {
@@ -84,8 +87,10 @@ object BytecodeRemapper {
     }
 
   // PolyAST's Break only leaves the innermost loop, so a non-loop statement that jumps close on becomes a run-once block
-  private def needsBlock(s: Statement): Boolean =
-    !s.isInstanceOf[DoStatement] && s.getLabelEdges.asScala.exists(isJump(_))
+  private def needsBlock(s: Statement): Boolean = s match {
+    case _: DoStatement => false
+    case _              => s.getLabelEdges.asScala.exists(isJump(_))
+  }
 
   // for and do..while run their condition and increment after the body, so continues route through the jump register
   private def hasTail(d: DoStatement): Boolean =
@@ -681,7 +686,7 @@ object BytecodeRemapper {
         affinity = p.Function.Affinity.Offload
       ),
       body = prologue.toList ++ copies ++ body ++ Option.when(
-        rtn == p.Type.Unit0 && !body.lastOption.exists(_.isInstanceOf[p.Stmt.Return])
+        rtn == p.Type.Unit0 && !body.lastOption.exists { case _: p.Stmt.Return => true; case _ => false }
       )(
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       ),

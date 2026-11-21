@@ -76,7 +76,10 @@ object Census {
     s"${e.getClass.getName}: ${Option(e.getMessage).getOrElse("")}$frame"
   }
 
-  def isRefusal(e: Throwable): Boolean = e.isInstanceOf[CompilerException]
+  def isRefusal(e: Throwable): Boolean = e match {
+    case _: CompilerException => true
+    case _                    => false
+  }
 
   def locate(marker: Class[?]): File =
     Paths.get(marker.getProtectionDomain.getCodeSource.getLocation.toURI).toFile

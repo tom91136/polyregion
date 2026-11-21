@@ -124,7 +124,7 @@ object Vineflower {
   // a structuring failure is a GeneralStatement in the tree, anything else a comment on the root
   private def diagnose(m: Method): Result[Unit] = {
     val comments = Option(m.root.commentLines).fold(List.empty[String])(_.asScala.toList)
-    if (walk(m.root).exists(_.isInstanceOf[GeneralStatement]))
+    if (walk(m.root).exists { case _: GeneralStatement => true; case _ => false })
       (s"Vineflower could not recover structured control flow for `${m.cl.qualifiedName}.${m.mt.getName}`; " +
         "the method keeps an unstructured region").fail
     else if (comments.nonEmpty)
