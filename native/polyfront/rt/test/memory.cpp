@@ -127,6 +127,7 @@ struct StubQueue final : object::ObjectDeviceQueue {
   bool failInvoke = false;
   bool mutateFirstPointer = false;
   bool raiseAssert = false;
+  bool failWait = false;
   std::vector<Type> invokedTypes;
   std::vector<std::byte> invokedData;
   uintptr_t firstPointer = 0;
@@ -150,6 +151,7 @@ struct StubQueue final : object::ObjectDeviceQueue {
   }
   void enqueueWaitBlocking() override {
     operations += 'W';
+    if (failWait) throw std::runtime_error("injected wait failure");
     ObjectDeviceQueue::enqueueWaitBlocking();
   }
   bool quiescent() override { return idle; }
@@ -522,6 +524,26 @@ TEST_CASE("mirror tables refuse a transaction on a created context") {
     CHECK_FALSE(polyregion::polyrt::sma::foreignContextActive("inside"));
     REQUIRE(polyrt_context_release(&context));
   }
+}
+
+TEST_CASE("a failed settle after a remote failure joins both messages") {
+  WithStubDevice device(false, false);
+  WithStubManagedPlatform platform;
+  StubQueue queue(std::chrono::seconds(1));
+  polyregion::polyrt::ExecutionContext context{polyregion::polyrt::currentPlatform.get(), device.stub, &queue};
+  REQUIRE(polyrt_context_acquire(&context));
+  const auto previous = polyrt_raise_host_failures(true);
+  CHECK_FALSE(polyrt_remote_malloc(&context, 8, nullptr));
+  const std::string original = polyrt_error_message();
+  REQUIRE_FALSE(original.empty());
+  queue.failWait = true;
+  CHECK(polyrt_remote_failed());
+  const std::string joined = polyrt_error_message();
+  CHECK(joined.starts_with(original + "; settle after failure: "));
+  CHECK(joined.find("injected wait failure") != std::string::npos);
+  queue.failWait = false;
+  polyrt_raise_host_failures(previous);
+  CHECK(polyrt_context_release(&context));
 }
 
 TEST_CASE("failed mirror cleanup is retried by the next transaction") {
