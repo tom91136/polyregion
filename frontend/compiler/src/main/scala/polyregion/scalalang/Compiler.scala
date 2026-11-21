@@ -1038,6 +1038,11 @@ object Compiler {
         log
       )
     )
+    candidatesWithoutDef = dispatchTags.keys.filterNot(unopt.defs.map(_.name).toSet).toList
+    _ <-
+      if (candidatesWithoutDef.isEmpty) ().success
+      else
+        s"Devirtualisation candidates without a struct definition: ${candidatesWithoutDef.map(_.repr).mkString(", ")}".fail
     _ = log.info(
       s"Program compiled (unpot), structures = ${unopt.defs.size}, functions = ${unopt.functions.size}"
     )

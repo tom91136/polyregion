@@ -34,6 +34,14 @@ object DevirtSuite {
   case class Plain(n: Int) extends Sized { def size: Int = n }
   case class Box[T](v: T)  extends Sized { def size: Int = 1 }
 
+  sealed trait Held {
+    def size: Int
+  }
+  case class Direct(n: Int) extends Held { def size: Int = n }
+  class Holder[T] {
+    class Inner extends Held { def size: Int = 1 }
+  }
+
   abstract class Gauge {
     def read(x: Int): Int
   }
@@ -182,6 +190,24 @@ class DevirtSuite extends munit.FunSuite {
     )
     assert(errors.contains("Cannot devirtualise generic candidate classes"), errors)
     assert(errors.contains("DevirtSuite$.Box"), errors)
+  }
+
+  test("a class nested in a generic outer class is rejected as a candidate") {
+    val errors = compileErrors(
+      """{
+        val xs  = mutable.ListBuffer[Held](Direct(1), Direct(2))
+        val out = Buffer.ofDim[Int](2)
+        launch(null) {
+          var i = 0
+          while (i < 2) {
+            out(i) = xs(i).size
+            i += 1
+          }
+        }
+      }"""
+    )
+    assert(errors.contains("Cannot devirtualise generic candidate classes"), errors)
+    assert(errors.contains("Holder"), errors)
   }
 
   cases("host", host)
