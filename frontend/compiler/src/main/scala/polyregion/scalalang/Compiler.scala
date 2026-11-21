@@ -5,7 +5,7 @@ import polyregion.ast.Traversal.*
 import polyregion.ast.pass.*
 import polyregion.ast.{PolyAST as p, *, given}
 import polyregion.intrinsic.IntrinsicTable
-import polyregion.javalang.{BytecodeResolver, Natives}
+import polyregion.javalang.BytecodeResolver
 import polyregion.prism.{Prism, PrismTables}
 
 import java.nio.file.Paths
@@ -116,7 +116,10 @@ object Compiler {
       }
   }
 
-  // a Java static method has no TASTy, so the bytecode tier lowers it from its class file unless an intrinsic covers it
+  // Intrinsify replaces calls to these with an allocation, so the ClassTag bodies behind them are never needed
+  private val ArrayAllocators = Set("scala.Array$.ofDim", "scala.runtime.Arrays$.newGenericArray")
+
+  // a Java static method has no TASTy, so the bytecode tier lowers it from its class file
   private def bytecodeFallback(using
       q: Quoted
   )(
@@ -125,24 +128,25 @@ object Compiler {
       target: p.Expr.Invoke
   ): Option[Result[List[p.Function]]] = {
     val flags = sym.flags
-    Option
-      .when(flags.is(q.Flags.JavaDefined) && flags.is(q.Flags.JavaStatic))(deriveSignature(defDef).toOption)
-      .flatten
-      .filter(sig => (sig.rtn :: sig.args).forall(BytecodeResolver.lowerable))
-      .map { signature =>
-        val bytes = BytecodeResolver.loaderClasses(getClass.getClassLoader, ClassLoader.getSystemClassLoader)
-        for {
-          owner <- BytecodeResolver.locate(sym.owner.fullName.stripSuffix("$"), bytes)
-          ref   <- BytecodeResolver.descriptorFor(owner, sym.name, signature.args, signature.rtn, bytes)
-          lowered <-
-            if (Natives.covered(ref)) Nil.success
-            else BytecodeResolver.resolve(List(ref), bytes)
-        } yield lowered match {
-          case plain :: _ if plain.name != target.calleeName =>
-            BytecodeResolver.callableAs(plain, target.calleeName, None) :: lowered
-          case _ => lowered
+    Option.when(flags.is(q.Flags.JavaDefined) && flags.is(q.Flags.JavaStatic)) {
+      for {
+        signature <- deriveSignature(defDef)
+        _ <- (signature.rtn :: signature.args).filterNot(BytecodeResolver.lowerable) match {
+          case Nil => ().success
+          case unfit =>
+            (s"Cannot lower the Java static `${sym.fullName}` from its class file: " +
+              s"${unfit.map(_.repr).mkString(", ")} cannot travel to a device, only primitives and their arrays can").fail
         }
+        bytes = BytecodeResolver.loaderClasses(getClass.getClassLoader, ClassLoader.getSystemClassLoader)
+        owner   <- BytecodeResolver.locate(sym.owner.fullName.stripSuffix("$"), bytes)
+        ref     <- BytecodeResolver.descriptorFor(owner, sym.name, signature.args, signature.rtn, bytes)
+        lowered <- BytecodeResolver.resolveRoot(ref, bytes)
+      } yield {
+        val (root, closure) = lowered
+        if (root.name != target.calleeName) BytecodeResolver.callableAs(root, target.calleeName, None) :: closure
+        else closure
       }
+    }
   }
 
   def compileAllDependencies(using
@@ -198,7 +202,8 @@ object Compiler {
                     // receivers directly at IR level. So just skip compiling these - they'll never
                     // be called as functions.
                     // intrinsics stubs are likewise replaced by Intrinsify at their call sites.
-                    val isScalaArrayMethod = sym.maybeOwner.fullName == "scala.Array"
+                    val isScalaArrayMethod =
+                      sym.maybeOwner.fullName == "scala.Array" || ArrayAllocators.contains(sym.fullName)
                     val isIntrinsicStub = sym.maybeOwner.fullName.stripSuffix("$") == "polyregion.scalalang.intrinsics"
                     if (isScalaArrayMethod || isIntrinsicStub)
                       (xs, depss, clsDepss, moduleSymDepss).success

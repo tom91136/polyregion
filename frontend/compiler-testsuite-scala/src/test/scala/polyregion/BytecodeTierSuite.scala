@@ -18,6 +18,8 @@ class BytecodeTierSuite extends BaseSuite {
   testExpr("jdk-signum")(java.lang.Integer.signum(-9))
   testExpr("jdk-compare")(java.lang.Integer.compare(-9, 3))
   testExpr("jdk-floor-mod")(java.lang.Math.floorMod(-7, 3))
+  testExpr("jdk-math-without-entry")(java.lang.Math.getExponent(1536.5))
+  testExpr("jdk-math-without-entry-nested")(java.lang.Math.nextUp(-0.15625))
 
   testExpr("nested")(Kernels.clampTwice(9, 0, 4))
   testExpr("recursive")(Kernels.gcd(84, 36))
@@ -51,6 +53,45 @@ class BytecodeTierSuite extends BaseSuite {
     """)
     assert(
       errors.exists(m => m.message.contains("Kernels.throwing") && m.message.contains("throw")),
+      errors.map(_.message).mkString("\n")
+    )
+  }
+
+  test("a math method without an entry that reaches unsupported bytecode is refused by key") {
+    val errors = typeCheckErrors("""
+      offload0(using AssertTarget.Offload) { java.lang.Math.IEEEremainder(1.0, 2.0); () }
+    """)
+    assert(
+      errors.exists(m =>
+        m.message.contains("unsupported JVM intrinsic java/lang/StrictMath.IEEEremainder(DD)D") && m.message.contains(
+          "native"
+        )
+      ),
+      errors.map(_.message).mkString("\n")
+    )
+  }
+
+  test("a java static with a non-lowerable argument is refused") {
+    val errors = typeCheckErrors("""
+      val s = null.asInstanceOf[String]
+      offload0(using AssertTarget.Offload) { Kernels.labelLength(s); () }
+    """)
+    assert(
+      errors.exists(m =>
+        m.message.contains("Cannot lower") && m.message.contains("labelLength") && m.message.contains("String")
+      ),
+      errors.map(_.message).mkString("\n")
+    )
+  }
+
+  test("a java static with a non-lowerable result is refused") {
+    val errors = typeCheckErrors("""
+      offload0(using AssertTarget.Offload) { Kernels.label(); () }
+    """)
+    assert(
+      errors.exists(m =>
+        m.message.contains("Cannot lower") && m.message.contains("label") && m.message.contains("String")
+      ),
       errors.map(_.message).mkString("\n")
     )
   }

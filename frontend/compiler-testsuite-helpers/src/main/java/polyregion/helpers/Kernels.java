@@ -81,6 +81,14 @@ public final class Kernels {
     return Integer.signum(x) * Math.abs(x);
   }
 
+  public static String label() {
+    return "kernel";
+  }
+
+  public static int labelLength(String label) {
+    return label.length();
+  }
+
   public static void bump(int[] xs, int n) {
     for (int i = 0; i < n; i++) xs[i] = clamp(xs[i], 0, 3);
   }
