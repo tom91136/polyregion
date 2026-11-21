@@ -22,7 +22,10 @@
 
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/Bitcode/BitcodeReader.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/SHA256.h"
 #include "llvm/Support/ThreadPool.h"
@@ -514,6 +517,20 @@ polyast::Program namespaceRemoteEntries(polyast::Program program,
 }
 
 } // namespace
+
+std::vector<int8_t> compiler::package::bitcodeToObject(const std::vector<int8_t> &bitcode, const compiletime::Target target,
+                                                       const std::string &arch) {
+  initialise();
+  llvm::LLVMContext context;
+  const auto buffer = llvm::MemoryBuffer::getMemBuffer(llvm::StringRef(reinterpret_cast<const char *>(bitcode.data()), bitcode.size()),
+                                                       "host-program", false);
+  auto module = llvm::parseBitcodeFile(buffer->getMemBufferRef(), context);
+  if (!module) throw std::runtime_error("cannot read the host program bitcode: " + llvm::toString(module.takeError()));
+  auto compiled = backend::llvmc::compileModule(toLLVMBackendOptions(Options{.target = target, .arch = arch}).targetInfo(),
+                                                compiletime::OptLevel::O0, false, **module);
+  if (!compiled.binary) throw std::runtime_error("cannot compile the host program: " + compiled.messages);
+  return *compiled.binary;
+}
 
 compiler::package::Result<polyast::CompileBundle>
 compiler::package::compile(polyast::ProgramLinkRequest request, const compiletime::Target hostTarget, const std::string &hostArch,

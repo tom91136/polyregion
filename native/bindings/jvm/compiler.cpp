@@ -17,6 +17,8 @@
 #include "generated/compiler.h"
 #include "generated/mirror.h"
 #include "jni_utils.h"
+#include "package_compiler.hpp"
+#include "polyast_codec.h"
 
 static constexpr const char *EX = "polyregion/jvm/compiler/PolyregionCompilerException";
 
@@ -153,5 +155,107 @@ jbyteArray Compiler::loadPackage0(JNIEnv *env, jclass, jstring name, jstring roo
     if (!out) return out;
     env->SetByteArrayRegion(out, 0, jsize(bytes.size()), reinterpret_cast<const jbyte *>(bytes.data()));
     return out;
+  });
+}
+
+static ct::Target hostObjectTarget() {
+  switch (polyregion::backend::llvmc::defaultHostTriple().getArch()) {
+    case llvm::Triple::x86_64: return ct::Target::Object_LLVM_x86_64;
+    case llvm::Triple::aarch64: return ct::Target::Object_LLVM_AArch64;
+    case llvm::Triple::arm: return ct::Target::Object_LLVM_ARM;
+    default: return ct::Target::Object_LLVM_HOST;
+  }
+}
+
+jobjectArray Compiler::compileInterface0(JNIEnv *env, jclass, jstring name, jstring roots, jstring declaration, jstring entry,
+                                         jbyteArray request, jstring capabilities, jstring targets, jint stackDepth) {
+  return wrapException(env, EX, [&] {
+    namespace pkg = polyfront::package;
+    const auto fail = [](const std::vector<std::string> &errors) { throw std::runtime_error(errors | mk_string("\n")); };
+    const auto archive = pkg::loadPackage(fromJni(env, name), pkg::splitPackageRoots(fromJni(env, roots)));
+    if (!archive) fail(archive.errors);
+    const auto qualified = fromJni(env, declaration);
+    const auto headers = pkg::loadPackageHeaders(*archive.value, qualified);
+    if (!headers) fail(headers.errors);
+    const auto selection = pkg::mergeSelections({&*headers.value});
+
+    const auto configured = fromJni(env, capabilities) ^ split(',') ^ filter([](const auto &c) { return !c.empty(); });
+    std::vector<std::pair<ct::Target, std::string>> deviceTargets;
+    for (const auto &raw : fromJni(env, targets) ^ split(',')) {
+      if (raw.empty()) continue;
+      const auto separator = raw.find('@');
+      if (separator == std::string::npos || separator == 0)
+        throw std::invalid_argument("device profile must be <target>@<architecture>: " + raw);
+      const auto spec = ct::TargetSpec::findByName(std::string_view(raw).substr(0, separator));
+      if (!spec) throw std::invalid_argument("unknown device target: " + raw.substr(0, separator));
+      deviceTargets.emplace_back(spec->codegen, raw.substr(separator + 1));
+    }
+    const auto groups = pkg::capabilityGroups(configured, deviceTargets);
+
+    const auto requestBytes = fromJni<char>(env, request);
+    const auto entryName = fromJni(env, entry);
+    std::vector<polyast::CompileBundle> bundles;
+    for (const auto &group : groups) {
+      if (!pkg::satisfiable(*headers.value, qualified, group.capabilities)) {
+        bundles.emplace_back(polyast::CompileBundle({}, {}, {}, {pkg::unsatisfiedReason(group.capabilities)}, {}));
+        continue;
+      }
+      auto linkRequest =
+          polyast::programlinkrequest_from_msgpack(reinterpret_cast<const uint8_t *>(requestBytes.data()),
+                                                   reinterpret_cast<const uint8_t *>(requestBytes.data() + requestBytes.size()));
+      linkRequest.packages = selection;
+      linkRequest.capabilities = group.capabilities;
+      linkRequest.logicalAddressing = group.logicalAddressing;
+      const auto selected = cp::package::select(linkRequest);
+      if (!selected) fail(selected.errors);
+      for (auto &package : linkRequest.packages) {
+        const auto implementations = *selected.value | filter([&](const auto &selection) {
+          return package.interface.declarations ^ exists([&](const auto &d) { return d.name == selection.declaration; });
+        }) | map([](const auto &selection) { return selection.implementation; })
+                                     | to<std::unordered_set>();
+        auto hydrated = pkg::hydratePackage(*archive.value, package, implementations);
+        if (!hydrated) fail(hydrated.errors);
+        package = std::move(*hydrated.value);
+      }
+      auto compiled = cp::package::compile(std::move(linkRequest), hostObjectTarget(), "native", group.targets,
+                                           stackDepth == 0 ? std::optional<int>{} : std::optional<int>{stackDepth});
+      if (!compiled) fail(compiled.errors);
+      auto slice = pkg::sliceBundle(*compiled.value, entryName, {});
+      if (!slice) fail(slice.errors);
+      if (slice.value->unfit.empty())
+        slice.value->hostObject = cp::package::bitcodeToObject(compiled.value->hostObject, ct::Target::Object_LLVM_HOST, "native");
+      bundles.emplace_back(std::move(*slice.value));
+    }
+
+    auto *bytes = env->FindClass("[B");
+    auto *out = env->NewObjectArray(jsize(bundles.size()), bytes, nullptr);
+    for (size_t i = 0; i < bundles.size(); ++i) {
+      const auto encoded = polyast::compilebundle_to_msgpack(bundles[i]);
+      auto *array = env->NewByteArray(jsize(encoded.size()));
+      env->SetByteArrayRegion(array, 0, jsize(encoded.size()), reinterpret_cast<const jbyte *>(encoded.data()));
+      env->SetObjectArrayElement(out, jsize(i), array);
+      env->DeleteLocalRef(array);
+    }
+    return out;
+  });
+}
+
+jbyte Compiler::moduleTarget0(JNIEnv *env, jclass, jint kind, jint format) {
+  return wrapException(env, EX, [&] {
+    for (const auto target : magic_enum::enum_values<ct::Target>()) {
+      const auto candidate = runtime::moduleFormatOf(target);
+      if (candidate && static_cast<jint>(*candidate) == format && static_cast<jint>(runtime::targetPlatformKind(target)) == kind)
+        return static_cast<jbyte>(magic_enum::enum_integer(target));
+    }
+    throw std::runtime_error("No target produces a module of kind " + std::to_string(kind) + " and format " + std::to_string(format));
+  });
+}
+
+jbyte Compiler::targetByName0(JNIEnv *env, jclass, jstring name) {
+  return wrapException(env, EX, [&] {
+    const auto value = fromJni(env, name);
+    const auto spec = ct::TargetSpec::findByName(value);
+    if (!spec) throw std::runtime_error("Unknown target `" + value + "`");
+    return static_cast<jbyte>(magic_enum::enum_integer(spec->codegen));
   });
 }

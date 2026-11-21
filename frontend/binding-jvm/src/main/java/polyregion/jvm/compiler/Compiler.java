@@ -20,6 +20,20 @@ public final class Compiler implements AutoCloseable {
 
   private static native byte[] loadPackage0(String name, String roots, String capabilities);
 
+  private static native byte[][] compileInterface0(
+      String name,
+      String roots,
+      String declaration,
+      String entry,
+      byte[] request,
+      String capabilities,
+      String targets,
+      int stackDepth);
+
+  private static native byte moduleTarget0(int kind, int format);
+
+  private static native byte targetByName0(String name);
+
   private final NativeLibrary library;
 
   private Compiler(NativeLibrary library) {
@@ -59,6 +73,32 @@ public final class Compiler implements AutoCloseable {
 
   public byte[] loadPackage(String name, String roots, String capabilities) {
     return loadPackage0(name, roots, capabilities);
+  }
+
+  public byte[][] compileInterface(
+      String name,
+      String roots,
+      String declaration,
+      String entry,
+      byte[] request,
+      String capabilities,
+      String targets,
+      int stackDepth) {
+    return compileInterface0(
+        name, roots, declaration, entry, request, capabilities, targets, stackDepth);
+  }
+
+  public Target moduleTarget(int kind, int format) {
+    return target(moduleTarget0(kind, format));
+  }
+
+  public Target targetByName(String name) {
+    return target(targetByName0(name));
+  }
+
+  private static Target target(byte value) {
+    for (Target t : Target.VALUES) if (t.value == value) return t;
+    throw new IllegalStateException("No target has value " + value);
   }
 
   @Override

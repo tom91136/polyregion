@@ -29,4 +29,6 @@ struct Selection {
                                                      const std::vector<std::pair<compiletime::Target, std::string>> &deviceTargets,
                                                      std::optional<int> stackDepth = {});
 
+[[nodiscard]] std::vector<int8_t> bitcodeToObject(const std::vector<int8_t> &bitcode, compiletime::Target target, const std::string &arch);
+
 } // namespace polyregion::compiler::package
