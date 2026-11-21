@@ -10,10 +10,27 @@ import scala.scalanative.unsigned.*
 import scala.scalanative.libc.stdlib
 
 @extern private object BoehmGC {
-  def GC_gcollect_and_unmap(): Unit = extern
+  def GC_gcollect_and_unmap(): Unit                     = extern
+  def GC_allow_register_threads(): Unit                 = extern
+  def GC_thread_is_registered(): CInt                   = extern
+  def GC_get_stack_base(base: Ptr[Ptr[Byte]]): CInt     = extern
+  def GC_register_my_thread(base: Ptr[Ptr[Byte]]): CInt = extern
+  def GC_unregister_my_thread(): CInt                   = extern
 }
 
 object NativeBundle {
+
+  private def attached[A](body: => A): A = {
+    BoehmGC.GC_allow_register_threads()
+    if (BoehmGC.GC_thread_is_registered() != 0) body
+    else {
+      val base = stackalloc[Ptr[Byte]](2)
+      BoehmGC.GC_get_stack_base(base)
+      BoehmGC.GC_register_my_thread(base)
+      try body
+      finally BoehmGC.GC_unregister_my_thread()
+    }
+  }
 
   private val plugin: PluginEntry = DefaultPlugin
 
@@ -79,6 +96,14 @@ object NativeBundle {
 
   @exported(PolyPassAbi.RunPasses.Name)
   def runPasses(
+      steps: Ptr[CString],
+      inPtr: Ptr[Byte],
+      inLen: CSize,
+      outPtr: Ptr[Ptr[Byte]],
+      outLen: Ptr[CSize]
+  ): CInt = attached(runPassesAttached(steps, inPtr, inLen, outPtr, outLen))
+
+  private def runPassesAttached(
       steps: Ptr[CString],
       inPtr: Ptr[Byte],
       inLen: CSize,
@@ -160,7 +185,7 @@ object NativeBundle {
       inLen: CSize,
       outPtr: Ptr[Ptr[Byte]],
       outLen: Ptr[CSize]
-  )(operation: A => Either[List[String], B]): CInt = {
+  )(operation: A => Either[List[String], B]): CInt = attached {
     val status: CInt =
       try
         MsgPack.decode[MsgPack.Versioned[A]](readBytes(inPtr, inLen)) match {
