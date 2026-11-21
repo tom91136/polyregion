@@ -723,14 +723,21 @@ lazy val `compiler-testsuite-hip` =
     hipSuites ++ spectraSuiteBase
   )
 
-lazy val javaSuiteSettings = processorTracking ++ Seq(
-  autoScalaLibrary := false,
+lazy val javaSuiteSettings = processorTracking ++ polyregionLibrarySettings ++ Seq(
+  autoScalaLibrary  := false,
+  polyregionTargets := envList("POLYREGION_TARGETS").getOrElse(Seq("host@native", "cuda@sm_80")),
   javacOptions ++= (if (buildJdk >= 21) Seq("-proc:full") else Nil),
   javacOptions += "-Apolyregion.deferErrors=true",
+  javacOptions += s"-Apolyregion.targets=${polyregionTargets.value.mkString(",")}",
+  javacOptions ++= Some(polyregionLibraryPath.value).filter(_.nonEmpty).map(path => s"-Apolyregion.library.path=$path"),
+  javacOptions ++= Some(polyregionCapabilities.value)
+    .filter(_.nonEmpty)
+    .map(capabilities => s"-Apolyregion.library.capabilities=${capabilities.mkString(",")}"),
   (Test / javaHome)                      := Some(file(sys.props("java.home"))),
   libraryDependencies += "com.github.sbt" % "junit-interface" % "0.13.3" % Test,
   fork                                   := true,
   Test / javaOptions += "-ea",
+  Test / javaOptions += s"-Dpolyregion.platform=${envValue("POLYRT_PLATFORM").getOrElse("")}",
   Test / parallelExecution := false
 )
 
@@ -739,6 +746,15 @@ lazy val `compiler-testsuite-java` = project
     commonSettings,
     javaSuiteSettings,
     name := "compiler-testsuite-java",
+    Test / unmanagedSources ++= {
+      if (polyregionLibraryPath.value.isEmpty) Nil
+      else
+        Seq((ThisBuild / baseDirectory).value / ".." / "spectra" / "generated" / "java" / "polyregion" / "Spectra.java")
+    },
+    Test / unmanagedSources / excludeFilter := {
+      val base = (Test / unmanagedSources / excludeFilter).value
+      if (polyregionLibraryPath.value.isEmpty) base || "SpectraLaunchTest.java" else base
+    },
     Test / javaOptions += {
       val artefacts =
         Seq((`runtime-java` / Compile / classDirectory).value, (`binding-jvm` / Compile / classDirectory).value)

@@ -9,6 +9,7 @@ import polyregion.__UnsafeObject
 import polyregion.ast.*
 import polyregion.javalang.LambdaOutliner.collectTree
 import polyregion.javalang.Processor.addOpens
+import polyregion.scalalang.LaunchConfig
 
 import java.lang.reflect.*
 import javax.annotation.processing.*
@@ -122,7 +123,32 @@ class Processor extends AbstractProcessor {
   }
 
   override def getSupportedOptions: java.util.Set[String] =
-    java.util.Set.of[String](Processor.DeferErrorsOption, Processor.ProcessorDigestOption)
+    java.util.Set.of[String](
+      Processor.DeferErrorsOption,
+      Processor.ProcessorDigestOption,
+      LaunchConfig.TargetsKey,
+      LaunchConfig.OptKey,
+      LaunchConfig.RootsKey,
+      LaunchConfig.CapabilitiesKey
+    )
+
+  private def launchConfig: Either[String, LaunchConfig] = {
+    val options = processingEnv.getOptions.asScala
+    def listed(key: String, env: String): List[String] =
+      options.get(key).orElse(sys.env.get(env)).toList.flatMap(_.split(',')).map(_.trim).filter(_.nonEmpty)
+    val settings =
+      listed(LaunchConfig.TargetsKey, "POLYREGION_TARGETS").map(LaunchConfig.TargetsKey + "=" + _) ++
+        options.get(LaunchConfig.OptKey).map(LaunchConfig.OptKey + "=" + _) ++
+        options
+          .get(LaunchConfig.RootsKey)
+          .orElse(sys.env.get("POLYFRONT_LIBRARY_PATH"))
+          .filter(_.nonEmpty)
+          .map(LaunchConfig.RootsKey + "=" + _) ++
+        listed(LaunchConfig.CapabilitiesKey, "POLYFRONT_LIBRARY_CAPABILITIES").map(
+          LaunchConfig.CapabilitiesKey + "=" + _
+        )
+    LaunchConfig.fromSettings(settings)
+  }
 
   override def getSupportedAnnotationTypes: java.util.Set[String] =
     java.util.Collections.singleton[String]("*")
@@ -154,6 +180,39 @@ class Processor extends AbstractProcessor {
 
     // lowering rewrites a class declaration in place, so the lifted class keeps the tree seen after analysis
     private val classTrees = mutable.Map.empty[TypeElement, ClassTree]
+
+    private def report(label: String, failure: Throwable): Unit = {
+      val reason = s"[PolyRegion] Cannot $label: ${failure.getMessage}"
+      debug(failure)
+      if (!deferErrors) processingEnv.getMessager.printMessage(Diagnostic.Kind.ERROR, reason)
+      else processingEnv.getMessager.printMessage(Diagnostic.Kind.WARNING, reason)
+    }
+
+    private def emit(fqcn: String, label: String, compiled: Result[Offloader.Executable]): Unit = {
+      val at  = fqcn.lastIndexOf('.')
+      val pkg = fqcn.take(at)
+      val nm  = fqcn.drop(at + 1)
+      compiled match {
+        case Left(failure) =>
+          report(label, failure)
+          if (deferErrors)
+            Offloader.unsupported(fqcn, s"[PolyRegion] Cannot $label: ${failure.getMessage}") match {
+              case Right(stub) =>
+                writeClass(processingEnv, pkg, nm, stub.bytes)
+                generated += fqcn
+              case Left(stubError) =>
+                processingEnv.getMessager
+                  .printMessage(Diagnostic.Kind.ERROR, s"[PolyRegion] Cannot $label (and the stub failed: $stubError)")
+            }
+        case Right(exe) =>
+          exe.twins.foreach { twin =>
+            val i = twin.fqcn.lastIndexOf('.')
+            writeClass(processingEnv, twin.fqcn.take(math.max(i, 0)), twin.fqcn.drop(i + 1), twin.bytes)
+          }
+          writeClass(processingEnv, pkg, nm, exe.bytes)
+          generated += fqcn
+      }
+    }
 
     override def started(e: TaskEvent): Unit = {
       debug(s"[STARTED]  =>  $e $visited")
@@ -192,46 +251,36 @@ class Processor extends AbstractProcessor {
               .mkString("\n")
           )
 
+          val sources = TreeRemapper.Sources(processingEnv, trees, symbolTable.toMap, methodTable.toMap, localTrees)
+
           xs.filterNot(x => pool.contains(x._2)).foreach { case (cls: String, x: MethodTree) =>
             pool += x
 
-            val pkg  = "polyregion.$gen$"
             val name = s"${cls.replace('.', '$')}$$${x.getName}"
-            val fqcn = s"$pkg.$name"
+            val fqcn = s"${LaunchSite.PACKAGE}.$name"
             if (generated.contains(fqcn)) debug(s"Skip already generated $fqcn")
             else {
               debug(s"Write $fqcn")
-              guard(
-                Offloader.compile(
-                  TreeRemapper.Sources(processingEnv, trees, symbolTable.toMap, methodTable.toMap, localTrees),
-                  x,
-                  fqcn
-                )
-              ) match {
-                case Left(failure) =>
-                  val reason = s"[PolyRegion] Cannot offload $cls.${x.getName}: ${failure.getMessage}"
-                  debug(failure)
-                  if (!deferErrors) processingEnv.getMessager.printMessage(Diagnostic.Kind.ERROR, reason)
-                  else
-                    Offloader.unsupported(fqcn, reason) match {
-                      case Right(stub) =>
-                        processingEnv.getMessager.printMessage(Diagnostic.Kind.WARNING, reason)
-                        writeClass(processingEnv, pkg, name, stub.bytes)
-                        generated += fqcn
-                      case Left(stubError) =>
-                        processingEnv.getMessager
-                          .printMessage(Diagnostic.Kind.ERROR, s"$reason (and the stub failed: $stubError)")
-                    }
-                case Right(exe) =>
-                  exe.twins.foreach { twin =>
-                    val at = twin.fqcn.lastIndexOf('.')
-                    writeClass(processingEnv, twin.fqcn.take(math.max(at, 0)), twin.fqcn.drop(at + 1), twin.bytes)
-                  }
-                  writeClass(processingEnv, pkg, name, exe.bytes)
-                  generated += fqcn
-              }
+              emit(fqcn, s"offload $cls.${x.getName}", guard(Offloader.compile(sources, x, fqcn)))
             }
+          }
 
+          val regionImpls = xs.flatMap { case (_, m: JCTree.JCMethodDecl) => Option(m.sym).toList; case _ => Nil }.toSet
+          val sites       = guard(Either.catchNonFatal(LaunchSites.collect(scope))).getOrElse(Nil)
+          val nested      = sites.flatMap(LaunchSites.callables).toSet
+          sites.filterNot(site => site.within.exists(w => regionImpls(w) || nested(w))).foreach { site =>
+            val label = s"launch ${site.stub.owner}.${site.stub.name}"
+            guard(LaunchSites.nameOf(site)) match {
+              case Left(failure)                           => report(label, failure)
+              case Right(fqcn) if generated.contains(fqcn) => debug(s"Skip already generated $fqcn")
+              case Right(fqcn) =>
+                debug(s"Write $fqcn")
+                emit(
+                  fqcn,
+                  label,
+                  guard(launchConfig.leftMap(CompilerException(_)).flatMap(LaunchSites.compile(sources, _, site, fqcn)))
+                )
+            }
           }
 
         case _ =>

@@ -43,7 +43,7 @@ object Offloader {
   }
 
   // a class named only by a field never reaches a signature and would resolve to an opaque shell
-  private def withFieldStructs(
+  private[javalang] def withFieldStructs(
       program: p.Program,
       classTable: Map[String, TypeElement],
       outerRefs: Set[(String, String)]
@@ -289,12 +289,17 @@ object Offloader {
     }
   }
 
-  private def emitClass(fqcn: String, image: Array[Byte], descriptor: String): Result[Array[Byte]] =
+  private[javalang] def emitClass(
+      fqcn: String,
+      image: Array[Byte],
+      descriptor: String,
+      parent: Class[?] = classOf[BinaryOffloadExecutable]
+  ): Result[Array[Byte]] =
     Either.catchNonFatal {
       val chunks = java.util.Base64.getEncoder.encodeToString(image).grouped(ChunkSize).toList
       // unpinned, ByteBuddy stamps the build JVM's class-file version
       ByteBuddy(ClassFileVersion.JAVA_V8)
-        .subclass(classOf[BinaryOffloadExecutable])
+        .subclass(parent.asInstanceOf[Class[AnyRef]])
         .name(fqcn)
         .modifiers(Visibility.PUBLIC, TypeManifestation.FINAL)
         .defineField("$BINARY$", classOf[Array[Byte]], Visibility.PUBLIC, Ownership.STATIC, FieldManifestation.FINAL)
@@ -315,6 +320,28 @@ object Offloader {
     emitClass(fqcn, Array.emptyByteArray, UnsupportedMarker + reason.take(ReasonLimit))
       .map(Executable(fqcn, _))
 
+  private[javalang] def optimise(
+      region: TreeRemapper.Region,
+      raw: p.Program,
+      entry: p.Function,
+      symbol: String,
+      log: Log
+  ): Result[(Map[p.Sym, p.Sym], p.Program)] = {
+    val tagged    = region.tags.map((fqn, tag) => p.Sym(fqn) -> tag)
+    val decorated = raw.copy(defs = Devirtualise.decorate(raw.defs, region.owners, tagged), entry = Some(entry))
+    for {
+      named <- Either.catchNonFatal(Devirtualise(region.dispatch)(decorated, log))
+      (monoToPoly, prog) = runPasses(named, log)
+      failures           = Verify(prog, log, verifyFunction = false).filter(_._2.nonEmpty)
+      _ <-
+        if (failures.isEmpty) ().success
+        else
+          s"Verification failed for `$symbol`:\n${failures
+              .map((fn, es) => s"${fn.signatureKey}\n${es.map("  -> " + _).mkString("\n")}")
+              .mkString("\n")}".fail
+    } yield (monoToPoly, prog)
+  }
+
   def compile(sources: TreeRemapper.Sources, entry: MethodTree, fqcn: String): Result[Executable] = {
     import sources.{classTable, env}
     val log    = PluginEntry.defaultLog
@@ -325,19 +352,9 @@ object Offloader {
       rawEntry <- raw.entry.failIfEmpty(s"Region `$symbol` has no entry")
       resultTpe = rawEntry.rtn
       routed    = routeReturnThroughCapture(rawEntry.copy(decl = rawEntry.decl.copy(name = p.Sym(symbol))))
-      slots <- slotsOf(routed, region.captures, resultTpe != p.Type.Unit0)
-      tagged    = region.tags.map((fqn, tag) => p.Sym(fqn) -> tag)
-      decorated = raw.copy(defs = Devirtualise.decorate(raw.defs, region.owners, tagged), entry = Some(routed))
-      named <- Either.catchNonFatal(Devirtualise(region.dispatch)(decorated, log))
-      passed             = runPasses(named, log)
+      slots  <- slotsOf(routed, region.captures, resultTpe != p.Type.Unit0)
+      passed <- optimise(region, raw, routed, symbol, log)
       (monoToPoly, prog) = passed
-      failures           = Verify(prog, log, verifyFunction = false).filter(_._2.nonEmpty)
-      _ <-
-        if (failures.isEmpty) ().success
-        else
-          s"Verification failed for `$symbol`:\n${failures
-              .map((fn, es) => s"${fn.signatureKey}\n${es.map("  -> " + _).mkString("\n")}")
-              .mkString("\n")}".fail
       hosts = prog.defs.flatMap { d =>
         val original = monoToPoly.getOrElse(d.name, d.name)
         val fqn      = original.fqn.mkString(".")

@@ -48,7 +48,12 @@ object JavaInMemory {
   // Vineflower has no class file version ceiling, so fixtures track the running JDK
   val DefaultOptions: List[String] = List("-g")
 
-  def compile(className: String, code: String, options: List[String] = DefaultOptions): Loaded = {
+  def compile(
+      className: String,
+      code: String,
+      options: List[String] = DefaultOptions,
+      processors: List[javax.annotation.processing.Processor] = Nil
+  ): Loaded = {
     val javac = ToolProvider.getSystemJavaCompiler
     require(Option(javac).isDefined, "no system Java compiler; the tests need a JDK rather than a JRE")
     val outputs     = mutable.LinkedHashMap.empty[String, Output]
@@ -62,6 +67,7 @@ object JavaInMemory {
       absent,
       List[JavaFileObject](Source(className, code)).asJava
     )
+    if (processors.nonEmpty) task.setProcessors(processors.asJava)
     if (!task.call())
       sys.error(diagnostics.getDiagnostics.asScala.map(_.toString).mkString("javac failed:\n", "\n", ""))
     Loaded(outputs.map((k, v) => k -> v.bytes).toMap)
