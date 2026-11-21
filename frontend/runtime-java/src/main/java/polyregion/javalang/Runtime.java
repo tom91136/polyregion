@@ -65,7 +65,8 @@ public final class Runtime {
     OffloadExecutable exe;
     try {
       Class<? extends OffloadExecutable> cls =
-          Class.forName(name).asSubclass(OffloadExecutable.class);
+          Class.forName(name, true, region.getClass().getClassLoader())
+              .asSubclass(OffloadExecutable.class);
       try {
         exe = cls.getDeclaredConstructor().newInstance();
       } catch (InstantiationException

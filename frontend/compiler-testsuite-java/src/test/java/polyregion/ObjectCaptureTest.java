@@ -2,6 +2,7 @@ package polyregion;
 
 import org.junit.Test;
 import polyregion.javalang.OffloadFunction;
+import polyregion.jvm.twin.TwinException;
 
 public class ObjectCaptureTest extends BaseSuite {
 
@@ -284,7 +285,7 @@ public class ObjectCaptureTest extends BaseSuite {
     try {
       polyregion.javalang.Runtime.offload(region);
       org.junit.Assert.fail("expected the launch to reject an unknown implementation");
-    } catch (IllegalArgumentException e) {
+    } catch (TwinException e) {
       org.junit.Assert.assertTrue(
           e.getMessage(), e.getMessage().contains(hidden.getClass().getName()));
     }

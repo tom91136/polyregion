@@ -32,8 +32,11 @@ public class Jdk8RuntimeTest {
           "import polyregion.javalang.OffloadFunction;",
           "import polyregion.javalang.OffloadRunnable;",
           "import polyregion.javalang.Runtime;",
+          "import polyregion.jvm.twin.FieldAccess;",
           "",
           "public final class " + PROBE + " {",
+          "  static final class Hidden { private int secret = 3; }",
+          "  static final class Open { int a = 5; }",
           "  public static void main(String[] args) {",
           "    int a = 3;",
           "    int b = 4;",
@@ -43,10 +46,17 @@ public class Jdk8RuntimeTest {
           "    int[] xs = new int[4];",
           "    OffloadRunnable write = () -> { for (int i = 0; i < 4; i++) xs[i] = i * 2; };",
           "    Runtime.offload(write);",
+          "    Open open = new Open();",
+          "    OffloadRunnable touch = () -> { open.a *= 2; };",
+          "    Runtime.offload(touch);",
+          "    FieldAccess secret = FieldAccess.of(Hidden.class, \"secret\", \"I\");",
+          "    Hidden hidden = new Hidden();",
+          "    secret.set(hidden, (Integer) secret.get(hidden) + 1);",
           "    StringBuilder sb = new StringBuilder();",
           "    for (int i = 0; i < xs.length; i++) sb.append(i == 0 ? \"\" : \",\").append(xs[i]);",
           "    System.out.println(\"probe scalar=\" + Runtime.offload(scalar)",
-          "        + \" nested=\" + Runtime.offload(nested) + \" written=\" + sb);",
+          "        + \" nested=\" + Runtime.offload(nested) + \" written=\" + sb",
+          "        + \" objects=\" + hidden.secret + \",\" + open.a);",
           "  }",
           "}",
           "");
@@ -113,6 +123,6 @@ public class Jdk8RuntimeTest {
     String output = run(command);
     assertTrue(
         "Java 8 run did not produce the expected values:\n" + output,
-        output.contains("probe scalar=13 nested=5 written=0,2,4,6"));
+        output.contains("probe scalar=13 nested=5 written=0,2,4,6 objects=4,10"));
   }
 }

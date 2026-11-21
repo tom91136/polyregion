@@ -40,4 +40,14 @@ public class ThisCaptureTest extends BaseSuite {
   public void explicitThis() {
     assertMatchesJdk(() -> this.field + 1);
   }
+
+  @Test
+  public void receiverWithATrappingAssertion() {
+    assertTraps(
+        "field is 7",
+        () -> {
+          if (field == 7) throw new AssertionError("field is 7");
+          return field;
+        });
+  }
 }

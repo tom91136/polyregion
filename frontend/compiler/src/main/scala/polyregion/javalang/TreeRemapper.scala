@@ -81,7 +81,9 @@ object TreeRemapper {
     case PerRow(lens: p.Term)
   }
 
-  case class Region(program: p.Program, captures: List[Capture], tags: Map[String, Int])
+  case class Captured(name: String, capture: Capture)
+
+  case class Region(program: p.Program, captures: List[Captured], tags: Map[String, Int])
 
   case class LoopCtx(
       update: List[ExpressionStatementTree],
@@ -2007,7 +2009,7 @@ object TreeRemapper {
       deps: DepCollector,
       role: Role,
       plan: Option[Plan]
-  ): Result[(p.Function, List[JSymbol.VarSymbol])] = m match {
+  ): Result[(p.Function, List[JSymbol.VarSymbol], List[Captured])] = m match {
     case md: JCTree.JCMethodDecl =>
       JavaTyper.typer(md.sym.getReturnType).flatMap(compileBody(md, deps, role == Role.Entry, plan, _))
   }
@@ -2018,13 +2020,15 @@ object TreeRemapper {
       isEntry: Boolean,
       plan: Option[Plan],
       rtn: p.Type
-  ): Result[(p.Function, List[JSymbol.VarSymbol])] = {
+  ): Result[(p.Function, List[JSymbol.VarSymbol], List[Captured])] = {
     val receiver =
       if (md.sym.isStatic) None
       else
         Some(p.Arg(p.Named("this", passed(isEntry, p.Type.Struct(p.Sym(ownerName(md.sym)), Nil)))))
-    val scope  = Scope(deps, isEntry, plan, rtn, receiver.map(_.named))
-    val params = md.getParameters.asScala.toVector
+    val scope      = Scope(deps, isEntry, plan, rtn, receiver.map(_.named))
+    val params     = md.getParameters.asScala.toVector
+    val shift      = if (receiver.isDefined) 1 else 0
+    val argSources = mutable.ListBuffer.empty[Captured]
     for {
       typed <- params.toList.traverse { v =>
         deps.capturedClosures.get(declOf(v)).filter(_ => isEntry) match {
@@ -2040,6 +2044,7 @@ object TreeRemapper {
             val named = p.Named(scope.uniqueName(v.getName.toString), tpe)
             scope.locals.put(declOf(v), named)
             scope.paramOf.put(declOf(v), i)
+            argSources += Captured(named.symbol, Capture.Arg(i + shift))
             out += p.Arg(named)
         }
         out.toList
@@ -2062,6 +2067,7 @@ object TreeRemapper {
         lengths.foreach { (v, i) =>
           val named = p.Named(s"#len$i", p.Type.IntS32)
           scope.arrayLengths.put(declOf(v), p.Term.Select(named, Nil, p.Type.IntS32))
+          argSources += Captured(named.symbol, Capture.Length(i + shift))
           out += p.Arg(named)
         }
         out.toList
@@ -2074,6 +2080,7 @@ object TreeRemapper {
             if (isArrayOfArrays(jcType(v))) {
               val named = p.Named(s"#rowlen$i", rowLengthTpe)
               scope.rowLengths.put(declOf(v), RowLength.PerRow(p.Term.Select(named, Nil, named.tpe)))
+              argSources += Captured(named.symbol, Capture.RowLengths(i + shift))
               out += ((i, p.Arg(named)))
             }
           }
@@ -2111,7 +2118,9 @@ object TreeRemapper {
         fpMode = p.Function.FpMode.Relaxed,
         convention = if (isEntry) p.CallConvention.OffloadEntry else p.CallConvention.RegularCall
       ),
-      scope.staticFields.keys.toList
+      scope.staticFields.keys.toList,
+      receiver.map(r => Captured(r.named.symbol, Capture.Receiver)).toList ++ argSources ++
+        scope.staticFields.map((v, named) => Captured(named.symbol, Capture.StaticField(ownerName(v), v.name.toString)))
     )
   }
 
@@ -2132,8 +2141,8 @@ object TreeRemapper {
           calleeTree(sym).filter(bodied(_)) match {
             case Some(mt) =>
               compileMethod(mt, deps, Role.Callee, plan) match {
-                case Right((fn, _)) => go(seen + sym, fn :: compiled)
-                case Left(e)        => Left(e)
+                case Right((fn, _, _)) => go(seen + sym, fn :: compiled)
+                case Left(e)           => Left(e)
               }
             case None =>
               debug(s"[PolyAST] skip dependency (no reachable body): ${fullName(sym)}")
@@ -2214,7 +2223,6 @@ object TreeRemapper {
   def compileRegion(sources: Sources, entry: MethodTree): Result[Region] = {
     import sources.*
     val entrySym = methodDeclSym(entry)
-    val params   = entry.getParameters.asScala.toList
     val deps = DepCollector(
       localTrees,
       methodTable,
@@ -2230,7 +2238,7 @@ object TreeRemapper {
       _ <- compileTransitive(trees, deps, entrySym, plan = None)
       plan = Some(Plan(planStatics(deps), planLengths(deps)))
       entryAndStatics <- compileMethod(entry, deps, Role.Entry, plan)
-      (entryFn, statics) = entryAndStatics
+      (entryFn, _, captures) = entryAndStatics
       sourceFns   <- compileTransitive(trees, deps, entrySym, plan = plan)
       bytecodeFns <- BytecodeResolver.resolve(deps.bytecodeRoots.toList, deps.classBytes)
       depFns = IntrinsicTable.dedupe(sourceFns ++ bytecodeFns ++ deps.nativeFns.toList)
@@ -2245,19 +2253,6 @@ object TreeRemapper {
         JavaTyper.lowerStruct(elem, deps.taggedTypes.contains(elem.getQualifiedName.toString))
       }
       structs = signatureStructs ++ allocatedStructs
-      shift   = if (entryFn.receiver.isDefined) 1 else 0
-      captures =
-        (if (shift == 1) List(Capture.Receiver) else Nil) ++
-          params.zipWithIndex.collect {
-            case (v, i) if !deps.capturedClosures.contains(declOf(v)) => Capture.Arg(i + shift)
-          } ++
-          params.zipWithIndex.collect {
-            case (v, i) if jcType(v).getKind == TypeKind.ARRAY => Capture.Length(i + shift)
-          } ++
-          params.zipWithIndex.collect {
-            case (v, i) if isArrayOfArrays(jcType(v)) => Capture.RowLengths(i + shift)
-          } ++
-          statics.map(v => Capture.StaticField(ownerName(v), v.name.toString))
     } yield Region(p.Program(Some(entryFn), depFns, structs.distinct), captures, deps.tagOf.toMap)
   }
 }

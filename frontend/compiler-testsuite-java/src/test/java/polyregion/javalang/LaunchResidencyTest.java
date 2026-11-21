@@ -28,7 +28,8 @@ public class LaunchResidencyTest {
     assertEquals(Double.valueOf(5.5), Runtime.offload(f));
     Queue.Stats after = stats();
     long invalidated = after.invalidations - before.invalidations;
-    assertTrue(invalidated >= 2);
+    if (Context.current().sharedAddressSpace()) assertEquals(0, invalidated);
+    else assertTrue(invalidated >= 2);
     assertEquals(invalidated, after.releases - before.releases);
   }
 

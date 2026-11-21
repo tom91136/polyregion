@@ -11,10 +11,15 @@ import net.bytebuddy.jar.asm.{MethodVisitor, Opcodes}
 import net.bytebuddy.matcher.ElementMatchers
 import polyregion.ast.pass.*
 import polyregion.ast.{CodeGen, MsgPack, PolyAST as p, *}
+import polyregion.jvm.twin.Layout
 import polyregion.jvm.{compiler as ct, runtime as rt}
 import polyregion.scalalang.Pickler
+import polyregion.twin.StructLayouts
 
-import javax.lang.model.element.TypeElement
+import javax.lang.model.`type`.{ArrayType, DeclaredType, TypeKind, TypeMirror}
+import javax.annotation.processing.ProcessingEnvironment
+import javax.lang.model.element.{Modifier, TypeElement}
+import scala.jdk.CollectionConverters.*
 
 object Offloader {
 
@@ -24,7 +29,7 @@ object Offloader {
   private val HostTarget = ct.Target.LLVM_HOST
   private val HostArch   = "native"
 
-  case class Executable(fqcn: String, bytes: Array[Byte])
+  case class Executable(fqcn: String, bytes: Array[Byte], twins: List[TwinEmitter.Emitted] = Nil)
 
   // the backend normalises non-alphanumerics in symbols, so pre-normalise to keep the runtime's name identical
   private def normalise(s: String): String = s.map(c => if (c.isLetterOrDigit || c == '_') c else '_')
@@ -34,9 +39,7 @@ object Offloader {
     val optimised = scala.Function.chain(
       List[ProgramPass](Intrinsify, Specialisation, PartialEval(), DeadArgElimination).map(pass => pass(_, log))
     )(prog)
-    val (monoToPoly, mono) = MonoStruct(optimised, log)
-    // the native compiler runs StructuredExit too, but the descriptor is settled here so the error buffer must exist first
-    (monoToPoly, hoistErrorBuffer(StructuredExit(mono, log)))
+    MonoStruct(optimised, log)
   }
 
   // a class named only by a field never reaches a signature and would resolve to an opaque shell
@@ -70,12 +73,12 @@ object Offloader {
   private val ResultCapture = "#result"
   private val ErrorCapture  = p.Conventions.ErrorArg
 
-  // the runtime packs the launch buffer from captures alone, so the error buffer moves across; the native ABI is unchanged
-  private def hoistErrorBuffer(prog: p.Program): p.Program = prog.copy(entry = prog.entry.map { entry =>
-    val (error, rest) = entry.args.partition(_.named.symbol == ErrorCapture)
-    if (error.isEmpty) entry
-    else entry.copy(decl = entry.decl.copy(args = rest, termCaptures = entry.termCaptures ++ error))
-  })
+  // the backend prepends the receiver ahead of every other parameter and the runtime prepends the error block, so a
+  // receiver kept apart from the captures would sit before the error block
+  private def receiverAsCapture(entry: p.Function): p.Function =
+    entry.receiver.fold(entry)(r =>
+      entry.copy(decl = entry.decl.copy(receiver = None, termCaptures = r +: entry.termCaptures))
+    )
 
   // the JNI layer copies arguments in but never out, so the result goes through a one-element output buffer
   private def routeReturnThroughCapture(entry: p.Function): p.Function =
@@ -120,60 +123,138 @@ object Offloader {
       )
     }
 
-  // `<module>|<symbol>|<launch ordinals>|<result ordinal>|<plan>|<layouts>|<tags>|<features>`, parsed by BinaryOffloadExecutable.invoke
-  // plan: a<i> captured value, l<i> its length, L<i> per-row lengths, s<owner>#<field> static, t receiver, r result, e error buffer
-  private def descriptorOf(
+  // what the launch fills a kernel parameter from; plan: a<i> captured value, l<i> its length, L<i> per-row lengths,
+  // s<owner>#<field> static, t receiver, r result
+  case class Slot(name: String, source: String, tpe: p.Type)
+
+  def slotsOf(
       entry: p.Function,
-      resultTpe: p.Type,
-      captures: List[TreeRemapper.Capture],
-      layouts: String,
-      tags: String,
-      features: List[String],
-      moduleName: String,
-      symbol: String
-  ): Result[String] = Either
-    .catchNonFatal {
-      val receiver = entry.receiver.map(a => Pickler.tpeAsRuntimeTpe(a.named.tpe)).toList
-      val ordinals =
-        (rt.Type.LONG +: (receiver ++ entry.termCaptures.map(a => Pickler.tpeAsRuntimeTpe(a.named.tpe))) :+ Pickler
-          .tpeAsRuntimeTpe(entry.rtn)).map(_.value)
-      val plan = captures.map {
+      captures: List[TreeRemapper.Captured],
+      hasResult: Boolean
+  ): Result[List[Slot]] = {
+    val sources = captures.map { c =>
+      c.name -> (c.capture match {
         case TreeRemapper.Capture.Arg(i)               => s"a$i"
         case TreeRemapper.Capture.Length(i)            => s"l$i"
         case TreeRemapper.Capture.RowLengths(i)        => s"L$i"
         case TreeRemapper.Capture.StaticField(o, name) => s"s$o#$name"
         case TreeRemapper.Capture.Receiver             => "t"
-      } ++ Option.when(resultTpe != p.Type.Unit0)("r") ++
-        Option.when(entry.termCaptures.exists(_.named.symbol == ErrorCapture))("e")
-      s"$moduleName|$symbol|${ordinals.mkString(",")}|${Pickler.tpeAsRuntimeTpe(resultTpe).value}|" +
-        s"${plan.mkString(",")}|$layouts|$tags|${features.mkString(",")}"
+      })
+    }.toMap ++ Option.when(hasResult)(ResultCapture -> "r")
+    (entry.moduleCaptures ::: entry.termCaptures ::: entry.args).traverse { a =>
+      sources
+        .get(a.named.symbol)
+        .map(Slot(a.named.symbol, _, a.named.tpe))
+        .failIfEmpty(s"Entry `${entry.name.repr}` takes `${a.named.symbol}`, which no launch source supplies")
     }
-    .leftMap(e => RuntimeException(s"Cannot derive a launch descriptor for `$symbol`", e))
+  }
+
+  // the format is parsed by BinaryOffloadExecutable.invoke
+  private def descriptorOf(
+      entryArgs: List[String],
+      slots: List[Slot],
+      resultTpe: p.Type,
+      layouts: String,
+      twins: List[String],
+      features: List[String],
+      moduleName: String,
+      symbol: String
+  ): Result[String] = {
+    val (error, launched) = entryArgs.partition(_ == ErrorCapture)
+    for {
+      _ <-
+        if (error.size > 1 || (error.nonEmpty && !entryArgs.headOption.contains(ErrorCapture)))
+          s"Entry `$symbol` has the error block in the wrong place: ${entryArgs.mkString(", ")}".fail
+        else ().success
+      chosen <- launched.traverse(name =>
+        slots.find(_.name == name).failIfEmpty(s"Entry `$symbol` takes `$name`, which no launch source supplies")
+      )
+      descriptor <- Either
+        .catchNonFatal {
+          val ordinals =
+            (rt.Type.LONG +: chosen.map(s => Pickler.tpeAsRuntimeTpe(s.tpe)) :+ rt.Type.VOID).map(_.value)
+          s"$moduleName|$symbol|${ordinals.mkString(",")}|${Pickler.tpeAsRuntimeTpe(resultTpe).value}|" +
+            s"${chosen.map(_.source).mkString(",")}|$layouts|${twins.mkString(",")}|${features.mkString(",")}"
+        }
+        .leftMap(e => RuntimeException(s"Cannot derive a launch descriptor for `$symbol`", e))
+    } yield descriptor
+  }
+
+  private def descriptorOfType(env: ProcessingEnvironment, t: TypeMirror): String = t.getKind match {
+    case TypeKind.BOOLEAN => "Z"
+    case TypeKind.BYTE    => "B"
+    case TypeKind.SHORT   => "S"
+    case TypeKind.INT     => "I"
+    case TypeKind.LONG    => "J"
+    case TypeKind.CHAR    => "C"
+    case TypeKind.FLOAT   => "F"
+    case TypeKind.DOUBLE  => "D"
+    case _ =>
+      env.getTypeUtils.erasure(t) match {
+        case a: ArrayType => "[" + descriptorOfType(env, a.getComponentType)
+        case d: DeclaredType =>
+          d.asElement match {
+            case e: TypeElement => s"L${env.getElementUtils.getBinaryName(e).toString.replace('.', '/')};"
+            case _              => ""
+          }
+        case _ => ""
+      }
+  }
+
+  private case class Host(elem: TypeElement, binary: String, fqn: String)
+
+  private def hostFieldsOf(env: ProcessingEnvironment, host: Host): Map[String, TwinEmitter.HostField] =
+    JavaTyper
+      .structFieldElements(host.elem)
+      .map { f =>
+        val name = f.getSimpleName.toString
+        name -> TwinEmitter.HostField(
+          host.binary,
+          name,
+          descriptorOfType(env, f.asType),
+          !f.getModifiers.contains(Modifier.PRIVATE),
+          f.getModifiers.contains(Modifier.FINAL)
+        )
+      }
+      .toMap
 
   // offsets come from the compiler so the host packs exactly what the kernel reads, keyed by binary name
-  private def layoutsOf(prog: p.Program, binaryNames: Map[String, String]): Result[String] =
-    if (prog.defs.isEmpty) "".success
+  private def layoutsOf(
+      prog: p.Program,
+      hosts: Map[String, Host],
+      tags: Map[String, Int],
+      env: ProcessingEnvironment
+  ): Result[List[Layout]] =
+    if (prog.defs.isEmpty) Nil.success
     else
       Either.catchNonFatal {
         import polyregion.ast.MsgPack.Codec.given
         val ast      = MsgPack.encode(CodeGen.structDefsVersioned(prog.defs))
         val compiler = ct.Compiler.create()
-        val layouts =
+        val laid =
           try compiler.layoutOf(ast, ct.Options.of(HostTarget, HostArch))
           finally compiler.close()
-        layouts
-          .map { l =>
-            // synthesised storage has no Java field, except the dispatch tag the host writes
-            val members = l.members
-              .filter(m => !m.name.startsWith("#") || m.name == JavaTyper.TagMember)
-              .map(m => s"${m.name}@${m.offsetInBytes}:${m.sizeInBytes}")
-              .mkString(",")
-            s"${binaryNames.getOrElse(l.name, l.name)}:${l.sizeInBytes}:$members"
+        val nameOf = (sym: p.Sym) => hosts.get(sym.repr).fold(sym.repr)(_.binary)
+        val defs   = prog.defs.map(d => d.name.repr -> d).toMap
+        laid.toList.flatMap { l =>
+          defs.get(l.name).map { sdef =>
+            val host   = hosts.get(l.name)
+            val fields = host.fold(Map.empty[String, TwinEmitter.HostField])(hostFieldsOf(env, _))
+            StructLayouts.of(
+              // synthesised storage has no Java field, the dispatch tag is found through the layout
+              sdef.copy(members = sdef.members.filterNot(_.symbol.startsWith("#"))),
+              l,
+              host.fold("")(_.binary),
+              host.flatMap(h => tags.get(h.fqn)),
+              nameOf,
+              name => fields.get(name).fold("")(_.descriptor),
+              name => fields.get(name).exists(_.readOnly)
+            )
           }
-          .mkString("~")
+        }
       }
 
-  private def compileToObject(prog: p.Program): Result[(Array[Byte], List[String])] = for {
+  private def compileToObject(prog: p.Program): Result[(Array[Byte], List[String], List[String])] = for {
     ast <- Either.catchNonFatal {
       MsgPack.encode(CodeGen.programVersioned(prog))
     }
@@ -185,7 +266,7 @@ object Offloader {
     image <- Option(compilation.program)
       .filter(_.nonEmpty)
       .failIfEmpty(s"Native compilation produced no object:\n${compilation.messages}")
-  } yield (image, compilation.features.toList)
+  } yield (image, compilation.features.toList, compilation.entryArgs.toList)
 
   // an array is no constant, so chunks go in as strings and join at class load
   private class BinaryInitialiser(fqcn: String, chunks: List[String]) extends ByteCodeAppender {
@@ -250,9 +331,11 @@ object Offloader {
       raw      <- withFieldStructs(region.program, classTable, region.tags)
       rawEntry <- raw.entry.failIfEmpty(s"Region `$symbol` has no entry")
       resultTpe = rawEntry.rtn
-      named = raw.copy(entry =
-        Some(routeReturnThroughCapture(rawEntry.copy(decl = rawEntry.decl.copy(name = p.Sym(symbol)))))
+      routed = routeReturnThroughCapture(
+        receiverAsCapture(rawEntry.copy(decl = rawEntry.decl.copy(name = p.Sym(symbol))))
       )
+      slots <- slotsOf(routed, region.captures, resultTpe != p.Type.Unit0)
+      named              = raw.copy(entry = Some(routed))
       passed             = runPasses(named, log)
       (monoToPoly, prog) = passed
       failures           = Verify(prog, log, verifyFunction = false).filter(_._2.nonEmpty)
@@ -262,21 +345,34 @@ object Offloader {
           s"Verification failed for `$symbol`:\n${failures
               .map((fn, es) => s"${fn.signatureKey}\n${es.map("  -> " + _).mkString("\n")}")
               .mkString("\n")}".fail
-      binaryNames = prog.defs.flatMap { d =>
+      hosts = prog.defs.flatMap { d =>
         val original = monoToPoly.getOrElse(d.name, d.name)
-        classTable
-          .get(original.fqn.mkString("."))
-          .map(e => d.name.repr -> env.getElementUtils.getBinaryName(e).toString)
+        val fqn      = original.fqn.mkString(".")
+        classTable.get(fqn).map(e => d.name.repr -> Host(e, env.getElementUtils.getBinaryName(e).toString, fqn))
       }.toMap
-      layouts <- layoutsOf(prog, binaryNames)
-      tags = region.tags.toList
-        .flatMap((fqn, tag) => classTable.get(fqn).map(e => s"${env.getElementUtils.getBinaryName(e)}=$tag"))
-        .mkString("~")
-      entry    <- prog.entry.failIfEmpty(s"Region `$symbol` lost its entry")
+      layouts  <- layoutsOf(prog, hosts, region.tags, env)
+      _        <- prog.entry.failIfEmpty(s"Region `$symbol` lost its entry")
       compiled <- compileToObject(prog)
-      (image, features) = compiled
-      descriptor <- descriptorOf(entry, resultTpe, region.captures, layouts, tags, features, fqcn, symbol)
-      bytes      <- emitClass(fqcn, image, descriptor)
-    } yield Executable(fqcn, bytes)
+      (image, features, entryArgs) = compiled
+      twins = layouts.zipWithIndex.flatMap { (layout, i) =>
+        hosts.values.find(_.binary == layout.className).flatMap { host =>
+          val pkg    = env.getElementUtils.getPackageOf(host.elem).getQualifiedName.toString
+          val simple = fqcn.substring(fqcn.lastIndexOf('.') + 1)
+          val name   = s"$simple$$Twin$$$i"
+          TwinEmitter.emit(if (pkg.isEmpty) name else s"$pkg.$name", layout, hostFieldsOf(env, host))
+        }
+      }
+      descriptor <- descriptorOf(
+        entryArgs,
+        slots,
+        resultTpe,
+        Layout.encodeAll(layouts.asJava),
+        twins.map(_.fqcn),
+        features,
+        fqcn,
+        symbol
+      )
+      bytes <- emitClass(fqcn, image, descriptor)
+    } yield Executable(fqcn, bytes, twins)
   }
 }

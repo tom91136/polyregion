@@ -25,14 +25,17 @@ object JavaTyper {
     }
 
   // javac marks captured state synthetic and getEnclosedElements hides it
-  def structFields(elem: TypeElement): List[(String, TypeMirror)] = elem match {
+  def structFieldElements(elem: TypeElement): List[VariableElement] = elem match {
     case c: JSymbol.ClassSymbol
         if elem.getNestingKind == NestingKind.LOCAL || elem.getNestingKind == NestingKind.ANONYMOUS =>
       c.members().getSymbols().asScala.toList.reverse.collect {
-        case v: JSymbol.VarSymbol if v.getKind == ElementKind.FIELD && !v.isStatic => v.name.toString -> v.asType
+        case v: JSymbol.VarSymbol if v.getKind == ElementKind.FIELD && !v.isStatic => v
       }
-    case _ => instanceFields(elem).map(f => f.getSimpleName.toString -> f.asType)
+    case _ => instanceFields(elem)
   }
+
+  def structFields(elem: TypeElement): List[(String, TypeMirror)] =
+    structFieldElements(elem).map(f => f.getSimpleName.toString -> f.asType)
 
   def structSyms(t: p.Type): List[p.Sym] = t match {
     case p.Type.Struct(n, args) => n :: args.flatMap(structSyms(_))

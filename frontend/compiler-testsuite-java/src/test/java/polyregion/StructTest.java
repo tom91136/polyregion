@@ -5,6 +5,7 @@ import static org.junit.Assert.assertEquals;
 
 import org.junit.Test;
 import polyregion.javalang.OffloadRunnable;
+import polyregion.jvm.twin.TwinException;
 
 public class StructTest extends BaseSuite {
 
@@ -305,7 +306,7 @@ public class StructTest extends BaseSuite {
     try {
       polyregion.javalang.Runtime.offload(() -> ps.length);
       org.junit.Assert.fail("expected a null element to be rejected");
-    } catch (IllegalArgumentException e) {
+    } catch (TwinException e) {
       org.junit.Assert.assertTrue(
           String.valueOf(e.getMessage()), String.valueOf(e.getMessage()).contains("null"));
     }

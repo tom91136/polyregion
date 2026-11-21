@@ -217,6 +217,10 @@ class Processor extends AbstractProcessor {
                           .printMessage(Diagnostic.Kind.ERROR, s"$reason (and the stub failed: $stubError)")
                     }
                 case Right(exe) =>
+                  exe.twins.foreach { twin =>
+                    val at = twin.fqcn.lastIndexOf('.')
+                    writeClass(processingEnv, twin.fqcn.take(math.max(at, 0)), twin.fqcn.drop(at + 1), twin.bytes)
+                  }
                   writeClass(processingEnv, pkg, name, exe.bytes)
                   generated += fqcn
               }
