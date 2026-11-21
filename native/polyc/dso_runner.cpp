@@ -55,16 +55,20 @@ struct DsoPassRunner::Impl {
   std::condition_variable anchorChanged;
   bool anchorReleased = false;
 
-  // XXX the plugin's collector registers the thread of its first call for good, so that call runs on a thread that outlives every caller
-  void initialiseOnAnchor(const std::function<void()> &first) {
-    std::promise<void> initialised;
+  // XXX the plugin's collector registers its loading thread for good, so load and first call run on a thread that outlives every caller
+  String initialiseOnAnchor(const std::function<String()> &first) {
+    std::promise<String> initialised;
+    auto result = initialised.get_future();
     anchor = std::thread([&] {
-      first();
-      initialised.set_value();
+      const auto failure = first();
+      initialised.set_value(failure);
+      if (!failure.empty()) return;
       std::unique_lock lock(anchorMutex);
       anchorChanged.wait(lock, [&] { return anchorReleased; });
     });
-    initialised.get_future().wait();
+    auto failure = result.get();
+    if (!failure.empty()) anchor.join();
+    return failure;
   }
 };
 
@@ -86,41 +90,44 @@ String DsoPassRunner::load() {
   // XXX set before dlopen: Boehm's GC_INIT runs from the DSO's .init_array.
   env::put("GC_INITIAL_HEAP_SIZE", "512M", false);
   env::put("GC_FREE_SPACE_DIVISOR", "4", false);
-  impl->dso = polyregion_dl_open(impl->path.c_str());
-  if (!impl->dso) {
-    const char *e = polyregion_dl_error();
-    return fmt::format("dlopen({}): {}", impl->path, e ? e : "<no error>");
-  }
-  impl->abi = reinterpret_cast<abi::AbiVersionFn>(polyregion_dl_find(impl->dso, abi::AbiVersion));
-  impl->count = reinterpret_cast<abi::PassCountFn>(polyregion_dl_find(impl->dso, abi::PassCount));
-  impl->name = reinterpret_cast<abi::PassNameFn>(polyregion_dl_find(impl->dso, abi::PassName));
-  impl->descr = reinterpret_cast<abi::PassDescrFn>(polyregion_dl_find(impl->dso, abi::PassDescr));
-  impl->run = reinterpret_cast<abi::RunPassesFn>(polyregion_dl_find(impl->dso, abi::RunPasses));
-  impl->err = reinterpret_cast<abi::LastErrorFn>(polyregion_dl_find(impl->dso, abi::LastError));
-  impl->free = reinterpret_cast<abi::FreeFn>(polyregion_dl_find(impl->dso, abi::Free));
-  namespace packageAbi = polypackage::abi;
-  impl->packageAbi = reinterpret_cast<packageAbi::AbiVersionFn>(polyregion_dl_find(impl->dso, packageAbi::AbiVersion));
-  impl->linkPackage = reinterpret_cast<packageAbi::LinkPackageFn>(polyregion_dl_find(impl->dso, packageAbi::LinkPackage));
-  impl->linkProgram = reinterpret_cast<packageAbi::LinkProgramFn>(polyregion_dl_find(impl->dso, packageAbi::LinkProgram));
-  impl->selectImplementations =
-      reinterpret_cast<packageAbi::SelectImplementationsFn>(polyregion_dl_find(impl->dso, packageAbi::SelectImplementations));
-  impl->packageErr = reinterpret_cast<packageAbi::LastErrorFn>(polyregion_dl_find(impl->dso, packageAbi::LastError));
-  impl->packageFree = reinterpret_cast<packageAbi::FreeFn>(polyregion_dl_find(impl->dso, packageAbi::Free));
+  bool completePass = false;
+  const auto open = [&]() -> String {
+    impl->dso = polyregion_dl_open(impl->path.c_str());
+    if (!impl->dso) {
+      const char *e = polyregion_dl_error();
+      return fmt::format("dlopen({}): {}", impl->path, e ? e : "<no error>");
+    }
+    impl->abi = reinterpret_cast<abi::AbiVersionFn>(polyregion_dl_find(impl->dso, abi::AbiVersion));
+    impl->count = reinterpret_cast<abi::PassCountFn>(polyregion_dl_find(impl->dso, abi::PassCount));
+    impl->name = reinterpret_cast<abi::PassNameFn>(polyregion_dl_find(impl->dso, abi::PassName));
+    impl->descr = reinterpret_cast<abi::PassDescrFn>(polyregion_dl_find(impl->dso, abi::PassDescr));
+    impl->run = reinterpret_cast<abi::RunPassesFn>(polyregion_dl_find(impl->dso, abi::RunPasses));
+    impl->err = reinterpret_cast<abi::LastErrorFn>(polyregion_dl_find(impl->dso, abi::LastError));
+    impl->free = reinterpret_cast<abi::FreeFn>(polyregion_dl_find(impl->dso, abi::Free));
+    namespace packageAbi = polypackage::abi;
+    impl->packageAbi = reinterpret_cast<packageAbi::AbiVersionFn>(polyregion_dl_find(impl->dso, packageAbi::AbiVersion));
+    impl->linkPackage = reinterpret_cast<packageAbi::LinkPackageFn>(polyregion_dl_find(impl->dso, packageAbi::LinkPackage));
+    impl->linkProgram = reinterpret_cast<packageAbi::LinkProgramFn>(polyregion_dl_find(impl->dso, packageAbi::LinkProgram));
+    impl->selectImplementations =
+        reinterpret_cast<packageAbi::SelectImplementationsFn>(polyregion_dl_find(impl->dso, packageAbi::SelectImplementations));
+    impl->packageErr = reinterpret_cast<packageAbi::LastErrorFn>(polyregion_dl_find(impl->dso, packageAbi::LastError));
+    impl->packageFree = reinterpret_cast<packageAbi::FreeFn>(polyregion_dl_find(impl->dso, packageAbi::Free));
 
-  const bool anyPass = impl->abi || impl->count || impl->name || impl->descr || impl->run || impl->err || impl->free;
-  const bool completePass = impl->abi && impl->count && impl->name && impl->run && impl->err && impl->free;
-  if (anyPass && !completePass) return fmt::format("dlsym polypass_*: incomplete pass capability in {}", impl->path);
-  const bool anyPackage =
-      impl->packageAbi || impl->linkPackage || impl->linkProgram || impl->selectImplementations || impl->packageErr || impl->packageFree;
-  const bool completePackage =
-      impl->packageAbi && impl->linkPackage && impl->linkProgram && impl->selectImplementations && impl->packageErr && impl->packageFree;
-  if (anyPackage && !completePackage) return fmt::format("dlsym polypackage_*: incomplete package capability in {}", impl->path);
-  if (!completePass && !completePackage) return fmt::format("{} exposes neither polypass_* nor polypackage_*", impl->path);
+    const bool anyPass = impl->abi || impl->count || impl->name || impl->descr || impl->run || impl->err || impl->free;
+    completePass = impl->abi && impl->count && impl->name && impl->run && impl->err && impl->free;
+    if (anyPass && !completePass) return fmt::format("dlsym polypass_*: incomplete pass capability in {}", impl->path);
+    const bool anyPackage =
+        impl->packageAbi || impl->linkPackage || impl->linkProgram || impl->selectImplementations || impl->packageErr || impl->packageFree;
+    const bool completePackage =
+        impl->packageAbi && impl->linkPackage && impl->linkProgram && impl->selectImplementations && impl->packageErr && impl->packageFree;
+    if (anyPackage && !completePackage) return fmt::format("dlsym polypackage_*: incomplete package capability in {}", impl->path);
+    if (!completePass && !completePackage) return fmt::format("{} exposes neither polypass_* nor polypackage_*", impl->path);
 
-  impl->initialiseOnAnchor([&] {
     if (completePass) impl->abi();
     else impl->packageAbi();
-  });
+    return {};
+  };
+  if (const auto failure = impl->initialiseOnAnchor(open); !failure.empty()) return failure;
 
   if (completePass) {
     if (const uint32_t v = impl->abi(); v != POLYPASS_ABI_VERSION)
