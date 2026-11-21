@@ -16,6 +16,8 @@ class ArrayMemberSuite extends munit.FunSuite {
   class Mutable(var xs: Array[Int])
   case class Outer(inner: Ints, tag: Int)
   case class Mixed(xs: Array[Int], buffer: Buffer[Int])
+  type Buf = Array[Int]
+  case class Aliased(data: Buf, n: Int)
 
   private val devices = rt.Context.platforms().flatMap(_.devices)
   private val host    = devices.find(d => d.platformKind == 1 && d.moduleFormat == 2)
@@ -165,6 +167,31 @@ class ArrayMemberSuite extends munit.FunSuite {
           m.xs(0) = m.xs(1)
         }
         assertEquals(m.xs.toList, List(4, 4))
+      }
+    }
+
+    test(s"[$label] an array member declared through a type alias is read by the kernel") {
+      withContext(label, device) { ctx =>
+        val h   = Aliased(Array(4, 5, 6), 3)
+        val out = Buffer.ofDim[Int](1)
+        launch[C](ctx) {
+          out(0) = h.data(0) + h.data(2) + h.n
+        }
+        assertEquals(out(0), 13)
+      }
+    }
+
+    test(s"[$label] an array member declared through a type alias is written back") {
+      withContext(label, device) { ctx =>
+        val h = Aliased(Array(1, 2, 3), 3)
+        launch[C](ctx) {
+          var i = 0
+          while (i < h.n) {
+            h.data(i) = h.data(i) * 2
+            i += 1
+          }
+        }
+        assertEquals(h.data.toList, List(2, 4, 6))
       }
     }
 

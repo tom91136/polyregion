@@ -224,7 +224,7 @@ object Retyper {
     repr.foldMapM(typer0(_).map((t, c) => (t :: Nil, c)))
 
   def typer0(using q: Quoted)(repr: q.TypeRepr): Result[(q.Retyped, q.ClsWitnesses)] =
-    (repr.dealias.widenTermRefByName.simplified match {
+    (repr.dealias.widenTermRefByName.dealias.simplified match {
       case tpe if tpe.typeSymbol == q.defn.NullClass =>
         (None -> p.Type.Ptr(p.Type.Nothing, p.Type.Space.Global), Map.empty).success
       case tpe if tpe.typeSymbol == q.defn.NothingClass =>

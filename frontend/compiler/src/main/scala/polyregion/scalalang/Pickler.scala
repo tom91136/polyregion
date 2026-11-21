@@ -257,7 +257,8 @@ object Pickler {
 
     def isPlainArray(recv: q.Term, m: StructMapping.Member[q.Term]): Boolean = {
       val sym = fieldSymbol(recv, m.name)
-      !sym.isNoSymbol && recv.tpe.widenTermRefByName.memberType(sym).widenTermRefByName.typeSymbol == q.defn.ArrayClass
+      !sym.isNoSymbol &&
+      recv.tpe.widenTermRefByName.memberType(sym).widenTermRefByName.dealias.simplified.typeSymbol == q.defn.ArrayClass
     }
 
     @tailrec def stageable(owner: p.StructDef, member: String, comp: p.Type): Boolean = comp match {
