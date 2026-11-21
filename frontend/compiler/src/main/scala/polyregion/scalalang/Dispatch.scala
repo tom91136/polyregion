@@ -79,8 +79,6 @@ object Dispatch {
       .filter((name, _) => tags.contains(name))
   }
 
-  def hostMembers(sdef: p.StructDef): List[p.Named] = sdef.members.filterNot(_.symbol.startsWith("#"))
-
   def tagMetadata(tags: Map[p.Sym, Int]): List[p.MetaEntry] =
     tags.toList.sortBy(_._2).map((cls, tag) => p.MetaEntry(p.Conventions.DispatchTagMeta + cls.fqcn, tag.toString))
 

@@ -1,6 +1,7 @@
 package polyregion.scalalang
 
 import cats.syntax.all.*
+import polyregion.ast.pass.Devirtualise
 import polyregion.ast.{PolyAST as p, *}
 import polyregion.jvm.runtime as rt
 import polyregion.jvm.twin.{FieldAccess, Layout, Marshal, TwinException}
@@ -101,7 +102,7 @@ object Pickler {
     val (layout, maybePrism) =
       layouts.getOrElse(sdef, q.report.errorAndAbort(s"Unseen sdef ${sdef.repr}, known reprs: ${layouts}"))
     val layoutTable = layout.fields.map(f => f.name -> f).toMap
-    val members = sdef.members.filterNot(_.symbol.startsWith("#")).map { named =>
+    val members = Devirtualise.hostMembers(sdef).map { named =>
       layoutTable
         .get(named.symbol)
         .map(f => StructMapping.Member[q.Term](named.symbol, named.tpe, f.size, f.offset, f.descriptor))

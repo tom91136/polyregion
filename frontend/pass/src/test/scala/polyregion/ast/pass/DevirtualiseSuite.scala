@@ -316,6 +316,17 @@ class DevirtualiseSuite extends munit.FunSuite {
     assertEquals(out(rect.name), List(tag, named("w"), named("h")))
   }
 
+  test("the members a host can hold are the ones the pass did not synthesise") {
+    val plain = List(
+      p.StructDef(shape.name, Nil, Nil, Nil),
+      p.StructDef(circle.name, Nil, List(named("r", p.Type.Float64)), List(shape))
+    )
+    val tags = Devirtualise.tagsOf(List(circle.name))
+    val out  = Devirtualise.decorate(plain, Map(shape.name -> List(circle.name)), tags).map(d => d.name -> d).toMap
+    assertEquals(Devirtualise.hostMembers(out(shape.name)), Nil)
+    assertEquals(Devirtualise.hostMembers(out(circle.name)), List(named("r", p.Type.Float64)))
+  }
+
   test("a candidate constructed in the kernel is stamped with its tag") {
     val c = named("c", circle)
     val stamp = p.Stmt.Mut(

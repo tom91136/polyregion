@@ -1,6 +1,7 @@
 package polyregion.scalalang
 
 import cats.syntax.all.*
+import polyregion.ast.pass.Devirtualise
 import polyregion.ast.{PolyAST as p, *}
 import polyregion.jvm.twin.Marshal
 import polyregion.jvm.{compiler as ct, runtime as rt}
@@ -337,7 +338,7 @@ object compiletime {
                         .map(layout =>
                           sd -> (
                             StructLayouts
-                              .of(sd.copy(members = Dispatch.hostMembers(sd)), layout, tag = tags.get(sd.name)),
+                              .of(sd.copy(members = Devirtualise.hostMembers(sd)), layout, tag = tags.get(sd.name)),
                             prismRefs.get(sd.name)
                           )
                         )

@@ -39,6 +39,8 @@ object Devirtualise {
     }
   }
 
+  def hostMembers(sdef: p.StructDef): List[p.Named] = sdef.members.filterNot(_.symbol.startsWith("#"))
+
   def noImplementation(callee: p.Sym): String =
     s"receiver has no implementation of ${callee.repr}: its class was not a known candidate"
 
