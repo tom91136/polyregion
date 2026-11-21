@@ -15,7 +15,7 @@ private[scalalang] object InterfaceResolver {
     configured("POLYFRONT_LIBRARY_CAPABILITIES", "polyregion.library.capabilities").getOrElse("")
 
   def configuredCapabilities: Set[String] =
-    configuredCapabilityList.split(',').iterator.map(_.trim).filter(_.nonEmpty).toSet
+    configuredCapabilityList.split(',').view.map(_.trim).filter(_.nonEmpty).toSet
 
   private lazy val compiler = polyregion.jvm.compiler.Compiler.create()
 

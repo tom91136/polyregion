@@ -1,6 +1,8 @@
 package polyregion.scalalang
 
-private[scalalang] object LaunchConfig {
+import polyregion.jvm.compiler.Opt
+
+object LaunchConfig {
 
   def targets: String =
     Option(System.getProperty("polyregion.targets"))
@@ -12,7 +14,7 @@ private[scalalang] object LaunchConfig {
   def deviceTargets(value: String): List[(String, String)] =
     value
       .split(',')
-      .iterator
+      .view
       .map(_.trim)
       .filter(_.nonEmpty)
       .map { entry =>
@@ -21,19 +23,19 @@ private[scalalang] object LaunchConfig {
       }
       .toList
 
-  def opt: polyregion.jvm.compiler.Opt =
+  def opt: Opt =
     Option(System.getProperty("polyregion.opt"))
       .orElse(Option(System.getenv("POLYREGION_OPT")))
       .map(_.trim)
       .filter(_.nonEmpty)
-      .fold(polyregion.jvm.compiler.Opt.O2)(polyregion.jvm.compiler.Opt.valueOf)
+      .fold(Opt.O2)(name => Opt.valueOf(name))
 
   def jit: Boolean =
     Option(System.getProperty("polyregion.jit"))
       .orElse(Option(System.getenv("POLYREGION_JIT")))
       .exists(_.trim.toBooleanOption.contains(true))
 
-  def targetNames: List[String] = targets.split(',').iterator.map(_.trim.takeWhile(_ != '@')).filter(_.nonEmpty).toList
+  def targetNames: List[String] = targets.split(',').view.map(_.trim.takeWhile(_ != '@')).filter(_.nonEmpty).toList
 
   def capabilitiesFor(capabilities: Set[String], target: String): Set[String] =
     capabilities.collect {

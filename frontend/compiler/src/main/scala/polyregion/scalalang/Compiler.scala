@@ -415,8 +415,8 @@ object Compiler {
     _ <-
       if (
         termTpe != termValue.tpe && !((termTpe, termValue.tpe) match {
-          case (_: p.Type.Exec, _: p.Type.FnRef) => true
-          case _                                 => false
+          case (p.Type.Exec(_, _, _), p.Type.FnRef(_)) => true
+          case _                                       => false
         })
       ) {
         s"Term type ($termTpe) is not the same as term value type (${termValue.tpe}), term was $termValue".fail
