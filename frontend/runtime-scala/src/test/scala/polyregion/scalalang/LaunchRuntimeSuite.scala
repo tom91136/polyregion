@@ -7,10 +7,12 @@ import java.util.concurrent.{CountDownLatch, TimeUnit}
 
 class LaunchRuntimeSuite extends munit.FunSuite {
 
-  private def group(program: String, hostOnly: Boolean): LaunchRuntime.Group =
-    new LaunchRuntime.Group(program, Array.empty[String], hostOnly) {
-      override def accepts(ctx: rt.Context): Boolean = true
-    }
+  private class AcceptingGroup(program: String, hostOnly: Boolean)
+      extends LaunchRuntime.Group(program, Array.empty[String], hostOnly) {
+    override def accepts(ctx: rt.Context): Boolean = true
+  }
+
+  private def group(program: String, hostOnly: Boolean): LaunchRuntime.Group = AcceptingGroup(program, hostOnly)
 
   test("a concurrent first use waits for the load in progress") {
     val started    = CountDownLatch(1)

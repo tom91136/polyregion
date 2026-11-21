@@ -7,6 +7,7 @@ import polyregion.jvm.twin.{Marshal, Twins}
 
 import java.nio.{ByteBuffer, ByteOrder}
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.locks.ReentrantLock
 
 object LaunchRuntime {
 
@@ -59,16 +60,15 @@ object LaunchRuntime {
 
   private val loaded = ConcurrentHashMap.newKeySet[String]()
 
-  private val loadLock = Object()
+  private val loadLock = ReentrantLock()
 
   private[scalalang] def ensureLoaded(program: String, isLoaded: => Boolean)(load: => Unit): Unit =
-    if (!loaded.contains(program))
-      loadLock.synchronized {
-        if (!loaded.contains(program)) {
-          if (!isLoaded) load
-          loaded.add(program)
-        }
-      }
+    if (!loaded.contains(program)) {
+      loadLock.lock()
+      try
+        if (!loaded.contains(program)) { if (!isLoaded) load; loaded.add(program) }
+      finally loadLock.unlock()
+    }
 
   private val sites = ConcurrentHashMap[String, Site]()
 
