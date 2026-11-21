@@ -542,6 +542,15 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
     const auto r = newVar(handleValueAsScalar(x.getRhs()));
     witness(x.getResult(), Expr::IntrOp(ap(l, r).widen()));
   };
+  const auto unordered = [&](auto x, auto ap) -> void {
+    const auto l = newVar(handleValueAsScalar(x.getLhs()));
+    const auto r = newVar(handleValueAsScalar(x.getRhs()));
+    const auto ordered = newVar(Expr::IntrOp(ap(l, r).widen()).widen());
+    const auto lNan = newVar(Expr::IntrOp(Intr::LogicNeq(l, l)).widen());
+    const auto rNan = newVar(Expr::IntrOp(Intr::LogicNeq(r, r)).widen());
+    const auto nan = newVar(Expr::IntrOp(Intr::LogicOr(lNan, rNan)).widen());
+    witness(x.getResult(), Expr::IntrOp(Intr::LogicOr(ordered, nan)).widen());
+  };
   const auto compare = [&](mlir::arith::CmpIOp x, auto ap, const std::optional<mlir::IntegerType::SignednessSemantics> order) -> void {
     auto l = newVar(handleValueAsScalar(x.getLhs()));
     auto r = newVar(handleValueAsScalar(x.getRhs()));
@@ -740,27 +749,24 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
             return;
           }
 
-          // XXX no-NaN-handling: treat unordered predicates as their ordered counterparts. Fortran
-          // code typically doesn't carry NaNs through these comparisons; if it does, the result
-          // matches "any predicate is true if either operand is NaN" which polyast can't express.
           case mlir::arith::CmpFPredicate::UEQ: {
-            intr2(x, Bind<Intr::LogicEq>());
+            unordered(x, Bind<Intr::LogicEq>());
             return;
           }
           case mlir::arith::CmpFPredicate::UGT: {
-            intr2(x, Bind<Intr::LogicGt>());
+            unordered(x, Bind<Intr::LogicGt>());
             return;
           }
           case mlir::arith::CmpFPredicate::UGE: {
-            intr2(x, Bind<Intr::LogicGte>());
+            unordered(x, Bind<Intr::LogicGte>());
             return;
           }
           case mlir::arith::CmpFPredicate::ULT: {
-            intr2(x, Bind<Intr::LogicLt>());
+            unordered(x, Bind<Intr::LogicLt>());
             return;
           }
           case mlir::arith::CmpFPredicate::ULE: {
-            intr2(x, Bind<Intr::LogicLte>());
+            unordered(x, Bind<Intr::LogicLte>());
             return;
           }
           case mlir::arith::CmpFPredicate::UNE: {
