@@ -1013,7 +1013,9 @@ POLYREGION_EXPORT extern "C" void polyrt_device_memset(void *context, void *dst,
   execution.settle();
 }
 
-POLYREGION_EXPORT extern "C" void polyrt_remote_sync(void *context) { (void)requireContext(context, __func__); }
+POLYREGION_EXPORT extern "C" bool polyrt_remote_sync(void *context) noexcept {
+  return runtimeStatus(__func__, [&] { (void)requireContext(context, __func__); });
+}
 
 static std::mutex &assertingModulesMutex() {
   static std::mutex mutex;

@@ -212,7 +212,7 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_device_usm_host_acquire(voi
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_device_usm_host_release(void *context, void *remote, void *local, uint64_t bytes,
                                                                             int32_t mode);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_device_memset(void *context, void *dst, int32_t value, uint64_t count);
-POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_remote_sync(void *context);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_remote_sync(void *context) noexcept;
 POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_remote_load(void *context, const char *moduleName, int32_t kind, int32_t format,
                                                                 size_t featureCount, const char **features, size_t imageLength,
                                                                 const uint8_t *image);

@@ -218,6 +218,18 @@ TEST_CASE("a failed remote operation is reported to a host program that raises f
   CHECK(polyrt_context_release(created.context));
 }
 
+TEST_CASE("a remote sync on a released context reports instead of throwing") {
+  const auto host = find(RelocatableBackend);
+  REQUIRE(host);
+  void *released = nullptr;
+  {
+    Created created(host);
+    released = created.context;
+  }
+  CHECK_FALSE(polyrt_remote_sync(released));
+  CHECK(lastError().find("released context") != std::string::npos);
+}
+
 TEST_CASE("raising host failures nests and restores the previous setting") {
   CHECK_FALSE(polyrt_raise_host_failures(true));
   CHECK(polyrt_raise_host_failures(true));

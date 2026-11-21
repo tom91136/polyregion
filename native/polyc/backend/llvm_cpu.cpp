@@ -389,7 +389,7 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
         return noop();
       },
       [&](const Spec::RemoteSync &v) -> ValPtr {
-        cg.B.CreateCall(external("polyrt_remote_sync", unit, {ptr}), {cg.mkTermVal(v.context)});
+        runtimeCall(external("polyrt_remote_sync", i1, {ptr}), {cg.mkTermVal(v.context)});
         return noop();
       },
       [&](const Spec::GpuVolatileLoad &v) -> ValPtr { return cg.mkVolatileLoad(v); },

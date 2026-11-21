@@ -940,7 +940,8 @@ TEST_CASE("CPU remote-operation ABI follows the target pointer width", "[backend
                .widen(),
            false)
            .widen(),
-       Var(freed, Expr::SpecOp(Spec::RemoteFree(selectNamed(context).widen(), selectNamed(remote).widen())).widen(), false).widen(), ret()},
+       Var(freed, Expr::SpecOp(Spec::RemoteFree(selectNamed(context).widen(), selectNamed(remote).widen())).widen(), false).widen(),
+       Var(Named("synced", Type::Unit0()), Expr::SpecOp(Spec::RemoteSync(selectNamed(context).widen())).widen(), false).widen(), ret()},
       FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
   const Function host(FunctionDecl(entry.decl.name, {}, {}, entry.decl.args, {}, {}, Type::Unit0(), FunctionAffinity::Host()), entry.body,
                       FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), CallConvention::RegularCall().widen());
@@ -956,6 +957,7 @@ TEST_CASE("CPU remote-operation ABI follows the target pointer width", "[backend
     CHECK_THAT(ir, Catch::Matchers::ContainsSubstring(fmt::format(
                        "declare i1 @polyrt_remote_launch_marshalled(ptr, ptr, ptr, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}", sizeType)));
     CHECK_THAT(ir, Catch::Matchers::ContainsSubstring(fmt::format("declare i1 @polyrt_remote_free(ptr, {})", sizeType)));
+    CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("declare i1 @polyrt_remote_sync(ptr)"));
     CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("call i8 @polyrt_remote_failed()"));
     if (sizeType == "i64") CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("zext i32"));
   };

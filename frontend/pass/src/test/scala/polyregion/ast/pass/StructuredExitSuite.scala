@@ -235,6 +235,17 @@ class StructuredExitSuite extends munit.FunSuite {
     assertEquals(out.decl.flatParams.headOption.map(_.named.symbol), Some(p.Conventions.ErrorArg))
   }
 
+  test("a remote sync is checked like the other remote operations") {
+    val context = named("ctx", p.Spec.ContextType)
+    val sync    = p.Stmt.Var(named("synced", p.Type.Unit0), Some(p.Expr.SpecOp(p.Spec.RemoteSync(selectT(context)))))
+    val out = StructuredExit(
+      program(asHost(fn("driver", List(p.Arg(context)), body = List(sync, ret)))),
+      NoopLog
+    ).entry.required
+    assertEquals(foreignCalls(out).count(_ == "polyrt_remote_failed"), 1)
+    assertEquals(survivingAsserts(out), 0)
+  }
+
   test("a remote operation wrapped in an annotation is checked") {
     val context  = named("ctx", p.Spec.ContextType)
     val position = p.SourcePosition("remote.cpp", 3, Some(1))
