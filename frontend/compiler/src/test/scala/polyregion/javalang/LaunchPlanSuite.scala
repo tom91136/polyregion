@@ -6,11 +6,13 @@ class LaunchPlanSuite extends munit.FunSuite {
 
   private val ints = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global)
 
-  private def entry(captures: p.Named*): p.Function = p.Function(
+  private def entry(captures: p.Named*): p.Function = entryOf(None, captures*)
+
+  private def entryOf(receiver: Option[p.Named], captures: p.Named*): p.Function = p.Function(
     decl = p.FunctionDecl(
       name = p.Sym("entry"),
       tpeVars = Nil,
-      receiver = None,
+      receiver = receiver.map(p.Arg(_)),
       args = Nil,
       moduleCaptures = Nil,
       termCaptures = captures.toList.map(p.Arg(_)),
@@ -37,5 +39,21 @@ class LaunchPlanSuite extends munit.FunSuite {
       )
       .fold(e => fail(e.getMessage), identity)
     assertEquals(slots.map(s => s.name -> s.source), List("xs" -> "a0", "#len0" -> "l0"))
+  }
+
+  test("the receiver keeps its place ahead of the captures") {
+    val self = p.Named("this", p.Type.Struct(p.Sym("Cell"), Nil))
+    val xs   = p.Named("xs", ints)
+    val slots = Offloader
+      .slotsOf(
+        entryOf(Some(self), xs),
+        List(
+          TreeRemapper.Captured("xs", TreeRemapper.Capture.Arg(0)),
+          TreeRemapper.Captured("this", TreeRemapper.Capture.Receiver)
+        ),
+        hasResult = false
+      )
+      .fold(e => fail(e.getMessage), identity)
+    assertEquals(slots.map(s => s.name -> s.source), List("this" -> "t", "xs" -> "a0"))
   }
 }

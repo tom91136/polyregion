@@ -73,13 +73,6 @@ object Offloader {
   private val ResultCapture = "#result"
   private val ErrorCapture  = p.Conventions.ErrorArg
 
-  // the backend prepends the receiver ahead of every other parameter and the runtime prepends the error block, so a
-  // receiver kept apart from the captures would sit before the error block
-  private def receiverAsCapture(entry: p.Function): p.Function =
-    entry.receiver.fold(entry)(r =>
-      entry.copy(decl = entry.decl.copy(receiver = None, termCaptures = r +: entry.termCaptures))
-    )
-
   // the JNI layer copies arguments in but never out, so the result goes through a one-element output buffer
   private def routeReturnThroughCapture(entry: p.Function): p.Function =
     if (entry.rtn == p.Type.Unit0) entry
@@ -141,7 +134,7 @@ object Offloader {
         case TreeRemapper.Capture.Receiver             => "t"
       })
     }.toMap ++ Option.when(hasResult)(ResultCapture -> "r")
-    (entry.moduleCaptures ::: entry.termCaptures ::: entry.args).traverse { a =>
+    entry.decl.invokeParams.traverse { a =>
       sources
         .get(a.named.symbol)
         .map(Slot(a.named.symbol, _, a.named.tpe))
@@ -331,9 +324,7 @@ object Offloader {
       raw      <- withFieldStructs(region.program, classTable, region.tags)
       rawEntry <- raw.entry.failIfEmpty(s"Region `$symbol` has no entry")
       resultTpe = rawEntry.rtn
-      routed = routeReturnThroughCapture(
-        receiverAsCapture(rawEntry.copy(decl = rawEntry.decl.copy(name = p.Sym(symbol))))
-      )
+      routed    = routeReturnThroughCapture(rawEntry.copy(decl = rawEntry.decl.copy(name = p.Sym(symbol))))
       slots <- slotsOf(routed, region.captures, resultTpe != p.Type.Unit0)
       named              = raw.copy(entry = Some(routed))
       passed             = runPasses(named, log)
