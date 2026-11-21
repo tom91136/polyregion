@@ -24,6 +24,42 @@ class ClosureSuite extends BaseSuite {
     }
     f(40) + y
   }
+  {
+    val longCapture   = 2L
+    val doubleCapture = 0.5
+    testExpr("long-capture-reached-by-two-lambdas-keeps-one-type") {
+      val f = (x: Long) => {
+        val g = (w: Long) => w + longCapture
+        g(x) + longCapture
+      }
+      f(40L)
+    }
+    testExpr("double-capture-reached-by-nested-lambdas-keeps-one-type") {
+      val f = (x: Double) => {
+        val g = (w: Double) => {
+          val h = (v: Double) => v + doubleCapture
+          h(w) + doubleCapture
+        }
+        g(x) + doubleCapture
+      }
+      f(40.0)
+    }
+    testExpr("long-capture-reached-by-two-local-defs-keeps-one-type") {
+      def g(w: Long): Long = w + longCapture
+      def f(x: Long): Long = g(x) + longCapture
+      f(40L)
+    }
+    testExpr("double-capture-reached-by-nested-local-defs-keeps-one-type") {
+      def f(x: Double): Double = {
+        def g(w: Double): Double = {
+          def h(v: Double): Double = v + doubleCapture
+          h(w) + doubleCapture
+        }
+        g(x) + doubleCapture
+      }
+      f(40.0)
+    }
+  }
   testExpr("lambda-value-two-args") {
     val f = (x: Int, y: Int) => x * y
     f(6, 7)
