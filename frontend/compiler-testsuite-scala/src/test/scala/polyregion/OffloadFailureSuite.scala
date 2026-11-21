@@ -15,7 +15,7 @@ class OffloadFailureSuite extends munit.FunSuite {
   test("a launch failure reaches the callback once") {
     var outcomes = List.empty[Either[Throwable, Unit]]
     var x        = 1
-    compiletime.offload0[Config[Target.Host.type, Opt.O2]](closedHostContext, outcomes ::= _) { x += 1; () }
+    compiletime.offload0(closedHostContext, outcomes ::= _, "host@native") { x += 1; () }
     outcomes match {
       case List(Left(e)) => assert(e.getMessage.endsWith(" is closed"), e.getMessage)
       case other         => fail(s"expected one failure, got $other")
@@ -29,12 +29,13 @@ class OffloadFailureSuite extends munit.FunSuite {
     val ctx   = rt.Context.create(host)
     try
       intercept[IllegalStateException] {
-        compiletime.offload0[Config[Target.Host.type, Opt.O2]](
+        compiletime.offload0(
           ctx,
           { _ =>
             calls += 1
             throw IllegalStateException("callback")
-          }
+          },
+          "host@native"
         ) { x += 1; () }
       }
     finally ctx.close()

@@ -5,26 +5,45 @@ import scala.annotation.compileTimeOnly
 object offload {
 
   @compileTimeOnly("polyregion_interface:polyregion.core:polyregion.core.for_each")
-  def for_each(n: Long, body: Long => Unit): Unit =
-    throw UnsupportedOperationException("compiler did not replace polyregion.core.for_each")
+  inline def for_each(n: Long, inline body: Long => Unit): Unit =
+    polyregion.scalalang.launch.call[Unit](
+      "polyregion.core:polyregion.core.for_each",
+      polyregion.jvm.runtime.Context.current(),
+      n,
+      body
+    )
 
   @compileTimeOnly("polyregion_interface:polyregion.core:polyregion.core.for_each")
-  def for_each(context: polyregion.jvm.runtime.Context, n: Long, body: Long => Unit): Unit =
-    throw UnsupportedOperationException("compiler did not replace polyregion.core.for_each")
+  inline def for_each(context: polyregion.jvm.runtime.Context, n: Long, inline body: Long => Unit): Unit =
+    polyregion.scalalang.launch.call[Unit]("polyregion.core:polyregion.core.for_each", context, n, body)
 
   @compileTimeOnly("polyregion_interface:polyregion.core:polyregion.core.transform_reduce")
-  def transform_reduce[T](n: Long, init: T, map: Long => T, combine: (T, T) => T): T =
-    throw UnsupportedOperationException("compiler did not replace polyregion.core.transform_reduce")
+  inline def transform_reduce[T](n: Long, init: T, inline map: Long => T, inline combine: (T, T) => T): T =
+    polyregion.scalalang.launch.call[T](
+      "polyregion.core:polyregion.core.transform_reduce",
+      polyregion.jvm.runtime.Context.current(),
+      n,
+      init,
+      map,
+      combine
+    )
 
   @compileTimeOnly("polyregion_interface:polyregion.core:polyregion.core.transform_reduce")
-  def transform_reduce[T](
+  inline def transform_reduce[T](
       context: polyregion.jvm.runtime.Context,
       n: Long,
       init: T,
-      map: Long => T,
-      combine: (T, T) => T
+      inline map: Long => T,
+      inline combine: (T, T) => T
   ): T =
-    throw UnsupportedOperationException("compiler did not replace polyregion.core.transform_reduce")
+    polyregion.scalalang.launch.call[T](
+      "polyregion.core:polyregion.core.transform_reduce",
+      context,
+      n,
+      init,
+      map,
+      combine
+    )
 
   inline def for_each(n0: Long, n1: Long, inline body: (Long, Long) => Unit): Unit =
     for_each(Math.multiplyExact(n0, n1), (i: Long) => body(i / n1, i % n1))

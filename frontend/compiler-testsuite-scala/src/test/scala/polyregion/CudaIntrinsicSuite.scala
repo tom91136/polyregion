@@ -7,11 +7,6 @@ import java.util.concurrent.{CountDownLatch, TimeUnit}
 import scala.compiletime.*
 import scala.reflect.ClassTag
 
-object CudaTarget {
-  val SM89: Target { type Arch = polyregion.jvm.compiler.Target.LLVM_NVPTX64.type; type UArch = "sm_89" } =
-    Target.NVPTX64("sm_89")
-}
-
 class CudaIntrinsicSuite extends BaseSuite {
 
   private lazy val hasCuda =
@@ -22,12 +17,13 @@ class CudaIntrinsicSuite extends BaseSuite {
     val ctx   = polyregion.scalalang.blocking.CUDA.devices.head.context
     val r     = scala.collection.mutable.ListBuffer[A](null.asInstanceOf[A])
     val latch = CountDownLatch(1)
-    polyregion.scalalang.compiletime.offload0[Config[CudaTarget.SM89.type, Opt.O2]](
+    polyregion.scalalang.compiletime.offload0(
       ctx,
       {
         case Left(e)   => throw e
         case Right(()) => latch.countDown()
-      }
+      },
+      "cuda@sm_89"
     ) { r(0) = f; () }
     assert(latch.await(60, TimeUnit.SECONDS))
     r(0)
@@ -38,12 +34,13 @@ class CudaIntrinsicSuite extends BaseSuite {
     val sink                                     = scala.collection.mutable.ListBuffer[A](null.asInstanceOf[A])
     var outcome: Option[Either[Throwable, Unit]] = None
     val latch                                    = CountDownLatch(1)
-    polyregion.scalalang.compiletime.offload0[Config[CudaTarget.SM89.type, Opt.O2]](
+    polyregion.scalalang.compiletime.offload0(
       ctx,
       { r =>
         outcome = Some(r)
         latch.countDown()
-      }
+      },
+      "cuda@sm_89"
     ) { sink(0) = f; () }
     assert(latch.await(60, TimeUnit.SECONDS))
     outcome.get

@@ -49,12 +49,13 @@ trait BaseSuite extends munit.FunSuite {
       import polyregion.scalalang.*
       import polyregion.scalalang.blocking.Host
       val latch = CountDownLatch(1)
-      polyregion.scalalang.compiletime.offload0[Config[Target.Host.type, Opt.O2]](
+      polyregion.scalalang.compiletime.offload0(
         Host.context,
         {
           case Left(e)   => throw e
           case Right(()) => latch.countDown()
-        }
+        },
+        "host@native"
       ) { f; () }
       assert(latch.await(5, TimeUnit.SECONDS))
   }
@@ -66,12 +67,13 @@ trait BaseSuite extends munit.FunSuite {
       import polyregion.scalalang.blocking.Host
       val r     = scala.collection.mutable.ListBuffer[A](null.asInstanceOf[A])
       val latch = CountDownLatch(1)
-      polyregion.scalalang.compiletime.offload0[Config[Target.Host.type, Opt.O2]](
+      polyregion.scalalang.compiletime.offload0(
         Host.context,
         {
           case Left(e)   => throw e
           case Right(()) => latch.countDown()
-        }
+        },
+        "host@native"
       ) { r(0) = f; () }
       assert(latch.await(5, TimeUnit.SECONDS))
       r(0)

@@ -14,8 +14,6 @@ object RecursionSuite {
 
 class RecursionSuite extends munit.FunSuite {
 
-  private type C = Config[Target.Host.type, Opt.O2]
-
   private lazy val hasCuda =
     try blocking.CUDA.devices.nonEmpty
     catch { case _: Throwable => false }
@@ -29,7 +27,7 @@ class RecursionSuite extends munit.FunSuite {
     val ctx      = blocking.CUDA.devices.head.context
     val result   = mutable.ListBuffer(-1)
     val outcomes = LinkedBlockingQueue[Either[Throwable, Unit]]()
-    compiletime.offload0[Config[CudaTarget.SM89.type, Opt.O2]](ctx, r => outcomes.put(r)) {
+    compiletime.offload0(ctx, r => outcomes.put(r), "cuda@sm_89") {
       result(0) = RecursionSuite.down(depth); ()
     }
     Option(outcomes.poll(60, TimeUnit.SECONDS)).get.map(_ => result(0))
@@ -42,14 +40,14 @@ class RecursionSuite extends munit.FunSuite {
 
   test("the callback core returns the value of a recursion within the limit") {
     val results = LinkedBlockingQueue[Either[Throwable, Int]]()
-    callback.Host.aot.task[C, Int](downFrom(100))(r => results.put(r))
+    callback.Host.ops.task[Int](downFrom(100))(r => results.put(r))
     assertEquals(Option(results.poll(30, TimeUnit.SECONDS)).get, Right(100))
     assert(results.isEmpty)
   }
 
   test("the callback core fails with the recursion limit") {
     val results = LinkedBlockingQueue[Either[Throwable, Int]]()
-    callback.Host.aot.task[C, Int](downFrom(100000))(r => results.put(r))
+    callback.Host.ops.task[Int](downFrom(100000))(r => results.put(r))
     val outcome = Option(results.poll(30, TimeUnit.SECONDS)).get
     assert(results.isEmpty)
     assert(outcome.isLeft, outcome.toString)
@@ -57,19 +55,19 @@ class RecursionSuite extends munit.FunSuite {
   }
 
   test("the blocking adapter returns the value and throws the recursion limit") {
-    assertEquals(blocking.Host.aot.task[C, Int](downFrom(100)), 100)
-    assertRecursionLimit(intercept[rt.PolyregionRuntimeException](blocking.Host.aot.task[C, Int](downFrom(100000))))
+    assertEquals(blocking.Host.ops.task[Int](downFrom(100)), 100)
+    assertRecursionLimit(intercept[rt.PolyregionRuntimeException](blocking.Host.ops.task[Int](downFrom(100000))))
   }
 
   test("the future adapter completes with the value and fails with the recursion limit") {
-    assertEquals(Await.result(future.Host.aot.task[C, Int](downFrom(100)), 30.seconds), 100)
-    val failed = future.Host.aot.task[C, Int](downFrom(100000))
+    assertEquals(Await.result(future.Host.ops.task[Int](downFrom(100)), 30.seconds), 100)
+    val failed = future.Host.ops.task[Int](downFrom(100000))
     assertRecursionLimit(intercept[rt.PolyregionRuntimeException](Await.result(failed, 30.seconds)))
   }
 
   test("a context runs a recursion again after the limit was raised") {
-    intercept[rt.PolyregionRuntimeException](blocking.Host.aot.task[C, Int](downFrom(100000)))
-    assertEquals(blocking.Host.aot.task[C, Int](downFrom(1000)), 1000)
+    intercept[rt.PolyregionRuntimeException](blocking.Host.ops.task[Int](downFrom(100000)))
+    assertEquals(blocking.Host.ops.task[Int](downFrom(1000)), 1000)
   }
 
   test("a recursion within the limit returns the value on cuda") {

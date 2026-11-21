@@ -49,9 +49,6 @@ object Simple {
     import polyregion.scalalang.*
     import polyregion.scalalang.blocking.*
 
-    type M = Config[Target.NVPTX64.SM61.type, Opt.O0]
-    type C = Config[Target.OpenCL_C.type, Opt.O0]
-
 //    val result = OpenCL.devices(0).aot.foreach[C](0 to n)(i => xs(i) = 42)
 
     // val result = OpenCL.devices(0).aot.task[Config[Target.OpenCL_C.type, Opt.O0], Int](42)
@@ -68,7 +65,7 @@ object Simple {
 
     val bb = Buffer[Boolean](true)
 
-    Host.aot.task[Config[Target.Host.type, Opt.O0], Double] {
+    Host.ops.task[Double] {
       val xs = Array.ofDim[Double](4)
       xs(0)
 

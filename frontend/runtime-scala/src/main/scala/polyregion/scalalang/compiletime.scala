@@ -89,94 +89,47 @@ object compiletime {
 
   private case class ReifiedConfig(target: ct.Target, arch: String, opt: ct.Opt)
 
-  private def reifyConfig(x: srt.Config[?, ?]): List[ReifiedConfig] =
-    x.targets.map((t, o) => ReifiedConfig(t.arch, t.uarch, o.value))
-
-  private def reifyConfigFromTpe[C: Type](using
-      q: Quotes
-  )(c: List[ReifiedConfig] = Nil): Result[List[ReifiedConfig]] = {
-    import q.reflect.*
-    Type.of[C] match {
-      case '[srt.Config[target, opt]] =>
-        TypeRepr.of[target].widenTermRefByName.dealias.simplified match {
-          case Refinement(target, xs, TypeBounds(l @ ConstantType(StringConstant(arch)), h)) if l == h =>
-            val vendorTpe   = target.select(TypeRepr.of[srt.Target#Arch].typeSymbol).dealias
-            val cpTargetTpe = TypeRepr.of[ct.Target]
-            if (vendorTpe <:< cpTargetTpe) {
-              (ReifiedConfig(
-                target = ct.Target.valueOf(vendorTpe.termSymbol.name),
-                arch = arch,
-                opt = Opt.valueOf(TypeRepr.of[opt].termSymbol.name).value
-              ) :: Nil).success
-            } else s"Target type `${vendorTpe}` != ${cpTargetTpe} ".fail
-          case AppliedType(_, List(ConstantType(StringConstant(arch)))) =>
-            val applied = TypeRepr.of[target].widenTermRefByName.dealias
-            val vendor  = applied.memberType(applied.typeSymbol.typeMember("Arch")).dealias
-            if (vendor <:< TypeRepr.of[ct.Target] && !vendor.termSymbol.isNoSymbol)
-              (ReifiedConfig(
-                target = ct.Target.valueOf(vendor.termSymbol.name),
-                arch = arch,
-                opt = Opt.valueOf(TypeRepr.of[opt].termSymbol.name).value
-              ) :: Nil).success
-            else
-              s"Target type `${applied.show}` has no ${TypeRepr.of[ct.Target].show} constant, found `${vendor.show}`".fail
-          case bad => s"Target type `${bad}` does not contain a String constant refinement or has illegal bounds".fail
-        }
-      case '[x *: xs] =>
-        for {
-          x  <- reifyConfigFromTpe[x](c)
-          xs <- reifyConfigFromTpe[xs](c)
-        } yield x ::: xs
-      case '[EmptyTuple] => Nil.success
-      case '[illegal] =>
-        s"The type `${TypeRepr.of[illegal].show}` cannot be used as a configuration, it must be either a ${TypeRepr.of[srt.Config].show} or a tuple of such type.".fail
+  private def reifiedConfigs(compiler: ct.Compiler, targets: String): Result[List[ReifiedConfig]] =
+    LaunchConfig.deviceTargets(if (targets.isEmpty) LaunchConfig.targets else targets).traverse { (name, arch) =>
+      Either
+        .catchNonFatal(compiler.targetByName(name))
+        .map(target => ReifiedConfig(target, arch, LaunchConfig.opt))
     }
-  }
 
   private inline def checked(e: Result[Expr[Unit]]): Expr[Unit] = e match {
     case Left(e)  => throw e
     case Right(x) => x
   }
 
-  inline def offload0[C](inline ctx: rt.Context, inline cb: Callback[Unit])(inline f: Any): Unit =
-    ${ generate0[C]('ctx, 'f, 'cb, jit = false) }
-  inline def offloadJit0[C](inline ctx: rt.Context, inline cb: Callback[Unit])(inline f: Any): Unit =
-    ${ generate0[C]('ctx, 'f, 'cb, jit = true) }
-  private def generate0[C: Type](using
-      q: Quotes
-  )(ctx: Expr[rt.Context], f: Expr[Any], cb: Expr[Callback[Unit]], jit: Boolean) = checked(for {
-    cs   <- reifyConfigFromTpe[C]()
-    expr <- generate(using Quoted(q))(cs, ctx, f, '{ rt.Dim3(1, 1, 1) }, cb, jit)
-  } yield expr)
-
-  inline def offload1[C](inline ctx: rt.Context, inline rangeX: Range, inline cb: Callback[Unit])(
+  inline def offload0(inline ctx: rt.Context, inline cb: Callback[Unit], inline targets: String = "")(
       inline f: Any
-  ): Unit = ${ generate1[C]('ctx, 'f, 'rangeX, 'cb, jit = false) }
-  inline def offloadJit1[C](inline ctx: rt.Context, inline rangeX: Range, inline cb: Callback[Unit])(
-      inline f: Any
-  ): Unit = ${ generate1[C]('ctx, 'f, 'rangeX, 'cb, jit = true) }
-  private def generate1[C: Type](using
+  ): Unit = ${ generate0('ctx, 'f, 'cb, 'targets) }
+  private def generate0(using
       q: Quotes
-  )(ctx: Expr[rt.Context], f: Expr[Any], rangeX: Expr[Range], cb: Expr[Callback[Unit]], jit: Boolean) = checked(
-    for {
-      cs   <- reifyConfigFromTpe[C]()
-      expr <- generate(using Quoted(q))(cs, ctx, f, '{ rt.Dim3($rangeX.size, 1, 1) }, cb, jit)
-    } yield expr
-  )
+  )(ctx: Expr[rt.Context], f: Expr[Any], cb: Expr[Callback[Unit]], targets: Expr[String]) =
+    checked(generate(using Quoted(q))(targets.valueOrAbort, ctx, f, '{ rt.Dim3(1, 1, 1) }, cb))
 
-  inline def offload2[C](
+  inline def offload1(
+      inline ctx: rt.Context,
+      inline rangeX: Range,
+      inline cb: Callback[Unit],
+      inline targets: String = ""
+  )(
+      inline f: Any
+  ): Unit = ${ generate1('ctx, 'f, 'rangeX, 'cb, 'targets) }
+  private def generate1(using
+      q: Quotes
+  )(ctx: Expr[rt.Context], f: Expr[Any], rangeX: Expr[Range], cb: Expr[Callback[Unit]], targets: Expr[String]) =
+    checked(generate(using Quoted(q))(targets.valueOrAbort, ctx, f, '{ rt.Dim3($rangeX.size, 1, 1) }, cb))
+
+  inline def offload2(
       inline ctx: rt.Context,
       inline rangeX: Range,
       inline rangeY: Range,
-      inline cb: Callback[Unit]
-  )(inline f: Any): Unit = ${ generate2[C]('ctx, 'f, 'rangeX, 'rangeY, 'cb, jit = false) }
-  inline def offloadJit2[C](
-      inline ctx: rt.Context,
-      inline rangeX: Range,
-      inline rangeY: Range,
-      inline cb: Callback[Unit]
-  )(inline f: Any): Unit = ${ generate2[C]('ctx, 'f, 'rangeX, 'rangeY, 'cb, jit = true) }
-  private def generate2[C: Type](using
+      inline cb: Callback[Unit],
+      inline targets: String = ""
+  )(inline f: Any): Unit = ${ generate2('ctx, 'f, 'rangeX, 'rangeY, 'cb, 'targets) }
+  private def generate2(using
       q: Quotes
   )(
       ctx: Expr[rt.Context],
@@ -184,28 +137,20 @@ object compiletime {
       rangeX: Expr[Range],
       rangeY: Expr[Range],
       cb: Expr[Callback[Unit]],
-      jit: Boolean
-  ) =
-    checked(for {
-      cs   <- reifyConfigFromTpe[C]()
-      expr <- generate(using Quoted(q))(cs, ctx, f, '{ rt.Dim3($rangeX.size, $rangeY.size, 1) }, cb, jit)
-    } yield expr)
+      targets: Expr[String]
+  ) = checked(
+    generate(using Quoted(q))(targets.valueOrAbort, ctx, f, '{ rt.Dim3($rangeX.size, $rangeY.size, 1) }, cb)
+  )
 
-  inline def offload3[C](
+  inline def offload3(
       inline ctx: rt.Context,
       inline rangeX: Range,
       inline rangeY: Range,
       inline rangeZ: Range,
-      inline cb: Callback[Unit]
-  )(inline f: Any): Unit = ${ generate3[C]('ctx, 'f, 'rangeX, 'rangeY, 'rangeZ, 'cb, jit = false) }
-  inline def offloadJit3[C](
-      inline ctx: rt.Context,
-      inline rangeX: Range,
-      inline rangeY: Range,
-      inline rangeZ: Range,
-      inline cb: Callback[Unit]
-  )(inline f: Any): Unit = ${ generate3[C]('ctx, 'f, 'rangeX, 'rangeY, 'rangeZ, 'cb, jit = true) }
-  private def generate3[C: Type](using
+      inline cb: Callback[Unit],
+      inline targets: String = ""
+  )(inline f: Any): Unit = ${ generate3('ctx, 'f, 'rangeX, 'rangeY, 'rangeZ, 'cb, 'targets) }
+  private def generate3(using
       q: Quotes
   )(
       ctx: Expr[rt.Context],
@@ -214,24 +159,29 @@ object compiletime {
       rangeY: Expr[Range],
       rangeZ: Expr[Range],
       cb: Expr[Callback[Unit]],
-      jit: Boolean
-  ) = checked(for {
-    cs   <- reifyConfigFromTpe[C]()
-    expr <- generate(using Quoted(q))(cs, ctx, f, '{ rt.Dim3($rangeX.size, $rangeY.size, $rangeZ.size) }, cb, jit)
-  } yield expr)
+      targets: Expr[String]
+  ) = checked(
+    generate(using Quoted(q))(
+      targets.valueOrAbort,
+      ctx,
+      f,
+      '{ rt.Dim3($rangeX.size, $rangeY.size, $rangeZ.size) },
+      cb
+    )
+  )
 
   private val ProgramCounter = AtomicLong(0)
   @SuppressWarnings(Array("bonsai:invariant-in-loop"))
   private def generate(using
       q: Quoted
   )(
-      configs: List[ReifiedConfig],
+      targets: String,
       ctx: Expr[rt.Context],
       f: Expr[Any],
       dim: Expr[rt.Dim3],
-      cb: Expr[Callback[Unit]],
-      jit: Boolean = false
+      cb: Expr[Callback[Unit]]
   ) = {
+    val jit = LaunchConfig.jit
     val log = RenderedLog("")
     val result = for {
 
@@ -262,6 +212,7 @@ object compiletime {
 
       serialisedAst <- Either.catchNonFatal(MsgPack.encode(CodeGen.programVersioned(prog)))
       compiler = ct.Compiler.create()
+      configs <- reifiedConfigs(compiler, targets)
 
       compilations <-
         if (jit) Nil.success

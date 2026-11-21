@@ -474,6 +474,7 @@ lazy val `compiler-testsuite-scala` = project
       "testFull" :: "testUntilFailed" :: state
     },
     name := "compiler-testsuite-scala",
+    Test / unmanagedSources += (ThisBuild / baseDirectory).value / ".." / "spectra" / "generated" / "scala" / "polyregion" / "spectra.scala",
     scalacOptions ++= Seq(
       "-Yretain-trees" // XXX for the test kernels
     ),
