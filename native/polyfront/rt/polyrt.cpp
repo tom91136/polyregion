@@ -786,7 +786,10 @@ POLYREGION_EXPORT extern "C" bool polyrt_remote_failed() noexcept {
     if (!foreignMarshalAttempted) return false;
     std::snprintf(runtimeErrorMessage, sizeof(runtimeErrorMessage), "%s", foreignMarshalMessage);
   }
-  if (!raiseHostFailures) polyrt_abort();
+  if (!raiseHostFailures) {
+    if (foreignMarshalAttempted && std::strstr(runtimeErrorMessage, foreignMarshalMessage)) return false;
+    polyrt_abort();
+  }
   foreignMarshalAttempted = false;
   if (activeTransactions.empty()) return true;
   char reported[sizeof(runtimeErrorMessage)];

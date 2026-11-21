@@ -346,6 +346,24 @@ TEST_CASE("a recorded mirror refusal is reported once, through the host program 
   CHECK(polyrt_context_release(created.context));
 }
 
+TEST_CASE("a recorded mirror refusal is left to the release when host failures are not raised") {
+  const auto host = find(RelocatableBackend);
+  REQUIRE(host);
+  Created created(host);
+  REQUIRE(polyrt_context_acquire(created.context));
+  REQUIRE_FALSE(polyrt_raise_host_failures(false));
+  REQUIRE(polyregion::polyrt::sma::foreignContextActive("probe"));
+  uintptr_t memory = 0;
+  REQUIRE(polyrt_remote_malloc(created.context, 8, &memory));
+  CHECK_FALSE(polyrt_remote_failed());
+  CHECK(polyrt_remote_free(created.context, memory));
+  CHECK_FALSE(polyrt_remote_failed());
+  CHECK_FALSE(polyrt_context_release(created.context));
+  CHECK(lastError().find("created context") != std::string::npos);
+  REQUIRE(polyrt_context_acquire(created.context));
+  CHECK(polyrt_context_release(created.context));
+}
+
 TEST_CASE("destroying a context that was not created reports an error") {
   CHECK_FALSE(polyrt_context_destroy(nullptr));
   CHECK_FALSE(lastError().empty());
