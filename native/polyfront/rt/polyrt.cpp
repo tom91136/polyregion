@@ -813,7 +813,7 @@ POLYREGION_EXPORT extern "C" bool polyrt_raise_host_failures(const bool enabled)
 POLYREGION_EXPORT extern "C" bool polyrt_remote_failed() noexcept {
   if (runtimeErrorMessage[0] == '\0') {
     if (!foreignMarshalAttempted) return false;
-    std::snprintf(runtimeErrorMessage, sizeof(runtimeErrorMessage), "%s", foreignMarshalMessage);
+    std::snprintf(runtimeErrorMessage, sizeof(runtimeErrorMessage), "%s", refusalMessage);
   }
   if (!raiseHostFailures) {
     if (foreignMarshalAttempted && std::strstr(runtimeErrorMessage, foreignMarshalMessage)) return false;

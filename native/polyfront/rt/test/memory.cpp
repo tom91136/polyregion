@@ -521,6 +521,20 @@ TEST_CASE("a launch with host pointers is refused when no capture marshal can mi
     CHECK(std::string(polyrt_error_message()).find("no capture marshal") != std::string::npos);
   }
 
+  SECTION("the host program check reports the refusal once") {
+    device.stub->advertised = std::vector<std::string>{"paging:Managed"};
+    int32_t platforms = 0;
+    REQUIRE(polyrt_context_acquire(&context));
+    REQUIRE(polyrt_remote_launch_marshalled(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
+                                            arguments.data(), mirrorSizes.data(), mirrorKinds.data(), nullptr));
+    REQUIRE(polyrt_platform_count(&platforms));
+    const auto previous = polyrt_raise_host_failures(true);
+    CHECK(polyrt_remote_failed());
+    CHECK(std::string(polyrt_error_message()).find("no capture marshal") != std::string::npos);
+    CHECK(polyrt_context_release(&context));
+    polyrt_raise_host_failures(previous);
+  }
+
   SECTION("a device that pages system memory reads the host pointer in place") {
     device.stub->advertised = std::vector<std::string>{"paging:System"};
     REQUIRE(polyrt_remote_launch_marshalled(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
