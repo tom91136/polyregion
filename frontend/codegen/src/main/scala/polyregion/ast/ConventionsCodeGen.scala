@@ -6,7 +6,7 @@ object ConventionsCodeGen {
 
   inline def conventionsHeader: String = ${ headerImpl }
 
-  private enum Kind { case Const, Macro, Abi, Reflect }
+  private enum Kind { case Const, Macro, Abi, HostAbi, Reflect }
   private case class Entry(name: String, value: String, kind: Kind)
 
   def headerImpl(using Quotes): Expr[String] = Expr(render(extract))
@@ -46,12 +46,14 @@ object ConventionsCodeGen {
     val conventions        = Symbol.requiredModule("polyregion.ast.PolyAST.Conventions")
     val macros             = Symbol.requiredModule("polyregion.ast.PolyAST.Conventions.Macros")
     val runtimeAbi         = Symbol.requiredModule("polyregion.ast.PolyAST.Conventions.RuntimeAbi")
+    val hostAbi            = Symbol.requiredModule("polyregion.ast.PolyAST.Conventions.HostAbi")
     val reflect            = Symbol.requiredModule("polyregion.ast.PolyAST.Conventions.Reflect")
     val assertMessageLimit = PolyAST.Conventions.assertMessageLimit
     constLiterals(conventions).map((n, v) => Entry(n, v, Kind.Const)) ++
       List(Entry("AssertMessageLimit", assertMessageLimit.toString, Kind.Const)) ++
       constStrings(macros).map((n, v) => Entry(n, v, Kind.Macro)) ++
       constStrings(runtimeAbi).map((n, v) => Entry(n, v, Kind.Abi)) ++
+      constStrings(hostAbi).map((n, v) => Entry(n, v, Kind.HostAbi)) ++
       constStrings(reflect).map((n, v) => Entry(n, v, Kind.Reflect))
   }
 
@@ -64,7 +66,8 @@ object ConventionsCodeGen {
     val consts = entries.collect { case Entry(n, v, Kind.Const) => s"inline constexpr auto $n = $v;" }.mkString("\n")
     val reflect =
       entries.collect { case Entry(n, v, Kind.Reflect) => s"""inline constexpr auto $n = "$v";""" }.mkString("\n")
-    val abiList = entries.collect { case Entry(n, v, Kind.Abi) => s"  X($n, $v)" }.mkString(" \\\n")
+    val abiList     = entries.collect { case Entry(n, v, Kind.Abi) => s"  X($n, $v)" }.mkString(" \\\n")
+    val hostAbiList = entries.collect { case Entry(n, v, Kind.HostAbi) => s"  X($n, $v)" }.mkString(" \\\n")
     s"""|// AUTO-GENERATED from PolyAST.Conventions via polyregion.ast.CodeGen. DO NOT EDIT.
         |#pragma once
         |
@@ -72,6 +75,9 @@ object ConventionsCodeGen {
         |
         |#define POLYREGION_RUNTIME_ABI(X) \\
         |$abiList
+        |
+        |#define POLYREGION_HOST_ABI(X) \\
+        |$hostAbiList
         |
         |namespace polyregion::conventions {
         |

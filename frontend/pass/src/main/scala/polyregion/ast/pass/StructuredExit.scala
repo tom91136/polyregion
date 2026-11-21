@@ -54,10 +54,10 @@ object StructuredExit extends ProgramPass {
   private val ExceptionWhatPtr          = p.Type.Ptr(p.Type.IntS8, p.Type.Space.Private)
   private val ExceptionCodeSym          = p.Conventions.ExceptionCode
   private val AssertTag                 = 0
-  private val HostAssertSym             = "__polyregion_builtin_assert"
+  private val HostAssertSym             = p.Conventions.HostAbi.BuiltinAssert
   private val RaisedSym                 = "#raised"
-  private val RemoteFailedSym           = "polyrt_remote_failed"
-  private val ErrorMessageSym           = "polyrt_error_message"
+  private val RemoteFailedSym           = p.Conventions.HostAbi.RemoteFailed
+  private val ErrorMessageSym           = p.Conventions.HostAbi.ErrorMessage
   private val RemoteFailedPrefix        = "#remote_failed"
   private val AssertedPtrSym            = "#asserted_ptr"
   private val DiscardSym                = "#raised_discard"

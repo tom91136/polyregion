@@ -839,6 +839,17 @@ object PolyAST {
       inline val SmaPoolReset   = "polyrt_sma_pool_reset"
       inline val SmaPoolPtr     = "polyrt_sma_pool_ptr"
     }
+    object HostAbi {
+      inline val BuiltinAssert          = "__polyregion_builtin_assert"
+      inline val RemoteLaunchMarshalled = "polyrt_remote_launch_marshalled"
+      inline val RemoteMalloc           = "polyrt_remote_malloc"
+      inline val RemoteTempMalloc       = "polyrt_remote_temp_malloc"
+      inline val RemoteFree             = "polyrt_remote_free"
+      inline val RemoteMemcpy           = "polyrt_remote_memcpy"
+      inline val RemoteSync             = "polyrt_remote_sync"
+      inline val RemoteFailed           = "polyrt_remote_failed"
+      inline val ErrorMessage           = "polyrt_error_message"
+    }
     object Reflect {
       inline val MirrorBitcodeGlobal = "polyregion_mirror_bc"
       inline val MirrorPrelude       = "__polyregion_mirror_prelude"

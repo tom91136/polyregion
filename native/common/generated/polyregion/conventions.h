@@ -22,6 +22,17 @@
   X(SmaPoolReset, polyrt_sma_pool_reset)                                                                                                   \
   X(SmaPoolPtr, polyrt_sma_pool_ptr)
 
+#define POLYREGION_HOST_ABI(X)                                                                                                             \
+  X(BuiltinAssert, __polyregion_builtin_assert)                                                                                            \
+  X(RemoteLaunchMarshalled, polyrt_remote_launch_marshalled)                                                                               \
+  X(RemoteMalloc, polyrt_remote_malloc)                                                                                                    \
+  X(RemoteTempMalloc, polyrt_remote_temp_malloc)                                                                                           \
+  X(RemoteFree, polyrt_remote_free)                                                                                                        \
+  X(RemoteMemcpy, polyrt_remote_memcpy)                                                                                                    \
+  X(RemoteSync, polyrt_remote_sync)                                                                                                        \
+  X(RemoteFailed, polyrt_remote_failed)                                                                                                    \
+  X(ErrorMessage, polyrt_error_message)
+
 namespace polyregion::conventions {
 
 inline constexpr auto EntryName = "_main";
