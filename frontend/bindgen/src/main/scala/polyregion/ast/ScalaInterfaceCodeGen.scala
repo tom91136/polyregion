@@ -91,17 +91,33 @@ private[ast] object ScalaInterfaceCodeGen {
     else s"$prefix\n${parameters.map("      " + _).mkString(",\n")}\n  $suffix"
   }
 
+  private val CurrentContext = "polyregion.jvm.runtime.Context.current()"
+
   private def declaration(interfaceDef: p.Interface, decl: p.FunctionDecl, context: Option[String]): String = {
     val tpeVars = if (decl.tpeVars.nonEmpty) decl.tpeVars.map(_.name).mkString("[", ", ", "]") else ""
-    val parameters = context.map(tpe => s"$ContextParameter: $tpe").toList ++ decl.args.map(arg =>
-      s"${arg.named.symbol}: ${tpe(arg.named.tpe)}"
-    )
-    val signature = render(s"  def ${decl.name.last}$tpeVars(", parameters, s"): ${tpe(decl.rtn)} =")
+    val parameters = context.map(tpe => s"$ContextParameter: $tpe").toList ++ decl.args.map { arg =>
+      val modifier = arg.named.tpe match {
+        case p.Type.Exec(_, _, _) => "inline "
+        case _                    => ""
+      }
+      s"$modifier${arg.named.symbol}: ${tpe(arg.named.tpe)}"
+    }
+    val signature = render(s"  inline def ${decl.name.last}$tpeVars(", parameters, s"): ${tpe(decl.rtn)} =")
+    val arguments = (if (context.isDefined) ContextParameter else CurrentContext) :: decl.args.map(_.named.symbol)
     s"""  @compileTimeOnly("${marker(interfaceDef, decl)}")
        |$signature
-       |    throw UnsupportedOperationException("compiler did not replace ${decl.name.fqn.mkString(
-        "."
-      )}")""".stripMargin
+       |${launchCall(interfaceDef, decl, arguments)}""".stripMargin
+  }
+
+  private def launchCall(interfaceDef: p.Interface, decl: p.FunctionDecl, arguments: List[String]): String = {
+    val prefix =
+      s"    polyregion.scalalang.launch.call[${tpe(decl.rtn)}](\"${interfaceIdentity(interfaceDef, decl)}\", "
+    val inline = s"$prefix${arguments.mkString(", ")})"
+    if (inline.length <= 120) inline
+    else
+      s"    polyregion.scalalang.launch.call[${tpe(decl.rtn)}](\n      \"${interfaceIdentity(interfaceDef, decl)}\",\n${arguments
+          .map("      " + _)
+          .mkString(",\n")}\n    )"
   }
 
   private def sugar(decl: p.FunctionDecl, context: Option[String], rank: Int): String = {

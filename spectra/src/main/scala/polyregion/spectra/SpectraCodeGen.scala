@@ -5,7 +5,7 @@ import java.nio.file.{Files, Path, Paths}
 
 import polyregion.ast.generated.PolyPackageWireSchema
 import polyregion.ast.PolyAST as p
-import polyregion.ast.{Core, FortranConfig, InterfaceCodeGen, JavaConfig, MsgPack, ScalaConfig}
+import polyregion.ast.{Core, FortranConfig, InterfaceCodeGen, JavaConfig, MsgPack, RegionConfig, ScalaConfig}
 
 import scala.jdk.CollectionConverters.*
 import scala.util.Using
@@ -13,7 +13,7 @@ import scala.util.Using
 object SpectraCodeGen {
 
   private val fortran = FortranConfig("spectra_api")
-  private val scala   = ScalaConfig("polyregion", "spectra")
+  private val scala   = ScalaConfig("polyregion", "spectra", Some(RegionConfig("polyregion.jvm.runtime.Context")))
   private val jvm     = JavaConfig("polyregion", "Spectra")
 
   private[spectra] val cppHeader: String = InterfaceCodeGen.cppHeader(Spectra.interfaceDef)

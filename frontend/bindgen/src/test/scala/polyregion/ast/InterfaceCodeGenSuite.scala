@@ -113,7 +113,7 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
     assert(sc.contains("object ExampleInterface"))
     assert(!sc.contains("trait ExampleInterface"))
     assert(sc.contains("@compileTimeOnly(\"polyregion_interface:example:example.transform\")"))
-    assert(sc.contains("def transform[T, U](in: Array[T], out: Array[U], n: Int, op: T => U): Unit"))
+    assert(sc.contains("inline def transform[T, U](in: Array[T], out: Array[U], n: Int, inline op: T => U): Unit"))
   }
 
   test("Fortran adapts erased generic results to output arguments") {
@@ -778,9 +778,11 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
 
   test("Scala region projection overloads every stub with a context and adds linearised sugar") {
     val source = InterfaceCodeGen.scalaObject(Core.interfaceDef, regionScala)
-    assert(source.contains("def for_each(n: Long, body: Long => Unit): Unit ="))
+    assert(source.contains("inline def for_each(n: Long, inline body: Long => Unit): Unit ="))
     assert(
-      source.contains("def for_each(context: polyregion.jvm.runtime.Context, n: Long, body: Long => Unit): Unit =")
+      source.contains(
+        "inline def for_each(context: polyregion.jvm.runtime.Context, n: Long, inline body: Long => Unit): Unit ="
+      )
     )
     assert(
       source.contains(
@@ -793,7 +795,9 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
     assert(source.contains("body(i / (n1 * n2), i / n2 % n1, i % n2)"))
     assert(source.contains("inline def task(inline body: () => Unit): Unit ="))
     assert(
-      !InterfaceCodeGen.scalaObject(Core.interfaceDef, ScalaConfig("polyregion", "offload")).contains("inline def")
+      !InterfaceCodeGen
+        .scalaObject(Core.interfaceDef, ScalaConfig("polyregion", "offload"))
+        .contains("context: polyregion.jvm.runtime.Context")
     )
   }
 
