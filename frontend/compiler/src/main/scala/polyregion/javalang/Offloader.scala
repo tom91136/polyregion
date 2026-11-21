@@ -46,7 +46,6 @@ object Offloader {
   private def withFieldStructs(
       program: p.Program,
       classTable: Map[String, TypeElement],
-      tags: Map[String, Int],
       outerRefs: Set[(String, String)]
   ): Result[p.Program] = {
     def go(defs: List[p.StructDef]): Result[List[p.StructDef]] = {
@@ -58,7 +57,7 @@ object Offloader {
           .flatTraverse { sym =>
             val fqn = sym.fqn.mkString(".")
             classTable.get(fqn) match {
-              case Some(elem) => JavaTyper.lowerStruct(elem, tags.contains(fqn), outerRefs).map(List(_))
+              case Some(elem) => JavaTyper.lowerStruct(elem, outerRefs).map(List(_))
               case None       => List.empty[p.StructDef].success
             }
           }
@@ -322,12 +321,14 @@ object Offloader {
     val symbol = normalise(fqcn)
     for {
       region   <- TreeRemapper.compileRegion(sources, entry)
-      raw      <- withFieldStructs(region.program, classTable, region.tags, region.outerRefs)
+      raw      <- withFieldStructs(region.program, classTable, region.outerRefs)
       rawEntry <- raw.entry.failIfEmpty(s"Region `$symbol` has no entry")
       resultTpe = rawEntry.rtn
       routed    = routeReturnThroughCapture(rawEntry.copy(decl = rawEntry.decl.copy(name = p.Sym(symbol))))
       slots <- slotsOf(routed, region.captures, resultTpe != p.Type.Unit0)
-      named              = Devirtualise(region.dispatch)(raw.copy(entry = Some(routed)), log)
+      tagged             = region.tags.map((fqn, tag) => p.Sym(fqn) -> tag)
+      decorated          = raw.copy(defs = Devirtualise.decorate(raw.defs, region.owners, tagged), entry = Some(routed))
+      named              = Devirtualise(region.dispatch)(decorated, log)
       passed             = runPasses(named, log)
       (monoToPoly, prog) = passed
       failures           = Verify(prog, log, verifyFunction = false).filter(_._2.nonEmpty)

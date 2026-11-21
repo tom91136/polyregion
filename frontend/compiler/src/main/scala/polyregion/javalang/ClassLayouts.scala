@@ -98,6 +98,24 @@ object ClassLayouts {
       )
     }
 
+  // one class gets one layout: javac's wins, and the class file's members must be a part of it
+  def merge(sourced: List[p.StructDef], bytecode: List[p.StructDef]): Result[List[p.StructDef]] = {
+    val known = sourced.map(d => d.name -> d).toMap
+    bytecode
+      .traverse { d =>
+        known.get(d.name).fold(List(d).success) { source =>
+          val have = source.members.map(m => m.symbol -> m.tpe).toMap
+          d.members.find(m => !have.get(m.symbol).contains(m.tpe)) match {
+            case None => List.empty[p.StructDef].success
+            case Some(m) =>
+              (s"`${d.name.repr}` has one layout from its source and another from its class file: member " +
+                s"`${m.symbol}: ${m.tpe.repr}` of the class file is not in the source layout").fail
+          }
+        }
+      }
+      .map(sourced ++ _.flatten)
+  }
+
   def isPlatform(internal: String): Boolean = Platform.exists(internal.startsWith(_))
 
   // fields the layout cannot carry are left out, an access to one is refused where it happens

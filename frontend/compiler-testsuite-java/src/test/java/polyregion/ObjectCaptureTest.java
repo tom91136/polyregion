@@ -235,17 +235,10 @@ public class ObjectCaptureTest extends BaseSuite {
   }
 
   @Test
-  public void rejectsDispatchOverImplementationsWithFields() {
+  public void dispatchesOverImplementationsWithFields() {
     Scaled a = new ByField(3);
     Scaled b = new Offset(2, 5);
-    OffloadFunction<Integer> region = () -> scale(a, 7) + scale(b, 7);
-    try {
-      polyregion.javalang.Runtime.offload(region);
-      org.junit.Assert.fail("expected a stateful implementation to be rejected");
-    } catch (UnsupportedOperationException e) {
-      org.junit.Assert.assertTrue(
-          e.getMessage(), e.getMessage().contains("carries instance state"));
-    }
+    assertMatchesJdk(() -> scale(a, 7) + scale(b, 7));
   }
 
   @Test

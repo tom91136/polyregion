@@ -11,9 +11,6 @@ import scala.jdk.CollectionConverters.*
 
 object JavaTyper {
 
-  // not a Java field: the host writes it from the object's class
-  final val TagMember = "#tag"
-
   // a local or anonymous class has no qualified name, the flat name is unique per compilation
   def structName(elem: TypeElement): String = (elem.getNestingKind, elem) match {
     case (NestingKind.LOCAL | NestingKind.ANONYMOUS, c: JSymbol.ClassSymbol) => c.flatName.toString
@@ -69,15 +66,13 @@ object JavaTyper {
     case _                      => Nil
   }
 
-  // the tag leads so every dispatch candidate agrees on its offset
-  def lowerStruct(elem: TypeElement, tagged: Boolean, outerRefs: Set[(String, String)]): Result[p.StructDef] =
+  def lowerStruct(elem: TypeElement, outerRefs: Set[(String, String)]): Result[p.StructDef] =
     (structFields(elem) ::: outerRefElements(elem)
       .filter(f => outerRefs.contains(structName(elem) -> f.getSimpleName.toString))
       .map(f => f.getSimpleName.toString -> f.asType))
       .traverse((name, mirror) => typer(mirror).map(t => p.Named(name, t)))
       .map { members =>
-        val all = if (tagged) p.Named(TagMember, p.Type.IntS32) :: members else members
-        p.StructDef(p.Sym(structName(elem)), Nil, all, Nil)
+        p.StructDef(p.Sym(structName(elem)), Nil, members, Nil)
       }
 
   // a constant with state is rejected rather than flattened to an ordinal

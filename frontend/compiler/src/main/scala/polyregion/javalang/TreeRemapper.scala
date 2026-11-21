@@ -52,7 +52,9 @@ object TreeRemapper {
           t
       }
 
-    val taggedTypes = mutable.LinkedHashSet.empty[String]
+    // the classes a dispatch names, whose structs the call sites alone would not bring in
+    val dispatchClasses = mutable.LinkedHashSet.empty[TypeElement]
+    val owners          = mutable.LinkedHashMap.empty[p.Sym, List[p.Sym]]
 
     // each virtual method with the classes implementing it, `args` picking the call's arguments an implementation takes
     val dispatch = mutable.LinkedHashMap.empty[p.Sym, List[Arm]]
@@ -94,6 +96,7 @@ object TreeRemapper {
       captures: List[Captured],
       tags: Map[String, Int],
       dispatch: Map[p.Sym, List[Devirtualise.Candidate]],
+      owners: Map[p.Sym, List[p.Sym]],
       outerRefs: Set[(String, String)]
   )
 
@@ -1434,23 +1437,23 @@ object TreeRemapper {
         else
           (s"Cannot devirtualise `${fullName(sym)}`: this compilation sees no class implementing it, " +
             "so there is nothing to compile into the kernel").fail
-      // every arm shares the abstract receiver, so an implementation reading its own state would use the wrong offsets
-      receivers = sym.owner match {
-        case c: JSymbol.ClassSymbol => c :: candidates.map(_._1)
-        case _                      => candidates.map(_._1)
-      }
-      _ <- receivers.traverse_ { c =>
-        val fields = JavaTyper.instanceFields(c)
-        if (fields.isEmpty) ().success
+      // the owner's layout is replaced by the tag and the room for its largest implementation
+      owner <- (sym.owner match {
+        case c: JSymbol.ClassSymbol => Some(c)
+        case _                      => None
+      }).failIfEmpty(s"`${fullName(sym)}` is not owned by a class")
+      _ <-
+        if (JavaTyper.instanceFields(owner).isEmpty) ().success
         else
-          (s"Cannot devirtualise `${fullName(sym)}`: `${c.getSimpleName}` carries instance state " +
-            s"(${fields.map(_.getSimpleName).mkString(", ")}), and only stateless implementations can " +
-            "share the abstract receiver's layout").fail
-      }
-      _ = scope.deps.taggedTypes += ownerName(sym)
+          (s"Cannot devirtualise `${fullName(sym)}`: `${owner.getSimpleName}` carries instance state " +
+            s"(${JavaTyper.instanceFields(owner).map(_.getSimpleName).mkString(", ")}), which the layout shared by " +
+            "its implementations has no room for").fail
+      ownerSym = p.Sym(JavaTyper.structName(owner))
+      _        = scope.deps.dispatchClasses += owner
+      _ = scope.deps.owners(ownerSym) =
+        (scope.deps.owners.getOrElse(ownerSym, Nil) ++ candidates.map(c => p.Sym(JavaTyper.structName(c._1)))).distinct
       arms <- candidates.traverse { (cls, impl) =>
-        val fqn = cls.getQualifiedName.toString
-        scope.deps.taggedTypes += fqn
+        scope.deps.dispatchClasses += cls
         scope.deps.fnSyms += impl
         scope.calls += impl
         (lengthArgsFor(scope, impl, argLengths), staticArgsFor(scope, impl)).mapN((ls, ss) =>
@@ -2257,19 +2260,16 @@ object TreeRemapper {
       bytecode  <- BytecodeResolver.resolve(deps.bytecodeRoots.toList, deps.classBytes)
       depFns = IntrinsicTable.dedupe(sourceFns ++ bytecode.functions ++ deps.nativeFns.toList)
       signatureStructs <- structSyms(entryFn :: depFns).flatTraverse { sym =>
-        val fqn = sym.fqn.mkString(".")
-        classTable.get(fqn) match {
-          case Some(elem) =>
-            JavaTyper.lowerStruct(elem, deps.taggedTypes.contains(fqn), deps.outerRefs.toSet).map(List(_))
-          case None => List.empty[p.StructDef].success
+        classTable.get(sym.fqn.mkString(".")) match {
+          case Some(elem) => JavaTyper.lowerStruct(elem, deps.outerRefs.toSet).map(List(_))
+          case None       => List.empty[p.StructDef].success
         }
       }
-      allocatedStructs <- deps.witnessed.toList.traverse { elem =>
-        JavaTyper.lowerStruct(elem, deps.taggedTypes.contains(elem.getQualifiedName.toString), deps.outerRefs.toSet)
+      allocatedStructs <- (deps.witnessed.toList ++ deps.dispatchClasses.toList).distinct.traverse { elem =>
+        JavaTyper.lowerStruct(elem, deps.outerRefs.toSet)
       }
-      sourced = (signatureStructs ++ allocatedStructs).map(_.name).toSet
-      structs = signatureStructs ++ allocatedStructs ++ bytecode.structs.filterNot(d => sourced(d.name))
-      tags    = Devirtualise.tagsOf(deps.dispatch.values.flatten.map(_.cls))
+      structs <- ClassLayouts.merge((signatureStructs ++ allocatedStructs).distinct, bytecode.structs)
+      tags = Devirtualise.tagsOf(deps.dispatch.values.flatten.map(_.cls))
       candidates = deps.dispatch.view.mapValues { arms =>
         arms.map(a => Devirtualise.Candidate(p.Type.Struct(a.cls, Nil), a.impl, tags(a.cls), Some(a.args)))
       }.toMap
@@ -2278,6 +2278,7 @@ object TreeRemapper {
       captures,
       tags.map((cls, tag) => cls.fqn.mkString(".") -> tag),
       candidates,
+      deps.owners.toMap,
       deps.outerRefs.toSet
     )
   }
