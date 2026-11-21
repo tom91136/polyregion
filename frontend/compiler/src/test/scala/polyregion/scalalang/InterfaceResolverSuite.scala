@@ -24,12 +24,12 @@ class InterfaceResolverSuite extends munit.FunSuite {
       pkg: p.Package,
       declaration: String,
       target: p.Expr.Invoke,
-      callerDecls: List[p.FunctionDecl] = Nil
+      callers: List[p.Function] = Nil
   ) =
     InterfaceResolver.importPackages(
       List(pkg),
       List(InterfaceResolver.Import(pkg.interface.name.fqcn, declaration, target)),
-      callerDecls,
+      callers,
       InterfaceResolver.configuredCapabilities,
       Map.empty
     )
@@ -183,7 +183,21 @@ class InterfaceResolverSuite extends munit.FunSuite {
       i32
     )
 
-    val (functions, _) = importOne(pkg, "bar.apply", target, List(callableDecl))
+    val (functions, _) = importOne(
+      pkg,
+      "bar.apply",
+      target,
+      List(
+        p.Function(
+          callableDecl,
+          Nil,
+          p.Function.Visibility.Internal,
+          p.Function.FpMode.Relaxed,
+          p.CallConvention.RegularCall,
+          None
+        )
+      )
+    )
       .fold(errors => fail(errors.mkString("\n")), identity)
     val resolved = functions.find(_.name == target.calleeName).getOrElse(fail("missing resolved function"))
 

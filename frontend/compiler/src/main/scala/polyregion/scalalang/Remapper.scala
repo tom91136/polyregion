@@ -249,9 +249,13 @@ object Remapper {
             .map((captures, v) => captures.filterNot(cap => argSymbols.contains(cap._2.symbol)))
             .map(xs =>
               xs.foldLeft(List.empty[(q.Symbol, p.Named)] -> c) { case ((acc, c0), (_, ref, (term, tpe))) =>
-                val sym       = ref.symbol
-                val (name, c) = c0.mkName(sym)
-                ((sym, p.Named(name, tpe)) :: acc) -> c
+                val sym = ref.symbol
+                c0.refs.get(sym) match {
+                  case Some(p.Expr.Alias(p.Term.Select(named, Nil, _))) => ((sym, named) :: acc) -> c0
+                  case _ =>
+                    val (name, c) = c0.mkName(sym)
+                    ((sym, p.Named(name, tpe)) :: acc) -> c
+                }
               }
             )
           (fn, c0) <- c.withFnName(defSymbol).mapFn(defDef, RenderedLog(""))
@@ -831,6 +835,8 @@ object Remapper {
         case (Nil, Nil, q.NamedArg(name, rhs)) => (c1 !! term).mapTerm(rhs) // named argument: `$name = $rhs`
         case (ta, ts, q.Typed(x, _)) =>
           (c1 !! term).mapTerm(x, tpeArgs = ta, termArgss = ts) // type ascription: `value : T`
+        case (ta, ts, q.Inlined(Some(call: q.Term), _, _)) if Compiler.interfaceIdentity(call.symbol).isDefined => // launch stub reached inside a region
+          (c1 !! term).mapTerm(call, tpeArgs = ta, termArgss = ts)
         case (ta, ts, q.Inlined(call, bindings, expansion)) => // inlined DefDef
           for {
             // For non-inlined args, bindings will contain all relevant arguments with rhs.

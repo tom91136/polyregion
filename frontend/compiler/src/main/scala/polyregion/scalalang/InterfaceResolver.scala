@@ -11,9 +11,11 @@ private[scalalang] object InterfaceResolver {
   private def configured(name: String, property: String): Option[String] =
     Option(System.getenv(name)).orElse(Option(System.getProperty(property))).map(_.trim).filter(_.nonEmpty)
 
+  def configuredCapabilityList: String =
+    configured("POLYFRONT_LIBRARY_CAPABILITIES", "polyregion.library.capabilities").getOrElse("")
+
   def configuredCapabilities: Set[String] =
-    configured("POLYFRONT_LIBRARY_CAPABILITIES", "polyregion.library.capabilities")
-      .fold(Set.empty[String])(_.split(',').iterator.map(_.trim).filter(_.nonEmpty).toSet)
+    configuredCapabilityList.split(',').iterator.map(_.trim).filter(_.nonEmpty).toSet
 
   private lazy val compiler = polyregion.jvm.compiler.Compiler.create()
 
@@ -81,7 +83,7 @@ private[scalalang] object InterfaceResolver {
   def importPackages(
       packages: List[p.Package],
       imports: List[Import],
-      callerDecls: List[p.FunctionDecl],
+      callers: List[p.Function],
       capabilities: Set[String],
       typeSizes: Map[p.Type, Int]
   ): Either[List[String], (List[p.Function], Set[p.StructDef])] = {
@@ -97,16 +99,13 @@ private[scalalang] object InterfaceResolver {
         value.target.rtn
       )
     }.toMap
-    val callers = callerDecls.map(decl =>
-      p.Function(decl, Nil, p.Function.Visibility.Internal, p.Function.FpMode.Relaxed, p.CallConvention.RegularCall)
-    )
     val request = p.Program.LinkRequest(
       packages,
       p.Program(None, roots ::: callers, Nil),
       capabilities.toList.sorted,
       layouts.toList.filter(_._2 > 0).sortBy(_._1.canonicalName).map((tpe, size) => p.Program.TypeSize(tpe, size))
     )
-    val callerNames = callerDecls.map(_.name).toSet
+    val callerNames = callers.map(_.name).toSet
     ProgramLinker
       .importProgram(request, signatures)
       .map(program => program.functions.filterNot(fn => callerNames(fn.name)) -> program.defs.toSet)
@@ -114,20 +113,23 @@ private[scalalang] object InterfaceResolver {
 
   def importAll(
       imports: List[Import],
-      callerDecls: List[p.FunctionDecl],
+      callers: List[p.Function],
       capabilities: Set[String] = configuredCapabilities,
-      typeSizes: Map[p.Type, Int] = Map.empty
+      typeSizes: Map[p.Type, Int] = Map.empty,
+      target: Option[String] = LaunchConfig.targetNames.headOption
   ): Either[List[String], (List[p.Function], Set[p.StructDef])] =
     if (imports.isEmpty) Right(Nil -> Set.empty)
-    else
+    else {
+      val available = target.fold(capabilities)(LaunchConfig.capabilitiesFor(capabilities, _))
       imports.map(_.packageName).distinct.sorted.traverse(loadPackage(_, capabilities = capabilities)).flatMap {
         packages =>
           importPackages(
             packages,
             imports,
-            callerDecls,
-            capabilities,
+            callers,
+            available,
             typeSizes
           )
       }
+    }
 }

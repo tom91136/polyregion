@@ -122,7 +122,8 @@ object Compiler {
       deps: q.FnWitnesses,
       missingDefDefs: Map[q.Symbol, q.DefDef],
       existing: List[p.Function],
-      renameMap: Map[q.Symbol, p.Sym] = Map.empty
+      renameMap: Map[q.Symbol, p.Sym] = Map.empty,
+      callers: List[p.Function] = Nil
   )(
       fnLut: Map[p.Signature, (p.Function, Set[p.StructDef])],
       structDefs: Map[p.Sym, p.StructDef]
@@ -195,7 +196,11 @@ object Compiler {
 
                           interfaceIdentity(actualSym) match {
                             case Some((packageName, declaration)) =>
-                              interfaceImports += InterfaceResolver.Import(packageName, declaration, target)
+                              interfaceImports += InterfaceResolver.Import(
+                                packageName,
+                                declaration,
+                                target.copy(receiver = None)
+                              )
                               (xs, depss, clsDepss, moduleSymDepss).success
                             case None if actualDefDef.rhs.isEmpty =>
                               log.info(
@@ -289,7 +294,7 @@ object Compiler {
 
       }(_._1.nonEmpty)
       imports <- InterfaceResolver
-        .importAll(interfaceImports.result(), (existing ::: fns).map(_.decl))
+        .importAll(interfaceImports.result(), callers ::: existing ::: fns)
         .leftMap(errors => CompilerException(errors.mkString("\n")))
     } yield (imports._1 ::: fns, imports._2 ++ clsDeps, moduleSymDeps)
   }
@@ -408,7 +413,12 @@ object Compiler {
     (termValue, c)      <- q.RemapContext(root = root, refs = scope).mapTerm(term, None, tpeArgs)
     (_ -> termTpe, wit) <- Retyper.typer0(term.tpe)
     _ <-
-      if (termTpe != termValue.tpe) {
+      if (
+        termTpe != termValue.tpe && !((termTpe, termValue.tpe) match {
+          case (_: p.Type.Exec, _: p.Type.FnRef) => true
+          case _                                 => false
+        })
+      ) {
         s"Term type ($termTpe) is not the same as term value type (${termValue.tpe}), term was $termValue".fail
       } else ().success
     statements          = c.stmts :+ p.Stmt.Return(termValue)
@@ -639,9 +649,30 @@ object Compiler {
         .success
   }
 
+  private def lambdaEntry(
+      region: p.Function,
+      functions: List[p.Function]
+  ): Result[(p.Function, List[p.Function])] =
+    region.collectWhere[p.Type] { case p.Type.FnRef(name) => name }.distinct match {
+      case name :: Nil =>
+        functions.filter(_.name == name) match {
+          case lambda :: Nil =>
+            (
+              lambda.copy(
+                decl = lambda.decl.copy(affinity = p.Function.Affinity.Offload),
+                visibility = p.Function.Visibility.Exported,
+                convention = p.CallConvention.OffloadEntry
+              ),
+              functions.filterNot(_.name == name)
+            ).success
+          case other => s"callable `${name.repr}` has ${other.size} definitions".fail
+        }
+      case other => s"expected the expression to be a single lambda, it references ${other.map(_.repr)}".fail
+    }
+
   def compileExpr(using
       q: Quoted
-  )(sink: Log, expr: Expr[Any], prisms: PrismTables): Result[
+  )(sink: Log, expr: Expr[Any], prisms: PrismTables, callable: Boolean = false): Result[
     (                                       //
         List[(p.Named, q.Term)],            //
         Map[p.Sym, polyregion.prism.Prism], //
@@ -853,7 +884,8 @@ object Compiler {
         rootDependentFns,
         symbolToMacroDefinedDefDefs,
         exprDeps.resolvedFunctions,
-        syntheticOverrideNames
+        syntheticOverrideNames,
+        rootFn :: Nil
       )(prisms.functions, prisms.structDefs)
 
     _ = log.info("A ", rootDependentFns.map(x => x.toString).toList*)
@@ -1017,10 +1049,15 @@ object Compiler {
         p.StructDef(classStruct.name, Nil, Nil, Nil).success
       }
 
+    (entryFn, programFns) <-
+      if (!callable) (rootFn0, abstractFnsWithAssertBody ::: allRootDependentFns0 ::: resolvedFunctions0).success
+      else
+        lambdaEntry(rootFn0, abstractFnsWithAssertBody ::: allRootDependentFns0 ::: resolvedFunctions0)
+
     unopt = dropClosureReceivers(
       p.Program(
-        Some(rootFn0),
-        IntrinsicTable.dedupe(abstractFnsWithAssertBody ::: allRootDependentFns0 ::: resolvedFunctions0),
+        Some(entryFn),
+        IntrinsicTable.dedupe(programFns),
         ((rootDependentStructs ++ allRootDependentStructs).toList ++ dispatchAnonStructDefs).distinct
       )
     )
