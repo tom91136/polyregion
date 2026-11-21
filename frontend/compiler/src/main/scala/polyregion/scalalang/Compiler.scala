@@ -167,8 +167,10 @@ object Compiler {
                     // handle `throw`, but Intrinsify handles xs.apply/update/length on Ptr<T>
                     // receivers directly at IR level. So just skip compiling these - they'll never
                     // be called as functions.
+                    // intrinsics stubs are likewise replaced by Intrinsify at their call sites.
                     val isScalaArrayMethod = sym.maybeOwner.fullName == "scala.Array"
-                    if (isScalaArrayMethod)
+                    val isIntrinsicStub = sym.maybeOwner.fullName.stripSuffix("$") == "polyregion.scalalang.intrinsics"
+                    if (isScalaArrayMethod || isIntrinsicStub)
                       (xs, depss, clsDepss, moduleSymDepss).success
                     else {
                       // For overrides synthesized by depsWithOverrides, the target ivk's receiver is the

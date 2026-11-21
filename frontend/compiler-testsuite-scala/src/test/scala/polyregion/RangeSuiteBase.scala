@@ -75,4 +75,23 @@ trait RangeSuiteBase extends munit.FunSuite {
       }
     }
   }
+
+  protected inline def raisesInstance[E <: Throwable: scala.reflect.ClassTag](name: String, message: String)(
+      inline f: => Unit
+  ): Unit = {
+    test(s"[host] $name") {
+      withContext("host", host) { ctx =>
+        val actual = intercept[Throwable](run[Config[Target.Host.type, Opt.O2], Unit](ctx)(f))
+        assertEquals(actual.getClass, scala.reflect.classTag[E].runtimeClass)
+        assertEquals(actual.getMessage, message)
+      }
+    }
+    test(s"[nvidia] $name") {
+      withContext("nvidia", nvidia) { ctx =>
+        val actual = intercept[Throwable](run[Config[Target.NVPTX64["sm_80"], Opt.O2], Unit](ctx)(f))
+        assertEquals(actual.getClass, scala.reflect.classTag[E].runtimeClass)
+        assertEquals(actual.getMessage, message)
+      }
+    }
+  }
 }

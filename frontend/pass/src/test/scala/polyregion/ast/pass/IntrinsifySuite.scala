@@ -38,14 +38,14 @@ class IntrinsifySuite extends munit.FunSuite {
     assert(specs.nonEmpty, "expected a SpecOp from gpuBarrierGlobal")
   }
 
-  test("intrinsics.raise(e, m) lowers to a JvmException Assert carrying both strings") {
+  test("intrinsics.raiseNamed(e, m) lowers to a JvmException Assert carrying both strings") {
     val e = entry(
       body = List(
         p.Stmt.Var(
           named("u", p.Type.Unit0),
           Some(
             call(
-              "raise",
+              "raiseNamed",
               List(p.Term.StringConst("java.lang.IllegalArgumentException"), p.Term.StringConst("step cannot be 0.")),
               p.Type.Unit0
             )
@@ -55,7 +55,7 @@ class IntrinsifySuite extends munit.FunSuite {
     )
     val out     = Intrinsify(program(e), NoopLog)
     val invokes = out.entry.body.flatMap(_.collectWhere[p.Expr] { case i: p.Expr.Invoke => i })
-    assert(invokes.isEmpty, s"raise should be lowered, got: ${invokes.map(_.repr)}")
+    assert(invokes.isEmpty, s"raiseNamed should be lowered, got: ${invokes.map(_.repr)}")
     val asserts = out.entry.body.flatMap(_.collectWhere[p.Expr] { case p.Expr.SpecOp(a: p.Spec.Assert) => a })
     assertEquals(
       asserts,

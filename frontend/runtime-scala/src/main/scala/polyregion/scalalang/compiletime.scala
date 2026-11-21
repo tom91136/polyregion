@@ -367,13 +367,15 @@ object compiletime {
                             println(s"fnTpeOrdinals=${fnTpeOrdinals.toList}")
                             println(s"fnValues.array=0x${fnValues.array.map(byte => f"$byte%02x").mkString(" ")}")
                           }
-                          $ctx.launch(
-                            Array(modules(found)),
-                            $moduleName,
-                            $fnName,
-                            fnTpeOrdinals,
-                            fnValues.array,
-                            rt.Policy($dim)
+                          polyregion.scalalang.Loaders.under(new AnyRef {}.getClass.getClassLoader)(
+                            $ctx.launch(
+                              Array(modules(found)),
+                              $moduleName,
+                              $fnName,
+                              fnTpeOrdinals,
+                              fnValues.array,
+                              rt.Policy($dim)
+                            )
                           )
                           marshal.sync()
 

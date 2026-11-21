@@ -110,6 +110,45 @@ object Remapper {
     case _ => false
   }
 
+  private def isIntrinsicRaise(using q: Quoted)(sym: q.Symbol): Boolean =
+    sym.name == "raise" && sym.owner.fullName.stripSuffix("$") == "polyregion.scalalang.intrinsics"
+
+  private def exceptionClassName(using q: Quoted)(tpe: q.TypeRepr): Either[String, String] = {
+    def binaryName(sym: q.Symbol): Option[String] = {
+      val owner      = sym.maybeOwner
+      val ownerFlags = owner.flags
+      val ownerName  = owner.fullName
+      val base       = sym.name.stripSuffix("$")
+      val self       = if (sym.flags.is(q.Flags.Module)) "$" else ""
+      if (owner.isNoSymbol) None
+      else if (ownerFlags.is(q.Flags.Package))
+        Some((if (ownerName.startsWith("<")) base else s"$ownerName.$base") + self)
+      else if (owner.isClassDef && ownerFlags.is(q.Flags.Module))
+        binaryName(owner).map(o => (if (o.endsWith("$")) o + base else s"$o$$$base") + self)
+      else None
+    }
+    def takesString(ctor: q.Symbol) = tpe.dealias.memberType(ctor) match {
+      case q.MethodType(_, arg :: Nil, _) => arg.dealias.typeSymbol.fullName == "java.lang.String"
+      case _                              => false
+    }
+    def instantiable(sym: q.Symbol) = {
+      val flags = sym.flags
+      !flags.is(q.Flags.Abstract) && !flags.is(q.Flags.Trait)
+    }
+    tpe.dealias.simplified.classSymbol match {
+      case None => Left(s"`${tpe.show}` is not a class, intrinsics.raise needs a concrete exception class")
+      case Some(sym) if !instantiable(sym) =>
+        Left(s"`${sym.fullName}` is abstract, intrinsics.raise needs a class that can be instantiated")
+      case Some(sym)
+          if !sym.declarations.filter(_.name == "<init>").exists(c => !c.flags.is(q.Flags.Private) && takesString(c)) =>
+        Left(s"`${sym.fullName}` has no public constructor taking a single String, intrinsics.raise needs one")
+      case Some(sym) =>
+        binaryName(sym).toRight(
+          s"`${sym.fullName}` is a local or inner class, intrinsics.raise needs a top-level class or one nested in an object"
+        )
+    }
+  }
+
   private def structConforms(using q: Quoted)(sub: p.Sym, sup: p.Sym): Boolean =
     Try(q.Symbol.requiredClass(sub.fqcn)).toOption
       .exists(_.typeRef.baseClasses.exists(b => Retyper.structName0(b) == sup))
@@ -902,6 +941,24 @@ object Remapper {
           }
         case (Nil, Nil, q.New(tpt)) => // new instance *without* arg application: `new $tpt`
           typedVar(tpt.tpe)
+        case (Nil, Nil, ap @ q.Apply(q.TypeApply(r: q.Ref, tpt :: Nil), message :: Nil))
+            if isIntrinsicRaise(r.symbol) =>
+          exceptionClassName(tpt.tpe) match {
+            case Left(error) => error.fail
+            case Right(name) =>
+              val named = r match {
+                case q.Select(qualifier, _) => q.Select.unique(qualifier, "raiseNamed")
+                case _ =>
+                  q.Select.unique(q.Ref(q.Symbol.requiredModule("polyregion.scalalang.intrinsics")), "raiseNamed")
+              }
+              for {
+                (args, c) <- c1.down(ap).mapTerms(message :: Nil)
+                (res, c) <- (c !! ap).mapTerm(
+                  named,
+                  termArgss = (p.Expr.Alias(p.Term.StringConst(name)) :: args) :: Nil
+                )
+              } yield (res, c)
+          }
         case (tpeArgs, termArgs0, ap @ q.Apply(fun, args)) => // *single* application of some terms: `$fun($args...)`
           val closure = fun match {
             case r: q.Ref => c1.closures.get(r.symbol).orElse(closureDefOf(fun))

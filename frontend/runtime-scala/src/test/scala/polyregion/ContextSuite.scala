@@ -322,6 +322,60 @@ class ContextSuite extends munit.FunSuite {
     } finally ctx.close()
   }
 
+  private def childLoaderWithFailure(): (java.net.URLClassLoader, String) = {
+    val dir    = java.nio.file.Files.createTempDirectory("child-failure")
+    val source = dir.resolve("childside").resolve("Outer.java")
+    java.nio.file.Files.createDirectories(source.getParent)
+    java.nio.file.Files.writeString(
+      source,
+      "package childside; public class Outer { public static class Failure extends RuntimeException { public Failure(String m) { super(m); } } }"
+    )
+    val compiler = javax.tools.ToolProvider.getSystemJavaCompiler
+    assertEquals(compiler.run(null, null, null, "-d", dir.toString, source.toString), 0)
+    (new java.net.URLClassLoader(Array(dir.toUri.toURL), getClass.getClassLoader), "childside.Outer$Failure")
+  }
+
+  test("a kernel JvmException assert resolves its class through the thread context loader") {
+    val (loader, name) = childLoaderWithFailure()
+    val ctx            = rt.Context.create(hostDevice)
+    val thread         = Thread.currentThread
+    val previous       = thread.getContextClassLoader
+    try {
+      thread.setContextClassLoader(loader)
+      val e = intercept[RuntimeException](launchAssert(ctx, p.Enums.AssertCode.JvmException, s"$name: from child"))
+      assertEquals(e.getClass.getName, name)
+      assert(e.getClass.getClassLoader eq loader)
+      assertEquals(e.getMessage, "from child")
+    } finally {
+      thread.setContextClassLoader(previous)
+      ctx.close()
+      loader.close()
+    }
+  }
+
+  test("a kernel JvmException assert naming a class outside the thread context loader raises a runtime exception") {
+    val (loader, name) = childLoaderWithFailure()
+    val ctx            = rt.Context.create(hostDevice)
+    try {
+      val e =
+        intercept[rt.PolyregionRuntimeException](launchAssert(ctx, p.Enums.AssertCode.JvmException, s"$name: hidden"))
+      assert(e.getMessage.contains(s"$name: hidden"), e.getMessage)
+    } finally {
+      ctx.close()
+      loader.close()
+    }
+  }
+
+  test("a kernel JvmException assert naming a class that is not a Throwable raises a runtime exception") {
+    val ctx = rt.Context.create(hostDevice)
+    try {
+      val e = intercept[rt.PolyregionRuntimeException](
+        launchAssert(ctx, p.Enums.AssertCode.JvmException, "java.lang.String: boom")
+      )
+      assert(e.getMessage.contains("java.lang.String: boom"), e.getMessage)
+    } finally ctx.close()
+  }
+
   test("any other kernel assert code raises a runtime exception naming the code and message") {
     val ctx = rt.Context.create(hostDevice)
     try {

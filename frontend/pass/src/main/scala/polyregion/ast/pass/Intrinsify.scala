@@ -10,7 +10,7 @@ import polyregion.ast.Traversal.*
 //   intrinsics.gpuGlobalIdx(d)  ->  Spec.GpuGlobalIdx(d)
 //   intrinsics.gpuBarrierAll()  ->  Spec.GpuBarrierAll
 //   intrinsics.assert(c, m)     ->  Spec.Assert(c, m)
-//   intrinsics.raise(e, m)      ->  Spec.Assert(JvmException, "e: m")
+//   intrinsics.raiseNamed(e, m) ->  Spec.Assert(JvmException, "e: m")
 //   intrinsics.zero[T]          ->  Cast(i32(0), T)
 //   intrinsics.add[T](x, y)     ->  Intr.Add(x, y, T)
 //   intrinsics.sin(x)           ->  Math.Sin(x)
@@ -99,7 +99,7 @@ object Intrinsify extends ProgramPass {
 
     (op, args) match {
       case "assert" -> (code :: message :: Nil) => spec(p.Spec.Assert(code, message))
-      case "raise" -> (p.Term.StringConst(exception) :: p.Term.StringConst(message) :: Nil) =>
+      case "raiseNamed" -> (p.Term.StringConst(exception) :: p.Term.StringConst(message) :: Nil) =>
         spec(
           p.Spec.Assert(
             p.Term.IntU32Const(p.Enums.AssertCode.JvmException.value),

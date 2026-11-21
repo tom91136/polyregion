@@ -58,7 +58,9 @@ object intrinsics {
 
   def assert(code: Int, message: String): Unit = intrinsic
 
-  def raise(exception: String, message: String): Unit = intrinsic
+  def raise[E <: Throwable](message: String): Unit = intrinsic
+
+  def raiseNamed(exception: String, message: String): Unit = intrinsic
 
   def zero[A]: A = intrinsic
 

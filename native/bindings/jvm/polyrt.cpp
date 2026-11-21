@@ -83,13 +83,45 @@ std::string codeName(const uint32_t code) {
   return name;
 }
 
+jclass loadThroughContextLoader(JNIEnv *env, const std::string &name) {
+  jclass result = nullptr;
+  [&] {
+    auto *threadClass = env->FindClass("java/lang/Thread");
+    auto *loaderClass = env->FindClass("java/lang/ClassLoader");
+    if (!threadClass || !loaderClass) return;
+    auto *current = env->GetStaticMethodID(threadClass, "currentThread", "()Ljava/lang/Thread;");
+    auto *contextLoader = env->GetMethodID(threadClass, "getContextClassLoader", "()Ljava/lang/ClassLoader;");
+    auto *load = env->GetMethodID(loaderClass, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;");
+    if (!current || !contextLoader || !load) return;
+    auto *thread = env->CallStaticObjectMethod(threadClass, current);
+    if (!thread || env->ExceptionCheck()) return;
+    auto *loader = env->CallObjectMethod(thread, contextLoader);
+    if (!loader || env->ExceptionCheck()) return;
+    auto *jname = env->NewStringUTF(name.c_str());
+    if (!jname) return;
+    result = static_cast<jclass>(env->CallObjectMethod(loader, load, jname));
+  }();
+  if (env->ExceptionCheck()) {
+    env->ExceptionClear();
+    return nullptr;
+  }
+  return result;
+}
+
 void throwJvmException(JNIEnv *env, const std::string &raised) {
   const auto split = raised.find(": ");
-  auto cls = (split == std::string::npos ? raised : raised.substr(0, split));
+  const auto cls = (split == std::string::npos ? raised : raised.substr(0, split));
   const auto message = split == std::string::npos ? std::string{} : raised.substr(split + 2);
-  std::replace(cls.begin(), cls.end(), '.', '/');
-  if (auto *exClass = env->FindClass(cls.c_str()); exClass && env->ThrowNew(exClass, message.c_str()) == JNI_OK) return;
-  env->ExceptionClear();
+  auto *exClass = loadThroughContextLoader(env, cls);
+  if (!exClass) {
+    auto internal = cls;
+    std::replace(internal.begin(), internal.end(), '.', '/');
+    exClass = env->FindClass(internal.c_str());
+    if (env->ExceptionCheck()) env->ExceptionClear();
+  }
+  auto *throwable = env->FindClass("java/lang/Throwable");
+  if (exClass && throwable && env->IsAssignableFrom(exClass, throwable) && env->ThrowNew(exClass, message.c_str()) == JNI_OK) return;
+  if (env->ExceptionCheck()) env->ExceptionClear();
   throwGeneric(env, EX, "Device raised " + raised);
 }
 

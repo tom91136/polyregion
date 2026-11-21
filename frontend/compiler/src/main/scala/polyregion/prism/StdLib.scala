@@ -18,7 +18,7 @@ object StdLib {
 
   class Range(val start: Int, val end: Int, val step: Int, val isInclusive: Boolean, val isEmpty: Boolean) {
     def by(step: Int): Range = {
-      if (step == 0) intrinsics.raise("java.lang.IllegalArgumentException", "step cannot be 0.")
+      if (step == 0) intrinsics.raise[java.lang.IllegalArgumentException]("step cannot be 0.")
       new Range(
         start,
         end,
@@ -48,7 +48,7 @@ object StdLib {
         else if (step > 0) (hi - start.toLong) / step.toLong + 1L
         else (start.toLong - hi) / (-step.toLong) + 1L
       if (n > Int.MaxValue.toLong)
-        intrinsics.raise("java.lang.IllegalArgumentException", "seqs cannot contain more than Int.MaxValue elements.")
+        intrinsics.raise[java.lang.IllegalArgumentException]("seqs cannot contain more than Int.MaxValue elements.")
       n.toInt
     }
 
@@ -59,7 +59,7 @@ object StdLib {
         else if (step > 0) (hi - start.toLong) / step.toLong + 1L
         else (start.toLong - hi) / (-step.toLong) + 1L
       if (n > Int.MaxValue.toLong)
-        intrinsics.raise("java.lang.IllegalArgumentException", "seqs cannot contain more than Int.MaxValue elements.")
+        intrinsics.raise[java.lang.IllegalArgumentException]("seqs cannot contain more than Int.MaxValue elements.")
       n.toInt
     }
 
@@ -80,13 +80,13 @@ object StdLib {
         else if (step > 0) (hi - start.toLong) / step.toLong + 1L
         else (start.toLong - hi) / (-step.toLong) + 1L
       if (n > Int.MaxValue.toLong)
-        intrinsics.raise("java.lang.IllegalArgumentException", "seqs cannot contain more than Int.MaxValue elements.")
-      if (idx < 0 || idx >= n) intrinsics.raise("java.lang.IndexOutOfBoundsException", "index out of bounds")
+        intrinsics.raise[java.lang.IllegalArgumentException]("seqs cannot contain more than Int.MaxValue elements.")
+      if (idx < 0 || idx >= n) intrinsics.raise[java.lang.IndexOutOfBoundsException]("index out of bounds")
       (start.toLong + idx.toLong * step.toLong).toInt
     }
 
     def head: Int = {
-      if (isEmpty) intrinsics.raise("java.util.NoSuchElementException", "head on empty Range")
+      if (isEmpty) intrinsics.raise[java.util.NoSuchElementException]("head on empty Range")
       start
     }
 
@@ -96,7 +96,7 @@ object StdLib {
         if (isEmpty) 0L
         else if (step > 0) (hi - start.toLong) / step.toLong + 1L
         else (start.toLong - hi) / (-step.toLong) + 1L
-      if (isEmpty) intrinsics.raise("java.util.NoSuchElementException", "last on empty Range")
+      if (isEmpty) intrinsics.raise[java.util.NoSuchElementException]("last on empty Range")
       (start.toLong + (n - 1L) * step.toLong).toInt
     }
 
@@ -166,7 +166,7 @@ object StdLib {
         if (isEmpty) 0L
         else if (step > 0) (hi - start.toLong) / step.toLong + 1L
         else (start.toLong - hi) / (-step.toLong) + 1L
-      if (isEmpty) intrinsics.raise("java.lang.UnsupportedOperationException", "empty.reduceLeft")
+      if (isEmpty) intrinsics.raise[java.lang.UnsupportedOperationException]("empty.reduceLeft")
       var acc: B = start
       var k      = 1L
       while (k < n) {
@@ -182,7 +182,7 @@ object StdLib {
         if (isEmpty) 0L
         else if (step > 0) (hi - start.toLong) / step.toLong + 1L
         else (start.toLong - hi) / (-step.toLong) + 1L
-      if (isEmpty) intrinsics.raise("java.lang.UnsupportedOperationException", "empty.reduceLeft")
+      if (isEmpty) intrinsics.raise[java.lang.UnsupportedOperationException]("empty.reduceLeft")
       var acc: B = start
       var k      = 1L
       while (k < n) {
@@ -199,7 +199,7 @@ object StdLib {
         else if (step > 0) (hi - start.toLong) / step.toLong + 1L
         else (start.toLong - hi) / (-step.toLong) + 1L
       if (n > Int.MaxValue.toLong)
-        intrinsics.raise("java.lang.IllegalArgumentException", "seqs cannot contain more than Int.MaxValue elements.")
+        intrinsics.raise[java.lang.IllegalArgumentException]("seqs cannot contain more than Int.MaxValue elements.")
       val out = intrinsics.array[B](n.toInt)
       var k   = 0L
       while (k < n) {
@@ -216,7 +216,7 @@ object StdLib {
         else if (step > 0) (hi - start.toLong) / step.toLong + 1L
         else (start.toLong - hi) / (-step.toLong) + 1L
       if (n > Int.MaxValue.toLong)
-        intrinsics.raise("java.lang.IllegalArgumentException", "seqs cannot contain more than Int.MaxValue elements.")
+        intrinsics.raise[java.lang.IllegalArgumentException]("seqs cannot contain more than Int.MaxValue elements.")
       val out = intrinsics.array[Int](n.toInt)
       var k   = 0L
       var m   = 0
@@ -235,7 +235,7 @@ object StdLib {
         else if (step > 0) (hi - start.toLong) / step.toLong + 1L
         else (start.toLong - hi) / (-step.toLong) + 1L
       if (n > Int.MaxValue.toLong)
-        intrinsics.raise("java.lang.IllegalArgumentException", "seqs cannot contain more than Int.MaxValue elements.")
+        intrinsics.raise[java.lang.IllegalArgumentException]("seqs cannot contain more than Int.MaxValue elements.")
       if (isEmpty) 0
       else if (n == 1L) start
       else ((n * (start.toLong + (start.toLong + (n - 1L) * step.toLong))) / 2L).toInt
@@ -244,7 +244,7 @@ object StdLib {
 
   class Inclusive(val start: Int, val end: Int, val step: Int, val isEmpty: Boolean) {
     def by(step: Int): Range = {
-      if (step == 0) intrinsics.raise("java.lang.IllegalArgumentException", "step cannot be 0.")
+      if (step == 0) intrinsics.raise[java.lang.IllegalArgumentException]("step cannot be 0.")
       new Range(start, end, step, isInclusive = true, (start > end && step > 0) || (start < end && step < 0))
     }
 
@@ -268,7 +268,7 @@ object StdLib {
         else if (step > 0) (hi - start.toLong) / step.toLong + 1L
         else (start.toLong - hi) / (-step.toLong) + 1L
       if (n > Int.MaxValue.toLong)
-        intrinsics.raise("java.lang.IllegalArgumentException", "seqs cannot contain more than Int.MaxValue elements.")
+        intrinsics.raise[java.lang.IllegalArgumentException]("seqs cannot contain more than Int.MaxValue elements.")
       n.toInt
     }
 
@@ -279,7 +279,7 @@ object StdLib {
         else if (step > 0) (hi - start.toLong) / step.toLong + 1L
         else (start.toLong - hi) / (-step.toLong) + 1L
       if (n > Int.MaxValue.toLong)
-        intrinsics.raise("java.lang.IllegalArgumentException", "seqs cannot contain more than Int.MaxValue elements.")
+        intrinsics.raise[java.lang.IllegalArgumentException]("seqs cannot contain more than Int.MaxValue elements.")
       n.toInt
     }
 
@@ -299,13 +299,13 @@ object StdLib {
         else if (step > 0) (hi - start.toLong) / step.toLong + 1L
         else (start.toLong - hi) / (-step.toLong) + 1L
       if (n > Int.MaxValue.toLong)
-        intrinsics.raise("java.lang.IllegalArgumentException", "seqs cannot contain more than Int.MaxValue elements.")
-      if (idx < 0 || idx >= n) intrinsics.raise("java.lang.IndexOutOfBoundsException", "index out of bounds")
+        intrinsics.raise[java.lang.IllegalArgumentException]("seqs cannot contain more than Int.MaxValue elements.")
+      if (idx < 0 || idx >= n) intrinsics.raise[java.lang.IndexOutOfBoundsException]("index out of bounds")
       (start.toLong + idx.toLong * step.toLong).toInt
     }
 
     def head: Int = {
-      if (isEmpty) intrinsics.raise("java.util.NoSuchElementException", "head on empty Range")
+      if (isEmpty) intrinsics.raise[java.util.NoSuchElementException]("head on empty Range")
       start
     }
 
@@ -315,7 +315,7 @@ object StdLib {
         if (isEmpty) 0L
         else if (step > 0) (hi - start.toLong) / step.toLong + 1L
         else (start.toLong - hi) / (-step.toLong) + 1L
-      if (isEmpty) intrinsics.raise("java.util.NoSuchElementException", "last on empty Range")
+      if (isEmpty) intrinsics.raise[java.util.NoSuchElementException]("last on empty Range")
       (start.toLong + (n - 1L) * step.toLong).toInt
     }
 
@@ -385,7 +385,7 @@ object StdLib {
         if (isEmpty) 0L
         else if (step > 0) (hi - start.toLong) / step.toLong + 1L
         else (start.toLong - hi) / (-step.toLong) + 1L
-      if (isEmpty) intrinsics.raise("java.lang.UnsupportedOperationException", "empty.reduceLeft")
+      if (isEmpty) intrinsics.raise[java.lang.UnsupportedOperationException]("empty.reduceLeft")
       var acc: B = start
       var k      = 1L
       while (k < n) {
@@ -401,7 +401,7 @@ object StdLib {
         if (isEmpty) 0L
         else if (step > 0) (hi - start.toLong) / step.toLong + 1L
         else (start.toLong - hi) / (-step.toLong) + 1L
-      if (isEmpty) intrinsics.raise("java.lang.UnsupportedOperationException", "empty.reduceLeft")
+      if (isEmpty) intrinsics.raise[java.lang.UnsupportedOperationException]("empty.reduceLeft")
       var acc: B = start
       var k      = 1L
       while (k < n) {
@@ -418,7 +418,7 @@ object StdLib {
         else if (step > 0) (hi - start.toLong) / step.toLong + 1L
         else (start.toLong - hi) / (-step.toLong) + 1L
       if (n > Int.MaxValue.toLong)
-        intrinsics.raise("java.lang.IllegalArgumentException", "seqs cannot contain more than Int.MaxValue elements.")
+        intrinsics.raise[java.lang.IllegalArgumentException]("seqs cannot contain more than Int.MaxValue elements.")
       val out = intrinsics.array[B](n.toInt)
       var k   = 0L
       while (k < n) {
@@ -435,7 +435,7 @@ object StdLib {
         else if (step > 0) (hi - start.toLong) / step.toLong + 1L
         else (start.toLong - hi) / (-step.toLong) + 1L
       if (n > Int.MaxValue.toLong)
-        intrinsics.raise("java.lang.IllegalArgumentException", "seqs cannot contain more than Int.MaxValue elements.")
+        intrinsics.raise[java.lang.IllegalArgumentException]("seqs cannot contain more than Int.MaxValue elements.")
       val out = intrinsics.array[Int](n.toInt)
       var k   = 0L
       var m   = 0
@@ -454,7 +454,7 @@ object StdLib {
         else if (step > 0) (hi - start.toLong) / step.toLong + 1L
         else (start.toLong - hi) / (-step.toLong) + 1L
       if (n > Int.MaxValue.toLong)
-        intrinsics.raise("java.lang.IllegalArgumentException", "seqs cannot contain more than Int.MaxValue elements.")
+        intrinsics.raise[java.lang.IllegalArgumentException]("seqs cannot contain more than Int.MaxValue elements.")
       if (isEmpty) 0
       else if (n == 1L) start
       else ((n * (start.toLong + (start.toLong + (n - 1L) * step.toLong))) / 2L).toInt
@@ -468,7 +468,7 @@ object StdLib {
     def nonEmpty: Boolean = length_ != 0
 
     def apply(i: Int): A = {
-      if (i < 0 || i >= length_) intrinsics.raise("java.lang.IndexOutOfBoundsException", "index out of bounds")
+      if (i < 0 || i >= length_) intrinsics.raise[java.lang.IndexOutOfBoundsException]("index out of bounds")
       data(i)
     }
 
@@ -570,12 +570,12 @@ object StdLib {
     def max(that: Int)         = java.lang.Math.max(x, that)
     def until(end: Int): Range = new Range(x, end, 1, isInclusive = false, x >= end)
     def until(end: Int, step: Int): Range = {
-      if (step == 0) intrinsics.raise("java.lang.IllegalArgumentException", "step cannot be 0.")
+      if (step == 0) intrinsics.raise[java.lang.IllegalArgumentException]("step cannot be 0.")
       new Range(x, end, step, isInclusive = false, (x > end && step > 0) || (x < end && step < 0) || x == end)
     }
     def to(end: Int): Inclusive = Inclusive(x, end, 1, x > end)
     def to(end: Int, step: Int): Inclusive = {
-      if (step == 0) intrinsics.raise("java.lang.IllegalArgumentException", "step cannot be 0.")
+      if (step == 0) intrinsics.raise[java.lang.IllegalArgumentException]("step cannot be 0.")
       Inclusive(x, end, step, (x > end && step > 0) || (x < end && step < 0))
     }
   }
