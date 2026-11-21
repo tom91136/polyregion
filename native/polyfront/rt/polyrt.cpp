@@ -17,6 +17,7 @@
 #include <mutex>
 #include <new>
 #include <optional>
+#include <set>
 #include <shared_mutex>
 #include <stdexcept>
 #include <string>
@@ -24,7 +25,6 @@
 #include <system_error>
 #include <type_traits>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -993,14 +993,20 @@ static std::mutex &assertingModulesMutex() {
   return mutex;
 }
 
-static std::unordered_set<std::string> &assertingModules() {
-  static std::unordered_set<std::string> modules;
+static std::set<std::pair<const Device *, std::string>> &assertingModules() {
+  static std::set<std::pair<const Device *, std::string>> modules;
   return modules;
 }
 
-static bool takesErrorBuffer(const char *moduleName) {
+static void recordAssertingModule(const Device *device, const char *moduleName, const bool asserting) {
   const std::scoped_lock lock(assertingModulesMutex());
-  return assertingModules().contains(moduleName);
+  if (asserting) assertingModules().emplace(device, moduleName);
+  else assertingModules().erase({device, moduleName});
+}
+
+static bool takesErrorBuffer(const Device *device, const char *moduleName) {
+  const std::scoped_lock lock(assertingModulesMutex());
+  return assertingModules().contains({device, moduleName});
 }
 
 POLYREGION_EXPORT extern "C" bool polyrt_remote_load(void *context, const char *moduleName, const int32_t kind, const int32_t format,
@@ -1018,13 +1024,7 @@ POLYREGION_EXPORT extern "C" bool polyrt_remote_load(void *context, const char *
                                                  .opt = polyregion::compiletime::OptLevel::O3,
                                                  .programLength = 0,
                                                  .program = nullptr};
-  if (!polyregion::polyrt::loadKernelObject(requireContext(context, __func__), moduleName, object)) return false;
-  if (std::any_of(features, features + featureCount,
-                  [](const char *feature) { return std::string_view(feature) == polyregion::conventions::ErrorArg; })) {
-    const std::scoped_lock lock(assertingModulesMutex());
-    assertingModules().emplace(moduleName);
-  }
-  return true;
+  return polyregion::polyrt::loadKernelObject(requireContext(context, __func__), moduleName, object);
 }
 
 POLYREGION_EXPORT extern "C" void polyrt_remote_require_loaded(void *context, const char *moduleName, const bool loaded) {
@@ -1091,7 +1091,7 @@ static void remoteLaunch(void *context, const char *moduleName, const char *kern
   auto &value = requireContext(context, __func__);
   rejectForeignMarshal();
   value.counters.launches.fetch_add(1, std::memory_order_relaxed);
-  uintptr_t error = takesErrorBuffer(moduleName) ? polyregion::polyrt::acquireErrorBlock(value) : 0;
+  uintptr_t error = takesErrorBuffer(value.device, moduleName) ? polyregion::polyrt::acquireErrorBlock(value) : 0;
   try {
     std::vector<uint8_t> types;
     std::vector<void *> ptrs;
@@ -1694,6 +1694,9 @@ static bool loadKernelObjectOn(Platform *platform, Device *device, DeviceQueue *
       }
     }
     device->loadModule(effectiveModuleName, image);
+    const auto errorArg = std::any_of(object.features, object.features + object.featureCount,
+                                      [](const char *feature) { return std::string_view(feature) == polyregion::conventions::ErrorArg; });
+    recordAssertingModule(device, effectiveModuleName.c_str(), errorArg);
   }
   note("loaded");
   return true;

@@ -90,8 +90,9 @@ struct StubDevice final : object::ObjectDevice {
   size_t computeUnits() override { return units; }
   uint32_t cudaArchitectureMajor() override { return cudaMajor; }
   uint32_t cudaArchitectureMinor() override { return cudaMinor; }
-  void loadModule(const std::string &, const std::string &) override {}
-  bool moduleLoaded(const std::string &) override { return false; }
+  std::unordered_set<std::string> loadedModules;
+  void loadModule(const std::string &name, const std::string &) override { loadedModules.insert(name); }
+  bool moduleLoaded(const std::string &name) override { return loadedModules.contains(name); }
   std::optional<void *> mallocShared(size_t size, Access access) override {
     if (!shared) return {};
     sharedAllocs++;
@@ -621,6 +622,54 @@ TEST_CASE("asserting remote modules take a leading error buffer and report the a
   CHECK(assertReported());
   CHECK(device.stub->remoteAllocs == 1);
   CHECK(context.remoteAllocations.size() == 1);
+}
+
+TEST_CASE("a module reloaded with an asserting image keeps the image its device holds") {
+  WithStubDevice device(false, false);
+  WithStubManagedPlatform platform;
+  StubQueue queue(std::chrono::seconds(1));
+  polyregion::polyrt::ExecutionContext context{polyregion::polyrt::currentPlatform.get(), device.stub, &queue};
+  const unsigned char image = 0;
+  std::array<const char *, 1> asserting{polyregion::conventions::ErrorArg};
+  REQUIRE(polyrt_remote_load(&context, "reloaded", static_cast<int32_t>(PlatformKind::Managed), static_cast<int32_t>(ModuleFormat::Object),
+                             0, nullptr, sizeof(image), &image));
+  REQUIRE(polyrt_remote_load(&context, "reloaded", static_cast<int32_t>(PlatformKind::Managed), static_cast<int32_t>(ModuleFormat::Object),
+                             asserting.size(), asserting.data(), sizeof(image), &image));
+  int64_t n = 3;
+  const std::array<uint8_t, 1> types{static_cast<uint8_t>(Type::IntS64)};
+  const std::array<void *, 1> arguments{&n};
+  REQUIRE(polyrt_remote_launch(&context, "reloaded", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(), arguments.data()));
+  CHECK(queue.invokedTypes == std::vector{Type::IntS64, Type::Void});
+  CHECK(device.stub->remoteAllocs == 0);
+}
+
+TEST_CASE("an asserting module on one device adds no error buffer on another device") {
+  WithStubManagedPlatform platform;
+  StubDevice asserting(false, false);
+  StubDevice plain(false, false);
+  StubQueue assertingQueue(std::chrono::seconds(1));
+  StubQueue plainQueue(std::chrono::seconds(1));
+  polyregion::polyrt::ExecutionContext assertingContext{polyregion::polyrt::currentPlatform.get(), &asserting, &assertingQueue};
+  polyregion::polyrt::ExecutionContext plainContext{polyregion::polyrt::currentPlatform.get(), &plain, &plainQueue};
+  const unsigned char image = 0;
+  std::array<const char *, 1> errorArg{polyregion::conventions::ErrorArg};
+  REQUIRE(polyrt_remote_load(&assertingContext, "shared_name", static_cast<int32_t>(PlatformKind::Managed),
+                             static_cast<int32_t>(ModuleFormat::Object), errorArg.size(), errorArg.data(), sizeof(image), &image));
+  REQUIRE(polyrt_remote_load(&plainContext, "shared_name", static_cast<int32_t>(PlatformKind::Managed),
+                             static_cast<int32_t>(ModuleFormat::Object), 0, nullptr, sizeof(image), &image));
+  int64_t n = 3;
+  const std::array<uint8_t, 1> types{static_cast<uint8_t>(Type::IntS64)};
+  const std::array<void *, 1> arguments{&n};
+
+  REQUIRE(
+      polyrt_remote_launch(&plainContext, "shared_name", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(), arguments.data()));
+  CHECK(plainQueue.invokedTypes == std::vector{Type::IntS64, Type::Void});
+  CHECK(plain.remoteAllocs == 0);
+
+  REQUIRE(polyrt_remote_launch(&assertingContext, "shared_name", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
+                               arguments.data()));
+  CHECK(assertingQueue.invokedTypes == std::vector{Type::Ptr, Type::IntS64, Type::Void});
+  CHECK(asserting.remoteAllocs == 1);
 }
 
 TEST_CASE("asserting remote launches reuse one error block per context") {
