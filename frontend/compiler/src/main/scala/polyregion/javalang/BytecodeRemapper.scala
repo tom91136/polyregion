@@ -202,11 +202,10 @@ object BytecodeRemapper {
           lowered = args.zip(params).map((a, t) => coerce(buf, a, t))
           callee  = MethodRef(owner, i.getName, i.getStringDescriptor)
           call <- Natives.resolve(callee, lowered) match {
-            case Some(Right(IntrinsicTable.Resolved.Inline(expr))) => expr.success
-            case Some(Right(IntrinsicTable.Resolved.Call(fn, invoke))) =>
+            case Some(IntrinsicTable.Resolved.Inline(expr)) => expr.success
+            case Some(IntrinsicTable.Resolved.Call(fn, invoke)) =>
               helpers += fn
               invoke.success
-            case Some(Left(e)) => Left(e)
             case None =>
               calls += callee
               p.Expr.Invoke(p.Type.FnRef(symbolOf(owner, i.getName)), Nil, None, lowered, rtn).success

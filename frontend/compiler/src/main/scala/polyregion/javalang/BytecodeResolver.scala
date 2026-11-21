@@ -60,25 +60,54 @@ object BytecodeResolver {
     )
   }
 
-  def lowerRef(ref: MethodRef, bytesOf: ClassBytes): Result[BytecodeRemapper.Lowered] =
+  // a covered owner's method, and what it reaches, is refused under the intrinsic's name
+  private def lowerRef(ref: MethodRef, origin: MethodRef, bytesOf: ClassBytes): Result[BytecodeRemapper.Lowered] =
     bytesOf(ref.owner)
       .failIfEmpty(s"No class file for `${ref.owner}` while lowering `${ref.repr}`")
       .flatMap(BytecodeRemapper.lowerWithCalls(_, ref.name, ref.desc))
-      .leftMap(e => CompilerException(s"Cannot lower `${ref.repr}` from its class file: ${e.getMessage}", e))
-
-  def resolve(roots: List[MethodRef], bytesOf: ClassBytes): Result[List[p.Function]] = {
-    @tailrec def go(todo: List[MethodRef], seen: Set[MethodRef], acc: List[p.Function]): Result[List[p.Function]] =
-      todo match {
-        case Nil                      => IntrinsicTable.dedupe(acc.reverse).success
-        case ref :: rest if seen(ref) => go(rest, seen, acc)
-        case ref :: rest =>
-          lowerRef(ref, bytesOf) match {
-            case Left(e)        => Left(e)
-            case Right(lowered) => go(rest ::: lowered.calls, seen + ref, lowered.helpers.reverse ::: lowered.fn :: acc)
-          }
+      .leftMap { e =>
+        val cause = s"Cannot lower `${ref.repr}` from its class file: ${e.getMessage}"
+        CompilerException(
+          List(ref, origin)
+            .find(Natives.covered(_))
+            .fold(cause)(r => s"unsupported JVM intrinsic ${Natives.keyOf(r).repr}: $cause"),
+          e
+        )
       }
-    go(roots, Set.empty, Nil)
+
+  // roots come first and each callee follows the root that reached it
+  private def walk(
+      todo: List[(MethodRef, MethodRef)],
+      seen: Set[MethodRef],
+      bytesOf: ClassBytes
+  ): Result[List[BytecodeRemapper.Lowered]] = {
+    @tailrec def go(
+        todo: List[(MethodRef, MethodRef)],
+        seen: Set[MethodRef],
+        acc: List[BytecodeRemapper.Lowered]
+    ): Result[List[BytecodeRemapper.Lowered]] = todo match {
+      case Nil                           => acc.reverse.success
+      case (ref, _) :: rest if seen(ref) => go(rest, seen, acc)
+      case (ref, origin) :: rest =>
+        lowerRef(ref, origin, bytesOf) match {
+          case Left(e)        => Left(e)
+          case Right(lowered) => go(rest ::: lowered.calls.map(_ -> origin), seen + ref, lowered :: acc)
+        }
+    }
+    go(todo, seen, Nil)
   }
+
+  private def functionsOf(lowered: List[BytecodeRemapper.Lowered]): List[p.Function] =
+    IntrinsicTable.dedupe(lowered.flatMap(l => l.fn :: l.helpers))
+
+  def resolve(roots: List[MethodRef], bytesOf: ClassBytes): Result[List[p.Function]] =
+    walk(roots.map(r => r -> r), Set.empty, bytesOf).map(functionsOf(_))
+
+  // the root's own function is returned apart from the closure it heads
+  def resolveRoot(root: MethodRef, bytesOf: ClassBytes): Result[(p.Function, List[p.Function])] = for {
+    head <- lowerRef(root, root, bytesOf)
+    rest <- walk(head.calls.map(_ -> root), Set(root), bytesOf)
+  } yield head.fn -> functionsOf(head :: rest)
 
   // the Scala frontend knows a callee by its lowered signature rather than by a JVM descriptor
   def descriptorFor(

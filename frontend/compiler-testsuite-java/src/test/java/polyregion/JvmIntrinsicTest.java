@@ -67,8 +67,19 @@ public class JvmIntrinsicTest extends BaseSuite {
   }
 
   @Test
+  public void mathWithoutAnEntryLowersFromBytecode() {
+    double x = 1536.5;
+    double y = -0.15625;
+    assertMatchesJdk("getExponent", () -> Math.getExponent(x));
+    assertMatchesJdk("getExponent-neg", () -> Math.getExponent(y));
+    assertMatchesJdk("nextUp", () -> Math.nextUp(x));
+    assertMatchesJdk("nextUp-neg", () -> Math.nextUp(y));
+  }
+
+  @Test
   public void missingIntrinsicsAreRefused() {
     double a = 1.5;
-    assertRejected("Math.IEEEremainder", () -> Math.IEEEremainder(a, a));
+    assertRejected("unsupported JVM intrinsic java/lang/StrictMath.IEEEremainder(DD)D", () -> Math.IEEEremainder(a, a));
+    assertRejected("native", () -> Math.IEEEremainder(a, a));
   }
 }

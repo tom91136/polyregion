@@ -17,6 +17,8 @@ class BytecodeNativesSuite extends munit.FunSuite {
       |  public static double remainder(double a) { return Math.IEEEremainder(a, a); }
       |  public static int viaHelper(int a) { return helper(a) + Integer.bitCount(a); }
       |  public static int helper(int a) { return Integer.rotateLeft(a, 3); }
+      |  public static int exponent(double a) { return Math.getExponent(a); }
+      |  public static double next(double a) { return Math.nextUp(a); }
       |}
       |""".stripMargin
 
@@ -81,11 +83,25 @@ class BytecodeNativesSuite extends munit.FunSuite {
     agree("viaHelper", ints.map(List(_)))
   }
 
-  test("an intrinsic the table lacks is refused, not lowered from a native body") {
+  test("a math method the table lacks is lowered from its bytecode") {
+    agree("exponent", doubles.filterNot(_.isNaN).map(List(_)))
+    agree("next", doubles.filterNot(_.isNaN).map(List(_)))
+  }
+
+  test("a math method the table lacks is refused with the intrinsic and the construct it reached") {
     resolved("remainder") match {
       case Left(e) =>
-        assert(e.getMessage.contains("unsupported JVM intrinsic java/lang/Math.IEEEremainder(DD)D"), e.getMessage)
-      case Right(_) => fail("Math.IEEEremainder has no table entry and must be refused")
+        assert(e.getMessage.contains("unsupported JVM intrinsic java/lang/StrictMath.IEEEremainder(DD)D"), e.getMessage)
+        assert(e.getMessage.contains("native"), e.getMessage)
+      case Right(_) => fail("Math.IEEEremainder reaches a native body and must be refused")
     }
+  }
+
+  test("the root of a closure is returned apart from its callees") {
+    val ref         = MethodRef("Natives", "viaHelper", AsmType.getMethodDescriptor(methodOf("viaHelper")))
+    val (root, all) = BytecodeResolver.resolveRoot(ref, classes).fold(e => fail(e.getMessage), identity)
+    assertEquals(root.name, BytecodeRemapper.symbolOf("Natives", "viaHelper"))
+    assert(all.contains(root))
+    assert(all.sizeIs > 1)
   }
 }

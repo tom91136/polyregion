@@ -950,18 +950,16 @@ object TreeRemapper {
     case other                  => other.toString
   }
 
-  private def intrinsicOf(deps: DepCollector, sym: JSymbol.MethodSymbol, args: List[p.Term]): Option[Result[p.Expr]] =
+  private def intrinsicOf(deps: DepCollector, sym: JSymbol.MethodSymbol, args: List[p.Term]): Option[p.Expr] =
     Option
       .when(sym.isStatic)(Natives.resolve(calleeOf(deps, sym), args))
       .flatten
-      .map(
-        _.map {
-          case IntrinsicTable.Resolved.Inline(expr) => expr
-          case IntrinsicTable.Resolved.Call(fn, invoke) =>
-            deps.nativeFns += fn
-            invoke
-        }
-      )
+      .map {
+        case IntrinsicTable.Resolved.Inline(expr) => expr
+        case IntrinsicTable.Resolved.Call(fn, invoke) =>
+          deps.nativeFns += fn
+          invoke
+      }
 
   private def calleeOf(deps: DepCollector, sym: JSymbol.MethodSymbol): MethodRef =
     MethodRef(binaryOwnerName(deps, sym), sym.name.toString, descriptorOf(deps, sym))
@@ -1111,7 +1109,7 @@ object TreeRemapper {
         impl.asType.getParameterTypes.asScala.toList.traverse(JavaTyper.typer).flatMap { paramTpes =>
           val args = if (paramTpes.size == terms.size) terms.zip(paramTpes).map(coerce(scope, buf, _, _)) else terms
           intrinsicOf(scope.deps, impl, args) match {
-            case Some(e) => e
+            case Some(e) => e.success
             case None if isUserMethod(impl) =>
               scope.deps.fnSyms += impl
               scope.calls += impl
@@ -1553,7 +1551,7 @@ object TreeRemapper {
       }
       argLengths = lowered.map(_._2)
       args       = if (paramTpes.size == raw.size) raw.zip(paramTpes).map(coerce(scope, buf, _, _)) else raw
-      e <- intrinsicOf(scope.deps, sym, args).getOrElse(invokeOf(scope, buf, sym, recv, args, argLengths, rtn))
+      e <- intrinsicOf(scope.deps, sym, args).fold(invokeOf(scope, buf, sym, recv, args, argLengths, rtn))(_.success)
     } yield e
 
   private def invokeOf(

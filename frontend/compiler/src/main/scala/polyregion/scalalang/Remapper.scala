@@ -559,8 +559,6 @@ object Remapper {
                 c.down(ref).updateDeps(_.witness(fn)) ::= p.Stmt.Var(named, Some(invoke))
               ).success
             )
-          case None if IntrinsicTable.CoveredOwners.contains(key.owner) =>
-            Some(s"unsupported JVM intrinsic ${key.repr}".fail)
           case None => None
         }
       }

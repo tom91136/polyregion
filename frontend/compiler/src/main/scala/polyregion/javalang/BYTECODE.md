@@ -47,9 +47,10 @@ Two places where the JVM's semantics are reproduced exactly, because getting the
 - Static calls. A call to a static method is lowered to an `Invoke` of `owner.name`, and the callee is
   lowered from its own class file in turn (`BytecodeResolver.resolve` walks the closure, deduplicated by
   owner, name and descriptor). Overloads share a symbol and differ by signature.
-- Intrinsics win. `Intrinsics.lookup` is consulted before a call is recorded, so `Math.sqrt` and friends
-  become `MathOp`s instead of being lowered from their native bodies. It is the single seam for the
-  descriptor-keyed table.
+- Intrinsics win. `Natives.resolve` asks `IntrinsicTable` before a call is recorded, so `Math.sqrt` and
+  friends become `MathOp`s instead of being lowered from their native bodies. A miss goes on to the bytecode
+  tier. When the bytecode of a `java/lang/Math` or `StrictMath` method cannot be lowered, the refusal names
+  the intrinsic (`unsupported JVM intrinsic java/lang/StrictMath.IEEEremainder(DD)D: ...`) and the construct it reached.
 
 ## Resolver wiring
 
@@ -57,7 +58,7 @@ Two places where the JVM's semantics are reproduced exactly, because getting the
   to `BytecodeResolver`. Class bytes come from javac's class path file manager, then from the running JDK.
 - `scalalang`: a Java static method (`JavaDefined` and `JavaStatic`) is invoked without its class's module as
   a receiver, and `Compiler.bytecodeFallback` lowers it when its signature is primitives and primitive arrays.
-  The class is found through the macro class loader. Signatures with other types keep their previous path.
+  The class is found through the macro class loader. A Java static with any other signature is refused.
 - A refusal names the method and the construct: ``Cannot lower `Owner.m(I)I` from its class file: Unsupported `throw`...``.
 
 ## Getting the tree out of Vineflower
