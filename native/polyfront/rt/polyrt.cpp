@@ -425,9 +425,21 @@ void retryPendingCleanups(polyregion::polyrt::ExecutionContext &execution) {
 thread_local char runtimeErrorMessage[512]{};
 thread_local std::vector<polyregion::polyrt::ExecutionContext *> activeTransactions;
 thread_local bool foreignMarshalAttempted = false;
+thread_local char refusalMessage[256]{};
 
 constexpr auto foreignMarshalMessage =
     "a created context cannot marshal pointer-bearing captures: the mirror tables belong to the default context";
+
+constexpr auto unmirroredPointersMessage =
+    "host pointers cannot reach this device: no capture marshal is registered and the device cannot page host memory";
+
+bool refuseInTransaction(const char *site, const char *message) noexcept {
+  if (activeTransactions.empty()) return false;
+  foreignMarshalAttempted = true;
+  std::snprintf(refusalMessage, sizeof(refusalMessage), "%s", message);
+  std::snprintf(runtimeErrorMessage, sizeof(runtimeErrorMessage), "%s: %s", site, message);
+  return true;
+}
 
 bool refusedForeignMarshal() {
   if (!std::exchange(foreignMarshalAttempted, false)) return false;
@@ -560,9 +572,7 @@ polyregion::polyrt::ExecutionContext::~ExecutionContext() {
 
 bool polyregion::polyrt::sma::foreignContextActive(const char *site) noexcept {
   if (activeTransactions.empty() || activeTransactions.back()->processMarshal) return false;
-  foreignMarshalAttempted = true;
-  std::snprintf(runtimeErrorMessage, sizeof(runtimeErrorMessage), "%s: %s", site, foreignMarshalMessage);
-  return true;
+  return refuseInTransaction(site, foreignMarshalMessage);
 }
 
 namespace {
@@ -775,7 +785,7 @@ static bool releaseTransaction(void *context, const bool failed, const char *ope
       }
     }
     if (failure) std::rethrow_exception(failure);
-    if (refused) throw std::runtime_error(foreignMarshalMessage);
+    if (refused) throw std::runtime_error(refusalMessage);
   });
 }
 
@@ -1286,6 +1296,16 @@ static void remoteLaunchMarshalled(void *context, const char *moduleName, const 
     return failure;
   };
   try {
+    const auto hostPointers = iota(size_t{0}, argCount) | exists([&](const size_t i) {
+                                return (mirrorKinds[i] == 1 && layouts && pointerBearing(layouts[i]))
+                                       || (mirrorKinds[i] == 3 && *static_cast<const uintptr_t *>(argPtrs[i]) != 0
+                                           && !remoteAllocation(execution, *static_cast<const uintptr_t *>(argPtrs[i])));
+                              });
+    if (hostPointers && !marshal && !foreign && !hostThreaded && mode != sma::MirrorMode::Off
+        && !hasFeature(*execution.device, polyregion::runtime::SystemPagingFeature)) {
+      if (!refuseInTransaction(__func__, unmirroredPointersMessage)) throw std::runtime_error(unmirroredPointersMessage);
+      return;
+    }
     if (marshal) marshal->visitClear();
     for (size_t i = 0; i < argCount; ++i) {
       launchArgPtrs[i] = argPtrs[i];
