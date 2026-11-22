@@ -820,6 +820,8 @@ object PolyAST {
     inline val HostAbiMeta             = "#host_abi:"
     inline val HostAbiNoteMeta         = "#host_abi_note:"
     inline val HostGroupState          = "__polyregion_host_group_state"
+    inline val SemanticsMeta           = "#semantics"
+    inline val SemanticsJvm            = "jvm"
 
     def assertMessageLimit: Int = 1024
 

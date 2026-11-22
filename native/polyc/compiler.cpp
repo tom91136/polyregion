@@ -342,11 +342,16 @@ compiler::package::Result<std::vector<compiler::package::Selection>> compiler::p
 
 namespace {
 
-std::string packageEntryPipeline(const compiletime::Target target, const std::string &arch, const std::optional<int> stackDepth) {
-  const auto opt = stackDepth ? fmt::format("DeadFunctionElimination;Intrinsify;RecursionLower(maxDepth={});FnInline;Intrinsify;"
-                                            "FullOpt(level=1)",
-                                            *stackDepth)
-                              : std::string("DeadFunctionElimination;Intrinsify;RecursionLower;FnInline;Intrinsify;FullOpt(level=1)");
+bool hasJvmSemantics(const polyast::Program &program) {
+  return program.metadata
+         ^ exists([](const auto &entry) { return entry.key == conventions::SemanticsMeta && entry.value == conventions::SemanticsJvm; });
+}
+
+std::string packageEntryPipeline(const compiletime::Target target, const std::string &arch, const std::optional<int> stackDepth,
+                                 const bool jvm) {
+  const auto recursion = stackDepth ? fmt::format("RecursionLower(maxDepth={})", *stackDepth) : std::string("RecursionLower");
+  const auto opt = fmt::format("DeadFunctionElimination;{}Intrinsify;{};FnInline;Intrinsify;FullOpt(level=1){}", //
+                               jvm ? "ArithmeticGuard;" : "", recursion, jvm ? ";EscapeAnalysis(refuse=true);ZeroAlloc" : "");
   const auto groups = compiletime::groupLowerArgs(target, arch);
   switch (target) {
     case compiletime::Target::Object_LLVM_SPIRV_GLCompute:
@@ -477,14 +482,14 @@ std::vector<std::string> validateRemoteEntries(const polyast::Program &program) 
 
 polyast::Program namespaceRemoteEntries(polyast::Program program,
                                         const std::vector<std::pair<compiletime::Target, std::string>> &deviceTargets,
-                                        const std::optional<int> stackDepth) {
+                                        const std::optional<int> stackDepth, const bool jvm) {
   const auto encoded = polyast::hashed_program_to_msgpack(program);
   llvm::SHA256 hash;
   hash.update(llvm::ArrayRef(encoded));
   std::vector<std::string> profiles;
   profiles.reserve(deviceTargets.size());
   for (const auto &[target, arch] : deviceTargets) {
-    const auto pipeline = packageEntryPipeline(target, arch, stackDepth);
+    const auto pipeline = packageEntryPipeline(target, arch, stackDepth, jvm);
     profiles.emplace_back(fmt::format("{}:{}:{}:{}:{}", magic_enum::enum_integer(target), arch.size(), arch, pipeline.size(), pipeline));
   }
   std::ranges::sort(profiles);
@@ -562,7 +567,8 @@ compiler::package::compile(polyast::ProgramLinkRequest request, const compiletim
   if (request.consumer.entry) retainConsumerEntry(*request.consumer.entry);
   for (const auto &function : request.consumer.functions)
     retainConsumerEntry(function);
-  auto program = namespaceRemoteEntries(std::move(*linked.value), deviceTargets, stackDepth);
+  const auto jvm = hasJvmSemantics(request.consumer);
+  auto program = namespaceRemoteEntries(std::move(*linked.value), deviceTargets, stackDepth, jvm);
   for (auto &function : program.functions) {
     const auto exported = function.convention.is<polyast::CallConvention::OffloadEntry>() || consumerEntries.contains(function.decl.name);
     if (exported) function.visibility = polyast::FunctionVisibility::Exported();
@@ -625,7 +631,7 @@ compiler::package::compile(polyast::ProgramLinkRequest request, const compiletim
   for (auto &job : entryJobs) {
     for (size_t index = 0; index < deviceTargets.size(); ++index) {
       const auto &[target, arch] = deviceTargets[index];
-      const auto pipeline = packageEntryPipeline(target, arch, stackDepth);
+      const auto pipeline = packageEntryPipeline(target, arch, stackDepth, jvm);
       const auto last = index + 1 == deviceTargets.size();
       auto entryProgram = last ? polyast::Program(std::move(job.entry), std::move(job.functions), sharedDefs, sharedPhase, sharedMetadata)
                                : polyast::Program(job.entry, job.functions, sharedDefs, sharedPhase, sharedMetadata);

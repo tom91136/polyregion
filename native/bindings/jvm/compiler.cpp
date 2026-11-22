@@ -12,6 +12,7 @@
 
 #include "polyfront/options.hpp"
 #include "polyfront/package.hpp"
+#include "polyregion/conventions.h"
 #include "polyregion/env_keys.h"
 
 #include "backend/llvmc.h"
@@ -219,6 +220,7 @@ jobjectArray Compiler::compileInterface0(JNIEnv *env, jclass, jstring name, jstr
       auto linkRequest =
           polyast::programlinkrequest_from_msgpack(reinterpret_cast<const uint8_t *>(requestBytes.data()),
                                                    reinterpret_cast<const uint8_t *>(requestBytes.data() + requestBytes.size()));
+      linkRequest.consumer.metadata.emplace_back(polyregion::conventions::SemanticsMeta, polyregion::conventions::SemanticsJvm);
       linkRequest.packages = selection;
       linkRequest.capabilities = group.capabilities;
       linkRequest.logicalAddressing = group.logicalAddressing;
