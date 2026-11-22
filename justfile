@@ -276,6 +276,58 @@ test-scala *args='':
     done
     cd frontend && {{ sbt }} 'pass/testFull' 'codegen/testFull' 'compiler/testFull' 'runtime-scala/testFull' 'ewgen/testFull' 'compiler-testsuite-scala/testFull' 'compiler-testsuite-cuda-host/testFull' {{ args }}
 
+# Print the JVM suite rows of a test profile, one per line: id and target spec, tab separated. A row is a profile target whose backend a package capability of the dist serves and polyc compiles to an object (the launch layouts need one).
+list-jvm-rows profile='emulators':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dist="{{ env_var_or_default('POLYREGION_DIST', dist_dir) }}"
+    exe=; [ "{{ os() }}" = windows ] && exe=.exe
+    served=$(cat "$dist"/lib/polyregion/packages/*/capabilities 2> /dev/null | tr ',' '\n' | sed 's/.*@//' || true)
+    objects=$({ "$dist/bin/polyc$exe" --help 2>&1 || true; } | sed -n 's/^[[:space:]]*\([^:]*\):[[:space:]]*Object_.*/\1/p' | tr '|' '\n')
+    suite=$(mktemp)
+    trap 'rm -f "$suite"' EXIT
+    printf 'POLYTEST_DEFAULT_ENV+=:POLYREGION_TEST_PROFILE=%s\n' "{{ profile }}" > "$suite"
+    POLYTEST_SUITE="$suite" "$dist/bin/polytest$exe" --list-targets | while IFS= read -r target; do
+        target="${target%$'\r'}"
+        grep -qx "${target%%@*}" <<< "$served" || continue
+        grep -qx "${target%%@*}" <<< "$objects" || continue
+        printf '%s\t%s\n' "$(tr -cs '[:alnum:]\n' _ <<< "$target" | sed 's/_*$//')" "$target"
+    done
+
+# Run the Scala Spectra launch suite against one profile target; $EMULATORS selects a Polyregion emulator bundle.
+test-jvm-scala target='host@native!host@*': (_test-jvm target "compiler-testsuite-spectra/testOnly polyregion.SpectraLaunchSuite")
+
+_test-jvm target command:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    dist="{{ env_var_or_default('POLYREGION_DIST', dist_dir) }}"
+    case "{{ os() }}" in
+        macos)   dso=dylib; libvar=DYLD_FALLBACK_LIBRARY_PATH ;;
+        windows) dso=dll;   libvar=PATH ;;
+        *)       dso=so;    libvar=LD_LIBRARY_PATH ;;
+    esac
+    export POLYREGION_NATIVE_LIB_DIR="${POLYREGION_NATIVE_LIB_DIR:-$dist/lib}"
+    export POLYPASS_PLUGINS="${POLYPASS_PLUGINS:-$dist/lib/libpolypass.$dso}"
+    export "$libvar=$dist/lib:${!libvar:-}"
+    if [ -n "${EMULATORS:-}" ]; then
+        source "{{ repo }}/emulators/bundle-env.sh" "$EMULATORS"
+        export POLYREGION_TEST_PROFILE=emulators POLYINVOKE_TEST_LOCK="${POLYINVOKE_TEST_LOCK:-0}"
+    fi
+    suite=$(mktemp)
+    log=$(mktemp)
+    trap 'rm -f "$suite" "$log"' EXIT
+    [ -n "${POLYREGION_TEST_PROFILE:-}" ] && printf 'POLYTEST_DEFAULT_ENV+=:POLYREGION_TEST_PROFILE=%s\n' "$POLYREGION_TEST_PROFILE" > "$suite"
+    row="{{ target }}"
+    while IFS= read -r kv; do export "${kv%$'\r'}"; done < <(POLYTEST_SUITE="$suite" "$dist/bin/polytest" --target-env "$row")
+    targets="${row%%!*}"
+    [ "$targets" = host@native ] || targets="host@native,$targets"
+    export POLYREGION_TARGETS="$targets"
+    cd frontend
+    {{ sbt }} '{{ command }}' 2>&1 | tee "$log"
+    rc=${PIPESTATUS[0]}
+    if [ "$rc" -eq 0 ] && ! grep -Eq 'Passed: Total [1-9]' "$log"; then echo "_test-jvm: no tests ran for {{ command }}" >&2; rc=1; fi
+    exit "$rc"
+
 # Run the native ctest suite; device targets skip without a GPU/emulator. Extra ctest flags via *args.
 test-native *args='': build-pass-native
     #!/usr/bin/env bash

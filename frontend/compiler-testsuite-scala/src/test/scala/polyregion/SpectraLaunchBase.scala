@@ -111,6 +111,19 @@ trait SpectraLaunchBase extends munit.FunSuite {
     )
   }
 
+  protected lazy val selectedBackend: Option[String] =
+    sys.env.get("POLYRT_PLATFORM").map(_.takeWhile(c => c != '@' && c != '!')).filter(_.nonEmpty)
+
+  protected def selectedTests(): Unit = {
+    def onSelected(f: rt.Context => Unit): Unit = {
+      assume(selectedBackend.exists(_ != "host"), "no device row is selected")
+      launched(f)(rt.Context.current())
+    }
+    test("spectra.sort sorts on the selected device")(onSelected(sortCase(_)))
+    test("spectra.transform maps on the selected device")(onSelected(transformCase(_)))
+    test("spectra.reduce reduces on the selected device")(onSelected(reduceCase(_)))
+  }
+
   protected def deviceTests(kind: String, created: => Option[rt.DeviceInfo]): Unit = {
     test(s"a pointer-bearing capture on the default $kind context follows the device paging")(
       pointerBearingOnDefault(created)(pointerCaptureCase(_))
@@ -127,7 +140,10 @@ trait SpectraLaunchBase extends munit.FunSuite {
     test(s"spectra.transform captures a scalar and an array on the default $kind context per the device paging")(
       pointerBearingOnDefault(created)(captureCase(_))
     )
-    test(s"spectra.sort orders by a capturing comparator on $kind")(launchedOnDefault(sortDescendingCase(_)))
+    test(s"spectra.sort orders by a capturing comparator on $kind") {
+      assume(created.isDefined, "no matching device")
+      launchedOnDefault(sortDescendingCase(_))
+    }
     test(s"spectra.sort sorts on $kind")(withContext(created)(launched(sortCase(_))))
     test(s"spectra.transform maps on $kind")(withContext(created)(launched(transformCase(_))))
     test(s"spectra.reduce reduces on $kind")(withContext(created)(launched(reduceCase(_))))

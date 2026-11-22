@@ -27,6 +27,7 @@ jobs:
     runs-on: ${{ inputs.runs_on }}
     outputs:
       slices: ${{ steps.gen.outputs.slices }}
+      jvm_rows: ${{ steps.jvm.outputs.rows }}
     env:
       POLYREGION_DIST: ${{ github.workspace }}/dist
       SPECTRA_PACKAGE: ${{ github.workspace }}/package/spectra/lib.polyast
@@ -48,6 +49,14 @@ jobs:
           slices=$(awk -F'\t' 'NF == 3 { sub(/\r$/, "", $3); printf "%s{\"id\":\"%s\",\"shard\":\"%s\",\"labels\":\"%s\"}", sep, $1, $2, $3; sep = "," }' spectra/slices.txt)
           echo "slices=[$slices]" >> "$GITHUB_OUTPUT"
           echo "slices: [$slices]"
+
+      - id: jvm
+        name: Build JVM row matrix
+        working-directory: .
+        run: |
+          rows=$(just list-jvm-rows | awk -F'\t' 'NF == 2 { sub(/\r$/, "", $2); printf "%s{\"id\":\"%s\",\"target\":\"%s\"}", sep, $1, $2; sep = "," }')
+          echo "rows=[$rows]" >> "$GITHUB_OUTPUT"
+          echo "jvm rows: [$rows]"
 
   test:
     needs: slices
@@ -91,6 +100,60 @@ jobs:
           name: spectra-test-results-${{ inputs.os }}-${{ inputs.arch }}-${{ matrix.slice.id }}
           path: spectra/target/package/spectra-test-results-${{ matrix.slice.id }}.xml
           if-no-files-found: warn
+
+  test-jvm:
+    needs: slices
+    if: ${{ !cancelled() && needs.slices.result == 'success' && needs.slices.outputs.jvm_rows != '[]' && contains(fromJSON(inputs.emulators || '[]'), inputs.arch) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        row: ${{ fromJSON(needs.slices.outputs.jvm_rows) }}
+    name: test-jvm (${{ inputs.arch }}, ${{ matrix.row.id }})
+    runs-on: ${{ inputs.runs_on }}
+    env:
+      POLYREGION_DIST: ${{ github.workspace }}/dist
+      EMULATORS: ${{ github.workspace }}/emulators/out
+      JVM_ROW: ${{ matrix.row.target }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ./.github/actions/setup-spectra-test
+        with:
+          os: ${{ inputs.os }}
+          arch: ${{ inputs.arch }}
+          emulators: 'true'
+
+      - name: Setup JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: ./.github/actions/sbt-cache
+
+      - name: Run Scala launch suite (${{ matrix.row.id }})
+        working-directory: .
+        run: just test-jvm-scala "$JVM_ROW"
+
+      - name: Annotate scala results
+        if: always()
+        uses: ./.github/actions/annotate-junit
+        with:
+          junit: frontend/target/out/**/test-reports/*.xml
+          label: jvm-scala-${{ matrix.row.id }}
+
+      - name: Upload test results
+        continue-on-error: true
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: spectra-jvm-test-results-${{ inputs.os }}-${{ inputs.arch }}-${{ matrix.row.id }}
+          path: frontend/target/out/**/test-reports/*.xml
+          if-no-files-found: warn
+
+      - uses: ./.github/actions/sbt-cache
+        with:
+          save: 'true'
 
   test-misc:
     needs: slices

@@ -622,6 +622,15 @@ def cudaSuiteProject(projectName: String, targets: Seq[String]) =
 lazy val `compiler-testsuite-cuda`      = cudaSuiteProject("compiler-testsuite-cuda", Seq("host@native", "cuda@sm_80"))
 lazy val `compiler-testsuite-cuda-host` = cudaSuiteProject("compiler-testsuite-cuda-host", Seq("host@native"))
 
+lazy val `compiler-testsuite-spectra` =
+  deviceSuiteProject(
+    "compiler-testsuite-spectra",
+    Seq("host@native"),
+    Set("SpectraLaunchSuite.scala"),
+    spectraSuiteBase,
+    spectraSuiteBase + "SpectraLaunchSuite.scala"
+  )
+
 lazy val `compiler-testsuite-hip` =
   deviceSuiteProject(
     "compiler-testsuite-hip",
