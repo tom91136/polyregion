@@ -1,7 +1,9 @@
 package polyregion.javalang;
 
 import java.lang.reflect.Array;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.OptionalDouble;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
@@ -12,8 +14,9 @@ import polyregion.jvm.runtime.Context;
  * of the typed entries below; the chain's launches are compiled ahead of time into generated
  * launch-site classes, and this class orders them.
  *
- * <p>{@code values} holds the context (or {@code null}), the source values, the terminal's extra
- * values, and finally the captured values of every lambda in the chain, in chain order.
+ * <p>{@code values} holds the context (or {@code null}) and the source values in the order the
+ * chain evaluates them, then the terminal's extra values, and finally the captured values of every
+ * lambda in the chain, in chain order.
  */
 public final class Streams {
 
@@ -46,23 +49,92 @@ public final class Streams {
     }
   }
 
+  public enum Kind {
+    TABULATE('t'),
+    TRANSFORM('m'),
+    FILTER('f');
+
+    final char tag;
+
+    Kind(char tag) {
+      this.tag = tag;
+    }
+  }
+
+  public static final class Segment {
+    public final Kind kind;
+    public final int from;
+    public final int to;
+
+    Segment(Kind kind, int from, int to) {
+      this.kind = kind;
+      this.from = from;
+      this.to = to;
+    }
+
+    public String role() {
+      return kind.tag + "" + from;
+    }
+  }
+
   public static final String MAIN = "main";
-  public static final String COUNT = "count";
-  public static final String VALIDITY = "valid";
-  public static final String VALUES = "values";
+  public static final String ORDER = "order";
   public static final String FILL = "fill";
-  public static final String INDICES = "indices";
-  public static final String SORT = "sort";
   public static final String SCAN = "scan";
   public static final String TAIL = "tail";
   public static final String EACH = "each";
+
+  public static final char FILTER_STAGE = 'F';
+  public static final char NO_NEUTRAL = 'I';
 
   private static final char ARRAY = 'A';
   private static final char RANGE = 'R';
   private static final char CLOSED = 'C';
 
-  public static String shape(Op op, char source, char in, char out, boolean filtered, boolean mapped) {
-    return op.name() + ":" + source + ":" + in + ":" + out + ":" + (filtered ? 1 : 0) + ":" + (mapped ? 1 : 0);
+  private static final long INDEX_CHUNK = 1L << 30;
+  private static final long ARRAY_CHUNK = 1L << 24;
+  private static final long MAX_ARRAY_SIZE = Integer.MAX_VALUE - 8;
+
+  public static String shape(
+      Op op, char source, char in, char out, String stages, boolean contextFirst) {
+    return op.name()
+        + ":"
+        + source
+        + ":"
+        + in
+        + ":"
+        + out
+        + ":"
+        + stages
+        + ":"
+        + (contextFirst ? 1 : 0);
+  }
+
+  public static List<Segment> segments(String stages, boolean range) {
+    List<Segment> out = new ArrayList<>();
+    boolean fromRange = range;
+    int start = 0;
+    int i = 0;
+    while (i < stages.length()) {
+      if (stages.charAt(i) != FILTER_STAGE) {
+        i++;
+        continue;
+      }
+      if (fromRange) {
+        out.add(new Segment(Kind.TABULATE, start, i));
+        fromRange = false;
+      } else if (i > start) {
+        out.add(new Segment(Kind.TRANSFORM, start, i));
+      }
+      int j = i;
+      while (j < stages.length() && stages.charAt(j) == FILTER_STAGE) j++;
+      out.add(new Segment(Kind.FILTER, i, j));
+      i = j;
+      start = j;
+    }
+    if (fromRange) out.add(new Segment(Kind.TABULATE, start, stages.length()));
+    else if (start < stages.length()) out.add(new Segment(Kind.TRANSFORM, start, stages.length()));
+    return out;
   }
 
   public static String siteName(String key, String role) {
@@ -117,6 +189,25 @@ public final class Streams {
     return new Chain(home, key, shape, values).run();
   }
 
+  private enum How {
+    SUM,
+    MIN,
+    MAX,
+    DEVICE
+  }
+
+  private static final class Materialised {
+    final Object array;
+    final int length;
+    final boolean fresh;
+
+    Materialised(Object array, int length, boolean fresh) {
+      this.array = array;
+      this.length = length;
+      this.fresh = fresh;
+    }
+  }
+
   private static final class Chain {
     final Class<?> home;
     final String key;
@@ -124,36 +215,45 @@ public final class Streams {
     final char source;
     final char in;
     final char out;
+    final String stages;
+    final char[] kinds;
     final boolean filtered;
-    final boolean mapped;
     final Context context;
     final Object origin;
+    final long lo;
     final Object extra;
     final Object[] captured;
     final long n;
 
     Chain(Class<?> home, String key, String shape, Object[] values) {
-      String[] parts = shape.split(":");
+      String[] parts = shape.split(":", -1);
       this.home = home;
       this.key = key;
       this.op = Op.valueOf(parts[0]);
       this.source = parts[1].charAt(0);
       this.in = parts[2].charAt(0);
       this.out = parts[3].charAt(0);
-      this.filtered = parts[4].equals("1");
-      this.mapped = parts[5].equals("1");
-      this.context = (Context) values[0];
-      int at = 1;
+      this.stages = parts[4];
+      this.kinds = new char[stages.length() + 1];
+      kinds[0] = in;
+      for (int i = 0; i < stages.length(); i++)
+        kinds[i + 1] = stages.charAt(i) == FILTER_STAGE ? kinds[i] : stages.charAt(i);
+      this.filtered = stages.indexOf(FILTER_STAGE) >= 0;
+      boolean contextFirst = parts[5].equals("1");
+      int at = 0;
+      Context selected = contextFirst ? (Context) values[at++] : null;
       if (source == ARRAY) {
         origin = values[at++];
-        if (origin == null) throw new NullPointerException();
         n = Array.getLength(origin);
+        lo = 0;
       } else {
-        long lo = ((Number) values[at++]).longValue();
+        lo = ((Number) values[at++]).longValue();
         long hi = ((Number) values[at++]).longValue();
-        origin = coerce(lo, in);
-        n = hi < lo ? 0 : hi - lo + (source == CLOSED ? 1 : 0);
+        origin = null;
+        boolean empty = source == CLOSED ? hi < lo : hi <= lo;
+        n = empty ? 0 : source == CLOSED ? Math.addExact(Math.subtractExact(hi, lo), 1) : Math.subtractExact(hi, lo);
       }
+      this.context = contextFirst ? selected : (Context) values[at++];
       extra = op.extras > 0 ? coerce(values[at], out) : null;
       at += op.extras;
       captured = Arrays.copyOfRange(values, at, values.length);
@@ -169,6 +269,18 @@ public final class Streams {
         default:
           return number.doubleValue();
       }
+    }
+
+    Object base(long offset) {
+      return source == ARRAY ? origin : coerce(lo + offset, in);
+    }
+
+    long step(long chunk) {
+      return source == ARRAY ? n : chunk;
+    }
+
+    int length(long offset, long step) {
+      return (int) Math.min(step, n - offset);
     }
 
     Object run() {
@@ -194,15 +306,19 @@ public final class Streams {
         case REDUCE:
           return tailReduction();
         case FOR_EACH:
-          if (n > 0) launch(EACH, null, n, null);
-          return null;
+          {
+            long step = step(INDEX_CHUNK);
+            for (long offset = 0; offset < n; offset += step)
+              launch(EACH, base(offset), null, (long) length(offset, step), null);
+            return null;
+          }
         case SET_ALL:
-          if (n > 0) launch(FILL, null, origin, (int) n, null);
+          if (n > 0) launch(FILL, origin, null, origin, (int) n, null);
           return null;
         case PREFIX:
           if (n > 1) {
             Object scanned = newArray(out, (int) n);
-            launch(SCAN, null, origin, scanned, (int) n, null);
+            launch(SCAN, origin, null, origin, scanned, (int) n, null);
             System.arraycopy(scanned, 0, origin, 0, (int) n);
           }
           return null;
@@ -237,62 +353,115 @@ public final class Streams {
     }
 
     void sort(Object array, int length) {
-      if (length > 1) launch(SORT, null, array, length, null);
+      if (length > 1) launch(ORDER, base(0), null, array, length, null);
     }
 
-    Object filtered(Object source, char kind) {
-      Object survivors = newArray(kind, (int) n);
-      int kept = (Integer) launch(VALIDITY, null, source, (int) n, survivors, null);
-      if (kept == 0) return newArray(out, 0);
-      if (!mapped) return copyOf(survivors, kind, 0, kept);
-      Object result = newArray(out, kept);
-      launch(VALUES, null, survivors, result, kept, null);
-      return result;
+    Materialised materialise(Object base, int length) {
+      Object current = source == ARRAY ? base : null;
+      boolean fresh = false;
+      int size = length;
+      for (Segment segment : segments(stages, source != ARRAY)) {
+        char to = kinds[segment.to];
+        char from = kinds[segment.from];
+        switch (segment.kind) {
+          case TABULATE:
+            {
+              Object result = newArray(to, size);
+              launch(segment.role(), base, null, result, size, null);
+              current = result;
+              break;
+            }
+          case TRANSFORM:
+            {
+              Object result = newArray(to, size);
+              launch(segment.role(), base, null, current, result, size, null);
+              current = result;
+              break;
+            }
+          default:
+            {
+              Object survivors = newArray(from, size);
+              int kept = (Integer) launch(segment.role(), base, null, current, size, survivors, null);
+              if (kept == 0) return new Materialised(newArray(out, 0), 0, true);
+              current = survivors;
+              size = kept;
+            }
+        }
+        fresh = true;
+      }
+      return new Materialised(current, size, fresh);
+    }
+
+    Object trimmed(Materialised m) {
+      if (m.fresh && Array.getLength(m.array) == m.length) return m.array;
+      return copyOf(m.array, out, 0, m.length);
+    }
+
+    static IllegalArgumentException tooLarge() {
+      return new IllegalArgumentException("Stream size exceeds max array size");
     }
 
     Object toArray() {
       if (n == 0) return newArray(out, 0);
-      if (source == ARRAY) {
-        if (filtered) return filtered(origin, in);
-        if (!mapped) return copyOf(origin, in, 0, (int) n);
-        Object result = newArray(out, (int) n);
-        launch(VALUES, null, origin, result, (int) n, null);
-        return result;
-      }
+      if (source == ARRAY) return trimmed(materialise(origin, (int) n));
       if (!filtered) {
-        Object result = newArray(out, (int) n);
-        launch(FILL, null, result, (int) n, null);
-        return result;
+        if (n >= MAX_ARRAY_SIZE) throw tooLarge();
+        return trimmed(materialise(base(0), (int) n));
       }
-      Object indices = newArray(in, (int) n);
-      launch(INDICES, null, indices, (int) n, null);
-      return filtered(indices, in);
+      List<Object> parts = new ArrayList<>();
+      long total = 0;
+      for (long offset = 0; offset < n; offset += ARRAY_CHUNK) {
+        Materialised m = materialise(base(offset), length(offset, ARRAY_CHUNK));
+        if (m.length == 0) continue;
+        total += m.length;
+        if (total >= MAX_ARRAY_SIZE) throw tooLarge();
+        parts.add(trimmed(m));
+      }
+      if (parts.size() == 1) return parts.get(0);
+      Object all = newArray(out, (int) total);
+      int at = 0;
+      for (Object part : parts) {
+        int size = Array.getLength(part);
+        System.arraycopy(part, 0, all, at, size);
+        at += size;
+      }
+      return all;
+    }
+
+    Object tail(Object array, int length) {
+      Object first = Array.get(array, 0);
+      if (length == 1) return first;
+      return launch(TAIL, base(0), null, copyOf(array, out, 1, length), length - 1, first, null);
     }
 
     Object tailReduction() {
-      Object all = toArray();
-      int length = Array.getLength(all);
-      if (length == 0) return empty(out);
-      Object first = Array.get(all, 0);
-      if (length == 1) return present(out, first);
-      Object tail = copyOf(all, out, 1, length);
-      return present(out, launch(TAIL, null, tail, length - 1, first, null));
+      List<Object> parts = new ArrayList<>();
+      long step = source == ARRAY ? n : ARRAY_CHUNK;
+      for (long offset = 0; offset < n; offset += step) {
+        Materialised m = materialise(base(offset), length(offset, step));
+        if (m.length > 0) parts.add(tail(m.array, m.length));
+      }
+      if (parts.isEmpty()) return empty(out);
+      if (parts.size() == 1) return present(out, parts.get(0));
+      Object partials = newArray(out, parts.size());
+      for (int i = 0; i < parts.size(); i++) Array.set(partials, i, parts.get(i));
+      return present(out, tail(partials, parts.size()));
     }
 
     String site(String role) {
       return siteName(key, role);
     }
 
-    Object[] flat(Object neutral) {
+    Object[] flat(Object base, Object neutral) {
       Object[] all = new Object[captured.length + 2];
-      all[0] = origin;
-      all[1] = neutral == null ? (Object) 0 : neutral;
+      all[0] = base;
+      all[1] = neutral == null ? zero(NO_NEUTRAL) : neutral;
       System.arraycopy(captured, 0, all, 2, captured.length);
       return all;
     }
 
-    Object launch(String role, Object neutral, Object... args) {
-      return Launch.step(home, site(role), context, args, flat(neutral));
+    Object launch(String role, Object base, Object neutral, Object... args) {
+      return Launch.step(home, site(role), context, args, flat(base, neutral));
     }
 
     static Object zero(char type) {
@@ -308,7 +477,7 @@ public final class Streams {
       }
     }
 
-    Object extremum(char type, boolean min) {
+    static Object extremum(char type, boolean min) {
       switch (type) {
         case 'I':
           return min ? Integer.MAX_VALUE : Integer.MIN_VALUE;
@@ -321,44 +490,102 @@ public final class Streams {
       }
     }
 
-    Object reduce(String role, char type, Object neutral) {
-      return source == ARRAY
-          ? launch(role, neutral, origin, (int) n, neutral, null, null)
-          : launch(role, neutral, n, neutral, null, null);
+    static Object combine(How how, char type, Object a, Object b) {
+      switch (type) {
+        case 'I':
+          return how == How.SUM
+              ? Ops.sumI((Integer) a, (Integer) b)
+              : how == How.MIN ? Ops.minI((Integer) a, (Integer) b) : Ops.maxI((Integer) a, (Integer) b);
+        case 'J':
+          return how == How.SUM
+              ? Ops.sumJ((Long) a, (Long) b)
+              : how == How.MIN ? Ops.minJ((Long) a, (Long) b) : Ops.maxJ((Long) a, (Long) b);
+        default:
+          return how == How.SUM
+              ? Ops.sumD((Double) a, (Double) b)
+              : how == How.MIN ? Ops.minD((Double) a, (Double) b) : Ops.maxD((Double) a, (Double) b);
+      }
+    }
+
+    List<Object> partials(Object neutral) {
+      List<Object> parts = new ArrayList<>();
+      long step = step(INDEX_CHUNK);
+      for (long offset = 0; offset < n; offset += step) {
+        int length = length(offset, step);
+        parts.add(
+            source == ARRAY
+                ? launch(MAIN, origin, neutral, origin, length, neutral, null, null)
+                : launch(MAIN, base(offset), neutral, (long) length, neutral, null, null));
+      }
+      return parts;
+    }
+
+    Object merge(List<Object> parts, How how, char type, Object identity) {
+      if (parts.size() > 1 && how == How.DEVICE) {
+        Object all = newArray(type, parts.size());
+        for (int i = 0; i < parts.size(); i++) Array.set(all, i, parts.get(i));
+        return launch(TAIL, base(0), null, all, parts.size(), identity, null);
+      }
+      Object acc = parts.get(0);
+      for (int i = 1; i < parts.size(); i++) acc = combine(how, type, acc, parts.get(i));
+      return acc;
+    }
+
+    Object total(char type, Object neutral, How how) {
+      return merge(partials(neutral), how, type, neutral);
+    }
+
+    List<Object> survivorPartials(Object neutral, long[] count) {
+      List<Object> parts = new ArrayList<>();
+      long step = source == ARRAY ? n : ARRAY_CHUNK;
+      for (long offset = 0; offset < n; offset += step) {
+        Materialised m = materialise(base(offset), length(offset, step));
+        if (m.length == 0) continue;
+        count[0] += m.length;
+        parts.add(launch(MAIN, base(offset), neutral, m.array, m.length, neutral, null, null));
+      }
+      return parts;
     }
 
     Object reduction() {
       switch (op) {
         case COUNT:
           if (!filtered) return n;
-          return n == 0 ? (Object) 0L : reduce(MAIN, 'J', 0L);
+          return n == 0 ? (Object) 0L : total('J', 0L, How.SUM);
         case SUM:
-          return n == 0 ? zero(out) : reduce(MAIN, out, zero(out));
+          return n == 0 ? zero(out) : total(out, zero(out), How.SUM);
         case REDUCE_ID:
-          return n == 0 ? extra : reduce(MAIN, out, extra);
+          return n == 0 ? extra : total(out, extra, How.DEVICE);
         case ANY:
-          return n != 0 && (Integer) reduce(MAIN, 'I', 0) > 0;
+          return n != 0 && (Long) total('J', 0L, How.SUM) > 0;
         case ALL:
-          return n == 0 || (Integer) reduce(MAIN, 'I', 0) == 0;
         case NONE:
-          return n == 0 || (Integer) reduce(MAIN, 'I', 0) == 0;
+          return n == 0 || (Long) total('J', 0L, How.SUM) == 0;
         case AVERAGE:
           {
             if (n == 0) return OptionalDouble.empty();
             char wide = out == 'D' ? 'D' : 'J';
-            Object sum = reduce(MAIN, wide, zero(wide));
-            long count = filtered ? (Long) reduce(COUNT, 'J', 0L) : n;
-            if (count == 0) return OptionalDouble.empty();
-            return OptionalDouble.of(((Number) sum).doubleValue() / count);
+            if (!filtered) {
+              Object sum = total(wide, zero(wide), How.SUM);
+              return OptionalDouble.of(((Number) sum).doubleValue() / n);
+            }
+            long[] count = {0};
+            List<Object> parts = survivorPartials(zero(wide), count);
+            if (count[0] == 0) return OptionalDouble.empty();
+            Object sum = merge(parts, How.SUM, wide, zero(wide));
+            return OptionalDouble.of(((Number) sum).doubleValue() / count[0]);
           }
         default:
           {
             boolean min = op == Op.MIN;
+            How how = min ? How.MIN : How.MAX;
             if (n == 0) return empty(out);
             Object neutral = extremum(out, min);
-            Object best = reduce(MAIN, out, neutral);
-            if (filtered && best.equals(neutral) && (Long) reduce(COUNT, 'J', 0L) == 0) return empty(out);
-            return present(out, best);
+            if (!filtered) return present(out, total(out, neutral, how));
+            long[] count = {0};
+            List<Object> parts = survivorPartials(neutral, count);
+            if (parts.isEmpty()) return empty(out);
+            return present(out, merge(parts, how, out, neutral));
           }
       }
     }

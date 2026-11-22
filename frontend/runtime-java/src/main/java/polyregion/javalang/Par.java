@@ -19,7 +19,11 @@ import polyregion.jvm.runtime.Context;
  * compile error naming the operation. The methods of this package never run: reaching one means
  * the compiler did not process the call.
  *
- * <p>Lambdas must be pure, and reductions must use an associative and commutative operation.
+ * <p>Lambdas must be pure, and reductions must use an associative and commutative operation. Every
+ * element runs through every stage, so {@code anyMatch}, {@code allMatch} and {@code noneMatch}
+ * evaluate their predicate on all elements rather than stopping at the first decisive one. {@code
+ * double} sums and averages add in the device's order without the JDK's compensation, so the last
+ * digits can differ from {@code DoubleStream.sum}.
  */
 public final class Par {
 

@@ -34,10 +34,14 @@ public class ParLaunchTest {
 
   @After
   public void everyChainLaunchedAKernel() {
-    if (!(false))
-      assertTrue(
-          name.getMethodName() + " ran no kernel",
-          Context.current().stats().launches > launchedBefore);
+    assertTrue(
+        name.getMethodName() + " ran no kernel", Context.current().stats().launches > launchedBefore);
+  }
+
+  private static double bound(double[] terms) {
+    double magnitude = 0;
+    for (double term : terms) magnitude += Math.abs(term);
+    return terms.length * Math.ulp(magnitude);
   }
 
   private static int[] ints(long seed) {
@@ -79,7 +83,8 @@ public class ParLaunchTest {
     long[] ls = longs(2);
     assertEquals(Arrays.stream(ls).map(x -> x * x).sum(), Par.longs(ls).map(x -> x * x).sum());
     double[] ds = doubles(3);
-    assertEquals(Arrays.stream(ds).map(x -> x * 0.5).sum(), Par.doubles(ds).map(x -> x * 0.5).sum(), 1e-6);
+    double[] halved = Arrays.stream(ds).map(x -> x * 0.5).toArray();
+    assertEquals(Arrays.stream(halved).sum(), Par.doubles(ds).map(x -> x * 0.5).sum(), bound(halved));
   }
 
   @Test
@@ -88,7 +93,8 @@ public class ParLaunchTest {
     assertEquals(
         Arrays.stream(xs).mapToLong(x -> (long) x * 1000000L).sum(),
         Par.ints(xs).mapToLong(x -> (long) x * 1000000L).sum());
-    assertEquals(Arrays.stream(xs).mapToDouble(x -> x / 2.0).sum(), Par.ints(xs).mapToDouble(x -> x / 2.0).sum(), 1e-6);
+    double[] halves = Arrays.stream(xs).mapToDouble(x -> x / 2.0).toArray();
+    assertEquals(Arrays.stream(halves).sum(), Par.ints(xs).mapToDouble(x -> x / 2.0).sum(), bound(halves));
     assertEquals(
         LongStream.range(0, N).mapToInt(i -> (int) (i % 17)).sum(),
         Par.range(0L, N).mapToInt(i -> (int) (i % 17)).sum());

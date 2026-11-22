@@ -216,22 +216,29 @@ object StreamSites {
           frame,
           name,
           frame.originType,
-          synth.tpe(neutral.getOrElse('I')),
+          synth.tpe(neutral.getOrElse(Streams.NO_NEUTRAL)),
           List(synth.tpe(kind), synth.tpe(kind)),
           synth.tpe(ret)
         ) { (_, _, g, args) =>
           List(make.Return(applyLam(frame, lam, g, args)): JCTree.JCStatement).success
         }
       case Program.Element(kind, stages, leaf, ret, neutral) =>
-        build(frame, name, frame.originType, synth.tpe(neutral.getOrElse('I')), List(synth.tpe(kind)), synth.tpe(ret)) {
-          (msym, sn, g, args) => body(frame, msym, sn, g, args.head, stages, leaf)
+        build(
+          frame,
+          name,
+          frame.originType,
+          synth.tpe(neutral.getOrElse(Streams.NO_NEUTRAL)),
+          List(synth.tpe(kind)),
+          synth.tpe(ret)
+        ) { (msym, sn, g, args) =>
+          body(frame, msym, sn, g, args.head, stages, leaf)
         }
       case Program.Index(index, origin, stages, leaf, ret, neutral) =>
         build(
           frame,
           name,
           frame.originType,
-          synth.tpe(neutral.getOrElse('I')),
+          synth.tpe(neutral.getOrElse(Streams.NO_NEUTRAL)),
           List(synth.tpe(index)),
           synth.tpe(ret)
         ) { (msym, sn, g, args) =>
@@ -342,75 +349,85 @@ object StreamSites {
 
   private def counting(chain: Chain, role: String): Step = reduceStep(chain, role, 'J', Leaf.One, combine("sum", 'J'))
 
-  private def valuesStep(chain: Chain, in: Char): Step = {
-    val maps = chain.stages.collect { case m: Stage.Map => m }
-    Step(
-      Streams.VALUES,
-      s"${Spectra}transform",
-      List(
-        Arg.Array(in),
-        Arg.Array(chain.elem),
-        Arg.Scalar('I'),
-        Arg.Fn(Program.Element(in, maps, Leaf.Identity, chain.elem))
-      ),
-      None
-    )
+  private def activeStages(chain: Chain): List[Stage] = chain.stages.filter {
+    case Stage.Sorted(_) => false
+    case _               => true
   }
 
+  private def pattern(chain: Chain): String = activeStages(chain).map {
+    case Stage.Map(_, _, to) => to
+    case _                   => Streams.FILTER_STAGE
+  }.mkString
+
   private def materialise(chain: Chain): List[Step] = {
-    val out = chain.elem
-    chain.source match {
-      case Source.Array(_, k) =>
-        if (chain.filtered)
+    val active = activeStages(chain)
+    val kinds = active
+      .scanLeft(chain.source.kind) {
+        case (_, Stage.Map(_, _, to)) => to
+        case (kind, _)                => kind
+      }
+      .toVector
+    val origin = chain.source.kind
+    Streams.segments(pattern(chain), chain.source.isRange).asScala.toList.map { segment =>
+      val in     = kinds(segment.from)
+      val to     = kinds(segment.to)
+      val within = active.slice(segment.from, segment.to)
+      segment.kind match {
+        case Streams.Kind.TABULATE =>
           Step(
-            Streams.VALIDITY,
-            s"${Spectra}copy_if",
-            List(
-              Arg.Array(k),
-              Arg.Scalar('I'),
-              Arg.Array(k),
-              Arg.Fn(Program.Element(k, chain.stages, Leaf.True, 'Z'))
-            ),
-            Some('I')
-          ) :: Option.when(chain.mapped)(valuesStep(chain, k)).toList
-        else Option.when(chain.mapped)(valuesStep(chain, k)).toList
-      case Source.Range(elem = k) =>
-        if (chain.filtered)
-          Step(
-            Streams.INDICES,
+            segment.role,
             s"${Spectra}tabulate",
             List(
-              Arg.Array(k),
+              Arg.Array(to),
               Arg.Scalar('I'),
-              Arg.Fn(Program.Index('I', Origin.Counted(k), Nil, Leaf.Identity, k))
+              Arg.Fn(Program.Index('I', Origin.Counted(origin), within, Leaf.Identity, to))
             ),
             None
-          ) :: Step(
-            Streams.VALIDITY,
+          )
+        case Streams.Kind.TRANSFORM =>
+          Step(
+            segment.role,
+            s"${Spectra}transform",
+            List(Arg.Array(in), Arg.Array(to), Arg.Scalar('I'), Arg.Fn(Program.Element(in, within, Leaf.Identity, to))),
+            None
+          )
+        case Streams.Kind.FILTER =>
+          Step(
+            segment.role,
             s"${Spectra}copy_if",
             List(
-              Arg.Array(k),
+              Arg.Array(in),
               Arg.Scalar('I'),
-              Arg.Array(k),
-              Arg.Fn(Program.Element(k, chain.stages, Leaf.True, 'Z'))
+              Arg.Array(in),
+              Arg.Fn(Program.Element(in, within, Leaf.True, 'Z'))
             ),
             Some('I')
-          ) :: Option.when(chain.mapped)(valuesStep(chain, k)).toList
-        else
-          List(
-            Step(
-              Streams.FILL,
-              s"${Spectra}tabulate",
-              List(
-                Arg.Array(out),
-                Arg.Scalar('I'),
-                Arg.Fn(Program.Index('I', Origin.Counted(k), chain.stages, Leaf.Identity, out))
-              ),
-              None
-            )
           )
+      }
     }
   }
+
+  private def survivorStep(chain: Chain, w: Char, leaf: Leaf, combiner: Arg): Step =
+    Step(
+      Streams.MAIN,
+      s"${Spectra}transform_reduce",
+      List(
+        Arg.Array(chain.elem),
+        Arg.Scalar('I'),
+        Arg.Scalar(w),
+        Arg.Fn(Program.Element(chain.elem, Nil, leaf, w, Some(w))),
+        combiner
+      ),
+      Some(w)
+    )
+
+  private def tailStep(lam: Lam, out: Char): Step =
+    Step(
+      Streams.TAIL,
+      s"${Spectra}reduce",
+      List(Arg.Array(out), Arg.Scalar('I'), Arg.Scalar(out), Arg.Fn(Program.Binary(lam, out, out))),
+      Some(out)
+    )
 
   private def plan(chain: Chain): Result[List[Step]] = {
     val out      = chain.elem
@@ -425,23 +442,21 @@ object StreamSites {
       case Terminal.Count =>
         if (filtered) List(counting(chain, Streams.MAIN)).success else Nil.success
       case Terminal.Min | Terminal.Max =>
-        val op = if (chain.terminal == Terminal.Min) "min" else "max"
-        (reduceStep(chain, Streams.MAIN, out, Leaf.Identity, combine(op, out)) :: Option
-          .when(filtered)(counting(chain, Streams.COUNT))
-          .toList).success
+        val combiner = combine(if (chain.terminal == Terminal.Min) "min" else "max", out)
+        if (filtered) (materialise(chain) :+ survivorStep(chain, out, Leaf.Identity, combiner)).success
+        else List(reduceStep(chain, Streams.MAIN, out, Leaf.Identity, combiner)).success
       case Terminal.Average =>
-        val wide = if (out == 'D') 'D' else 'J'
-        val leaf = if (out == 'I') Leaf.Widen else Leaf.Identity
-        (reduceStep(chain, Streams.MAIN, wide, leaf, combine("sum", wide)) :: Option
-          .when(filtered)(counting(chain, Streams.COUNT))
-          .toList).success
+        val wide     = if (out == 'D') 'D' else 'J'
+        val leaf     = if (out == 'I') Leaf.Widen else Leaf.Identity
+        val combiner = combine("sum", wide)
+        if (filtered) (materialise(chain) :+ survivorStep(chain, wide, leaf, combiner)).success
+        else List(reduceStep(chain, Streams.MAIN, wide, leaf, combiner)).success
       case Terminal.Matches(kind, lam) =>
         val leaf = if (kind == Match.All) Leaf.NotBit(lam) else Leaf.Bit(lam)
-        List(reduceStep(chain, Streams.MAIN, 'I', leaf, combine("sum", 'I'))).success
+        List(reduceStep(chain, Streams.MAIN, 'J', leaf, combine("sum", 'J'))).success
       case Terminal.ReduceId(_, lam) =>
-        List(
-          reduceStep(chain, Streams.MAIN, out, Leaf.Identity, Arg.Fn(Program.Binary(lam, out, out, Some(out))))
-        ).success
+        (reduceStep(chain, Streams.MAIN, out, Leaf.Identity, Arg.Fn(Program.Binary(lam, out, out, Some(out)))) ::
+          Option.when(chain.source.isRange)(tailStep(lam, out)).toList).success
       case Terminal.ForEach(lam) =>
         val k = chain.source.kind
         val origin = chain.source match {
@@ -459,13 +474,7 @@ object StreamSites {
       case Terminal.ToArray =>
         val sorted = chain.stages.exists { case Stage.Sorted(_) => true; case _ => false }
         (materialise(chain) ::: Option.when(sorted)(sortStep(out)).toList).success
-      case Terminal.Reduce(lam) =>
-        (materialise(chain) :+ Step(
-          Streams.TAIL,
-          s"${Spectra}reduce",
-          List(Arg.Array(out), Arg.Scalar('I'), Arg.Scalar(out), Arg.Fn(Program.Binary(lam, out, out))),
-          Some(out)
-        )).success
+      case Terminal.Reduce(lam) => (materialise(chain) :+ tailStep(lam, out)).success
       case Terminal.SortInPlace => List(sortStep(out)).success
       case Terminal.SetAll(lam) =>
         val to = chain.source.kind
@@ -495,7 +504,7 @@ object StreamSites {
 
   private def sortStep(kind: Char): Step =
     Step(
-      Streams.SORT,
+      Streams.ORDER,
       s"${Spectra}sort",
       List(Arg.Array(kind), Arg.Scalar('I'), Arg.Forward(s"lt${suffix(kind)}")),
       None
@@ -525,21 +534,38 @@ object StreamSites {
       case Source.Range(closed = true) => 'C'
       case Source.Range(_, _, _, _)    => 'R'
     }
-    Streams.shape(op, source, chain.source.kind, chain.elem, chain.filtered, chain.mapped)
+    Streams.shape(op, source, chain.source.kind, chain.elem, pattern(chain), chain.contextFirst)
   }
 
   case class Identity(key: String, shape: String)
 
   def identify(chain: Chain): Identity = {
     val shape = shapeOf(chain)
-    Identity(keyOf(chain, shape), shape)
+    Identity(provisionalKey(chain, shape), shape)
   }
 
-  private def keyOf(chain: Chain, shape: String): String = {
-    val lams = chain.lams.map(l => s"${l.impl.owner.flatName}.${l.impl.name}:${l.impl.`type`}").mkString(",")
-    val sha  = MessageDigest.getInstance("SHA-1").digest(s"$shape|$lams".getBytes(StandardCharsets.UTF_8))
+  private def digest(text: String): String = {
+    val sha = MessageDigest.getInstance("SHA-1").digest(text.getBytes(StandardCharsets.UTF_8))
     sha.take(8).map(b => f"${b & 0xff}%02x").mkString
   }
+
+  private def provisionalKey(chain: Chain, shape: String): String = {
+    val lams = chain.lams.map(l => s"${l.impl.owner.flatName}.${l.impl.name}:${l.impl.`type`}").mkString(",")
+    digest(s"$shape|$lams")
+  }
+
+  private def finalKey(provisional: String, lowered: List[(Step, List[LaunchSites.StepArg])]): String =
+    digest(
+      (provisional :: lowered.map { (step, args) =>
+        val parts = args.map {
+          case LaunchSites.StepArg.Scalar(p) => s"P${p.code}"
+          case LaunchSites.StepArg.Array(p)  => s"A${p.code}"
+          case LaunchSites.StepArg.Fn(c) =>
+            s"${c.function}|${c.dependencies}|${c.environment}|${c.defs}|${c.result}"
+        }
+        s"${step.role}:${step.identity}:${step.result}:${parts.mkString(",")}"
+      }).mkString("\n")
+    )
 
   case class Compiled(key: String, shape: String, classes: List[(String, Offloader.Executable)])
 
@@ -551,15 +577,15 @@ object StreamSites {
   ): Result[Compiled] =
     sources.env match {
       case javac: JavacProcessingEnvironment =>
-        val synth = Synth(javac)
-        val ops   = (name: String) => synth.method(OpsClass, name)
-        val frame = Frame(synth, home, chain, ops)
-        val shape = shapeOf(chain)
-        val key   = keyOf(chain, shape)
+        val synth       = Synth(javac)
+        val ops         = (name: String) => synth.method(OpsClass, name)
+        val frame       = Frame(synth, home, chain, ops)
+        val shape       = shapeOf(chain)
+        val provisional = provisionalKey(chain, shape)
         for {
           steps <- plan(chain)
-          classes <- steps.traverse { step =>
-            val fqcn      = Streams.siteName(key, step.role)
+          lowered <- steps.traverse { step =>
+            val fqcn      = Streams.siteName(provisional, step.role)
             val entryName = LaunchSites.normalise(fqcn.substring(fqcn.lastIndexOf('.') + 1))
             step.args.zipWithIndex
               .traverse {
@@ -587,8 +613,12 @@ object StreamSites {
                     )
                   } yield StepArg.Fn(callable)
               }
-              .flatMap(args => LaunchSites.compileStep(config, fqcn, step.identity, args, step.result.map(prim(_))))
-              .map(fqcn -> _)
+              .map(step -> _)
+          }
+          key = finalKey(provisional, lowered)
+          classes <- lowered.traverse { (step, args) =>
+            val fqcn = Streams.siteName(key, step.role)
+            LaunchSites.compileStep(config, fqcn, step.identity, args, step.result.map(prim(_))).map(fqcn -> _)
           }
         } yield Compiled(key, shape, classes)
       case _ => "stream chains need the javac processing environment".fail
@@ -637,7 +667,9 @@ object StreamSites {
               .method("polyregion.jvm.runtime.Context", "current", _.`type`.getParameterTypes.isEmpty)
               .map(synth.call(_, Nil))
           )(_.success)
-          values = context :: src ::: extras ::: captured
+          values =
+            if (chain.contextFirst) context :: src ::: extras ::: captured
+            else src ::: context :: extras ::: captured
           entry <- synth.method(StreamsClass, entryOf(chain), _.`type`.getParameterTypes.size == 4)
           array = {
             val a = make.NewArray(

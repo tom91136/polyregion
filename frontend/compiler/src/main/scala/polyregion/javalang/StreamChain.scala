@@ -1,6 +1,6 @@
 package polyregion.javalang
 
-import com.sun.tools.javac.code.{Flags, Symbol as JSymbol}
+import com.sun.tools.javac.code.Symbol as JSymbol
 import com.sun.tools.javac.tree.{JCTree, TreeInfo}
 import polyregion.ast.*
 
@@ -22,6 +22,11 @@ object StreamChain {
     def kind: Char = this match {
       case Array(_, elem)     => elem
       case Range(elem = elem) => elem
+    }
+
+    def isRange: Boolean = this match {
+      case Range(_, _, _, _) => true
+      case _                 => false
     }
   }
 
@@ -60,6 +65,7 @@ object StreamChain {
       stages: List[Stage],
       terminal: Terminal,
       context: Option[JCTree.JCExpression],
+      contextFirst: Boolean,
       parallel: Boolean
   ) {
     def lams: List[Lam] = stages.collect {
@@ -154,7 +160,7 @@ object StreamChain {
   private def lam(tree: JCTree.JCExpression): Result[Lam] =
     LaunchSites.lambdaOf(tree) match {
       case Some((call: JCTree.JCMethodInvocation, impl)) =>
-        if (impl.isStatic || (impl.flags & Flags.SYNTHETIC) != 0) Right(Lam(impl, call.args.asScala.toList))
+        if (impl.isStatic) Right(Lam(impl, call.args.asScala.toList))
         else s"a stream lambda cannot bind a receiver, `${impl.owner}.${impl.name}` is an instance method".fail
       case _ => "a stream operation must take a lambda expression or a static method reference".fail
     }
@@ -266,7 +272,16 @@ object StreamChain {
         if (sorting) Right(Terminal.SortInPlace)
         else if (name.endsWith("SetAll") || name == "setAll") lam(rest(1)).map(Terminal.SetAll(_))
         else lam(rest(1)).map(Terminal.Prefix(_))
-    } yield Chain(root, via, Source.Array(array, kind), Nil, terminal, context, parallel = true)
+    } yield Chain(
+      root,
+      via,
+      Source.Array(array, kind),
+      Nil,
+      terminal,
+      context,
+      contextFirst = context.isDefined,
+      parallel = true
+    )
   }
 
   private def terminal(
@@ -278,20 +293,30 @@ object StreamChain {
     for {
       up <- receiver(root).toRight(CompilerException(s"`$name` has no receiver")).flatMap(spine(_))
       terminal <- (name, args) match {
-        case ("sum", Nil)                            => Right(Terminal.Sum)
-        case ("count", Nil)                          => Right(Terminal.Count)
-        case ("min", Nil)                            => Right(Terminal.Min)
-        case ("max", Nil)                            => Right(Terminal.Max)
-        case ("average", Nil)                        => Right(Terminal.Average)
-        case ("toArray", Nil)                        => Right(Terminal.ToArray)
-        case ("anyMatch", List(p))                   => lam(p).map(Terminal.Matches(Match.Any, _))
-        case ("allMatch", List(p))                   => lam(p).map(Terminal.Matches(Match.All, _))
-        case ("noneMatch", List(p))                  => lam(p).map(Terminal.Matches(Match.None, _))
-        case ("forEach" | "forEachOrdered", List(f)) => lam(f).map(Terminal.ForEach(_))
-        case ("reduce", List(identity, op))          => lam(op).map(Terminal.ReduceId(identity, _))
-        case ("reduce", List(op))                    => lam(op).map(Terminal.Reduce(_))
-        case _                                       => s"`$name` is not a lowered stream terminal".fail
+        case ("sum", Nil)                   => Right(Terminal.Sum)
+        case ("count", Nil)                 => Right(Terminal.Count)
+        case ("min", Nil)                   => Right(Terminal.Min)
+        case ("max", Nil)                   => Right(Terminal.Max)
+        case ("average", Nil)               => Right(Terminal.Average)
+        case ("toArray", Nil)               => Right(Terminal.ToArray)
+        case ("anyMatch", List(p))          => lam(p).map(Terminal.Matches(Match.Any, _))
+        case ("allMatch", List(p))          => lam(p).map(Terminal.Matches(Match.All, _))
+        case ("noneMatch", List(p))         => lam(p).map(Terminal.Matches(Match.None, _))
+        case ("forEach", List(f))           => lam(f).map(Terminal.ForEach(_))
+        case ("forEachOrdered", _)          => "`forEachOrdered` keeps the encounter order and is not lowered".fail
+        case ("reduce", List(identity, op)) => lam(op).map(Terminal.ReduceId(identity, _))
+        case ("reduce", List(op))           => lam(op).map(Terminal.Reduce(_))
+        case _                              => s"`$name` is not a lowered stream terminal".fail
       }
-    } yield Chain(root, up.via, up.source, up.stages, terminal, up.context, up.parallel.contains(true))
+    } yield Chain(
+      root,
+      up.via,
+      up.source,
+      up.stages,
+      terminal,
+      up.context,
+      contextFirst = false,
+      parallel = up.parallel.contains(true)
+    )
   }
 }

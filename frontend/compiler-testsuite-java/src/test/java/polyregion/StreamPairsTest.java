@@ -14,6 +14,12 @@ public class StreamPairsTest {
 
   private static final int N = 4096;
 
+  private static double bound(double[] terms) {
+    double magnitude = 0;
+    for (double term : terms) magnitude += Math.abs(term);
+    return terms.length * Math.ulp(magnitude);
+  }
+
   @Test
   public void sumOfSquaresOfTheEvens() {
     int[] xs = new Random(1).ints(N, -100, 100).toArray();
@@ -26,7 +32,9 @@ public class StreamPairsTest {
   @Test
   public void integralOverARange() {
     double step = 1.0 / N;
-    double expected = IntStream.range(0, N).mapToDouble(i -> 4.0 / (1.0 + (i + 0.5) * step * (i + 0.5) * step)).sum() * step;
+    double[] terms = IntStream.range(0, N).mapToDouble(i -> 4.0 / (1.0 + (i + 0.5) * step * (i + 0.5) * step)).toArray();
+    double expected = Arrays.stream(terms).sum() * step;
+    double tolerance = bound(terms) * step;
     double jdk =
         IntStream.range(0, N)
                 .parallel()
@@ -34,8 +42,8 @@ public class StreamPairsTest {
                 .sum()
             * step;
     double par = Par.range(0, N).mapToDouble(i -> 4.0 / (1.0 + (i + 0.5) * step * (i + 0.5) * step)).sum() * step;
-    assertEquals(expected, jdk, 1e-9);
-    assertEquals(expected, par, 1e-9);
+    assertEquals(expected, jdk, tolerance);
+    assertEquals(expected, par, tolerance);
   }
 
   @Test

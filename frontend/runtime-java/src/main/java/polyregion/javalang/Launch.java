@@ -124,6 +124,14 @@ public final class Launch {
         }
       };
 
+  private static final ClassValue<ConcurrentHashMap<String, Class<?>>> SITES =
+      new ClassValue<ConcurrentHashMap<String, Class<?>>>() {
+        @Override
+        protected ConcurrentHashMap<String, Class<?>> computeValue(Class<?> home) {
+          return new ConcurrentHashMap<>();
+        }
+      };
+
   private static final Set<String> LOADED = ConcurrentHashMap.newKeySet();
 
   private static final ReentrantLock LOAD_LOCK = new ReentrantLock();
@@ -397,7 +405,8 @@ public final class Launch {
   }
 
   static Object step(Class<?> home, String name, Context context, Object[] args, Object[] captured) {
-    Plan plan = PLANS.get(siteClass(name, home.getClassLoader()));
+    Plan plan =
+        PLANS.get(SITES.get(home).computeIfAbsent(name, site -> siteClass(site, home.getClassLoader())));
     if (plan.unsupported != null) throw new UnsupportedOperationException(plan.unsupported);
     if (plan.specs.length != args.length)
       throw new IllegalStateException(

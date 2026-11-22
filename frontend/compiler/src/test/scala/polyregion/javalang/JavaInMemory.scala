@@ -34,9 +34,20 @@ object JavaInMemory {
         kind: JavaFileObject.Kind,
         sibling: FileObject
     ): JavaFileObject = outputs.getOrElseUpdate(name, Output(name))
+
+    override def getFileForOutput(
+        location: JavaFileManager.Location,
+        packageName: String,
+        relativeName: String,
+        sibling: FileObject
+    ): FileObject = {
+      val name = (if (packageName.isEmpty) relativeName else s"$packageName.$relativeName").stripSuffix(".class")
+      outputs.getOrElseUpdate(name, Output(name))
+    }
   }
 
-  class Loaded(val classes: Map[String, Array[Byte]]) extends ClassLoader(JavaInMemory.getClass.getClassLoader) {
+  class Loaded(val classes: Map[String, Array[Byte]], val messages: List[String] = Nil)
+      extends ClassLoader(JavaInMemory.getClass.getClassLoader) {
     override def findClass(name: String): Class[?] =
       classes.get(name) match {
         case Some(bs) => defineClass(name, bs, 0, bs.length)
@@ -71,6 +82,6 @@ object JavaInMemory {
     if (processors.nonEmpty) task.setProcessors(processors.asJava)
     if (!task.call())
       sys.error(diagnostics.getDiagnostics.asScala.map(_.toString).mkString("javac failed:\n", "\n", ""))
-    Loaded(outputs.map((k, v) => k -> v.bytes).toMap)
+    Loaded(outputs.map((k, v) => k -> v.bytes).toMap, diagnostics.getDiagnostics.asScala.map(_.toString).toList)
   }
 }

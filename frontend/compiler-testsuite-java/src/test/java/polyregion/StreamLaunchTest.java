@@ -40,6 +40,12 @@ public class StreamLaunchTest {
           Context.current().stats().launches > launchedBefore);
   }
 
+  private static double bound(double[] terms) {
+    double magnitude = 0;
+    for (double term : terms) magnitude += Math.abs(term);
+    return terms.length * Math.ulp(magnitude);
+  }
+
   private static int[] ints(long seed) {
     Random random = new Random(seed);
     int[] xs = new int[N];
@@ -88,10 +94,8 @@ public class StreamLaunchTest {
     long[] ls = longs(2);
     double[] ds = doubles(3);
     assertEquals(Arrays.stream(ls).map(x -> x * x).sum(), Arrays.stream(ls).parallel().map(x -> x * x).sum());
-    assertEquals(
-        Arrays.stream(ds).map(x -> x * 0.5).sum(),
-        Arrays.stream(ds).parallel().map(x -> x * 0.5).sum(),
-        1e-6);
+    double[] halved = Arrays.stream(ds).map(x -> x * 0.5).toArray();
+    assertEquals(Arrays.stream(halved).sum(), Arrays.stream(ds).parallel().map(x -> x * 0.5).sum(), bound(halved));
   }
 
   @Test
@@ -99,8 +103,9 @@ public class StreamLaunchTest {
     int[] xs = ints(4);
     long wide = Arrays.stream(xs).mapToLong(x -> (long) x * 1000000L).sum();
     assertEquals(wide, Arrays.stream(xs).parallel().mapToLong(x -> (long) x * 1000000L).sum());
-    double halves = Arrays.stream(xs).mapToDouble(x -> x / 2.0).sum();
-    assertEquals(halves, Arrays.stream(xs).parallel().mapToDouble(x -> x / 2.0).sum(), 1e-6);
+    double[] halves = Arrays.stream(xs).mapToDouble(x -> x / 2.0).toArray();
+    assertEquals(
+        Arrays.stream(halves).sum(), Arrays.stream(xs).parallel().mapToDouble(x -> x / 2.0).sum(), bound(halves));
     int narrowed = LongStream.range(0, N).mapToInt(i -> (int) (i % 17)).sum();
     assertEquals(narrowed, LongStream.range(0, N).parallel().mapToInt(i -> (int) (i % 17)).sum());
   }
@@ -159,7 +164,10 @@ public class StreamLaunchTest {
         Arrays.stream(xs).filter(x -> x > 0).average(), Arrays.stream(xs).parallel().filter(x -> x > 0).average());
     assertEquals(OptionalDouble.empty(), Arrays.stream(xs).parallel().filter(x -> x > 5000).average());
     double[] ds = doubles(11);
-    assertEquals(Arrays.stream(ds).average().getAsDouble(), Arrays.stream(ds).parallel().average().getAsDouble(), 1e-6);
+    assertEquals(
+        Arrays.stream(ds).average().getAsDouble(),
+        Arrays.stream(ds).parallel().average().getAsDouble(),
+        bound(ds) / ds.length);
   }
 
   @Test

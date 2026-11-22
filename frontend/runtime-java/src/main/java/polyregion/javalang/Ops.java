@@ -74,12 +74,12 @@ public final class Ops {
     return a;
   }
 
-  public static int bit(boolean a) {
-    return a ? 1 : 0;
+  public static long bit(boolean a) {
+    return a ? 1L : 0L;
   }
 
-  public static int notBit(boolean a) {
-    return a ? 0 : 1;
+  public static long notBit(boolean a) {
+    return a ? 0L : 1L;
   }
 
   public static boolean ltI(int a, int b) {

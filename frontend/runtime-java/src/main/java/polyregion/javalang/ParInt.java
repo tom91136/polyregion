@@ -10,7 +10,7 @@ import java.util.function.IntToLongFunction;
 import java.util.function.IntUnaryOperator;
 import polyregion.jvm.runtime.Context;
 
-/** A int pipeline lowered by the compiler; see {@link Par}. */
+/** An int pipeline lowered by the compiler; see {@link Par}. */
 public final class ParInt {
 
   private ParInt() {

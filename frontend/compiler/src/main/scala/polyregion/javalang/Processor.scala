@@ -333,12 +333,18 @@ class Processor(scan: Tree => LaunchSites.Collected) extends AbstractProcessor {
       guard(Either.catchNonFatal(StreamSites.collect(scope))) match {
         case Left(failure) => debug(failure)
         case Right(sites) =>
-          sites.filterNot(_.within.exists(excluded)).foreach { site =>
+          sites.foreach { site =>
             val par = site.decoded.via == StreamChain.Via.Par
             def refuse(label: String, failure: Throwable): Unit =
               if (par) report(label, failure) else note(s"$label, using the JDK: ${failure.getMessage}")
             val label = s"lower ${site.decoded.root}"
             site.decoded.chain match {
+              case _ if site.within.exists(excluded) =>
+                if (par)
+                  report(
+                    label,
+                    CompilerException("a .par chain cannot appear inside an offload region or a launch callable")
+                  )
               case Left(failure)                           => if (par) report(label, failure) else debug(failure)
               case Right(chain) if !par && !chain.parallel => ()
               case Right(chain) =>

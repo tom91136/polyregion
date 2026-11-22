@@ -77,6 +77,85 @@ class StreamSiteSuite extends munit.FunSuite {
     assert(errors.contains("a stream lambda cannot bind a receiver"), errors)
   }
 
+  test("a .par lambda that reads an instance field is a compile error") {
+    val errors = diagnostics("""  private int bias = 1;
+                               |
+                               |  public int run(int[] xs) {
+                               |    return Par.ints(xs).map(x -> x + bias).sum();
+                               |  }""".stripMargin)
+    assert(errors.contains("a stream lambda cannot bind a receiver"), errors)
+  }
+
+  test("forEachOrdered is not part of the .par api") {
+    val errors = diagnostics("""  public static void run(int[] out) {
+                               |    Par.range(0, 4).forEachOrdered(i -> out[0] = i);
+                               |  }""".stripMargin)
+    assert(errors.contains("forEachOrdered"), errors)
+  }
+
+  test("a .par chain inside an offload region is a compile error") {
+    val errors = diagnostics("""  public static int run(int[] xs) {
+                               |    return polyregion.javalang.Runtime.offload(() -> Par.ints(xs).sum());
+                               |  }""".stripMargin)
+    assert(errors.contains("a .par chain cannot appear inside an offload region or a launch callable"), errors)
+  }
+
+  private val libraryPath = Option(System.getProperty("polyregion.library.path")).map(_.trim).filter(_.nonEmpty)
+
+  private val capabilities = sys.env.getOrElse("POLYFRONT_LIBRARY_CAPABILITIES", "spectra.dpl@host")
+
+  private def generatedSites(body: String): Set[String] = {
+    val source =
+      s"""package diag;
+         |
+         |import java.util.Arrays;
+         |
+         |public class Chains {
+         |$body
+         |}
+         |""".stripMargin
+    val loaded = JavaInMemory.compile(
+      "diag.Chains",
+      source,
+      List(
+        "-g",
+        "-classpath",
+        classpath,
+        s"-Apolyregion.library.path=${libraryPath.get}",
+        s"-Apolyregion.library.capabilities=$capabilities"
+      ) ++ Option.when(java.lang.Runtime.version.feature >= 21)("-proc:full"),
+      List(Processor())
+    )
+    val sites = loaded.classes.keySet.filter(_.contains("Stream$"))
+    if (sites.isEmpty)
+      fail(loaded.messages.mkString(s"the chain was not lowered, produced ${loaded.classes.keySet}:\n", "\n", ""))
+    sites
+  }
+
+  test("a body-only edit of a lambda changes the generated site names") {
+    assume(libraryPath.isDefined, "no package directory is available")
+    def chain(factor: Int) =
+      s"""  public static int run(int[] xs) {
+         |    return Arrays.stream(xs).parallel().map(x -> x * $factor).sum();
+         |  }""".stripMargin
+    val before = generatedSites(chain(2))
+    val after  = generatedSites(chain(3))
+    assert(before.intersect(after).isEmpty, s"$before vs $after")
+  }
+
+  test("an edit of a helper that a lambda calls changes the generated site names") {
+    assume(libraryPath.isDefined, "no package directory is available")
+    def chain(factor: Int) =
+      s"""  static int scale(int x) { return x * $factor; }
+         |
+         |  public static int run(int[] xs) {
+         |    return Arrays.stream(xs).parallel().map(x -> scale(x)).sum();
+         |  }""".stripMargin
+    val before = generatedSites(chain(2))
+    val after  = generatedSites(chain(3))
+    assert(before.intersect(after).isEmpty, s"$before vs $after")
+  }
+
   test("a second context selection is a compile error") {
     val errors = diagnostics(
       """  public static int run(int[] xs, polyregion.jvm.runtime.Context a, polyregion.jvm.runtime.Context b) {
