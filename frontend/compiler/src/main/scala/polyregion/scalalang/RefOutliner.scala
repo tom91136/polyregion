@@ -18,6 +18,13 @@ object RefOutliner {
     case _              => None               // we got a non ref node, give up
   }
 
+  private def isMutableMember(using q: Quoted)(ref: q.Ref): Boolean = ref match {
+    case q.Ident(_) =>
+      val sym = ref.symbol
+      sym.flags.is(q.Flags.Mutable) && sym.owner.isClassDef && !sym.owner.flags.is(q.Flags.Module)
+    case _ => false
+  }
+
   def outline(using
       q: Quoted
   )(sink: Log, term: q.Term) //
@@ -48,6 +55,7 @@ object RefOutliner {
         sym.isValDef ||
           (sym.isDefDef && flags.is(q.Flags.FieldAccessor))
       )
+      if !isMutableMember(s)
 
       (root, path) <- idents(s) // s === root.$path
 
