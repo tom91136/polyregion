@@ -1,4 +1,4 @@
-#if defined(__linux__) && defined(__x86_64__)
+#if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
 
   #include <algorithm>
   #include <array>
@@ -38,7 +38,14 @@ namespace {
 constexpr uint64_t HoleSpacing = 3ull << 30;
 constexpr uint64_t FragmentedSpan = 64ull << 30;
 constexpr size_t MaxHoles = 16;
+
+  #if defined(__x86_64__)
 constexpr uint64_t ReportedPcOffset = 42;
+constexpr uint16_t ElfMachine = 62;
+  #else
+constexpr uint64_t ReportedPcOffset = 40;
+constexpr uint16_t ElfMachine = 183;
+  #endif
 
 struct Range {
   uint64_t begin, end;
@@ -116,22 +123,64 @@ struct FragmentedAddressSpace {
 
 void put32(std::vector<uint8_t> &b, const size_t at, const uint32_t v) { std::memcpy(b.data() + at, &v, 4); }
 
+struct Rela {
+  uint64_t offset, info;
+  int64_t addend;
+};
+
+struct ArchCode {
+  std::vector<uint8_t> text;
+  std::vector<uint8_t> ehCie;
+  std::vector<Rela> textRelas;
+  Rela ehRela;
+};
+
+ArchCode archCode() {
+  #if defined(__x86_64__)
+  return {{0x53,                               //
+           0x48, 0x89, 0xf3,                   //
+           0xbf, 0x08, 0x00, 0x00, 0x00,       //
+           0xe8, 0,    0,    0,    0,          //
+           0x48, 0x8d, 0x05, 0,    0,    0, 0, //
+           0x8b, 0x00,                         //
+           0x48, 0x8d, 0x0d, 0,    0,    0, 0, //
+           0x03, 0x01,                         //
+           0x48, 0x89, 0x03,                   //
+           0x48, 0x8d, 0x05, 0,    0,    0, 0, //
+           0x48, 0x89, 0x43, 0x08,             //
+           0x5b,                               //
+           0xc3},
+          {0x14, 0, 0, 0, 0, 0, 0, 0, 0x01, 0x7a, 0x52, 0x00, 0x01, 0x78, 0x10, 0x01, 0x1b, 0x0c, 0x07, 0x08, 0x90, 0x01, 0, 0},
+          {{10, (5ull << 32) | 4, -4}, {17, (1ull << 32) | 2, -4}, {26, (2ull << 32) | 2, -4}},
+          {32, (3ull << 32) | 2, 0}};
+  #else
+  return {{0xf3, 0x7b, 0xbf, 0xa9, //
+           0xf3, 0x03, 0x01, 0xaa, //
+           0x00, 0x01, 0x80, 0xd2, //
+           0x00, 0x00, 0x00, 0x94, //
+           0x01, 0x00, 0x00, 0x90, //
+           0x21, 0x00, 0x40, 0xb9, //
+           0x02, 0x00, 0x00, 0x90, //
+           0x42, 0x00, 0x40, 0xb9, //
+           0x21, 0x00, 0x02, 0x0b, //
+           0x61, 0x02, 0x00, 0xf9, //
+           0x01, 0x00, 0x00, 0x10, //
+           0x61, 0x06, 0x00, 0xf9, //
+           0xf3, 0x7b, 0xc1, 0xa8, //
+           0xc0, 0x03, 0x5f, 0xd6},
+          {0x14, 0, 0, 0, 0, 0, 0, 0, 0x01, 0x7a, 0x52, 0x00, 0x04, 0x78, 0x1e, 0x01, 0x1b, 0x0c, 0x1f, 0x00, 0, 0, 0, 0},
+          {{12, (5ull << 32) | 283, 0},
+           {16, (1ull << 32) | 275, 0},
+           {20, (1ull << 32) | 285, 0},
+           {24, (2ull << 32) | 275, 0},
+           {28, (2ull << 32) | 285, 0}},
+          {32, (3ull << 32) | 261, 0}};
+  #endif
+}
+
 std::string buildObject() {
-  const std::vector<uint8_t> text = {0x53,                               //
-                                     0x48, 0x89, 0xf3,                   //
-                                     0xbf, 0x08, 0x00, 0x00, 0x00,       //
-                                     0xe8, 0,    0,    0,    0,          //
-                                     0x48, 0x8d, 0x05, 0,    0,    0, 0, //
-                                     0x8b, 0x00,                         //
-                                     0x48, 0x8d, 0x0d, 0,    0,    0, 0, //
-                                     0x03, 0x01,                         //
-                                     0x48, 0x89, 0x03,                   //
-                                     0x48, 0x8d, 0x05, 0,    0,    0, 0, //
-                                     0x48, 0x89, 0x43, 0x08,             //
-                                     0x5b,                               //
-                                     0xc3};
-  std::vector<uint8_t> ehFrame = {0x14, 0,    0,    0,    0,    0,    0,    0,    0x01, 0x7a, 0x52, 0x00,
-                                  0x01, 0x78, 0x10, 0x01, 0x1b, 0x0c, 0x07, 0x08, 0x90, 0x01, 0,    0};
+  const auto [text, ehCie, relas, ehRela] = archCode();
+  std::vector<uint8_t> ehFrame = ehCie;
   const auto le32 = [&](const uint32_t v) {
     for (int i = 0; i < 4; ++i)
       ehFrame.push_back(static_cast<uint8_t>(v >> (8 * i)));
@@ -159,13 +208,6 @@ std::string buildObject() {
   };
   const Sym syms[] = {{0, 0, 0, 0, 0, 0},    {0, 3, 0, 2, 0, 0}, {0, 3, 0, 3, 0, 0}, {0, 3, 0, 1, 0, 0}, {1, 0x12, 0, 1, 0, text.size()},
                       {11, 0x10, 0, 0, 0, 0}};
-  struct Rela {
-    uint64_t offset, info;
-    int64_t addend;
-  };
-  const Rela relas[] = {{10, (5ull << 32) | 4, -4}, {17, (1ull << 32) | 2, -4}, {26, (2ull << 32) | 2, -4}};
-  const Rela ehRelas[] = {{32, (3ull << 32) | 2, 0}};
-
   std::vector<uint8_t> out(64, 0);
   struct Sec {
     uint32_t name, type;
@@ -182,8 +224,8 @@ std::string buildObject() {
       {shName(".rodata"), 1, 0x2, 4, 0, 0, 0, rodata},
       {shName(".data"), 1, 0x3, 4, 0, 0, 0, data},
       {shName(".eh_frame"), 1, 0x2, 8, 0, 0, 0, ehFrame},
-      {shName(".rela.text"), 4, 0x40, 8, 24, 7, 1, bytes(relas, sizeof(relas))},
-      {shName(".rela.eh_frame"), 4, 0x40, 8, 24, 7, 4, bytes(ehRelas, sizeof(ehRelas))},
+      {shName(".rela.text"), 4, 0x40, 8, 24, 7, 1, bytes(relas.data(), relas.size() * sizeof(Rela))},
+      {shName(".rela.eh_frame"), 4, 0x40, 8, 24, 7, 4, bytes(&ehRela, sizeof(Rela))},
       {shName(".symtab"), 2, 0, 8, 24, 8, 4, bytes(syms, sizeof(syms))},
       {shName(".strtab"), 3, 0, 1, 0, 0, 0, std::vector<uint8_t>(strtab.begin(), strtab.end())},
       {shName(".shstrtab"), 3, 0, 1, 0, 0, 0, std::vector<uint8_t>(shstr.begin(), shstr.end())},
@@ -217,7 +259,7 @@ std::string buildObject() {
 
   const uint8_t ident[16] = {0x7f, 'E', 'L', 'F', 2, 1, 1, 0};
   std::memcpy(out.data(), ident, 16);
-  const uint16_t type = 1, machine = 62, ehsize = 64, shentsize = 64, shnum = static_cast<uint16_t>(secs.size()), shstrndx = 9;
+  const uint16_t type = 1, machine = ElfMachine, ehsize = 64, shentsize = 64, shnum = static_cast<uint16_t>(secs.size()), shstrndx = 9;
   const uint32_t version = 1;
   std::memcpy(out.data() + 16, &type, 2);
   std::memcpy(out.data() + 18, &machine, 2);
