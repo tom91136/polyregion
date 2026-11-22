@@ -28,42 +28,46 @@
 using namespace polyregion;
 using polyrt::DebugLevel;
 
-POLYREGION_RT_PROTECT static auto &allocations = *new polyrt::SynchronisedMemAllocation(
-    [](const void *ptr) -> polyrt::PtrQuery {
-      if (const auto meta = rt_reflect::_rt_reflect_p(ptr); meta.type != rt_reflect::Type::Unknown) {
-        return polyrt::PtrQuery{.sizeInBytes = meta.size,
-                                .offsetInBytes = meta.offset,
-                                .hostReadOnly = meta.type == rt_reflect::Type::StaticRodata,
-                                .deviceAccessible = polyrt_usm_shared(static_cast<const char *>(ptr) - meta.offset),
-                                .heap = rt_reflect::isHeap(meta.type)};
-      }
-      polyrt::ensureRoSegmentsRecorded();
-      if (const auto meta = rt_reflect::_rt_reflect_p(ptr); meta.type != rt_reflect::Type::Unknown) {
-        return polyrt::PtrQuery{
-            .sizeInBytes = meta.size, .offsetInBytes = meta.offset, .hostReadOnly = meta.type == rt_reflect::Type::StaticRodata};
-      }
-      log(DebugLevel::Debug, "Local: Failed to query %p", ptr);
-      return polyrt::PtrQuery{.sizeInBytes = 0, .offsetInBytes = 0};
-    },
-    polyrt::sma::stdRemoteAlloc(),   //
-    polyrt::sma::stdRemoteRead(),    //
-    polyrt::sma::stdRemoteWrite(),   //
-    polyrt::sma::stdRemoteRelease(), //
-    polyrt::debugLevel() >= DebugLevel::Debug);
+namespace {
+const auto localReflect = [](const void *ptr) -> polyrt::PtrQuery {
+  if (const auto meta = rt_reflect::_rt_reflect_p(ptr); meta.type != rt_reflect::Type::Unknown) {
+    return polyrt::PtrQuery{.sizeInBytes = meta.size,
+                            .offsetInBytes = meta.offset,
+                            .hostReadOnly = meta.type == rt_reflect::Type::StaticRodata,
+                            .deviceAccessible = polyrt_usm_shared(static_cast<const char *>(ptr) - meta.offset),
+                            .heap = rt_reflect::isHeap(meta.type)};
+  }
+  polyrt::ensureRoSegmentsRecorded();
+  if (const auto meta = rt_reflect::_rt_reflect_p(ptr); meta.type != rt_reflect::Type::Unknown) {
+    return polyrt::PtrQuery{
+        .sizeInBytes = meta.size, .offsetInBytes = meta.offset, .hostReadOnly = meta.type == rt_reflect::Type::StaticRodata};
+  }
+  log(DebugLevel::Debug, "Local: Failed to query %p", ptr);
+  return polyrt::PtrQuery{.sizeInBytes = 0, .offsetInBytes = 0};
+};
+
+using Allocations = polyrt::sma::StdAllocation<std::remove_const_t<decltype(localReflect)>>;
+
+std::unique_ptr<polyrt::sma::CaptureMarshal> marshalFactory(polyrt::ExecutionContext &context) {
+  return polyrt::sma::makeStdMarshal(context, localReflect, polyrt::debugLevel() >= DebugLevel::Debug);
+}
+} // namespace
+
+POLYREGION_RT_PROTECT static Allocations &allocations() { return polyrt::sma::active<Allocations>(); }
 
 POLYREGION_EXPORT extern "C" void polyrt_map_read(void *origin, const ptrdiff_t sizeInBytes, const size_t unitInBytes) {
-  polyrt::sma::mapRead(allocations, origin, sizeInBytes, unitInBytes);
+  polyrt::sma::mapRead(allocations(), origin, sizeInBytes, unitInBytes);
 }
 
 POLYREGION_EXPORT extern "C" void polyrt_map_write(void *origin, const ptrdiff_t sizeInBytes, const size_t unitInBytes) {
-  polyrt::sma::mapWrite(allocations, origin, sizeInBytes, unitInBytes);
+  polyrt::sma::mapWrite(allocations(), origin, sizeInBytes, unitInBytes);
 }
 
 POLYREGION_EXPORT extern "C" void polyrt_map_readwrite(void *origin, const ptrdiff_t sizeInBytes, const size_t unitInBytes) {
-  polyrt::sma::mapReadwrite(allocations, origin, sizeInBytes, unitInBytes);
+  polyrt::sma::mapReadwrite(allocations(), origin, sizeInBytes, unitInBytes);
 }
 
-POLYREGION_DEFINE_SMA_MIRROR_ABI(allocations);
+POLYREGION_DEFINE_SMA_MIRROR_ABI(allocations(), marshalFactory);
 
 namespace {
 polyrt::AssertSink g_assert;
@@ -140,23 +144,24 @@ POLYREGION_EXPORT void polystl::details::dispatchManaged(const size_t global, co
     // lay the whole capture graph into one device arena (pointers -> arena offsets); the
     // arena-lowered kernel takes the arena base and derefs arena[off + i]
     const polyrt::sma::ContextTransaction transaction;
-    const auto arena = polyrt::sma::arenaMarshal(allocations, functorData, *layout, polyrt::sma::currentArenaPlacement());
+    const auto arena =
+        polyrt::sma::arenaMarshal(allocations(), functorData, *layout, polyrt::sma::activeArenaPlacement(), *polyrt::currentDevice);
     auto buffer = newBuffer();
     bindError(buffer);
     if (localMemBytes > 0) buffer.append(Type::Scratch, nullptr);
     polyrt::sma::bindArena(buffer, arena.base, arena.root, polyrt::currentDevice->arenaViewStart(moduleId).has_value());
     launch(buffer);
-    allocations.genArenaReadback();
+    allocations().genArenaReadback();
     log(DebugLevel::Debug, "<%s:%s:%zu> Done (arena)", __func__, moduleId, global);
     return;
   }
 
   const bool useGenerated = mode == polyrt::sma::MirrorMode::Compiletime && prelude;
   const uintptr_t preludeResult = useGenerated ? prelude(functorData, layout->sizeInBytes) : 0;
-  polyrt::sma::dumpAllocationTable(allocations);
+  polyrt::sma::dumpAllocationTable(allocations());
 
   auto *functorDevicePtr = useGenerated ? reinterpret_cast<void *>(preludeResult)
-                                        : reinterpret_cast<void *>(allocations.syncLocalToRemote(functorData, *layout));
+                                        : reinterpret_cast<void *>(allocations().syncLocalToRemote(functorData, *layout));
   auto buffer = newBuffer();
   bindError(buffer);
   if (localMemBytes > 0) buffer.append(Type::Scratch, nullptr);
@@ -164,7 +169,7 @@ POLYREGION_EXPORT void polystl::details::dispatchManaged(const size_t global, co
   launch(buffer);
   // sync device-side writes to captured pointer-targets back before the device alloc is freed
   if (useGenerated && postlude) postlude(functorData, layout->sizeInBytes);
-  else allocations.syncRemoteToLocalAfterLaunch(functorData);
-  allocations.disassociate(functorData);
+  else allocations().syncRemoteToLocalAfterLaunch(functorData);
+  allocations().disassociate(functorData);
   log(DebugLevel::Debug, "<%s:%s:%zu> Done", __func__, moduleId, global);
 }

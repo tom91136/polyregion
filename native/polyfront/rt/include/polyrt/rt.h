@@ -37,6 +37,9 @@ struct HeapCounters {
 };
 
 class DeviceHeap;
+namespace sma {
+struct CaptureMarshal;
+}
 
 struct ExecutionContext {
   ExecutionContext(Platform *platform, Device *device, DeviceQueue *queue);
@@ -55,7 +58,9 @@ struct ExecutionContext {
   std::vector<std::vector<uintptr_t>> temporaryAllocationScopes;
   std::vector<std::vector<uintptr_t>> ownedAllocationScopes;
   std::vector<uintptr_t> errorBlocks;
-  bool processMarshal = true;
+  std::mutex marshalMutex;
+  std::unique_ptr<sma::CaptureMarshal> marshal;
+  std::atomic<sma::CaptureMarshal *> marshalLive{nullptr};
 
   struct Counters {
     // NOLINTNEXTLINE(readability-redundant-member-init)
@@ -127,7 +132,8 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT bool loadKernelObject(ExecutionContext &
 POLYREGION_RT_PROTECT POLYREGION_EXPORT runtime::LoadOutcome loadKernelObjectOutcome(ExecutionContext &context, const char *moduleName,
                                                                                      const KernelObject &object);
 namespace sma {
-POLYREGION_RT_PROTECT POLYREGION_EXPORT bool foreignContextActive(const char *site) noexcept;
+// records a refusal that fails the release of the transaction on this thread; false outside a transaction
+POLYREGION_RT_PROTECT POLYREGION_EXPORT bool refuseCapture(const char *site, const char *message) noexcept;
 } // namespace sma
 } // namespace polyregion::polyrt
 

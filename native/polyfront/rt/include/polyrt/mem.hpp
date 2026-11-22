@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cinttypes>
 #include <cmath>
@@ -10,6 +11,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -559,11 +561,13 @@ private:
   std::vector<uintptr_t> remoteGarbage;
   std::map<uintptr_t, Guard> guards{};
   std::recursive_mutex guardMutex;
-  static inline std::atomic<SynchronisedMemAllocation *> guardOwner{nullptr};
+  static inline std::array<std::atomic<SynchronisedMemAllocation *>, guard::details::MaxRanges> slotOwners{};
 
   static guard::Resolution onGuardFault(void *address) {
-    const auto owner = guardOwner.load(std::memory_order_acquire);
-    return owner ? owner->resolveFault(reinterpret_cast<uintptr_t>(address)) : guard::Resolution::Declined;
+    const auto slot = guard::slotAt(reinterpret_cast<uintptr_t>(address));
+    if (!slot) return guard::Resolution::Gone;
+    const auto owner = slotOwners[*slot].load(std::memory_order_acquire);
+    return owner ? owner->resolveFault(reinterpret_cast<uintptr_t>(address)) : guard::Resolution::Gone;
   }
 
   Guard *guardAt(const uintptr_t local) {
@@ -641,10 +645,10 @@ private:
     // the allocator writes its own links into the first bytes on free, so the first page is never guarded
     const uintptr_t begin = (base + page) / page * page, end = (base + size) / page * page;
     if (!meta.heap || meta.offsetInBytes != 0 || end <= begin || end - begin < guard::MinGuardPages * page) return nullptr;
-    SynchronisedMemAllocation *expected = nullptr;
-    if (!guardOwner.compare_exchange_strong(expected, this, std::memory_order_acq_rel) && expected != this) return nullptr;
+    if (const auto held = guard::slotAt(begin); held && slotOwners[*held].load(std::memory_order_acquire) != this) return nullptr;
     const auto slot = guard::track(begin, end);
     if (!slot) return nullptr;
+    slotOwners[*slot].store(this, std::memory_order_release);
     Guard &g = guards.emplace(base, Guard{base, remote, begin, end, size, remoteOffset, arena}).first->second;
     g.slot = *slot;
     return &g;
@@ -652,6 +656,7 @@ private:
 
   std::map<uintptr_t, Guard>::iterator dropGuard(const std::map<uintptr_t, Guard>::iterator it) {
     protectBody(it->second, guard::Access::ReadWrite);
+    slotOwners[it->second.slot].store(nullptr, std::memory_order_release);
     guard::untrack(it->second.slot);
     return guards.erase(it);
   }
@@ -765,11 +770,18 @@ public:
   }
 
   void dropAllGuards() {
-    if (guardOwner.load(std::memory_order_acquire) != this) return;
     const std::scoped_lock lock(guardMutex);
     for (auto it = guards.begin(); it != guards.end();)
       it = dropGuard(it);
-    guardOwner.store(nullptr, std::memory_order_release);
+  }
+
+  void releaseAll() {
+    const auto table = exclusive();
+    dropAllGuards();
+    drainReleased(true);
+    forgetTables(0, std::numeric_limits<uintptr_t>::max(), true);
+    drainReleased(true);
+    beginSync();
   }
 
   ~SynchronisedMemAllocation() { dropAllGuards(); }

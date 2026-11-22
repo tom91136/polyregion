@@ -5,8 +5,11 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <functional>
+#include <memory>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 
 #include "polyregion/env_keys.h"
 #include "polyregion/show.hpp"
@@ -49,32 +52,32 @@ POLYREGION_RT_PROTECT inline MirrorMode mirrorModeFor(const invoke::ModuleFormat
   return kind != invoke::PlatformKind::HostThreaded && arenaFormat(fmt) ? MirrorMode::Arena : MirrorMode::Compiletime;
 }
 
-POLYREGION_RT_PROTECT inline auto stdRemoteAlloc() {
-  return [](const size_t size) -> uintptr_t {
-    const auto p = currentDevice->mallocDevice(size, invoke::Access::RW);
+POLYREGION_RT_PROTECT inline auto stdRemoteAlloc(ExecutionContext &context) {
+  return [&context](const size_t size) -> uintptr_t {
+    const auto p = context.device->mallocDevice(size, invoke::Access::RW);
     log(DebugLevel::Debug, "                               Remote 0x%" PRIxPTR " = malloc(%zu)", p, size);
     return p;
   };
 }
 
-POLYREGION_RT_PROTECT inline auto stdRemoteRead() {
-  return [](void *dst, const uintptr_t src, const size_t srcOffset, const size_t size) {
+POLYREGION_RT_PROTECT inline auto stdRemoteRead(ExecutionContext &context) {
+  return [&context](void *dst, const uintptr_t src, const size_t srcOffset, const size_t size) {
     log(DebugLevel::Debug, "Local %p <|[%4zu]- Remote [%p + %4zu]", dst, size, reinterpret_cast<void *>(src), srcOffset);
-    copyToHost(*currentQueue, src, srcOffset, dst, size);
+    copyToHost(*context.queue, src, srcOffset, dst, size);
   };
 }
 
-POLYREGION_RT_PROTECT inline auto stdRemoteWrite() {
-  return [](const void *src, const uintptr_t dst, const size_t dstOffset, const size_t size) {
+POLYREGION_RT_PROTECT inline auto stdRemoteWrite(ExecutionContext &context) {
+  return [&context](const void *src, const uintptr_t dst, const size_t dstOffset, const size_t size) {
     log(DebugLevel::Debug, "Local %p -[%4zu]|> Remote [%p + %4zu]", src, size, reinterpret_cast<void *>(dst), dstOffset);
-    copyToDevice(*currentQueue, src, dst, dstOffset, size);
+    copyToDevice(*context.queue, src, dst, dstOffset, size);
   };
 }
 
-POLYREGION_RT_PROTECT inline auto stdRemoteRelease() {
-  return [](const uintptr_t remotePtr) {
+POLYREGION_RT_PROTECT inline auto stdRemoteRelease(ExecutionContext &context) {
+  return [&context](const uintptr_t remotePtr) {
     log(DebugLevel::Debug, "                               Remote free(0x%" PRIxPTR ")", remotePtr);
-    currentDevice->freeDevice(remotePtr);
+    context.device->freeDevice(remotePtr);
   };
 }
 
@@ -140,7 +143,10 @@ POLYREGION_RT_PROTECT inline void mapReadwrite(SMA &sma, void *origin, const ptr
 }
 
 POLYREGION_RT_PROTECT POLYREGION_EXPORT ArenaPlacement arenaPlacementOf(void *context);
-POLYREGION_RT_PROTECT POLYREGION_EXPORT ArenaPlacement currentArenaPlacement();
+
+// the context the generated code of this thread runs against: the innermost acquired transaction, else the default context
+POLYREGION_RT_PROTECT POLYREGION_EXPORT ExecutionContext &activeContext();
+POLYREGION_RT_PROTECT POLYREGION_EXPORT ArenaPlacement activeArenaPlacement();
 
 class ContextTransaction {
   void *context = polyrt_context_current();
@@ -164,11 +170,11 @@ struct ArenaImage {
 // lays the capture graph into the device arena, pointers rewritten to arena offsets, with the capture at the window root
 template <typename SMA>
 POLYREGION_RT_PROTECT inline ArenaImage arenaMarshal(SMA &sma, const void *capture, const runtime::TypeLayout &layout,
-                                                     ArenaPlacement placement) {
+                                                     ArenaPlacement placement, invoke::Device &device) {
   const auto table = sma.exclusive();
   sma.genArenaAdopt(std::move(placement));
   sma.genArenaReset();
-  sma.genArenaObjectSlack = invoke::overReadPadBytes(currentDevice->features());
+  sma.genArenaObjectSlack = invoke::overReadPadBytes(device.features());
   sma.genArenaMirror(static_cast<const char *>(capture), 1, 1, layout, sizeof(uintptr_t), layout.sizeInBytes);
   const auto base = sma.genArenaFinish();
   return {base, static_cast<int64_t>(sma.genArenaWindow)};
@@ -185,7 +191,7 @@ POLYREGION_RT_PROTECT inline void bindArena(invoke::ArgBuffer &buffer, const uin
     buffer.append(invoke::Type::Ptr, &pointer);
 }
 
-// the SMA of the library that hosts this runtime, for launches whose captures the runtime marshals itself
+// the SMA of one context, built by the library that hosts this runtime for launches whose captures the runtime marshals itself
 struct CaptureMarshal {
   virtual ~CaptureMarshal() = default;
   virtual void visitClear() = 0;
@@ -196,13 +202,20 @@ struct CaptureMarshal {
   virtual ArenaImage arena(const void *capture, const runtime::TypeLayout &layout, ArenaPlacement placement) = 0;
   virtual void readArena() = 0;
   virtual void releaseArena() = 0;
+  virtual void forget(const void *host, size_t sizeInBytes) = 0;
+  virtual void reclaim(const void *host, size_t sizeInBytes, bool forWrite) = 0;
+  virtual void disassociate(const void *host, bool releaseRemote) = 0;
+  virtual void releaseAll() = 0;
 };
 
 template <typename SMA> class CaptureMarshalOf final : public CaptureMarshal {
-  SMA &sma;
+  invoke::Device &device;
 
 public:
-  explicit CaptureMarshalOf(SMA &sma) : sma(sma) {}
+  SMA sma;
+
+  template <typename... Args>
+  explicit CaptureMarshalOf(invoke::Device &device, Args &&...args) : device(device), sma(std::forward<Args>(args)...) {}
   void visitClear() override { sma.unmirrorVisitClear(); }
   uintptr_t ensure(const void *local, const size_t minSize) override { return sma.mirrorEnsure(local, minSize, minSize != 0); }
   void readAlloc(const void *local) override { sma.unmirrorReadAlloc(local); }
@@ -212,84 +225,86 @@ public:
     sma.disassociate(capture);
   }
   ArenaImage arena(const void *capture, const runtime::TypeLayout &layout, ArenaPlacement placement) override {
-    return arenaMarshal(sma, capture, layout, std::move(placement));
+    return arenaMarshal(sma, capture, layout, std::move(placement), device);
   }
   void readArena() override { sma.genArenaReadback(); }
   void releaseArena() override { sma.releaseArenaGuards(); }
+  void forget(const void *host, const size_t sizeInBytes) override { sma.forget(host, sizeInBytes); }
+  void reclaim(const void *host, const size_t sizeInBytes, const bool forWrite) override { sma.reclaimRange(host, sizeInBytes, forWrite); }
+  void disassociate(const void *host, const bool releaseRemote) override { sma.disassociate(host, releaseRemote); }
+  void releaseAll() override { sma.releaseAll(); }
 };
 
-POLYREGION_RT_PROTECT POLYREGION_EXPORT void registerCaptureMarshal(CaptureMarshal *marshal);
-POLYREGION_RT_PROTECT POLYREGION_EXPORT CaptureMarshal *captureMarshal();
+using CaptureMarshalFactory = std::unique_ptr<CaptureMarshal> (*)(ExecutionContext &);
+
+// the library that hosts this runtime supplies how a context builds its SMA; null means no context can marshal host pointers
+POLYREGION_RT_PROTECT POLYREGION_EXPORT void registerCaptureMarshalFactory(CaptureMarshalFactory factory);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT CaptureMarshalFactory captureMarshalFactory();
+POLYREGION_RT_PROTECT POLYREGION_EXPORT CaptureMarshal *captureMarshal(ExecutionContext &context);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT void forEachMarshal(const std::function<void(CaptureMarshal &)> &visit);
+
+template <typename LocalReflect>
+using StdAllocation = SynchronisedMemAllocation<
+    LocalReflect, decltype(stdRemoteAlloc(std::declval<ExecutionContext &>())), decltype(stdRemoteRead(std::declval<ExecutionContext &>())),
+    decltype(stdRemoteWrite(std::declval<ExecutionContext &>())), decltype(stdRemoteRelease(std::declval<ExecutionContext &>()))>;
+
+template <typename LocalReflect>
+POLYREGION_RT_PROTECT inline std::unique_ptr<CaptureMarshal> makeStdMarshal(ExecutionContext &context, LocalReflect localReflect,
+                                                                            const bool debug = false) {
+  return std::make_unique<CaptureMarshalOf<StdAllocation<LocalReflect>>>(*context.device, localReflect, stdRemoteAlloc(context),
+                                                                         stdRemoteRead(context), stdRemoteWrite(context),
+                                                                         stdRemoteRelease(context), debug);
+}
+
+template <typename SMA> POLYREGION_RT_PROTECT inline SMA &active() {
+  return static_cast<CaptureMarshalOf<SMA> &>(*captureMarshal(activeContext())).sma;
+}
 
 } // namespace polyregion::polyrt::sma
 
 #define POLYREGION_SMA_ABI_SYMBOL_CHECK(constName, symbol) static_assert(sizeof(&symbol) > 0, #symbol);
 
-#define POLYREGION_SMA_FOREIGN_GUARD(...)                                                                                                  \
-  if (::polyregion::polyrt::sma::foreignContextActive(__func__)) return __VA_ARGS__
-
-#define POLYREGION_DEFINE_SMA_MIRROR_ABI(allocations)                                                                                      \
+#define POLYREGION_DEFINE_SMA_MIRROR_ABI(allocations, factory)                                                                             \
   POLYREGION_EXPORT extern "C" uintptr_t polyrt_sma_alloc(const void *local, const size_t sizeInBytes, const int hostReadOnly) {           \
-    POLYREGION_SMA_FOREIGN_GUARD(0);                                                                                                       \
     return (allocations).mirrorAlloc(local, sizeInBytes, hostReadOnly != 0);                                                               \
   }                                                                                                                                        \
-  POLYREGION_EXPORT extern "C" uintptr_t polyrt_sma_ensure(const void *local) {                                                            \
-    POLYREGION_SMA_FOREIGN_GUARD(0);                                                                                                       \
-    return (allocations).mirrorEnsure(local);                                                                                              \
-  }                                                                                                                                        \
+  POLYREGION_EXPORT extern "C" uintptr_t polyrt_sma_ensure(const void *local) { return (allocations).mirrorEnsure(local); }                \
   POLYREGION_EXPORT extern "C" uintptr_t polyrt_sma_ensure_min(const void *local, const uint64_t minSize) {                                \
-    POLYREGION_SMA_FOREIGN_GUARD(0);                                                                                                       \
     return (allocations).mirrorEnsure(local, minSize, true);                                                                               \
   }                                                                                                                                        \
-  POLYREGION_EXPORT extern "C" uint64_t polyrt_sma_pointee_size(const void *local) {                                                       \
-    POLYREGION_SMA_FOREIGN_GUARD(0);                                                                                                       \
-    return (allocations).mirrorPointeeSize(local);                                                                                         \
-  }                                                                                                                                        \
+  POLYREGION_EXPORT extern "C" uint64_t polyrt_sma_pointee_size(const void *local) { return (allocations).mirrorPointeeSize(local); }      \
   POLYREGION_EXPORT extern "C" uintptr_t polyrt_sma_ensure_deep(const void *local, const size_t depth) {                                   \
-    POLYREGION_SMA_FOREIGN_GUARD(0);                                                                                                       \
     return (allocations).mirrorEnsureDeep(local, depth);                                                                                   \
   }                                                                                                                                        \
   POLYREGION_EXPORT extern "C" void polyrt_sma_patch(const uintptr_t remote, const size_t offsetInBytes, const uintptr_t value) {          \
-    POLYREGION_SMA_FOREIGN_GUARD();                                                                                                        \
     (allocations).mirrorPatch(remote, offsetInBytes, value);                                                                               \
   }                                                                                                                                        \
-  POLYREGION_EXPORT extern "C" void polyrt_sma_read_alloc(const void *local) {                                                             \
-    POLYREGION_SMA_FOREIGN_GUARD();                                                                                                        \
-    (allocations).unmirrorReadAlloc(local);                                                                                                \
-  }                                                                                                                                        \
+  POLYREGION_EXPORT extern "C" void polyrt_sma_read_alloc(const void *local) { (allocations).unmirrorReadAlloc(local); }                   \
   POLYREGION_EXPORT extern "C" void polyrt_sma_read_deep(const void *local, const size_t depth) {                                          \
-    POLYREGION_SMA_FOREIGN_GUARD();                                                                                                        \
     (allocations).unmirrorReadDeep(local, depth);                                                                                          \
   }                                                                                                                                        \
-  POLYREGION_EXPORT extern "C" void polyrt_sma_visit_clear(void) {                                                                         \
-    POLYREGION_SMA_FOREIGN_GUARD();                                                                                                        \
-    (allocations).unmirrorVisitClear();                                                                                                    \
-  }                                                                                                                                        \
+  POLYREGION_EXPORT extern "C" void polyrt_sma_visit_clear(void) { (allocations).unmirrorVisitClear(); }                                   \
   static thread_local std::vector<size_t> poolPtrOffsets;                                                                                  \
   POLYREGION_EXPORT extern "C" void polyrt_sma_pool_reset(void) { poolPtrOffsets.clear(); }                                                \
   POLYREGION_EXPORT extern "C" void polyrt_sma_pool_ptr(const uint64_t offsetInBytes) { poolPtrOffsets.push_back(offsetInBytes); }         \
   POLYREGION_EXPORT extern "C" uintptr_t polyrt_sma_mirror_graph(const void *root) {                                                       \
-    POLYREGION_SMA_FOREIGN_GUARD(0);                                                                                                       \
     return (allocations).mirrorGraph(root, poolPtrOffsets.data(), poolPtrOffsets.size());                                                  \
   }                                                                                                                                        \
-  POLYREGION_EXPORT extern "C" void polyrt_sma_read_graph(const void *root) {                                                              \
-    POLYREGION_SMA_FOREIGN_GUARD();                                                                                                        \
-    (allocations).unmirrorReadGraph(root);                                                                                                 \
-  }                                                                                                                                        \
-  namespace { /* XXX `allocations` is immortal, so a callback that outlives the hook clear still finds live tables */                      \
-  ::polyregion::polyrt::sma::CaptureMarshalOf<std::remove_reference_t<decltype(allocations)>> captureMarshalOf{allocations};               \
+  POLYREGION_EXPORT extern "C" void polyrt_sma_read_graph(const void *root) { (allocations).unmirrorReadGraph(root); }                     \
+  namespace {                                                                                                                              \
   struct ReleaseHookRegistrar {                                                                                                            \
     ReleaseHookRegistrar() {                                                                                                               \
-      ::polyregion::polyrt::sma::registerCaptureMarshal(&captureMarshalOf);                                                                \
-      ::polyregion::rt_reflect::_rt_set_release_cb(+[](void *p, const size_t n) { (allocations).forget(p, n); });                          \
-      ::polyregion::rt_reflect::_rt_set_reclaim_cb(                                                                                        \
-          +[](const void *p, const size_t n, const bool forWrite) { (allocations).reclaimRange(p, n, forWrite); });                        \
+      ::polyregion::polyrt::sma::registerCaptureMarshalFactory(factory);                                                                   \
+      ::polyregion::rt_reflect::_rt_set_release_cb(                                                                                        \
+          +[](void *p, const size_t n) { ::polyregion::polyrt::sma::forEachMarshal([&](auto &marshal) { marshal.forget(p, n); }); });      \
+      ::polyregion::rt_reflect::_rt_set_reclaim_cb(+[](const void *p, const size_t n, const bool forWrite) {                               \
+        ::polyregion::polyrt::sma::forEachMarshal([&](auto &marshal) { marshal.reclaim(p, n, forWrite); });                                \
+      });                                                                                                                                  \
     }                                                                                                                                      \
     ~ReleaseHookRegistrar() {                                                                                                              \
-      ::polyregion::polyrt::sma::registerCaptureMarshal(nullptr);                                                                          \
+      ::polyregion::polyrt::sma::registerCaptureMarshalFactory(nullptr);                                                                   \
       ::polyregion::rt_reflect::_rt_set_release_cb(nullptr);                                                                               \
       ::polyregion::rt_reflect::_rt_set_reclaim_cb(nullptr);                                                                               \
-      (allocations).dropAllGuards();                                                                                                       \
     }                                                                                                                                      \
   } releaseHookRegistrar;                                                                                                                  \
   }                                                                                                                                        \

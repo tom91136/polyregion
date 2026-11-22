@@ -71,10 +71,22 @@ extern "C" void __polyregion_builtin_assert(uint32_t code, const char *message);
 
 using polyregion::polyrt::DebugLevel;
 
-static std::atomic<polyregion::polyrt::sma::CaptureMarshal *> registeredCaptureMarshal{nullptr};
+static std::atomic<polyregion::polyrt::sma::CaptureMarshalFactory> registeredMarshalFactory{nullptr};
 
-void polyregion::polyrt::sma::registerCaptureMarshal(CaptureMarshal *marshal) { registeredCaptureMarshal.store(marshal); }
-polyregion::polyrt::sma::CaptureMarshal *polyregion::polyrt::sma::captureMarshal() { return registeredCaptureMarshal.load(); }
+void polyregion::polyrt::sma::registerCaptureMarshalFactory(CaptureMarshalFactory factory) { registeredMarshalFactory.store(factory); }
+polyregion::polyrt::sma::CaptureMarshalFactory polyregion::polyrt::sma::captureMarshalFactory() { return registeredMarshalFactory.load(); }
+
+polyregion::polyrt::sma::CaptureMarshal *polyregion::polyrt::sma::captureMarshal(ExecutionContext &context) {
+  if (auto *live = context.marshalLive.load(std::memory_order_acquire)) return live;
+  const auto factory = captureMarshalFactory();
+  if (!factory) return nullptr;
+  const std::scoped_lock lock(context.marshalMutex);
+  if (!context.marshal) {
+    context.marshal = factory(context);
+    context.marshalLive.store(context.marshal.get(), std::memory_order_release);
+  }
+  return context.marshal.get();
+}
 
 std::unique_ptr<Platform> polyregion::polyrt::currentPlatform{};
 std::unique_ptr<Device> polyregion::polyrt::currentDevice{};
@@ -271,9 +283,15 @@ static std::chrono::seconds queueTimeout() {
   return timeout;
 }
 
+static thread_local bool initialising = false;
+
 void polyregion::polyrt::initialise() {
   static std::once_flag flag;
   std::call_once(flag, [] {
+    const struct Scope {
+      Scope() { initialising = true; }
+      ~Scope() { initialising = false; }
+    } scope;
     if (!currentPlatform) {
       log(DebugLevel::Info, "Initialising backends... (addr=%p)", reinterpret_cast<void *>(&initialise));
       auto parsed = selectPlatform();
@@ -338,8 +356,32 @@ POLYREGION_EXPORT extern "C" bool polyrt_context_available(void *context, const 
 }
 
 namespace {
-std::shared_mutex &contextRegistryMutex() {
-  static std::shared_mutex mutex;
+class RegistryMutex {
+  std::shared_mutex mutex;
+  static inline thread_local int depth = 0;
+
+public:
+  void lock() {
+    mutex.lock();
+    ++depth;
+  }
+  void unlock() {
+    --depth;
+    mutex.unlock();
+  }
+  void lock_shared() {
+    mutex.lock_shared();
+    ++depth;
+  }
+  void unlock_shared() {
+    --depth;
+    mutex.unlock_shared();
+  }
+  static bool heldByThisThread() { return depth > 0; }
+};
+
+RegistryMutex &contextRegistryMutex() {
+  static RegistryMutex mutex;
   return mutex;
 }
 
@@ -424,26 +466,23 @@ void retryPendingCleanups(polyregion::polyrt::ExecutionContext &execution) {
 
 thread_local char runtimeErrorMessage[512]{};
 thread_local std::vector<polyregion::polyrt::ExecutionContext *> activeTransactions;
-thread_local bool foreignMarshalAttempted = false;
+thread_local bool captureRefused = false;
 thread_local char refusalMessage[256]{};
-
-constexpr auto foreignMarshalMessage =
-    "a created context cannot marshal pointer-bearing captures: the mirror tables belong to the default context";
 
 constexpr auto unmirroredPointersMessage =
     "host pointers cannot reach this device: no capture marshal is registered and the device cannot page host memory";
 
 bool refuseInTransaction(const char *site, const char *message) noexcept {
   if (activeTransactions.empty()) return false;
-  foreignMarshalAttempted = true;
+  captureRefused = true;
   std::snprintf(refusalMessage, sizeof(refusalMessage), "%s", message);
   std::snprintf(runtimeErrorMessage, sizeof(runtimeErrorMessage), "%s: %s", site, message);
   return true;
 }
 
-bool refusedForeignMarshal() {
-  if (!std::exchange(foreignMarshalAttempted, false)) return false;
-  foreignMarshalAttempted = true;
+bool refusalPending() {
+  if (!std::exchange(captureRefused, false)) return false;
+  captureRefused = true;
   return true;
 }
 
@@ -565,14 +604,25 @@ polyregion::polyrt::ExecutionContext::~ExecutionContext() {
     }
   }
   errorBlocks.clear();
-  if (heap && processMarshal)
-    if (auto *marshal = sma::captureMarshal()) marshal->releaseArena();
+  if (heap && marshal) marshal->releaseArena();
   heap.reset();
 }
 
-bool polyregion::polyrt::sma::foreignContextActive(const char *site) noexcept {
-  if (activeTransactions.empty() || activeTransactions.back()->processMarshal) return false;
-  return refuseInTransaction(site, foreignMarshalMessage);
+bool polyregion::polyrt::sma::refuseCapture(const char *site, const char *message) noexcept { return refuseInTransaction(site, message); }
+
+polyregion::polyrt::ExecutionContext &polyregion::polyrt::sma::activeContext() {
+  if (!activeTransactions.empty()) return *activeTransactions.back();
+  if (!initialising)
+    if (auto *current = currentContext()) return *current;
+  static ExecutionContext detached{nullptr, nullptr, nullptr};
+  return detached;
+}
+
+void polyregion::polyrt::sma::forEachMarshal(const std::function<void(CaptureMarshal &)> &visit) {
+  if (RegistryMutex::heldByThisThread()) return;
+  const std::shared_lock lock(contextRegistryMutex());
+  for (auto *context : contextRegistry())
+    if (auto *live = context->marshalLive.load(std::memory_order_acquire)) visit(*live);
 }
 
 namespace {
@@ -684,7 +734,6 @@ POLYREGION_EXPORT extern "C" bool polyrt_context_create(const int32_t platform, 
     auto deviceLock = testLockEnabled() ? sharedDeviceLock(target.physicalDevice()) : nullptr;
     auto queue = target.createQueue(queueTimeout());
     auto created = std::make_unique<polyregion::polyrt::ExecutionContext>(entry.platform.get(), &target, queue.get());
-    created->processMarshal = false;
     static std::atomic<uintptr_t> sequence{0};
     const auto handle = (++sequence << 4) | createdHandleTag;
     const std::unique_lock registry(contextRegistryMutex());
@@ -713,6 +762,7 @@ POLYREGION_EXPORT extern "C" bool polyrt_context_destroy(void *context) noexcept
       }
       try {
         execution->settle();
+        if (execution->marshal) execution->marshal->releaseAll();
       } catch (...) {
         failure = std::current_exception();
       }
@@ -762,7 +812,7 @@ static bool releaseTransaction(void *context, const bool failed, const char *ope
     if (holder == activeTransactions.rend()) throw std::logic_error("polyrt_context_release: no matching acquire on this thread");
     activeTransactions.erase(std::next(holder).base());
     const std::unique_lock transaction(execution.transaction, std::adopt_lock);
-    const auto refused = std::exchange(foreignMarshalAttempted, false);
+    const auto refused = std::exchange(captureRefused, false);
     auto released = std::move(execution.temporaryAllocationScopes.back());
     execution.temporaryAllocationScopes.pop_back();
     auto owned = std::move(execution.ownedAllocationScopes.back());
@@ -812,14 +862,11 @@ POLYREGION_EXPORT extern "C" bool polyrt_raise_host_failures(const bool enabled)
 
 POLYREGION_EXPORT extern "C" bool polyrt_remote_failed() noexcept {
   if (runtimeErrorMessage[0] == '\0') {
-    if (!foreignMarshalAttempted) return false;
+    if (!captureRefused) return false;
     std::snprintf(runtimeErrorMessage, sizeof(runtimeErrorMessage), "%s", refusalMessage);
   }
-  if (!raiseHostFailures) {
-    if (foreignMarshalAttempted && std::strstr(runtimeErrorMessage, foreignMarshalMessage)) return false;
-    polyrt_abort();
-  }
-  foreignMarshalAttempted = false;
+  if (!raiseHostFailures) polyrt_abort();
+  captureRefused = false;
   if (activeTransactions.empty()) return true;
   char reported[sizeof(runtimeErrorMessage)];
   std::memcpy(reported, runtimeErrorMessage, sizeof(reported));
@@ -1159,7 +1206,7 @@ static void remoteLaunch(void *context, const char *moduleName, const char *kern
                          const size_t gridZ, const size_t blockX, const size_t blockY, const size_t blockZ, const size_t localMemBytes,
                          const size_t argCount, const uint8_t *argTypes, void *const *argPtrs, const int64_t arenaRoot = 0) {
   auto &value = requireContext(context, __func__);
-  if (refusedForeignMarshal()) return;
+  if (refusalPending()) return;
   value.counters.launches.fetch_add(1, std::memory_order_relaxed);
   uintptr_t error = takesErrorBuffer(value.device, moduleName) ? polyregion::polyrt::acquireErrorBlock(value) : 0;
   try {
@@ -1250,10 +1297,7 @@ polyregion::polyrt::ArenaPlacement polyregion::polyrt::sma::arenaPlacementOf(voi
   return arenaPlacement(requireContext(context, __func__));
 }
 
-polyregion::polyrt::ArenaPlacement polyregion::polyrt::sma::currentArenaPlacement() {
-  auto *execution = currentContext();
-  return execution ? arenaPlacementOf(execution) : ArenaPlacement{};
-}
+polyregion::polyrt::ArenaPlacement polyregion::polyrt::sma::activeArenaPlacement() { return arenaPlacement(activeContext()); }
 
 static bool pointerBearing(const polyregion::runtime::TypeLayout *layout) {
   return layout && view(layout->members, layout->members + layout->memberCount) | exists([](const auto &member) {
@@ -1279,7 +1323,7 @@ static void remoteLaunchMarshalled(void *context, const char *moduleName, const 
                                    const polyregion::runtime::TypeLayout *const *layouts) {
   namespace sma = polyregion::polyrt::sma;
   auto &execution = requireContext(context, __func__);
-  if (refusedForeignMarshal()) return;
+  if (refusalPending()) return;
   const std::scoped_lock transaction(execution.transaction);
   struct Mirror {
     uintptr_t remote = 0;
@@ -1293,11 +1337,7 @@ static void remoteLaunchMarshalled(void *context, const char *moduleName, const 
   const auto marshalling = iota(size_t{0}, argCount) | exists([&](const size_t i) {
                              return mirrorKinds[i] == 3 || (mirrorKinds[i] == 1 && layouts && pointerBearing(layouts[i]));
                            });
-  const bool foreign = !execution.processMarshal && !hostThreaded && mode != sma::MirrorMode::Off;
-  auto *marshal = !marshalling || hostThreaded || mode == sma::MirrorMode::Off || foreign ? nullptr : sma::captureMarshal();
-  const auto refuse = [&] {
-    if (!sma::foreignContextActive(__func__)) throw std::runtime_error(foreignMarshalMessage);
-  };
+  auto *marshal = !marshalling || hostThreaded || mode == sma::MirrorMode::Off ? nullptr : sma::captureMarshal(execution);
   std::vector<size_t> mirroredCaptures, ensuredPointers;
   std::optional<size_t> arenaCapture;
   sma::ArenaImage arena{};
@@ -1321,7 +1361,7 @@ static void remoteLaunchMarshalled(void *context, const char *moduleName, const 
                  || (mirrorKinds[i] == 3 && *static_cast<const uintptr_t *>(argPtrs[i]) != 0
                      && !remoteAllocation(execution, *static_cast<const uintptr_t *>(argPtrs[i])));
         });
-    if (hostPointers && !marshal && !foreign && !hostThreaded && mode != sma::MirrorMode::Off
+    if (hostPointers && !marshal && !hostThreaded && mode != sma::MirrorMode::Off
         && !hasFeature(*execution.device, polyregion::runtime::SystemPagingFeature)) {
       if (!refuseInTransaction(__func__, unmirroredPointersMessage)) throw std::runtime_error(unmirroredPointersMessage);
       return;
@@ -1329,10 +1369,6 @@ static void remoteLaunchMarshalled(void *context, const char *moduleName, const 
     if (marshal) marshal->visitClear();
     for (size_t i = 0; i < argCount; ++i) {
       launchArgPtrs[i] = argPtrs[i];
-      if (foreign && mirrorKinds[i] == 1 && pointerBearing(layouts ? layouts[i] : nullptr)) {
-        refuse();
-        return;
-      }
       if (mirrorKinds[i] != 1 || !marshal || !pointerBearing(layouts ? layouts[i] : nullptr)) continue;
       if (mode == sma::MirrorMode::Arena) {
         if (arenaCapture) throw std::logic_error(fmt::format("{}: launch of {} has more than one arena capture", __func__, kernelName));
@@ -1350,11 +1386,6 @@ static void remoteLaunchMarshalled(void *context, const char *moduleName, const 
       if (launchArgPtrs[i] != argPtrs[i]) continue;
       if (mirrorKinds[i] == 3) {
         const auto pointer = *static_cast<const uintptr_t *>(argPtrs[i]);
-        if (foreign && pointer != 0 && !remoteAllocation(execution, pointer)) {
-          refuse();
-          if (const auto failure = release()) std::rethrow_exception(failure);
-          return;
-        }
         if (!marshal || pointer == 0 || remoteAllocation(execution, pointer)) continue;
         if (const auto remote = marshal->ensure(reinterpret_cast<const void *>(pointer), mirrorSizes[i])) {
           marshalled[i] = remote;

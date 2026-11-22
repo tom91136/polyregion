@@ -368,6 +368,17 @@ inline std::optional<size_t> track(const uintptr_t begin, const uintptr_t end) {
   return std::nullopt;
 }
 
+inline std::optional<size_t> slotAt(const uintptr_t address) {
+  const size_t n = details::rangeHighWater.load(std::memory_order_acquire);
+  for (size_t i = 0; i < n; ++i) {
+    const auto &r = details::ranges[i];
+    if (const auto begin = r.begin.load(std::memory_order_acquire);
+        begin && begin <= address && address < r.end.load(std::memory_order_acquire))
+      return i;
+  }
+  return std::nullopt;
+}
+
 inline bool tracking(const uintptr_t begin) {
   const size_t n = details::rangeHighWater.load(std::memory_order_acquire);
   for (size_t i = 0; i < n; ++i)

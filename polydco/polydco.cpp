@@ -51,36 +51,40 @@ POLYREGION_EXPORT extern "C" void __polyregion_fc_assert_msg(const char *message
 POLYREGION_EXPORT extern "C" void __polyregion_builtin_assert(uint32_t code, const char *message) { g_assert.record(code, message); }
 POLYREGION_EXPORT extern "C" int __polyregion_fc_assert_raised() { return g_assert.raised() ? 1 : 0; }
 
-static auto &allocations = *new polyrt::SynchronisedMemAllocation(
-    [](const void *ptr) -> polyrt::PtrQuery {
-      if (const auto it = ptrRecords.find(reinterpret_cast<uintptr_t>(ptr)); it != ptrRecords.end()) {
-        const auto meta = rt_reflect::_rt_reflect_p(ptr);
-        return polyrt::PtrQuery{.sizeInBytes = it->second,
-                                .offsetInBytes = 0,
-                                .heap = runtimeHeapTracked && rt_reflect::isHeap(meta.type) && meta.offset == 0 && meta.size >= it->second};
-      }
-      // XXX fall through to polyreflect-rt for captures we didn't record locally (libc calloc paths).
-      if (const auto meta = rt_reflect::_rt_reflect_p(ptr); meta.type != rt_reflect::Type::Unknown) {
-        return polyrt::PtrQuery{.sizeInBytes = meta.size,
-                                .offsetInBytes = meta.offset,
-                                .hostReadOnly = meta.type == rt_reflect::Type::StaticRodata,
-                                .deviceAccessible = polyrt_usm_shared(static_cast<const char *>(ptr) - meta.offset),
-                                .heap = runtimeHeapTracked && rt_reflect::isHeap(meta.type)};
-      }
-      // XXX Fortran PARAMETER arrays land in .rdata; resolve via the lazy RO-segment scan
-      polyrt::ensureRoSegmentsRecorded();
-      if (const auto meta = rt_reflect::_rt_reflect_p(ptr); meta.type != rt_reflect::Type::Unknown) {
-        return polyrt::PtrQuery{
-            .sizeInBytes = meta.size, .offsetInBytes = meta.offset, .hostReadOnly = meta.type == rt_reflect::Type::StaticRodata};
-      }
-      log(DebugLevel::Debug, "Local: Failed to query %p", ptr);
-      return polyrt::PtrQuery{0, 0};
-    },
-    polyrt::sma::stdRemoteAlloc(),   //
-    polyrt::sma::stdRemoteRead(),    //
-    polyrt::sma::stdRemoteWrite(),   //
-    polyrt::sma::stdRemoteRelease(), //
-    polyrt::debugLevel() >= DebugLevel::Debug);
+namespace {
+const auto localReflect = [](const void *ptr) -> polyrt::PtrQuery {
+  if (const auto it = ptrRecords.find(reinterpret_cast<uintptr_t>(ptr)); it != ptrRecords.end()) {
+    const auto meta = rt_reflect::_rt_reflect_p(ptr);
+    return polyrt::PtrQuery{.sizeInBytes = it->second,
+                            .offsetInBytes = 0,
+                            .heap = runtimeHeapTracked && rt_reflect::isHeap(meta.type) && meta.offset == 0 && meta.size >= it->second};
+  }
+  // XXX fall through to polyreflect-rt for captures we didn't record locally (libc calloc paths).
+  if (const auto meta = rt_reflect::_rt_reflect_p(ptr); meta.type != rt_reflect::Type::Unknown) {
+    return polyrt::PtrQuery{.sizeInBytes = meta.size,
+                            .offsetInBytes = meta.offset,
+                            .hostReadOnly = meta.type == rt_reflect::Type::StaticRodata,
+                            .deviceAccessible = polyrt_usm_shared(static_cast<const char *>(ptr) - meta.offset),
+                            .heap = runtimeHeapTracked && rt_reflect::isHeap(meta.type)};
+  }
+  // XXX Fortran PARAMETER arrays land in .rdata; resolve via the lazy RO-segment scan
+  polyrt::ensureRoSegmentsRecorded();
+  if (const auto meta = rt_reflect::_rt_reflect_p(ptr); meta.type != rt_reflect::Type::Unknown) {
+    return polyrt::PtrQuery{
+        .sizeInBytes = meta.size, .offsetInBytes = meta.offset, .hostReadOnly = meta.type == rt_reflect::Type::StaticRodata};
+  }
+  log(DebugLevel::Debug, "Local: Failed to query %p", ptr);
+  return polyrt::PtrQuery{0, 0};
+};
+
+using Allocations = polyrt::sma::StdAllocation<std::remove_const_t<decltype(localReflect)>>;
+
+std::unique_ptr<polyrt::sma::CaptureMarshal> marshalFactory(polyrt::ExecutionContext &context) {
+  return polyrt::sma::makeStdMarshal(context, localReflect, polyrt::debugLevel() >= DebugLevel::Debug);
+}
+
+Allocations &allocations() { return polyrt::sma::active<Allocations>(); }
+} // namespace
 
 POLYREGION_EXPORT extern "C" [[maybe_unused]] void polydco_record(void *ptr, const size_t size) {
   std::unique_lock lock(recordsMutex);
@@ -94,7 +98,7 @@ POLYREGION_EXPORT extern "C" [[maybe_unused]] void polydco_release(void *ptr) {
   ptrRecords.erase(reinterpret_cast<uintptr_t>(ptr));
   // XXX Keep the SVM mirror; Intel coarse-grain clSVMAlloc reuses freed addresses and collides
   // with still-live allocs in the same dispatch chain.
-  allocations.disassociate(ptr, /*releaseRemote*/ false);
+  polyrt::sma::forEachMarshal([&](auto &marshal) { marshal.disassociate(ptr, /*releaseRemote*/ false); });
 }
 
 static size_t boxDataBytes(const CFI_cdesc_t *box) {
@@ -125,7 +129,7 @@ POLYREGION_EXPORT extern "C" [[maybe_unused]] void polydco_release_box(void *box
   std::unique_lock lock(recordsMutex);
   log(DebugLevel::Debug, "polydco_release_box(box=%p, base=%p)", boxRef, box->base_addr);
   ptrRecords.erase(reinterpret_cast<uintptr_t>(box->base_addr));
-  allocations.disassociate(box->base_addr, /*releaseRemote*/ false);
+  polyrt::sma::forEachMarshal([&](auto &marshal) { marshal.disassociate(box->base_addr, /*releaseRemote*/ false); });
 }
 
 #if !defined(_WIN32) && !defined(__APPLE__)
@@ -159,18 +163,18 @@ POLYREGION_EXPORT extern "C" [[maybe_unused]] void polydco_debug_typelayout(cons
 }
 
 POLYREGION_EXPORT extern "C" void polyrt_map_read(void *origin, const ptrdiff_t sizeInBytes, const size_t unitInBytes) {
-  polyrt::sma::mapRead(allocations, origin, sizeInBytes, unitInBytes);
+  polyrt::sma::mapRead(allocations(), origin, sizeInBytes, unitInBytes);
 }
 
 POLYREGION_EXPORT extern "C" void polyrt_map_write(void *origin, const ptrdiff_t sizeInBytes, const size_t unitInBytes) {
-  polyrt::sma::mapWrite(allocations, origin, sizeInBytes, unitInBytes);
+  polyrt::sma::mapWrite(allocations(), origin, sizeInBytes, unitInBytes);
 }
 
 POLYREGION_EXPORT extern "C" void polyrt_map_readwrite(void *origin, const ptrdiff_t sizeInBytes, const size_t unitInBytes) {
-  polyrt::sma::mapReadwrite(allocations, origin, sizeInBytes, unitInBytes);
+  polyrt::sma::mapReadwrite(allocations(), origin, sizeInBytes, unitInBytes);
 }
 
-POLYREGION_DEFINE_SMA_MIRROR_ABI(allocations);
+POLYREGION_DEFINE_SMA_MIRROR_ABI(allocations(), marshalFactory);
 
 template <typename T> static void validatePrelude(const runtime::TypeLayout *layout, const char *moduleId) {
   if (layout->memberCount < 1) {
@@ -302,14 +306,15 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
   if (mode == polyrt::sma::MirrorMode::Arena) {
     // marshal the whole capture graph into one device arena (pointers -> arena offsets)
     const polyrt::sma::ContextTransaction transaction;
-    const auto arena = polyrt::sma::arenaMarshal(allocations, captures, *layout, polyrt::sma::currentArenaPlacement());
+    const auto arena =
+        polyrt::sma::arenaMarshal(allocations(), captures, *layout, polyrt::sma::activeArenaPlacement(), *polyrt::currentDevice);
     ArgBuffer buffer;
     polyrt::bindAssertError(buffer, asserts, errDev);
     polyrt::sma::bindArena(buffer, arena.base, arena.root, polyrt::currentDevice->arenaViewStart(moduleId).has_value());
     buffer.append(Type::Ptr, &mpr.devicePartials);
     if (isReduction) buffer.append(Type::Scratch, nullptr);
     launch(buffer);
-    allocations.genArenaReadback();
+    allocations().genArenaReadback();
     mpr.releaseAndReduce();
     polyrt::currentQueue->enqueueWaitBlocking();
     log(DebugLevel::Debug, "<%s:%s:%" PRId64 "> Done (arena)", __func__, moduleId, tripCount);
@@ -319,8 +324,8 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
   const bool useGenerated = mode == polyrt::sma::MirrorMode::Compiletime && prelude;
   const uintptr_t preludeResult = useGenerated ? prelude(captures, layout->sizeInBytes) : 0;
   auto functorDevicePtr =
-      useGenerated ? reinterpret_cast<void *>(preludeResult) : reinterpret_cast<void *>(allocations.syncLocalToRemote(captures, *layout));
-  polyrt::sma::dumpAllocationTable(allocations);
+      useGenerated ? reinterpret_cast<void *>(preludeResult) : reinterpret_cast<void *>(allocations().syncLocalToRemote(captures, *layout));
+  polyrt::sma::dumpAllocationTable(allocations());
 
   ArgBuffer buffer;
   polyrt::bindAssertError(buffer, asserts, errDev);
@@ -333,15 +338,15 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
   launch(buffer);
 
   if (useGenerated && postlude) postlude(captures, layout->sizeInBytes);
-  else allocations.syncRemoteToLocalAfterLaunch(captures);
+  else allocations().syncRemoteToLocalAfterLaunch(captures);
   polyrt::currentQueue->enqueueWaitBlocking();
 
-  allocations.disassociate(captures);
+  allocations().disassociate(captures);
 
   mpr.releaseAndReduce();
 
   polyrt::currentQueue->enqueueWaitBlocking();
-  polyrt::sma::dumpAllocations(allocations);
+  polyrt::sma::dumpAllocations(allocations());
   log(DebugLevel::Debug, "<%s:%s:%" PRId64 "> Done", __func__, moduleId, tripCount);
 }
 

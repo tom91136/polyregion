@@ -50,24 +50,18 @@ HostBlocks &hostBlocks() {
   return *blocks;
 }
 
-auto &hostAllocations() {
-  static auto *allocations = new polyrt::SynchronisedMemAllocation(
-      [](const void *ptr) -> polyrt::PtrQuery {
-        auto &host = hostBlocks();
-        const std::scoped_lock lock(host.mutex);
-        const auto address = reinterpret_cast<uintptr_t>(ptr);
-        const auto upper = host.blocks.upper_bound(address);
-        if (upper == host.blocks.begin()) return {0, 0};
-        const auto &[base, size] = *std::prev(upper);
-        return address - base <= size ? polyrt::PtrQuery{.sizeInBytes = size, .offsetInBytes = address - base} : polyrt::PtrQuery{0, 0};
-      },
-      polyrt::sma::stdRemoteAlloc(), polyrt::sma::stdRemoteRead(), polyrt::sma::stdRemoteWrite(), polyrt::sma::stdRemoteRelease());
-  return *allocations;
-}
+const auto localReflect = [](const void *ptr) -> polyrt::PtrQuery {
+  auto &host = hostBlocks();
+  const std::scoped_lock lock(host.mutex);
+  const auto address = reinterpret_cast<uintptr_t>(ptr);
+  const auto upper = host.blocks.upper_bound(address);
+  if (upper == host.blocks.begin()) return {0, 0};
+  const auto &[base, size] = *std::prev(upper);
+  return address - base <= size ? polyrt::PtrQuery{.sizeInBytes = size, .offsetInBytes = address - base} : polyrt::PtrQuery{0, 0};
+};
 
-polyrt::sma::CaptureMarshal &hostCaptureMarshal() {
-  static auto *marshal = new polyrt::sma::CaptureMarshalOf<std::remove_reference_t<decltype(hostAllocations())>>(hostAllocations());
-  return *marshal;
+std::unique_ptr<polyrt::sma::CaptureMarshal> hostMarshalFactory(polyrt::ExecutionContext &context) {
+  return polyrt::sma::makeStdMarshal(context, localReflect);
 }
 
 } // namespace
@@ -90,13 +84,13 @@ polyrt::sma::CaptureMarshal &hostCaptureMarshal() {
   if (!promoted) return JNI_ERR;
 #endif
   if (!Context::registerMethods(env)) return JNI_ERR;
-  polyregion::polyrt::sma::registerCaptureMarshal(&hostCaptureMarshal());
+  polyregion::polyrt::sma::registerCaptureMarshalFactory(&hostMarshalFactory);
   return JNI_VERSION_1_1;
 }
 
 [[maybe_unused]] JNIEXPORT void JNICALL JNI_OnUnload(JavaVM *vm, void *) {
   if (const char *d = std::getenv(env::PolyregionDebug); d && *d) fprintf(stderr, "OnUnload polyrt\n");
-  polyregion::polyrt::sma::registerCaptureMarshal(nullptr);
+  polyregion::polyrt::sma::registerCaptureMarshalFactory(nullptr);
   if (JNIEnv *env = getEnv(vm); env) Context::unregisterMethods(env);
 }
 
@@ -483,7 +477,8 @@ void Context::releaseHost0(JNIEnv *env, jclass, jlong address) {
       const std::scoped_lock lock(host.mutex);
       host.blocks.erase(static_cast<uintptr_t>(address));
     }
-    hostAllocations().disassociate(reinterpret_cast<const void *>(address), /*releaseRemote*/ false);
+    polyrt::sma::forEachMarshal(
+        [&](auto &marshal) { marshal.disassociate(reinterpret_cast<const void *>(address), /*releaseRemote*/ false); });
   });
 }
 
