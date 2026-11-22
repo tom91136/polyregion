@@ -61,8 +61,15 @@ trait SpectraLaunchBase extends munit.FunSuite {
     assertEquals(spectra.reduce_unordered(ctx, xs, xs.length, 0, (a: Int, b: Int) => a + b), xs.sum)
   }
 
+  protected def inclusiveScanCase(ctx: rt.Context): Unit = {
+    val xs  = Array.tabulate(100000)(i => i % 7)
+    val out = Array.ofDim[Int](xs.length)
+    spectra.inclusive_scan(ctx, xs, out, xs.length, (a: Int, b: Int) => a + b)
+    assertEquals(out.toList, xs.scanLeft(0)(_ + _).tail.toList)
+  }
+
   protected def transformReduceUnorderedCase(ctx: rt.Context): Unit = {
-    val xs = Array.tabulate(1000)(_ + 1)
+    val xs = Array.tabulate(100000)(_ + 1)
     assertEquals(
       spectra.transform_reduce_unordered(ctx, xs, xs.length, 0, (x: Int) => x % 7, (a: Int, b: Int) => a + b),
       xs.map(_ % 7).sum
@@ -203,16 +210,6 @@ trait SpectraLaunchBase extends munit.FunSuite {
     assert(ctx.stats().launches > before, "the call did not launch on the device")
   }
 
-  protected def mirrorsOrRefuses(device: Option[rt.DeviceInfo])(f: rt.Context => Unit): Unit =
-    withContext(device)(ctx =>
-      scala.util.Try(f(ctx)).failed.foreach {
-        case gap: rt.CapabilityGapException => assume(false, gap.getMessage)
-        case refused: rt.PolyregionRuntimeException =>
-          assert(refused.getMessage.contains("created context"), refused.getMessage)
-        case other => throw other
-      }
-    )
-
   private def launchedOnDefault(f: rt.Context => Unit): Unit = discreteDefault(launched(f))
 
   private def pointerBearingOnDefault(device: Option[rt.DeviceInfo])(f: rt.Context => Unit): Unit = {
@@ -249,11 +246,11 @@ trait SpectraLaunchBase extends munit.FunSuite {
     test(s"a nested pointer in the environment on the default $kind context")(
       pointerBearingOnDefault(created)(nestedPointerCase(_))
     )
-    test(s"a pointer-bearing capture mirrors or is refused on a created $kind context")(
-      mirrorsOrRefuses(created)(pointerCaptureCase(_))
+    test(s"a pointer-bearing capture mirrors on a created $kind context")(
+      withContext(created)(launched(pointerCaptureCase(_)))
     )
-    test(s"a nested pointer in the environment mirrors or is refused on a created $kind context")(
-      mirrorsOrRefuses(created)(nestedPointerCase(_))
+    test(s"a nested pointer in the environment mirrors on a created $kind context")(
+      withContext(created)(launched(nestedPointerCase(_)))
     )
     test(s"spectra.transform captures a scalar and an array on the default $kind context")(
       pointerBearingOnDefault(created)(captureCase(_))
@@ -269,6 +266,7 @@ trait SpectraLaunchBase extends munit.FunSuite {
     test(s"spectra.transform_reduce keeps encounter order on $kind")(
       withContext(created)(launched(transformReduceOrderCase(_)))
     )
+    test(s"spectra.inclusive_scan scans on $kind")(withContext(created)(launched(inclusiveScanCase(_))))
     test(s"spectra.reduce_unordered reduces on $kind")(withContext(created)(launched(reduceUnorderedCase(_))))
     test(s"spectra.transform_reduce_unordered reduces on $kind")(
       withContext(created)(launched(transformReduceUnorderedCase(_)))
