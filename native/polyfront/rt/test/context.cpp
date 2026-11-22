@@ -1,7 +1,8 @@
 #include <array>
 #include <atomic>
-#include <barrier>
+#include <condition_variable>
 #include <cstring>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
@@ -20,6 +21,26 @@ namespace {
 
 constexpr int32_t RelocatableBackend = static_cast<int32_t>(Backend::RelocatableObject);
 constexpr int32_t CudaBackend = static_cast<int32_t>(Backend::CUDA);
+
+struct Rendezvous {
+  std::mutex mutex;
+  std::condition_variable condition;
+  const std::size_t parties;
+  std::size_t waiting = 0;
+  std::size_t generation = 0;
+  explicit Rendezvous(const std::size_t count) : parties(count) {}
+  void arriveAndWait() {
+    std::unique_lock lock(mutex);
+    const auto current = generation;
+    if (++waiting == parties) {
+      waiting = 0;
+      ++generation;
+      condition.notify_all();
+    } else {
+      condition.wait(lock, [&] { return generation != current; });
+    }
+  }
+};
 
 struct Selection {
   int32_t platform = -1;
@@ -117,12 +138,12 @@ Selection defaultSelection() {
 void loadConcurrently(const Selection &selection) {
   Created first(selection), second(selection);
   const auto &image = imageFor(selection);
-  std::barrier sync(2);
+  Rendezvous sync(2);
   std::atomic<int> failures{0};
   const auto run = [&](void *context, const float offset) {
     for (int k = 0; k < 64; ++k) {
       const auto name = "concurrent_" + std::to_string(k);
-      sync.arrive_and_wait();
+      sync.arriveAndWait();
       const auto result = tryFma(context, selection, image, name.c_str(), 1.f, offset, 1.f);
       if (!result || *result != 1.f + offset) ++failures;
     }
@@ -562,12 +583,12 @@ TEST_CASE("a module store resolves distinct symbols on a shared module concurren
       "test", [](const std::string &image) { return static_cast<int>(image.size()); },
       [](const int module, const std::string &symbol, const std::vector<Type> &) { return module + static_cast<int>(symbol.size()); });
   store.loadModule("shared", std::string(3, 'x'));
-  std::barrier start(8);
+  Rendezvous start(8);
   std::atomic<int> failures{0};
   std::vector<std::thread> threads;
   for (int t = 0; t < 8; ++t)
     threads.emplace_back([&, t] {
-      start.arrive_and_wait();
+      start.arriveAndWait();
       for (int k = 0; k < 20000; ++k) {
         const auto symbol = "s" + std::to_string(t) + "_" + std::to_string(k);
         if (store.resolveFunction("shared", symbol, {}) != 3 + static_cast<int>(symbol.size())) ++failures;
