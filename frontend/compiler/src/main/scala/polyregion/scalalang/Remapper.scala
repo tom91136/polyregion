@@ -122,6 +122,27 @@ object Remapper {
       val self       = if (sym.flags.is(q.Flags.Module)) "$" else ""
       if (owner.isNoSymbol) None
       else if (ownerFlags.is(q.Flags.Package))
+  private def isMethod(using q: Quoted)(sym: q.Symbol, owner: String, name: String): Boolean =
+    sym.name == name && sym.owner.fullName.stripSuffix("$") == owner
+
+  @tailrec private def constantMessage(using q: Quoted)(term: q.Term): Option[String] = term match {
+    case q.Literal(constant) => Some(String.valueOf(constant.value))
+    case q.Inlined(_, _, x)  => constantMessage(x)
+    case q.Typed(x, _)       => constantMessage(x)
+    case q.Block(Nil, x)     => constantMessage(x)
+    case _                   => None
+  }
+
+  private def failureText(using
+      q: Quoted
+  )(what: String, prefix: String, message: List[q.Term]): Either[String, String] =
+    message match {
+      case Nil => Right(prefix)
+      case m :: Nil =>
+        constantMessage(m).map(text => s"$prefix: $text").toRight(s"The message of $what must be a literal")
+      case _ => Left(s"Unexpected arguments to $what")
+    }
+
         Some((if (ownerName.startsWith("<")) base else s"$ownerName.$base") + self)
       else if (owner.isClassDef && ownerFlags.is(q.Flags.Module))
         binaryName(owner).map(o => (if (o.endsWith("$")) o + base else s"$o$$$base") + self)
@@ -674,7 +695,6 @@ object Remapper {
                 )
               } yield (invoke, c))
             } else None
-          }
 
           val refSym = refTpe.typeSymbol
 
@@ -965,6 +985,31 @@ object Remapper {
             case _        => closureDefOf(fun)
           }
           closure match {
+        case (Nil, Nil, ap @ q.Apply(r: q.Ref, args))
+            if isMethod(r.symbol, "scala.runtime.Scala3RunTime", "assertFailed") =>
+          failureText("assert", "assertion failed", args) match {
+            case Left(error) => error.fail
+            case Right(text) =>
+              (c1 !! ap).mapTerm(
+                q.Select.unique(q.Ref(q.Symbol.requiredModule("polyregion.scalalang.intrinsics")), "assertFailed"),
+                termArgss = (p.Expr.Alias(p.Term.StringConst(text)) :: Nil) :: Nil
+              )
+          }
+        case (Nil, Nil, ap @ q.Apply(r: q.Ref, requirement :: message))
+            if isMethod(r.symbol, "scala.Predef", "require") =>
+          failureText("require", "requirement failed", message) match {
+            case Left(error) => error.fail
+            case Right(text) =>
+              val intrinsicsRef = q.Ref(q.Symbol.requiredModule("polyregion.scalalang.intrinsics"))
+              val raise = q.Apply(
+                q.Select.unique(intrinsicsRef, "raiseNamed"),
+                List(
+                  q.Literal(q.StringConstant("java.lang.IllegalArgumentException")),
+                  q.Literal(q.StringConstant(text))
+                )
+              )
+              (c1 !! ap).mapTerm(q.If(requirement, q.Literal(q.UnitConstant()), raise))
+          }
             case Some(dd) =>
               for {
                 (_, c)        <- (c1 !! ap).mapTerm(fun)

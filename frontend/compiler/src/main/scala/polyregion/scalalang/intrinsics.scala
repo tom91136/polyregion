@@ -62,6 +62,8 @@ object intrinsics {
 
   def raiseNamed(exception: String, message: String): Unit = intrinsic
 
+  def assertFailed(message: String): Unit = intrinsic
+
   def zero[A]: A = intrinsic
 
   def add[A](x: A, y: A): A = intrinsic

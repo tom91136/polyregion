@@ -11,6 +11,7 @@ import polyregion.ast.Traversal.*
 //   intrinsics.gpuBarrierAll()  ->  Spec.GpuBarrierAll
 //   intrinsics.assert(c, m)     ->  Spec.Assert(c, m)
 //   intrinsics.raiseNamed(e, m) ->  Spec.Assert(JvmException, "e: m")
+//   intrinsics.assertFailed(m)  ->  Spec.Assert(Assert, m)
 //   intrinsics.zero[T]          ->  Cast(i32(0), T)
 //   intrinsics.add[T](x, y)     ->  Intr.Add(x, y, T)
 //   intrinsics.sin(x)           ->  Math.Sin(x)
@@ -106,6 +107,9 @@ object Intrinsify extends ProgramPass {
             p.Term.StringConst(s"$exception: $message")
           )
         )
+
+      case "assertFailed" -> (message :: Nil) =>
+        spec(p.Spec.Assert(p.Term.IntU32Const(p.Enums.AssertCode.Assert.value), message))
 
       case "zero" -> Nil            => p.Expr.Cast(p.Term.IntS32Const(0), rtn) -> List.empty[p.Stmt]
       case "add" -> (x :: y :: Nil) => intr(p.Intr.Add(x, y, rtn))
