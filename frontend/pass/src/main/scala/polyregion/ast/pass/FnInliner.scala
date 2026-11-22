@@ -118,11 +118,15 @@ abstract class FnInliner(selective: Boolean, prefix: String) extends ProgramPass
       }
       name -> conformed
     }
+    val sharedReceivers = (renamed.decl.receiver.map(_.named), ivk.receiver) match {
+      case (Some(named), Some(_: p.Term.Select)) if named.tpe.isInstanceOf[p.Type.Struct] => Set(named)
+      case _                                                                              => Set.empty[p.Named]
+    }
     val mutableParameters = renamed
       .collectWhere[p.Stmt] { case p.Stmt.Mut(p.Term.Select(root, _, _), _) =>
         root
       }
-      .toSet
+      .toSet -- sharedReceivers
     val moduleCaptureNames   = renamed.moduleCaptures.map(_.named).toSet
     val mutableLocalsBuilder = List.newBuilder[(p.Named, (p.Named, p.Stmt.Var))]
     parameters.foreach { (name, value) =>
