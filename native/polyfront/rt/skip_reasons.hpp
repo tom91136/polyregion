@@ -9,9 +9,22 @@
 
 #include "aspartame/all.hpp"
 
+#include "polyregion/enums.h"
+
 namespace polyregion::polyrt {
 
 using namespace aspartame;
+
+constexpr std::string_view outcomeName(const runtime::LoadOutcome outcome) {
+  switch (outcome) {
+    case runtime::LoadOutcome::Loaded: return "loaded";
+    case runtime::LoadOutcome::Format: return "format";
+    case runtime::LoadOutcome::Lacks: return "lacks";
+    case runtime::LoadOutcome::Unprepared: return "unprepared";
+    case runtime::LoadOutcome::NoDevice: return "no-device";
+  }
+  return "";
+}
 
 class SkipReasons {
 public:
@@ -31,10 +44,10 @@ private:
   std::optional<Device> device;
   std::vector<Attempt> attempts;
 
-  std::vector<std::string> detailOf(const std::string &outcome) const {
+  std::vector<std::string> detailOf(const runtime::LoadOutcome outcome) const {
     std::vector<std::string> out;
     for (const auto &a : attempts)
-      if (a.outcome == outcome)
+      if (a.outcome == outcomeName(outcome))
         for (const auto &d : a.detail)
           if (!(out ^ contains(d))) out.push_back(d);
     return out;
@@ -65,10 +78,10 @@ public:
     const std::scoped_lock lock(mutex);
     constexpr std::string_view prefix = "polyrt: no compatible target: ";
     const auto name = device ? device->name : std::string{};
-    const auto lacks = detailOf("lacks");
-    const auto unprepared = detailOf("unprepared");
-    const auto unloadable = detailOf("format");
-    const bool deviceless = attempts ^ exists([](const auto &a) { return a.outcome == "no-device"; });
+    const auto lacks = detailOf(runtime::LoadOutcome::Lacks);
+    const auto unprepared = detailOf(runtime::LoadOutcome::Unprepared);
+    const auto unloadable = detailOf(runtime::LoadOutcome::Format);
+    const bool deviceless = attempts ^ exists([](const auto &a) { return a.outcome == outcomeName(runtime::LoadOutcome::NoDevice); });
     std::vector<std::string> parts;
     if (!lacks.empty()) parts.push_back(name + " lacks " + (lacks ^ mk_string(", ")));
     if (!unprepared.empty()) parts.push_back(name + " cannot prepare " + (unprepared ^ mk_string(", ")));

@@ -7,6 +7,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -508,13 +509,18 @@ jint Context::select0(JNIEnv *env, jclass, jlong context, //
     auto set = readImages(env, imageNames, imageTargets, imageFeatures, images);
     auto *handle = toHandle(context);
     Transaction transaction(handle);
-    jint selected = -1;
-    for (size_t i = 0; i < set.names.size() && selected < 0; ++i)
-      if (polyrt_remote_load(handle, set.names[i].c_str(), set.kinds[i], set.formats[i], set.features[i].size(),
-                             set.featurePointers[i].data(), set.images[i].size(), reinterpret_cast<const uint8_t *>(set.images[i].data())))
-        selected = static_cast<jint>(i);
+    using polyregion::runtime::LoadOutcome;
+    std::optional<jint> selected;
+    int32_t worst = static_cast<int32_t>(LoadOutcome::Format);
+    for (size_t i = 0; i < set.names.size() && !selected; ++i) {
+      const auto outcome = polyrt_remote_load_outcome(handle, set.names[i].c_str(), set.kinds[i], set.formats[i], set.features[i].size(),
+                                                      set.featurePointers[i].data(), set.images[i].size(),
+                                                      reinterpret_cast<const uint8_t *>(set.images[i].data()));
+      if (outcome == static_cast<int32_t>(LoadOutcome::Loaded)) selected = static_cast<jint>(i);
+      else worst = std::max(worst, outcome);
+    }
     transaction.end();
-    return selected;
+    return selected.value_or(-worst);
   });
 }
 

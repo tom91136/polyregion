@@ -757,6 +757,33 @@ TEST_CASE("asserting remote modules take a leading error buffer and report the a
   CHECK(context.remoteAllocations.size() == 1);
 }
 
+TEST_CASE("remote load names why a device refuses an image") {
+  using polyregion::runtime::LoadOutcome;
+  WithStubDevice device(false);
+  WithStubManagedPlatform platform;
+  StubQueue queue(std::chrono::seconds(1));
+  device.stub->advertised = std::vector<std::string>{"x87"};
+  polyregion::polyrt::ExecutionContext context{polyregion::polyrt::currentPlatform.get(), device.stub, &queue};
+  polyregion::polyrt::ExecutionContext deviceless{polyregion::polyrt::currentPlatform.get(), nullptr, nullptr};
+  const unsigned char image = 0;
+  std::array<const char *, 1> lacking{"int64"};
+  size_t count = 0;
+  const auto load = [&](void *on, const ModuleFormat format, const size_t length, std::array<const char *, 1> *features = nullptr) {
+    return static_cast<LoadOutcome>(polyrt_remote_load_outcome(
+        on, ("outcome" + std::to_string(count++)).c_str(), static_cast<int32_t>(PlatformKind::Managed), static_cast<int32_t>(format),
+        features ? features->size() : 0, features ? features->data() : nullptr, length, &image));
+  };
+  CHECK(load(&context, ModuleFormat::Object, sizeof(image)) == LoadOutcome::Loaded);
+  CHECK(load(&context, ModuleFormat::SPIRV_GLCompute, sizeof(image)) == LoadOutcome::Format);
+  CHECK(load(&context, ModuleFormat::Object, sizeof(image), &lacking) == LoadOutcome::Lacks);
+  CHECK(load(&context, ModuleFormat::Object, 0) == LoadOutcome::Unprepared);
+  CHECK(load(&deviceless, ModuleFormat::Object, sizeof(image)) == LoadOutcome::NoDevice);
+  CHECK(polyrt_remote_load(&context, "outcome", static_cast<int32_t>(PlatformKind::Managed), static_cast<int32_t>(ModuleFormat::Object), 0,
+                           nullptr, sizeof(image), &image));
+  CHECK_FALSE(polyrt_remote_load(&context, "outcome", static_cast<int32_t>(PlatformKind::Managed),
+                                 static_cast<int32_t>(ModuleFormat::Object), lacking.size(), lacking.data(), sizeof(image), &image));
+}
+
 TEST_CASE("a module reloaded with an asserting image keeps the image its device holds") {
   WithStubDevice device(false, false);
   WithStubManagedPlatform platform;

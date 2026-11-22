@@ -124,6 +124,8 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT bool loadKernelObject(const char *module
 POLYREGION_RT_PROTECT POLYREGION_EXPORT bool loadKernelObject(ExecutionContext &context, const char *moduleName, const KernelObject &object,
                                                               const void *capture = nullptr, const TypeLayout *interfaceLayout = nullptr,
                                                               std::string *loadedModuleName = nullptr);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT runtime::LoadOutcome loadKernelObjectOutcome(ExecutionContext &context, const char *moduleName,
+                                                                                     const KernelObject &object);
 namespace sma {
 POLYREGION_RT_PROTECT POLYREGION_EXPORT bool foreignContextActive(const char *site) noexcept;
 } // namespace sma
@@ -220,6 +222,9 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_remote_sync(void *context) n
 POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_remote_load(void *context, const char *moduleName, int32_t kind, int32_t format,
                                                                 size_t featureCount, const char **features, size_t imageLength,
                                                                 const uint8_t *image);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT int32_t polyrt_remote_load_outcome(void *context, const char *moduleName, int32_t kind,
+                                                                           int32_t format, size_t featureCount, const char **features,
+                                                                           size_t imageLength, const uint8_t *image);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_remote_require_loaded(void *context, const char *moduleName, bool loaded);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_remote_fallback(const char *site) noexcept;
 POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_remote_launch(void *context, const char *moduleName, const char *kernelName,

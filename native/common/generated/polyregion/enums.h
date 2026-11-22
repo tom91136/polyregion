@@ -100,4 +100,12 @@ enum class POLYREGION_EXPORT ModuleFormat : uint8_t {
   SPIRV_GLCompute = 7,
 };
 
+enum class POLYREGION_EXPORT LoadOutcome : uint8_t {
+  Loaded = 0,
+  Format = 1,
+  Lacks = 2,
+  Unprepared = 3,
+  NoDevice = 4,
+};
+
 } // namespace polyregion::runtime

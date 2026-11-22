@@ -1072,9 +1072,9 @@ static bool takesErrorBuffer(const Device *device, const char *moduleName) {
   return assertingModules().contains({device, moduleName});
 }
 
-POLYREGION_EXPORT extern "C" bool polyrt_remote_load(void *context, const char *moduleName, const int32_t kind, const int32_t format,
-                                                     const size_t featureCount, const char **features, const size_t imageLength,
-                                                     const uint8_t *image) {
+POLYREGION_EXPORT extern "C" int32_t polyrt_remote_load_outcome(void *context, const char *moduleName, const int32_t kind,
+                                                                const int32_t format, const size_t featureCount, const char **features,
+                                                                const size_t imageLength, const uint8_t *image) {
   const polyregion::runtime::KernelObject object{.kind = static_cast<polyregion::runtime::PlatformKind>(kind),
                                                  .format = static_cast<polyregion::runtime::ModuleFormat>(format),
                                                  .featureCount = featureCount,
@@ -1087,7 +1087,14 @@ POLYREGION_EXPORT extern "C" bool polyrt_remote_load(void *context, const char *
                                                  .opt = polyregion::compiletime::OptLevel::O3,
                                                  .programLength = 0,
                                                  .program = nullptr};
-  return polyregion::polyrt::loadKernelObject(requireContext(context, __func__), moduleName, object);
+  return static_cast<int32_t>(polyregion::polyrt::loadKernelObjectOutcome(requireContext(context, __func__), moduleName, object));
+}
+
+POLYREGION_EXPORT extern "C" bool polyrt_remote_load(void *context, const char *moduleName, const int32_t kind, const int32_t format,
+                                                     const size_t featureCount, const char **features, const size_t imageLength,
+                                                     const uint8_t *image) {
+  return polyrt_remote_load_outcome(context, moduleName, kind, format, featureCount, features, imageLength, image)
+         == static_cast<int32_t>(polyregion::runtime::LoadOutcome::Loaded);
 }
 
 POLYREGION_EXPORT extern "C" void polyrt_remote_require_loaded(void *context, const char *moduleName, const bool loaded) {
@@ -1689,17 +1696,19 @@ static std::mutex &moduleLoadMutex(const Device *device) {
   return *slot;
 }
 
-static bool loadKernelObjectOn(Platform *platform, Device *device, DeviceQueue *queue, const char *moduleName,
-                               const polyregion::runtime::KernelObject &object, const void *capture,
-                               const polyregion::runtime::TypeLayout *interfaceLayout, std::string *loadedModuleName) {
+static polyregion::runtime::LoadOutcome loadKernelObjectOn(Platform *platform, Device *device, DeviceQueue *queue, const char *moduleName,
+                                                           const polyregion::runtime::KernelObject &object, const void *capture,
+                                                           const polyregion::runtime::TypeLayout *interfaceLayout,
+                                                           std::string *loadedModuleName) {
   using polyregion::polyrt::SkipReasons;
+  using polyregion::runtime::LoadOutcome;
   std::optional<SkipReasons::Device> on;
   if (platform && device)
     on = SkipReasons::Device{.platform = platform->name(),
                              .name = device->name(),
                              .kind = std::string(magic_enum::enum_name(platform->kind())),
                              .format = std::string(magic_enum::enum_name(device->moduleFormat()))};
-  const auto note = [&](const char *outcome, std::vector<std::string> detail = {}) {
+  const auto note = [&](const LoadOutcome outcome, std::vector<std::string> detail = {}) {
     std::vector<std::string> features;
     for (size_t i = 0; i < object.featureCount; ++i)
       features.emplace_back(object.features[i]);
@@ -1707,22 +1716,21 @@ static bool loadKernelObjectOn(Platform *platform, Device *device, DeviceQueue *
                                .kind = std::string(magic_enum::enum_name(object.kind)),
                                .format = std::string(magic_enum::enum_name(object.format)),
                                .features = std::move(features),
-                               .outcome = outcome,
+                               .outcome = std::string(polyregion::polyrt::outcomeName(outcome)),
                                .detail = std::move(detail)});
+    return outcome;
   };
   if (!platform || !device || !queue) {
-    note("no-device");
     log(DebugLevel::Info, "No device/queue in %s", __func__);
-    return false;
+    return note(LoadOutcome::NoDevice);
   }
 
   if (platform->kind() != object.kind || device->moduleFormat() != object.format) {
-    note("format", {std::string(magic_enum::enum_name(object.format))});
     log(DebugLevel::Debug, "Skipping incompatible image: %s [%s] (targeting %s [%s])",
         magic_enum::enum_name(object.kind).data(),   //
         magic_enum::enum_name(object.format).data(), //
         magic_enum::enum_name(platform->kind()).data(), magic_enum::enum_name(device->moduleFormat()).data());
-    return false;
+    return note(LoadOutcome::Format, {std::string(magic_enum::enum_name(object.format))});
   }
 
   log(DebugLevel::Debug, "Found compatible image: %s [%s] (targeting %s [%s])",
@@ -1742,8 +1750,7 @@ static bool loadKernelObjectOn(Platform *platform, Device *device, DeviceQueue *
   }
   if (lacksRequiredPaging(*device, platform->kind())) missing.emplace_back(polyregion::runtime::SystemPagingFeature);
   if (!missing.empty()) {
-    note("lacks", std::move(missing));
-    return false;
+    return note(LoadOutcome::Lacks, std::move(missing));
   }
 
   SpecConsts specStorage;
@@ -1777,13 +1784,11 @@ static bool loadKernelObjectOn(Platform *platform, Device *device, DeviceQueue *
       image.assign(reinterpret_cast<const char *>(object.image), object.imageLength);
     } else if (object.programLength > 0 && object.program) {
       if (!jitCompileObject(effectiveModuleName.c_str(), object, specStorage.values, image)) {
-        note("unprepared", {"jit"});
-        return false;
+        return note(LoadOutcome::Unprepared, {"jit"});
       }
     } else {
       log(DebugLevel::Debug, "Object for `%s` carries neither a prebuilt image nor a JIT program", moduleName);
-      note("unprepared", {"image"});
-      return false;
+      return note(LoadOutcome::Unprepared, {"image"});
     }
     if (const char *dumpDir = std::getenv(polyregion::env::PolyrtDumpKernel)) {
       static int counter = 0;
@@ -1798,21 +1803,26 @@ static bool loadKernelObjectOn(Platform *platform, Device *device, DeviceQueue *
                                       [](const char *feature) { return std::string_view(feature) == polyregion::conventions::ErrorArg; });
     recordAssertingModule(device, effectiveModuleName.c_str(), errorArg);
   }
-  note("loaded");
-  return true;
+  return note(LoadOutcome::Loaded);
 }
 
 bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelObject &object, const void *capture,
                                           const TypeLayout *interfaceLayout, std::string *loadedModuleName) {
   initialise();
   return loadKernelObjectOn(currentPlatform.get(), currentDevice.get(), currentQueue.get(), moduleName, object, capture, interfaceLayout,
-                            loadedModuleName);
+                            loadedModuleName)
+         == polyregion::runtime::LoadOutcome::Loaded;
 }
 
 bool polyregion::polyrt::loadKernelObject(ExecutionContext &context, const char *moduleName, const KernelObject &object,
                                           const void *capture, const TypeLayout *interfaceLayout, std::string *loadedModuleName) {
-  return loadKernelObjectOn(context.platform, context.device, context.queue, moduleName, object, capture, interfaceLayout,
-                            loadedModuleName);
+  return loadKernelObjectOn(context.platform, context.device, context.queue, moduleName, object, capture, interfaceLayout, loadedModuleName)
+         == polyregion::runtime::LoadOutcome::Loaded;
+}
+
+polyregion::runtime::LoadOutcome polyregion::polyrt::loadKernelObjectOutcome(ExecutionContext &context, const char *moduleName,
+                                                                             const KernelObject &object) {
+  return loadKernelObjectOn(context.platform, context.device, context.queue, moduleName, object, nullptr, nullptr, nullptr);
 }
 
 // XXX InterposePass routes every free/delete here, but not every pointer was allocated by us

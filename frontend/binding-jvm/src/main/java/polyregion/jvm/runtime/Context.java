@@ -327,6 +327,12 @@ public final class Context implements AutoCloseable {
     return new Stats(values[0], values[1], values[2], values[3], values[4]);
   }
 
+  /**
+   * Loads the first image the device accepts.
+   *
+   * @return the index of the loaded image, or the negated {@link LoadOutcome} value of the most
+   *     severe refusal when no image loads
+   */
   public int select(ModuleImage[] images) {
     requireOpen();
     return select0(

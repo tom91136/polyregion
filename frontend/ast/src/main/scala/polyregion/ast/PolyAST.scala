@@ -991,9 +991,21 @@ object PolyAST {
       case SPIRV_GLCompute extends ModuleFormat(7)
     }
 
+    // refusals are ordered by severity, so the worst outcome of several attempts is the largest value
+    enum LoadOutcome(val value: Int, override val java: Option[String]) extends Variant {
+      def namespace           = "runtime"
+      def cppExport           = true
+      override def javaMirror = Some(JavaMirror("runtime", "LoadOutcome"))
+      case Loaded     extends LoadOutcome(0, Some("LOADED"))
+      case Format     extends LoadOutcome(1, Some("FORMAT"))
+      case Lacks      extends LoadOutcome(2, Some("LACKS"))
+      case Unprepared extends LoadOutcome(3, Some("UNPREPARED"))
+      case NoDevice   extends LoadOutcome(4, Some("NO_DEVICE"))
+    }
+
     val All: List[Variant] =
       Backend.values.toList ++ Access.values.toList ++ Target.values.toList ++ OptLevel.values.toList ++
-        Type.values.toList ++ PlatformKind.values.toList ++ ModuleFormat.values.toList ++
+        Type.values.toList ++ PlatformKind.values.toList ++ ModuleFormat.values.toList ++ LoadOutcome.values.toList ++
         List(
           AssertCode.Error,
           AssertCode.Assert,

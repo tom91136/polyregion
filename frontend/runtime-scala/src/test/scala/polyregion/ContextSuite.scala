@@ -512,6 +512,24 @@ class ContextSuite extends munit.FunSuite {
     } finally ctx.close()
   }
 
+  test("select reports the most severe refusal as a negated outcome") {
+    val ctx = rt.Context.create(hostDevice)
+    try {
+      def image(name: String, target: ct.Target, features: Array[String], bytes: Array[Byte]) =
+        rt.ModuleImage(name, target, features, bytes)
+      val format                           = image("format", ct.Target.LLVM_NVPTX64, Array.empty, Array[Byte](0))
+      val lacks                            = image("lacks", ct.Target.LLVM_HOST, Array("storage8"), Array[Byte](0))
+      val unprepared                       = image("unprepared", ct.Target.LLVM_HOST, Array.empty, Array.empty)
+      def outcome(images: rt.ModuleImage*) = ctx.select(images.toArray)
+      assertEquals(outcome(format), -rt.LoadOutcome.FORMAT.value.toInt)
+      assertEquals(outcome(lacks), -rt.LoadOutcome.LACKS.value.toInt)
+      assertEquals(outcome(unprepared), -rt.LoadOutcome.UNPREPARED.value.toInt)
+      assertEquals(outcome(format, lacks), -rt.LoadOutcome.LACKS.value.toInt)
+      assertEquals(outcome(lacks, format), -rt.LoadOutcome.LACKS.value.toInt)
+      assertEquals(outcome(lacks, unprepared), -rt.LoadOutcome.UNPREPARED.value.toInt)
+    } finally ctx.close()
+  }
+
   test("a host program is called with the context as its first argument") {
     ensureProbe()
     val ctx = rt.Context.create(hostDevice)
