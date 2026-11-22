@@ -41,3 +41,4 @@ static const std::string Lib = envOr(polyregion::env::PolytestLib, "@POLYTEST_LI
 static const std::string LibraryPath = envOr(polyregion::env::PolytestLibraryPath, "@POLYTEST_LIBRARY_PATH@");
 static const std::string Include = envOr(polyregion::env::PolytestInclude, "@POLYTEST_INCLUDE@");
 static const std::string PackageFixture = "@POLYTEST_PACKAGE_FIXTURE@";
+static const std::string Polyinfo = "@POLYTEST_POLYINFO@";

@@ -58,6 +58,7 @@ using namespace aspartame;
 struct DriverConfig {
   std::string driverPath;
   std::string binaryDir;
+  std::string polyinfo;
   std::string workDir;
   std::vector<std::string> testFiles;
   std::string profileDir;
@@ -432,9 +433,14 @@ inline std::vector<std::string> runFeaturesFromEnv() {
   return runFeatures;
 }
 
+inline std::string siblingPolyinfo(llvm::StringRef binDir) {
+  const auto found = llvm::sys::findProgramByName("polyinfo", {binDir});
+  return found ? *found : std::string();
+}
+
 inline skip::Verdict skipVerdict(const Task &task, const DriverConfig &cfg, const std::string &selector, const std::string &stderrText) {
-  const auto inventory =
-      queryInventory(selector, resolveBin("polyinfo", cfg), baseEnvs(task, cfg, false, selector), task.output + ".inventory");
+  if (cfg.polyinfo.empty()) return skip::reject("polyinfo not located for this suite");
+  const auto inventory = queryInventory(selector, cfg.polyinfo, baseEnvs(task, cfg, false, selector), task.output + ".inventory");
   const auto manifest = skip::parseManifest(polyregion::read_string(task.output + ".images"));
   return skip::judge(selector, inventory, manifest, stderrText, runFeaturesFromEnv());
 }

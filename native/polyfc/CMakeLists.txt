@@ -169,7 +169,9 @@ polytest_configure_suite(polyfc-tests
         INCLUDE "${CMAKE_SOURCE_DIR}/../$<TARGET_NAME:polydco>/include:${CMAKE_SOURCE_DIR}/$<TARGET_NAME:polyinvoke>/include:${CMAKE_SOURCE_DIR}/include:${CMAKE_SOURCE_DIR}/include"
         GLOB "check_*.*"
         PACKAGE_FIXTURE "$<TARGET_FILE:polycpp-package-fixture>"
+        POLYINFO "$<TARGET_FILE:polyinfo>"
         TEST_FILES_OUT _polyfc_test_files)
+add_dependencies(polyfc-tests polyinfo)
 
 # Running `strip` on macOS drops even more stuff than just compiling with -dead_strip.
 if (APPLE)

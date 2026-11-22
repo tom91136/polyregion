@@ -27,6 +27,7 @@ struct TempDir {
 polyregion::polytest::DriverConfig testConfig(const std::string &dir) {
   return {.driverPath = "driver",
           .binaryDir = dir,
+          .polyinfo = dir + "/polyinfo",
           .workDir = dir,
           .testFiles = {},
           .profileDir = dir,

@@ -39,6 +39,7 @@ int main(int argc, const char **argv) {
       DriverConfig{
           .driverPath = Driver,
           .binaryDir = BinaryDir,
+          .polyinfo = Polyinfo,
           .workDir = WorkDir,
           .testFiles = TestFiles,
           .profileDir = envOr(polyregion::env::PolytestProfileDir, POLYREGION_TEST_PROFILE_DIR),

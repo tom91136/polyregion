@@ -1,6 +1,6 @@
 function(polytest_configure_suite target)
-    cmake_parse_arguments(ARG "RECURSIVE" "NAME_PREFIX;DRIVER;LIB;LIBRARY_PATH;INCLUDE;GLOB;TEST_FILES_OUT;PACKAGE_FIXTURE" "" ${ARGN})
-    foreach (req NAME_PREFIX DRIVER GLOB TEST_FILES_OUT)
+    cmake_parse_arguments(ARG "RECURSIVE" "NAME_PREFIX;DRIVER;LIB;LIBRARY_PATH;INCLUDE;GLOB;TEST_FILES_OUT;PACKAGE_FIXTURE;POLYINFO" "" ${ARGN})
+    foreach (req NAME_PREFIX DRIVER GLOB TEST_FILES_OUT POLYINFO)
         if (NOT ARG_${req})
             message(FATAL_ERROR "polytest_configure_suite: ${req} required")
         endif ()
@@ -32,6 +32,7 @@ function(polytest_configure_suite target)
     set(POLYTEST_LIBRARY_PATH "${ARG_LIBRARY_PATH}")
     set(POLYTEST_INCLUDE "${ARG_INCLUDE}")
     set(POLYTEST_PACKAGE_FIXTURE "${ARG_PACKAGE_FIXTURE}")
+    set(POLYTEST_POLYINFO "${ARG_POLYINFO}")
 
     configure_file("${CMAKE_SOURCE_DIR}/polytest/test_all.h.in" "${CMAKE_CURRENT_BINARY_DIR}/test_all.h.in")
     file(GENERATE

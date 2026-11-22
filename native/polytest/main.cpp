@@ -59,8 +59,12 @@ void prependEnv(const char *name, const std::string &value, char separator) {
 int main(int argc, const char **argv) {
   if (argc > 5 && std::string_view(argv[1]) == "--audit-skip" && std::string_view(argv[4]) == "--") {
     const auto self = llvm::sys::fs::getMainExecutable(argv[0], reinterpret_cast<void *>(&distPath));
-    const auto polyinfo = llvm::sys::findProgramByName("polyinfo", {llvm::sys::path::parent_path(self)});
-    return runAudited(argv[2], argv[3], polyinfo ? *polyinfo : "polyinfo", std::vector<std::string>(argv + 5, argv + argc));
+    const auto polyinfo = detail::siblingPolyinfo(llvm::sys::path::parent_path(self));
+    if (polyinfo.empty()) {
+      std::fprintf(stderr, "polytest: polyinfo not found beside the polytest binary\n");
+      return 2;
+    }
+    return runAudited(argv[2], argv[3], polyinfo, std::vector<std::string>(argv + 5, argv + argc));
   }
   if (argc == 3 && std::string_view(argv[1]) == "--skip-report") {
     if (!llvm::sys::fs::exists(argv[2])) {
@@ -114,6 +118,7 @@ int main(int argc, const char **argv) {
                  DriverConfig{
                      .driverPath = suite.get("POLYTEST_DRIVER", distPath(root, {"bin", "clang++"}) + exeSuffix),
                      .binaryDir = bin,
+                     .polyinfo = detail::siblingPolyinfo(bin),
                      .workDir = suite.get("POLYTEST_WORK_DIR"),
                      .testFiles = suite.all("POLYTEST_FILES"),
                      .profileDir = profileDir,
