@@ -160,6 +160,52 @@ class SourcePointerLegaliseSuite extends munit.FunSuite {
     )
   }
 
+  test("equal specialisations reached through different requirements share one clone") {
+    val innerSym = sym("Inner")
+    val inner    = p.Type.Struct(innerSym, Nil)
+    val outerSym = sym("Outer")
+    val outer    = p.Type.Struct(outerSym, Nil)
+    val innerDef = p.StructDef(innerSym, Nil, List(named("k", globalPtr)), Nil)
+    val outerDef = p.StructDef(outerSym, Nil, List(named("rng", globalPtr), named("inner", inner)), Nil)
+    val input    = named("input", globalPtr)
+    val value    = named("value")
+    val source   = named("source", outer)
+    val local    = named("local", outer)
+    val address  = named("address", p.Type.Ptr(outer, p.Type.Space.Private))
+    def rng(owner: p.Named): p.Term.Select = p.Term.Select(owner, List(p.PathStep.Field("rng")), globalPtr)
+    val key: p.Term.Select = p.Term.Select(address, List(p.PathStep.Field("inner"), p.PathStep.Field("k")), globalPtr)
+    val kernel = entry(
+      args = List(p.Arg(input)),
+      body = List(
+        p.Stmt.Var(value, None, isMutable = true),
+        p.Stmt.Var(source, Some(p.Expr.Alias(p.Term.Poison(outer))), isMutable = true),
+        p.Stmt.Mut(
+          rng(source),
+          p.Expr.RefTo(selectT(value), None, p.Type.IntS32, p.Type.Space.Private, p.Region.Opaque)
+        ),
+        p.Stmt.Var(local, Some(p.Expr.Alias(p.Term.Poison(outer))), isMutable = true),
+        p.Stmt.Var(address, Some(p.Expr.RefTo(selectT(local), None, outer, p.Type.Space.Private, p.Region.Opaque))),
+        p.Stmt.Mut(rng(address), p.Expr.Alias(rng(source))),
+        p.Stmt.Mut(key, p.Expr.Alias(selectT(input))),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val out = SourcePointerLegalise()(program(kernel, defs = List(innerDef, outerDef)), NoopLog)
+
+    def structOfVar(named: p.Named): Set[p.Type.Struct] = out.entry.required
+      .collectAll[p.Stmt]
+      .collect { case p.Stmt.Var(name, _, _) if name.symbol == named.symbol => name.tpe }
+      .collect {
+        case structure: p.Type.Struct                => structure
+        case p.Type.Ptr(structure: p.Type.Struct, _) => structure
+      }
+      .toSet
+    val used   = structOfVar(source) ++ structOfVar(local) ++ structOfVar(address)
+    val clones = out.defs.filter(definition => used.exists(_.name == definition.name) && definition.name != outerSym)
+    assertEquals(clones.map(_.name).toSet.size, 1, clues(used, out.defs))
+  }
+
   test("an address-space-specialised recursive aggregate points to its specialised type") {
     val nodeSym = sym("Node")
     val node    = p.Type.Struct(nodeSym, Nil)

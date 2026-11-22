@@ -50,6 +50,7 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
     private val originalDefs = program.defs.map(definition => definition.name -> definition).toMap
     private val definitions  = scala.collection.mutable.LinkedHashMap.from(originalDefs)
     private val clones       = scala.collection.mutable.LinkedHashMap.empty[(p.Sym, Requirement), p.Type.Struct]
+    private val specialised  = scala.collection.mutable.LinkedHashMap.empty[(p.Sym, List[p.Named]), p.Type.Struct]
     private val takenNames   = scala.collection.mutable.Set.from(program.defs.map(_.name.fqn.mkString(".")))
 
     private def memberType(owner: p.Type, name: String): Option[p.Type] = structOf(owner).flatMap { structure =>
@@ -127,24 +128,26 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
             }
             member.copy(tpe = nestedRetyped)
           }
-          val changed = members != definition.members
-          if (!changed) structure
-          else {
-            val signature            = members.flatMap(member => pointerLeaves(member.tpe)).map(spaceCode).mkString
-            val name                 = freshName(structure.name, signature)
-            val clone: p.Type.Struct = p.Type.Struct(name, structure.args)
-            def retargetSelf(tpe: p.Type): p.Type = tpe match {
-              case value: p.Type.Struct if value == structure => clone
-              case p.Type.Ptr(component, space)               => p.Type.Ptr(retargetSelf(component), space)
-              case p.Type.Arr(component, size, space)         => p.Type.Arr(retargetSelf(component), size, space)
-              case other                                      => other
-            }
-            definitions(name) = definition.copy(
-              name = name,
-              members = members.map(member => member.copy(tpe = retargetSelf(member.tpe)))
+          if (members == definition.members) structure
+          else
+            specialised.getOrElseUpdate(
+              structure.name -> members, {
+                val signature            = members.flatMap(member => pointerLeaves(member.tpe)).map(spaceCode).mkString
+                val name                 = freshName(structure.name, signature)
+                val clone: p.Type.Struct = p.Type.Struct(name, structure.args)
+                def retargetSelf(tpe: p.Type): p.Type = tpe match {
+                  case value: p.Type.Struct if value == structure => clone
+                  case p.Type.Ptr(component, space)               => p.Type.Ptr(retargetSelf(component), space)
+                  case p.Type.Arr(component, size, space)         => p.Type.Arr(retargetSelf(component), size, space)
+                  case other                                      => other
+                }
+                definitions(name) = definition.copy(
+                  name = name,
+                  members = members.map(member => member.copy(tpe = retargetSelf(member.tpe)))
+                )
+                clone
+              }
             )
-            clone
-          }
         }
       )
     }
