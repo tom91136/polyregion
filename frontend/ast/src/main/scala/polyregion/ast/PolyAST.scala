@@ -416,34 +416,40 @@ object PolyAST {
       Overload(List(Type.Float32, Type.Float32), Type.Float32),
       Overload(List(Type.Float64, Type.Float64), Type.Float64)
     )
+    inline def TernaryUniformFractional = List(
+      Overload(List(Type.Float16, Type.Float16, Type.Float16), Type.Float16),
+      Overload(List(Type.Float32, Type.Float32, Type.Float32), Type.Float32),
+      Overload(List(Type.Float64, Type.Float64, Type.Float64), Type.Float64)
+    )
   }
   @SuppressWarnings(Array("bonsai:common-factor"))
   enum Math(val overloads: List[Overload], val terms: List[Term], val tpe: Type) derives MsgPack.Codec {
-    case Abs(x: Term, rtn: Type)            extends Math(Intr.BinaryUniformNumeric, List(x), rtn)
-    case Sin(x: Term, rtn: Type)            extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Cos(x: Term, rtn: Type)            extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Tan(x: Term, rtn: Type)            extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Asin(x: Term, rtn: Type)           extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Acos(x: Term, rtn: Type)           extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Atan(x: Term, rtn: Type)           extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Sinh(x: Term, rtn: Type)           extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Cosh(x: Term, rtn: Type)           extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Tanh(x: Term, rtn: Type)           extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Signum(x: Term, rtn: Type)         extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Round(x: Term, rtn: Type)          extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Ceil(x: Term, rtn: Type)           extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Floor(x: Term, rtn: Type)          extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Rint(x: Term, rtn: Type)           extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Sqrt(x: Term, rtn: Type)           extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Cbrt(x: Term, rtn: Type)           extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Exp(x: Term, rtn: Type)            extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Expm1(x: Term, rtn: Type)          extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Log(x: Term, rtn: Type)            extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Log1p(x: Term, rtn: Type)          extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Log10(x: Term, rtn: Type)          extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Pow(x: Term, y: Term, rtn: Type)   extends Math(Math.BinaryUniformFractional, List(x, y), rtn)
-    case Atan2(x: Term, y: Term, rtn: Type) extends Math(Math.BinaryUniformFractional, List(x, y), rtn)
-    case Hypot(x: Term, y: Term, rtn: Type) extends Math(Math.BinaryUniformFractional, List(x, y), rtn)
+    case Abs(x: Term, rtn: Type)                   extends Math(Intr.BinaryUniformNumeric, List(x), rtn)
+    case Sin(x: Term, rtn: Type)                   extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Cos(x: Term, rtn: Type)                   extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Tan(x: Term, rtn: Type)                   extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Asin(x: Term, rtn: Type)                  extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Acos(x: Term, rtn: Type)                  extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Atan(x: Term, rtn: Type)                  extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Sinh(x: Term, rtn: Type)                  extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Cosh(x: Term, rtn: Type)                  extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Tanh(x: Term, rtn: Type)                  extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Signum(x: Term, rtn: Type)                extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Round(x: Term, rtn: Type)                 extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Ceil(x: Term, rtn: Type)                  extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Floor(x: Term, rtn: Type)                 extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Rint(x: Term, rtn: Type)                  extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Sqrt(x: Term, rtn: Type)                  extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Cbrt(x: Term, rtn: Type)                  extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Exp(x: Term, rtn: Type)                   extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Expm1(x: Term, rtn: Type)                 extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Log(x: Term, rtn: Type)                   extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Log1p(x: Term, rtn: Type)                 extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Log10(x: Term, rtn: Type)                 extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Pow(x: Term, y: Term, rtn: Type)          extends Math(Math.BinaryUniformFractional, List(x, y), rtn)
+    case Atan2(x: Term, y: Term, rtn: Type)        extends Math(Math.BinaryUniformFractional, List(x, y), rtn)
+    case Hypot(x: Term, y: Term, rtn: Type)        extends Math(Math.BinaryUniformFractional, List(x, y), rtn)
+    case Fma(x: Term, y: Term, z: Term, rtn: Type) extends Math(Math.TernaryUniformFractional, List(x, y, z), rtn)
   }
 
   case class Signature(
@@ -1179,31 +1185,32 @@ object PolyAST {
         }
       case Expr.MathOp(op) =>
         op match {
-          case Math.Abs(x, tpe)      => s"'abs(${x.repr})"
-          case Math.Sin(x, tpe)      => s"'sin(${x.repr})"
-          case Math.Cos(x, tpe)      => s"'cos(${x.repr})"
-          case Math.Tan(x, tpe)      => s"'tan(${x.repr})"
-          case Math.Asin(x, tpe)     => s"'asin(${x.repr})"
-          case Math.Acos(x, tpe)     => s"'acos(${x.repr})"
-          case Math.Atan(x, tpe)     => s"'atan(${x.repr})"
-          case Math.Sinh(x, tpe)     => s"'sinh(${x.repr})"
-          case Math.Cosh(x, tpe)     => s"'cosh(${x.repr})"
-          case Math.Tanh(x, tpe)     => s"'tanh(${x.repr})"
-          case Math.Signum(x, tpe)   => s"'signum(${x.repr})"
-          case Math.Round(x, tpe)    => s"'round(${x.repr})"
-          case Math.Ceil(x, tpe)     => s"'ceil(${x.repr})"
-          case Math.Floor(x, tpe)    => s"'floor(${x.repr})"
-          case Math.Rint(x, tpe)     => s"'rint(${x.repr})"
-          case Math.Sqrt(x, tpe)     => s"'sqrt(${x.repr})"
-          case Math.Cbrt(x, tpe)     => s"'cbrt(${x.repr})"
-          case Math.Exp(x, tpe)      => s"'exp(${x.repr})"
-          case Math.Expm1(x, tpe)    => s"'expm1(${x.repr})"
-          case Math.Log(x, tpe)      => s"'log(${x.repr})"
-          case Math.Log1p(x, tpe)    => s"'log1p(${x.repr})"
-          case Math.Log10(x, tpe)    => s"'log10(${x.repr})"
-          case Math.Pow(x, y, tpe)   => s"'pow(${x.repr}, ${y.repr})"
-          case Math.Atan2(x, y, tpe) => s"'atan2(${x.repr}, ${y.repr})"
-          case Math.Hypot(x, y, tpe) => s"'hypot(${x.repr}, ${y.repr})"
+          case Math.Abs(x, tpe)       => s"'abs(${x.repr})"
+          case Math.Sin(x, tpe)       => s"'sin(${x.repr})"
+          case Math.Cos(x, tpe)       => s"'cos(${x.repr})"
+          case Math.Tan(x, tpe)       => s"'tan(${x.repr})"
+          case Math.Asin(x, tpe)      => s"'asin(${x.repr})"
+          case Math.Acos(x, tpe)      => s"'acos(${x.repr})"
+          case Math.Atan(x, tpe)      => s"'atan(${x.repr})"
+          case Math.Sinh(x, tpe)      => s"'sinh(${x.repr})"
+          case Math.Cosh(x, tpe)      => s"'cosh(${x.repr})"
+          case Math.Tanh(x, tpe)      => s"'tanh(${x.repr})"
+          case Math.Signum(x, tpe)    => s"'signum(${x.repr})"
+          case Math.Round(x, tpe)     => s"'round(${x.repr})"
+          case Math.Ceil(x, tpe)      => s"'ceil(${x.repr})"
+          case Math.Floor(x, tpe)     => s"'floor(${x.repr})"
+          case Math.Rint(x, tpe)      => s"'rint(${x.repr})"
+          case Math.Sqrt(x, tpe)      => s"'sqrt(${x.repr})"
+          case Math.Cbrt(x, tpe)      => s"'cbrt(${x.repr})"
+          case Math.Exp(x, tpe)       => s"'exp(${x.repr})"
+          case Math.Expm1(x, tpe)     => s"'expm1(${x.repr})"
+          case Math.Log(x, tpe)       => s"'log(${x.repr})"
+          case Math.Log1p(x, tpe)     => s"'log1p(${x.repr})"
+          case Math.Log10(x, tpe)     => s"'log10(${x.repr})"
+          case Math.Pow(x, y, tpe)    => s"'pow(${x.repr}, ${y.repr})"
+          case Math.Atan2(x, y, tpe)  => s"'atan2(${x.repr}, ${y.repr})"
+          case Math.Hypot(x, y, tpe)  => s"'hypot(${x.repr}, ${y.repr})"
+          case Math.Fma(x, y, z, tpe) => s"'fma(${x.repr}, ${y.repr}, ${z.repr})"
         }
       case Expr.IntrOp(op) =>
         op match {

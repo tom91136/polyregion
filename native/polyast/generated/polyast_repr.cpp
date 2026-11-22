@@ -423,6 +423,9 @@ std::string repr(const Expr::Any &e) {
         if (auto _z = _x->op.get<Math::Hypot>()) {
           return fmt::format("'hypot({}, {})", repr(_z->x), repr(_z->y));
         }
+        if (auto _z = _x->op.get<Math::Fma>()) {
+          return fmt::format("'fma({}, {}, {})", repr(_z->x), repr(_z->y), repr(_z->z));
+        }
 
         throw std::logic_error(fmt::format("Unhandled match case for _x->op (of type Math::Any) at {}:{})", __FILE__, __LINE__));
       }();

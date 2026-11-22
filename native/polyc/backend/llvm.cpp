@@ -674,6 +674,12 @@ ValPtr CodeGen::intr2(const llvm::Intrinsic::ID id, const AnyType &overload, //
   return B.CreateCall(callee, {mkTermVal(lhs), mkTermVal(rhs)});
 }
 
+ValPtr CodeGen::intr3(const llvm::Intrinsic::ID id, const AnyType &overload,  //
+                      const AnyTerm &x, const AnyTerm &y, const AnyTerm &z) { //
+  auto *const callee = llvm::Intrinsic::getOrInsertDeclaration(&M, id, resolveType(overload));
+  return B.CreateCall(callee, {mkTermVal(x), mkTermVal(y), mkTermVal(z)});
+}
+
 ValPtr CodeGen::findStackVar(const Named &named) {
   if (named.tpe.is<Type::Unit0>()) return mkTermVal(Term::Unit0Const());
   // Nothing-typed names are absent from stackVarPtrs (FunctionType::get rejects void params).

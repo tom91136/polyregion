@@ -1132,6 +1132,14 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
     }
     r.push(Stmt::Return(Expr::MathOp(mkOp(select(r, {}, args[0].named), select(r, {}, args[1].named), rtnType))));
   };
+  auto emitTernaryMath = [&](auto &r, const auto &mkOp) {
+    if (args.size() != 3) {
+      r.push(Stmt::Return(Expr::Alias(Term::Poison(rtnType))));
+      return;
+    }
+    r.push(Stmt::Return(
+        Expr::MathOp(mkOp(select(r, {}, args[0].named), select(r, {}, args[1].named), select(r, {}, args[2].named), rtnType))));
+  };
   auto emitBinaryIntr = [&](auto &r, const auto &mkOp) {
     if (args.size() != 2) {
       r.push(Stmt::Return(Expr::Alias(Term::Poison(rtnType))));
@@ -1193,6 +1201,15 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
   case clang::Builtin::BI__builtin_##BASE##l:                                                                                              \
     emitBinaryMath(r, [](const auto &x, const auto &y, const auto &t) { return Math::NODE(x, y, t); });                                    \
     break;
+#define POLYC_TERNARY_MATH(BASE, NODE)                                                                                                     \
+  case clang::Builtin::BI##BASE##f:                                                                                                        \
+  case clang::Builtin::BI##BASE:                                                                                                           \
+  case clang::Builtin::BI##BASE##l:                                                                                                        \
+  case clang::Builtin::BI__builtin_##BASE##f:                                                                                              \
+  case clang::Builtin::BI__builtin_##BASE:                                                                                                 \
+  case clang::Builtin::BI__builtin_##BASE##l:                                                                                              \
+    emitTernaryMath(r, [](const auto &x, const auto &y, const auto &z, const auto &t) { return Math::NODE(x, y, z, t); });                 \
+    break;
 #define POLYC_BINARY_INTR(BASE, NODE)                                                                                                      \
   case clang::Builtin::BI##BASE##f:                                                                                                        \
   case clang::Builtin::BI##BASE:                                                                                                           \
@@ -1227,11 +1244,13 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
             POLYC_BINARY_MATH(pow, Pow)
             POLYC_BINARY_MATH(atan2, Atan2)
             POLYC_BINARY_MATH(hypot, Hypot)
+            POLYC_TERNARY_MATH(fma, Fma)
             POLYC_BINARY_INTR(fmin, Min)
             POLYC_BINARY_INTR(fmax, Max)
 
 #undef POLYC_UNARY_MATH
 #undef POLYC_BINARY_MATH
+#undef POLYC_TERNARY_MATH
 #undef POLYC_BINARY_INTR
 
           case clang::Builtin::NotBuiltin:

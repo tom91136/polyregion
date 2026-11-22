@@ -3,10 +3,10 @@
 #include "msgpack.hpp"
 
 namespace polyregion::polyast {
-constexpr auto AdtHash = "17e4f5d1e81121ff7d911fbb215cd1af";
-constexpr auto ProgramHash = "1948e5152fa5a509dd2e489b7b215ba2";
-constexpr auto PackageHash = "d9a4e0da0bed9419f721e7522f189132";
-constexpr auto PackageWireHash = "309ae338542b73ae2be6b62f410780d6";
+constexpr auto AdtHash = "bde697216b0469088a0973b24e56be37";
+constexpr auto ProgramHash = "def84d8dfca6e629d2fd0de306edc2cb";
+constexpr auto PackageHash = "89832af0cf2fd030a67a26c457f0335d";
+constexpr auto PackageWireHash = "d760f1e3d90f339aa92183e7341d7345";
 constexpr auto CompileWireHash = "f1300ddff6331e8ab1eec99ac66daa04";
 using msgpack::decodeMaybeInterned;
 using msgpack::encodeInterned;
@@ -2297,6 +2297,22 @@ json Math::hypot_to_json(const Math::Hypot &x_) {
   return json::array({x, y, rtn});
 }
 
+Math::Fma Math::fma_from_json(const json &j_) {
+  auto x = Term::any_from_json(j_.at(0));
+  auto y = Term::any_from_json(j_.at(1));
+  auto z = Term::any_from_json(j_.at(2));
+  auto rtn = Type::any_from_json(j_.at(3));
+  return {std::move(x), std::move(y), std::move(z), std::move(rtn)};
+}
+
+json Math::fma_to_json(const Math::Fma &x_) {
+  const auto x = Term::any_to_json(x_.x);
+  const auto y = Term::any_to_json(x_.y);
+  const auto z = Term::any_to_json(x_.z);
+  const auto rtn = Type::any_to_json(x_.rtn);
+  return json::array({x, y, z, rtn});
+}
+
 Math::Any Math::any_from_json(const json &j_) {
   const auto ord_ = j_.at(0).get<size_t>();
   const auto &t_ = j_.at(1);
@@ -2326,6 +2342,7 @@ Math::Any Math::any_from_json(const json &j_) {
     case 22: return Math::pow_from_json(t_);
     case 23: return Math::atan2_from_json(t_);
     case 24: return Math::hypot_from_json(t_);
+    case 25: return Math::fma_from_json(t_);
     default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
@@ -2355,7 +2372,8 @@ json Math::any_to_json(const Math::Any &x_) {
                         [](const Math::Log10 &y_) -> json { return {21, Math::log10_to_json(y_)}; },
                         [](const Math::Pow &y_) -> json { return {22, Math::pow_to_json(y_)}; },
                         [](const Math::Atan2 &y_) -> json { return {23, Math::atan2_to_json(y_)}; },
-                        [](const Math::Hypot &y_) -> json { return {24, Math::hypot_to_json(y_)}; });
+                        [](const Math::Hypot &y_) -> json { return {24, Math::hypot_to_json(y_)}; },
+                        [](const Math::Fma &y_) -> json { return {25, Math::fma_to_json(y_)}; });
 }
 
 ExceptionKind exceptionkind_from_json(const json &j_) {
@@ -4144,6 +4162,8 @@ Math::Atan2 atan2_fields_from_msgpack(MsgpackReader &, size_t);
 void atan2_fields_to_msgpack(MsgpackWriter &, const Math::Atan2 &);
 Math::Hypot hypot_fields_from_msgpack(MsgpackReader &, size_t);
 void hypot_fields_to_msgpack(MsgpackWriter &, const Math::Hypot &);
+Math::Fma fma_fields_from_msgpack(MsgpackReader &, size_t);
+void fma_fields_to_msgpack(MsgpackWriter &, const Math::Fma &);
 Math::Any any_from_msgpack(MsgpackReader &);
 void any_to_msgpack(MsgpackWriter &, const Math::Any &);
 }} // namespace Math
@@ -8709,6 +8729,22 @@ void hypot_fields_to_msgpack(MsgpackWriter &w_, const Math::Hypot &x_) {
   Type::any_to_msgpack(w_, x_.rtn);
 }
 
+Math::Fma fma_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 4) throw std::runtime_error("Expected Math::Fma with 4 field(s)");
+  auto x = Term::any_from_msgpack(r_);
+  auto y = Term::any_from_msgpack(r_);
+  auto z = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {std::move(x), std::move(y), std::move(z), std::move(rtn)};
+}
+
+void fma_fields_to_msgpack(MsgpackWriter &w_, const Math::Fma &x_) {
+  Term::any_to_msgpack(w_, x_.x);
+  Term::any_to_msgpack(w_, x_.y);
+  Term::any_to_msgpack(w_, x_.z);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
 Math::Any any_from_msgpack(MsgpackReader &r_) {
   if (r_.nextIsArray()) {
     const auto n_ = r_.readArrayHeader();
@@ -8740,6 +8776,7 @@ Math::Any any_from_msgpack(MsgpackReader &r_) {
       case 22: return Math::pow_fields_from_msgpack(r_, n_ - 1);
       case 23: return Math::atan2_fields_from_msgpack(r_, n_ - 1);
       case 24: return Math::hypot_fields_from_msgpack(r_, n_ - 1);
+      case 25: return Math::fma_fields_from_msgpack(r_, n_ - 1);
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   } else {
@@ -8769,7 +8806,8 @@ Math::Any any_from_msgpack(MsgpackReader &r_) {
       case 21:
       case 22:
       case 23:
-      case 24: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 24:
+      case 25: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   }
@@ -8901,6 +8939,11 @@ void any_to_msgpack(MsgpackWriter &w_, const Math::Any &x_) {
         w_.writeArrayHeader(4);
         w_.writeInt32(24);
         Math::hypot_fields_to_msgpack(w_, y_);
+      },
+      [&](const Math::Fma &y_) -> void {
+        w_.writeArrayHeader(5);
+        w_.writeInt32(25);
+        Math::fma_fields_to_msgpack(w_, y_);
       });
 }
 }} // namespace Math

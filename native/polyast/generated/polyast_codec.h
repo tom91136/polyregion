@@ -507,6 +507,8 @@ namespace Math {
 [[nodiscard]] POLYREGION_EXPORT json atan2_to_json(const Math::Atan2 &);
 [[nodiscard]] POLYREGION_EXPORT Math::Hypot hypot_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json hypot_to_json(const Math::Hypot &);
+[[nodiscard]] POLYREGION_EXPORT Math::Fma fma_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json fma_to_json(const Math::Fma &);
 [[nodiscard]] POLYREGION_EXPORT Math::Any any_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json any_to_json(const Math::Any &);
 } // namespace Math

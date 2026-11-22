@@ -202,6 +202,7 @@ struct CodeGen {
   [[nodiscard]] ValPtr intr0(llvm::Intrinsic::ID id);
   [[nodiscard]] ValPtr intr1(llvm::Intrinsic::ID id, const AnyType &overload, const AnyTerm &arg);
   [[nodiscard]] ValPtr intr2(llvm::Intrinsic::ID id, const AnyType &overload, const AnyTerm &lhs, const AnyTerm &rhs);
+  [[nodiscard]] ValPtr intr3(llvm::Intrinsic::ID id, const AnyType &overload, const AnyTerm &x, const AnyTerm &y, const AnyTerm &z);
   [[nodiscard]] ValPtr intrAbs(const AnyType &overload, const AnyTerm &arg);
 
   [[nodiscard]] ValPtr findStackVar(const Named &named);
@@ -274,8 +275,8 @@ ValPtr mkExternMathVal(CodeGen &cg, const Expr::MathOp &expr, //
       [&](const Math::Log10 &v) -> ValPtr { return unary("log10", v.tpe, v.x); },                //
       [&](const Math::Pow &v) -> ValPtr { return binary("pow", v.tpe, v.x, v.y); },              //
       [&](const Math::Atan2 &v) -> ValPtr { return binary("atan2", v.tpe, v.x, v.y); },          //
-      [&](const Math::Hypot &v) -> ValPtr { return binary("hypot", v.tpe, v.x, v.y); }           //
-  );
+      [&](const Math::Hypot &v) -> ValPtr { return binary("hypot", v.tpe, v.x, v.y); },          //
+      [&](const Math::Fma &v) -> ValPtr { return cg.intr3(llvm::Intrinsic::fma, v.tpe, v.x, v.y, v.z); });
 }
 
 } // namespace details

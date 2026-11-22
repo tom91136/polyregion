@@ -842,7 +842,8 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
             [&](const Math::Log10 &v) { return fmt::format("{}({})", mathFn("log10"), mkTerm(v.x)); },
             [&](const Math::Pow &v) { return fmt::format("{}({}, {})", mathFn("pow"), mkTerm(v.x), mkTerm(v.y)); },
             [&](const Math::Atan2 &v) { return fmt::format("{}({}, {})", mathFn("atan2"), mkTerm(v.x), mkTerm(v.y)); },
-            [&](const Math::Hypot &v) { return fmt::format("{}({}, {})", mathFn("hypot"), mkTerm(v.x), mkTerm(v.y)); });
+            [&](const Math::Hypot &v) { return fmt::format("{}({}, {})", mathFn("hypot"), mkTerm(v.x), mkTerm(v.y)); },
+            [&](const Math::Fma &v) { return fmt::format("{}({}, {}, {})", mathFn("fma"), mkTerm(v.x), mkTerm(v.y), mkTerm(v.z)); });
       },
       [&](const Expr::Cast &x) { return fmt::format("(({}) {})", mkTpe(x.as), mkTerm(x.from)); },
       [&](const Expr::BitCast &x) { return reinterpretScalar(mkTerm(x.from), x.from.tpe(), x.as); },

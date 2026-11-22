@@ -555,6 +555,10 @@ object Interpreter {
         case p.Math.Pow(x, y, _)   => V.D(math.pow(evalT(x, fr).asD, evalT(y, fr).asD))
         case p.Math.Atan2(x, y, _) => V.D(math.atan2(evalT(x, fr).asD, evalT(y, fr).asD))
         case p.Math.Hypot(x, y, _) => V.D(math.hypot(evalT(x, fr).asD, evalT(y, fr).asD))
+        case p.Math.Fma(x, y, z, r) =>
+          val (a, b, c) = (evalT(x, fr).asD, evalT(y, fr).asD, evalT(z, fr).asD)
+          if (r == p.Type.Float32) V.D(java.lang.Math.fma(a.toFloat, b.toFloat, c.toFloat).toDouble)
+          else V.D(java.lang.Math.fma(a, b, c))
       }
     }
 

@@ -8083,6 +8083,52 @@ struct POLYREGION_EXPORT Hypot : Math::Base {
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
+
+struct POLYREGION_EXPORT Fma : Math::Base {
+  Term::Any x;
+  Term::Any y;
+  Term::Any z;
+  Type::Any rtn;
+  constexpr static uint32_t variant_id = 25;
+  [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
+  [[nodiscard]] POLYREGION_EXPORT Math::Fma withX(const Term::Any &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Math::Fma withY(const Term::Any &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Math::Fma withZ(const Term::Any &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Math::Fma withRtn(const Type::Any &v_) const;
+  template <typename T, typename U>
+  POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, Fma>) {
+      if (auto x_ = f(*this)) {
+        results_.emplace_back(*x_);
+      }
+    }
+    x.collect_where<T, U>(results_, f);
+    y.collect_where<T, U>(results_, f);
+    z.collect_where<T, U>(results_, f);
+    rtn.collect_where<T, U>(results_, f);
+  }
+  template <typename T, typename U>
+  [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT Fma modify_all(const std::function<T(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, Fma>) {
+      return f(*this);
+    }
+    return Math::Fma(x.modify_all<T>(f), y.modify_all<T>(f), z.modify_all<T>(f), rtn.modify_all<T>(f));
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Math::Fma &) const;
+  Fma(Term::Any x, Term::Any y, Term::Any z, Type::Any rtn) noexcept;
+  POLYREGION_EXPORT operator Any() const;
+  [[nodiscard]] POLYREGION_EXPORT Any widen() const;
+};
 } // namespace Math
 
 struct POLYREGION_EXPORT ExceptionKind {
@@ -12334,7 +12380,7 @@ POLYREGION_EXPORT polyregion::polyast::Intr::Any polyregion::polyast::Intr::Any:
 }
 namespace polyregion::polyast::Math {
 using All = alternatives<Abs, Sin, Cos, Tan, Asin, Acos, Atan, Sinh, Cosh, Tanh, Signum, Round, Ceil, Floor, Rint, Sqrt, Cbrt, Exp, Expm1,
-                         Log, Log1p, Log10, Pow, Atan2, Hypot>;
+                         Log, Log1p, Log10, Pow, Atan2, Hypot, Fma>;
 }
 template <typename T> constexpr POLYREGION_EXPORT bool polyregion::polyast::Math::Any::is() const {
   static_assert((polyregion::polyast::Math::All::contains<T>), "type not part of the variant");
@@ -13893,6 +13939,9 @@ template <> struct hash<polyregion::polyast::Math::Atan2> {
 };
 template <> struct hash<polyregion::polyast::Math::Hypot> {
   std::size_t operator()(const polyregion::polyast::Math::Hypot &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::Math::Fma> {
+  std::size_t operator()(const polyregion::polyast::Math::Fma &) const noexcept;
 };
 template <> struct hash<polyregion::polyast::ExceptionKind> {
   std::size_t operator()(const polyregion::polyast::ExceptionKind &) const noexcept;

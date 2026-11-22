@@ -3631,6 +3631,35 @@ POLYREGION_EXPORT bool Math::Hypot::operator==(const Base &rhs_) const {
 Math::Hypot::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Hypot>(*this)); }
 Math::Any Math::Hypot::widen() const { return Any(*this); };
 
+Math::Fma::Fma(Term::Any x, Term::Any y, Term::Any z, Type::Any rtn) noexcept
+    : Math::Base({Overload({Type::Float16(), Type::Float16(), Type::Float16()}, Type::Float16()),
+                  Overload({Type::Float32(), Type::Float32(), Type::Float32()}, Type::Float32()),
+                  Overload({Type::Float64(), Type::Float64(), Type::Float64()}, Type::Float64())},
+                 {x, y, z}, rtn),
+      x(std::move(x)), y(std::move(y)), z(std::move(z)), rtn(std::move(rtn)) {}
+uint32_t Math::Fma::id() const { return variant_id; };
+size_t Math::Fma::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(z)>()(z) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  return seed;
+}
+Math::Fma Math::Fma::withX(const Term::Any &v_) const { return Math::Fma(v_, y, z, rtn); }
+Math::Fma Math::Fma::withY(const Term::Any &v_) const { return Math::Fma(x, v_, z, rtn); }
+Math::Fma Math::Fma::withZ(const Term::Any &v_) const { return Math::Fma(x, y, v_, rtn); }
+Math::Fma Math::Fma::withRtn(const Type::Any &v_) const { return Math::Fma(x, y, z, v_); }
+POLYREGION_EXPORT bool Math::Fma::operator==(const Math::Fma &rhs) const {
+  return (this->x == rhs.x) && (this->y == rhs.y) && (this->z == rhs.z) && (this->rtn == rhs.rtn);
+}
+POLYREGION_EXPORT bool Math::Fma::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const Math::Fma &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+Math::Fma::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Fma>(*this)); }
+Math::Any Math::Fma::widen() const { return Any(*this); };
+
 ExceptionKind::ExceptionKind(Type::Any tpe, std::string sourceName) noexcept : tpe(std::move(tpe)), sourceName(std::move(sourceName)) {}
 size_t ExceptionKind::hash_code() const {
   size_t seed = 0;
@@ -5669,6 +5698,9 @@ std::size_t std::hash<polyregion::polyast::Math::Atan2>::operator()(const polyre
   return x.hash_code();
 }
 std::size_t std::hash<polyregion::polyast::Math::Hypot>::operator()(const polyregion::polyast::Math::Hypot &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::Math::Fma>::operator()(const polyregion::polyast::Math::Fma &x) const noexcept {
   return x.hash_code();
 }
 std::size_t std::hash<polyregion::polyast::ExceptionKind>::operator()(const polyregion::polyast::ExceptionKind &x) const noexcept {
