@@ -92,8 +92,8 @@ public final class Streams {
   private static final char RANGE = 'R';
   private static final char CLOSED = 'C';
 
-  private static final long INDEX_CHUNK = 1L << 30;
-  private static final long ARRAY_CHUNK = 1L << 24;
+  static long indexChunk = 1L << 30;
+  static long arrayChunk = 1L << 24;
   private static final long MAX_ARRAY_SIZE = Integer.MAX_VALUE - 8;
 
   public static String shape(
@@ -308,7 +308,7 @@ public final class Streams {
           return tailReduction();
         case FOR_EACH:
           {
-            long step = step(INDEX_CHUNK);
+            long step = step(indexChunk);
             for (long offset = 0; offset < n; offset += step)
               launch(EACH, base(offset), null, (long) length(offset, step), null);
             return null;
@@ -411,8 +411,8 @@ public final class Streams {
       }
       List<Object> parts = new ArrayList<>();
       long total = 0;
-      for (long offset = 0; offset < n; offset += ARRAY_CHUNK) {
-        Materialised m = materialise(base(offset), length(offset, ARRAY_CHUNK));
+      for (long offset = 0; offset < n; offset += arrayChunk) {
+        Materialised m = materialise(base(offset), length(offset, arrayChunk));
         if (m.length == 0) continue;
         total += m.length;
         if (total >= MAX_ARRAY_SIZE) throw tooLarge();
@@ -437,7 +437,7 @@ public final class Streams {
 
     Object tailReduction() {
       List<Object> parts = new ArrayList<>();
-      long step = source == ARRAY ? n : ARRAY_CHUNK;
+      long step = source == ARRAY ? n : arrayChunk;
       for (long offset = 0; offset < n; offset += step) {
         Materialised m = materialise(base(offset), length(offset, step));
         if (m.length > 0) parts.add(tail(m.array, m.length));
@@ -531,7 +531,7 @@ public final class Streams {
 
     List<Object> partials(Object neutral) {
       List<Object> parts = new ArrayList<>();
-      long step = step(INDEX_CHUNK);
+      long step = step(indexChunk);
       for (long offset = 0; offset < n; offset += step) {
         int length = length(offset, step);
         parts.add(
@@ -559,7 +559,7 @@ public final class Streams {
 
     List<Object> survivorPartials(Object neutral, long[] count) {
       List<Object> parts = new ArrayList<>();
-      long step = source == ARRAY ? n : ARRAY_CHUNK;
+      long step = source == ARRAY ? n : arrayChunk;
       for (long offset = 0; offset < n; offset += step) {
         Materialised m = materialise(base(offset), length(offset, step));
         if (m.length == 0) continue;
