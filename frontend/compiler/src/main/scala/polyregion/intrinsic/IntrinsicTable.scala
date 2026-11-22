@@ -187,6 +187,194 @@ object IntrinsicTable {
     result
   }
 
+  private val IntOverflow  = "integer overflow"
+  private val LongOverflow = "long overflow"
+
+  private def overflowMessage(t: p.Type): String = if (t == J) LongOverflow else IntOverflow
+
+  private def overflowIf(b: Emit, message: String, cond: p.Term): Unit = b.when(cond)(b.raise(message))
+
+  private def minValue(t: p.Type): Long = if (t == J) Long.MinValue else Int.MinValue.toLong
+
+  private def addExact(b: Emit, x: p.Term, y: p.Term): p.Term = {
+    val r = b.wrapAdd(x, y)
+    overflowIf(b, overflowMessage(x.tpe), b.lt(b.and(b.xor(x, r), b.xor(y, r)), b.const(x.tpe, 0)))
+    r
+  }
+
+  private def subtractExact(b: Emit, x: p.Term, y: p.Term): p.Term = {
+    val r = b.wrapSub(x, y)
+    overflowIf(b, overflowMessage(x.tpe), b.lt(b.and(b.xor(x, y), b.xor(x, r)), b.const(x.tpe, 0)))
+    r
+  }
+
+  private def stepExact(b: Emit, x: p.Term, limit: Long, delta: Long): p.Term = {
+    overflowIf(b, overflowMessage(x.tpe), b.eq(x, b.const(x.tpe, limit)))
+    b.wrapAdd(x, b.const(x.tpe, delta))
+  }
+
+  private def negateExact(b: Emit, x: p.Term): p.Term = {
+    overflowIf(b, overflowMessage(x.tpe), b.eq(x, b.const(x.tpe, minValue(x.tpe))))
+    b.wrapNeg(x)
+  }
+
+  private def absExact(b: Emit, x: p.Term): p.Term.Select = {
+    val name = if (x.tpe == J) "Long" else "Integer"
+    overflowIf(
+      b,
+      s"Overflow to represent absolute value of $name.MIN_VALUE",
+      b.eq(x, b.const(x.tpe, minValue(x.tpe)))
+    )
+    abs(b, x)
+  }
+
+  private def multiplyHigh(b: Emit, x: p.Term, y: p.Term): p.Term = {
+    val mask = b.const(J, 0xffffffffL)
+    val s32  = b.const(J, 32)
+    val x1   = b.shr(x, s32)
+    val x2   = b.and(x, mask)
+    val y1   = b.shr(y, s32)
+    val y2   = b.and(y, mask)
+    val z2   = b.wrapMul(x2, y2)
+    val t    = b.wrapAdd(b.wrapMul(x1, y2), b.lshr(z2, s32))
+    val z1   = b.wrapAdd(b.and(t, mask), b.wrapMul(x2, y1))
+    b.wrapAdd(b.wrapAdd(b.wrapMul(x1, y1), b.shr(t, s32)), b.shr(z1, s32))
+  }
+
+  private def multiplyExact(b: Emit, x: p.Term, y: p.Term): p.Term =
+    if (x.tpe == I) {
+      val wide = b.mul(b.cast(x, J), b.cast(y, J))
+      val r    = b.cast(wide, I)
+      overflowIf(b, IntOverflow, b.neq(b.cast(r, J), wide))
+      r
+    } else {
+      val hi = multiplyHigh(b, x, y)
+      val lo = b.wrapMul(x, y)
+      overflowIf(b, LongOverflow, b.neq(hi, b.shr(lo, b.const(J, 63))))
+      lo
+    }
+
+  private def toIntExact(b: Emit, x: p.Term): p.Term = {
+    val r = b.cast(x, I)
+    overflowIf(b, IntOverflow, b.neq(b.cast(r, J), x))
+    r
+  }
+
+  private case class FpLayout(bits: p.Type, shift: Int, bias: Int, width: Int) {
+    val expMask: Long  = (if (bits == J) 0x7ffL else 0xffL) << shift
+    val signBit: Long  = if (bits == J) Long.MinValue else Int.MinValue.toLong
+    val maxExp: Int    = bias
+    val minExp: Int    = 1 - bias
+    val infinity: Long = expMask
+  }
+
+  private val Layouts: Map[p.Type, FpLayout] = Map(
+    F -> FpLayout(bits = I, shift = 23, bias = 127, width = 24),
+    D -> FpLayout(bits = J, shift = 52, bias = 1023, width = 53)
+  )
+
+  private def rawBits(b: Emit, x: p.Term): p.Term.Select = b.bitCast(x, Layouts(x.tpe).bits)
+
+  private def getExponent(b: Emit, x: p.Term): p.Term = {
+    val l      = Layouts(x.tpe)
+    val field  = b.and(rawBits(b, x), b.const(l.bits, l.expMask))
+    val biased = b.cast(b.shr(field, b.const(l.bits, l.shift)), I)
+    b.sub(biased, b.const(I, l.bias))
+  }
+
+  private def ulp(b: Emit, x: p.Term): p.Term.Select = {
+    val fp     = x.tpe
+    val l      = Layouts(fp)
+    val exp    = getExponent(b, x)
+    val result = b.variable(p.Expr.Alias(b.real(fp, 0)))
+    b.branch(b.eq(exp, b.const(I, l.maxExp + 1)))(
+      b.set(result, p.Expr.BitCast(b.magnitudeBits(x), fp))
+    ) {
+      b.branch(b.eq(exp, b.const(I, l.minExp - 1)))(
+        b.set(result, p.Expr.BitCast(b.const(l.bits, 1), fp))
+      ) {
+        val e = b.sub(exp, b.const(I, l.width - 1))
+        b.branch(b.gte(e, b.const(I, l.minExp))) {
+          val biased = b.add(b.cast(e, l.bits), b.const(l.bits, l.bias))
+          b.set(result, p.Expr.BitCast(b.and(b.shl(biased, b.const(l.bits, l.shift)), b.const(l.bits, l.expMask)), fp))
+        } {
+          val distance = b.add(b.cast(e, l.bits), b.const(l.bits, l.width - 1 - l.minExp))
+          b.set(result, p.Expr.BitCast(b.shl(b.const(l.bits, 1), distance), fp))
+        }
+      }
+    }
+    result
+  }
+
+  private def zeroNormalisedBits(b: Emit, x: p.Term): p.Term.Select = {
+    val l   = Layouts(x.tpe)
+    val raw = b.variable(p.Expr.BitCast(x, l.bits))
+    b.when(b.eq(x, b.real(x.tpe, 0)))(b.set(raw, p.Expr.Alias(b.const(l.bits, 0))))
+    raw
+  }
+
+  private def nextUp(b: Emit, x: p.Term): p.Term.Select = {
+    val fp     = x.tpe
+    val l      = Layouts(fp)
+    val result = b.variable(p.Expr.Alias(x))
+    val live   = b.both(b.not(b.isNaN(x)), b.neq(rawBits(b, x), b.const(l.bits, l.infinity)))
+    b.when(live) {
+      val raw = zeroNormalisedBits(b, x)
+      b.branch(b.gte(x, b.real(fp, 0)))(b.set(raw, p.Expr.Alias(b.wrapAdd(raw, b.const(l.bits, 1)))))(
+        b.set(raw, p.Expr.Alias(b.wrapAdd(raw, b.const(l.bits, -1))))
+      )
+      b.set(result, p.Expr.BitCast(raw, fp))
+    }
+    result
+  }
+
+  private def nextDown(b: Emit, x: p.Term): p.Term.Select = {
+    val fp     = x.tpe
+    val l      = Layouts(fp)
+    val result = b.variable(p.Expr.Alias(x))
+    val live   = b.both(b.not(b.isNaN(x)), b.neq(rawBits(b, x), b.const(l.bits, l.infinity | l.signBit)))
+    b.when(live) {
+      b.branch(b.eq(x, b.real(fp, 0)))(b.set(result, p.Expr.BitCast(b.const(l.bits, l.signBit | 1), fp))) {
+        val raw = rawBits(b, x)
+        b.branch(b.gt(x, b.real(fp, 0)))(
+          b.set(result, p.Expr.BitCast(b.wrapAdd(raw, b.const(l.bits, -1)), fp))
+        )(b.set(result, p.Expr.BitCast(b.wrapAdd(raw, b.const(l.bits, 1)), fp)))
+      }
+    }
+    result
+  }
+
+  private def nextAfter(b: Emit, start: p.Term, direction: p.Term): p.Term.Select = {
+    val fp      = start.tpe
+    val l       = Layouts(fp)
+    val wide    = b.cast(start, D)
+    val towards = b.cast(direction, fp)
+    val result  = b.variable(p.Expr.Alias(start))
+    b.branch(b.isNaN(start))(b.set(result, p.Expr.Alias(start))) {
+      b.branch(b.isNaN(direction))(b.set(result, p.Expr.Alias(towards))) {
+        b.branch(b.eq(wide, direction))(b.set(result, p.Expr.Alias(towards))) {
+          val raw = zeroNormalisedBits(b, start)
+          val one = b.const(l.bits, 1)
+          val neg = b.const(l.bits, -1)
+          val nil = b.const(l.bits, 0)
+          b.branch(b.gt(direction, wide)) {
+            b.branch(b.gte(raw, nil))(b.set(raw, p.Expr.Alias(b.wrapAdd(raw, one))))(
+              b.set(raw, p.Expr.Alias(b.wrapAdd(raw, neg)))
+            )
+          } {
+            b.branch(b.gt(raw, nil))(b.set(raw, p.Expr.Alias(b.wrapAdd(raw, neg)))) {
+              b.branch(b.lt(raw, nil))(b.set(raw, p.Expr.Alias(b.wrapAdd(raw, one))))(
+                b.set(raw, p.Expr.Alias(b.const(l.bits, l.signBit | 1)))
+              )
+            }
+          }
+          b.set(result, p.Expr.BitCast(raw, fp))
+        }
+      }
+    }
+    result
+  }
+
   private val ExactUnary = Set("sqrt", "ceil", "floor", "rint")
 
   private def mathEntries(owner: String, exactOnly: Boolean): List[(Key, Lowering)] = {
@@ -237,7 +425,40 @@ object IntrinsicTable {
       body(s"$owner.floorDiv(JJ)J")((b, _) => p.Expr.Alias(floorDiv(b, b.params.head, b.params(1)))),
       body(s"$owner.floorDiv(JI)J")((b, _) => p.Expr.Alias(floorDiv(b, b.params.head, b.cast(b.params(1), J))))
     )
-    unary ++ binary ++ numeric ++ rounding ++ angles ++ integral
+    val exact = List(
+      body(s"$owner.addExact(II)I")((b, _) => p.Expr.Alias(addExact(b, b.params.head, b.params(1)))),
+      body(s"$owner.addExact(JJ)J")((b, _) => p.Expr.Alias(addExact(b, b.params.head, b.params(1)))),
+      body(s"$owner.subtractExact(II)I")((b, _) => p.Expr.Alias(subtractExact(b, b.params.head, b.params(1)))),
+      body(s"$owner.subtractExact(JJ)J")((b, _) => p.Expr.Alias(subtractExact(b, b.params.head, b.params(1)))),
+      body(s"$owner.multiplyExact(II)I")((b, _) => p.Expr.Alias(multiplyExact(b, b.params.head, b.params(1)))),
+      body(s"$owner.multiplyExact(JJ)J")((b, _) => p.Expr.Alias(multiplyExact(b, b.params.head, b.params(1)))),
+      body(s"$owner.multiplyExact(JI)J")((b, _) =>
+        p.Expr.Alias(multiplyExact(b, b.params.head, b.cast(b.params(1), J)))
+      ),
+      body(s"$owner.incrementExact(I)I")((b, _) => p.Expr.Alias(stepExact(b, b.params.head, Int.MaxValue.toLong, 1))),
+      body(s"$owner.incrementExact(J)J")((b, _) => p.Expr.Alias(stepExact(b, b.params.head, Long.MaxValue, 1))),
+      body(s"$owner.decrementExact(I)I")((b, _) => p.Expr.Alias(stepExact(b, b.params.head, Int.MinValue.toLong, -1))),
+      body(s"$owner.decrementExact(J)J")((b, _) => p.Expr.Alias(stepExact(b, b.params.head, Long.MinValue, -1))),
+      body(s"$owner.negateExact(I)I")((b, _) => p.Expr.Alias(negateExact(b, b.params.head))),
+      body(s"$owner.negateExact(J)J")((b, _) => p.Expr.Alias(negateExact(b, b.params.head))),
+      body(s"$owner.absExact(I)I")((b, _) => p.Expr.Alias(absExact(b, b.params.head))),
+      body(s"$owner.absExact(J)J")((b, _) => p.Expr.Alias(absExact(b, b.params.head))),
+      body(s"$owner.toIntExact(J)I")((b, _) => p.Expr.Alias(toIntExact(b, b.params.head))),
+      body(s"$owner.multiplyHigh(JJ)J")((b, _) => p.Expr.Alias(multiplyHigh(b, b.params.head, b.params(1)))),
+      body(s"$owner.multiplyFull(II)J")((b, _) => p.Expr.Alias(b.mul(b.cast(b.params.head, J), b.cast(b.params(1), J))))
+    )
+    val ieee = List(F, D).flatMap { t =>
+      val l = tpeLetter(t)
+      List(
+        op(s"$owner.fma($l$l$l)$l")((as, rtn) => math(p.Math.Fma(as.head, as(1), as(2), rtn))),
+        body(s"$owner.ulp($l)$l")((b, _) => p.Expr.Alias(ulp(b, b.params.head))),
+        body(s"$owner.getExponent($l)I")((b, _) => p.Expr.Alias(getExponent(b, b.params.head))),
+        body(s"$owner.nextUp($l)$l")((b, _) => p.Expr.Alias(nextUp(b, b.params.head))),
+        body(s"$owner.nextDown($l)$l")((b, _) => p.Expr.Alias(nextDown(b, b.params.head))),
+        body(s"$owner.nextAfter(${l}D)$l")((b, _) => p.Expr.Alias(nextAfter(b, b.params.head, b.params(1))))
+      )
+    }
+    unary ++ binary ++ numeric ++ rounding ++ angles ++ integral ++ exact ++ ieee
   }
 
   private def integralEntries(owner: String, t: p.Type): List[(Key, Lowering)] = {

@@ -79,6 +79,7 @@ final class Emit(val params: List[p.Term.Select]) {
   def xor(x: p.Term, y: p.Term): p.Term.Select  = intr(p.Intr.BXor(x, y, x.tpe))
   def shl(x: p.Term, y: p.Term): p.Term.Select  = intr(p.Intr.BSL(x, y, x.tpe))
   def ushr(x: p.Term, y: p.Term): p.Term.Select = intr(p.Intr.BZSR(x, y, x.tpe))
+  def shr(x: p.Term, y: p.Term): p.Term.Select  = intr(p.Intr.BSR(x, y, x.tpe))
   def popCount(x: p.Term): p.Term.Select        = intr(p.Intr.PopCount(x, x.tpe))
 
   def eq(x: p.Term, y: p.Term): p.Term.Select   = intr(p.Intr.LogicEq(x, y))
@@ -103,10 +104,32 @@ final class Emit(val params: List[p.Term.Select]) {
   def isInfinite(x: p.Term): p.Term.Select = eq(magnitudeBits(x), exponentMask(x))
   def isFinite(x: p.Term): p.Term.Select   = lt(magnitudeBits(x), exponentMask(x))
 
+  private def unsigned(t: p.Type): p.Type = if (t == p.Type.IntS64) p.Type.IntU64 else p.Type.IntU32
+
+  private def wrapping(x: p.Term, y: p.Term)(f: (p.Term, p.Term) => p.Term): p.Term = {
+    val u = unsigned(x.tpe)
+    cast(f(cast(x, u), cast(y, u)), x.tpe)
+  }
+
   def wrapNeg(x: p.Term): p.Term = {
-    val u = if (x.tpe == p.Type.IntS64) p.Type.IntU64 else p.Type.IntU32
+    val u = unsigned(x.tpe)
     cast(sub(const(u, 0), cast(x, u)), x.tpe)
   }
+  def wrapAdd(x: p.Term, y: p.Term): p.Term = wrapping(x, y)(add(_, _))
+  def wrapSub(x: p.Term, y: p.Term): p.Term = wrapping(x, y)(sub(_, _))
+  def wrapMul(x: p.Term, y: p.Term): p.Term = wrapping(x, y)(mul(_, _))
+
+  def lshr(x: p.Term, y: p.Term): p.Term = {
+    val u = unsigned(x.tpe)
+    cast(ushr(cast(x, u), cast(y, u)), x.tpe)
+  }
+
+  def raise(message: String): Unit =
+    bind(
+      p.Expr.SpecOp(
+        p.Spec.Assert(p.Term.IntU32Const(p.Enums.AssertCode.Arithmetic.value), p.Term.StringConst(message))
+      )
+    )
 
   def cast(x: p.Term, as: p.Type): p.Term =
     if (x.tpe == as) x else bind(p.Expr.Cast(x, as))

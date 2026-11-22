@@ -3,9 +3,9 @@ package polyregion.intrinsic
 import polyregion.ast.Interpreter.{V, Vm}
 import polyregion.ast.pass.{PluginEntry, Verify}
 import polyregion.ast.Traversal.*
-import polyregion.ast.{PolyAST as p, *, given}
+import polyregion.ast.{Interpreter, PolyAST as p, *, given}
 
-import java.lang.reflect.Method
+import java.lang.reflect.{InvocationTargetException, Method}
 
 class IntrinsicTableSuite extends munit.FunSuite {
 
@@ -35,6 +35,7 @@ class IntrinsicTableSuite extends munit.FunSuite {
     Float.PositiveInfinity,
     Float.NegativeInfinity,
     1.4e-45f,
+    1.17549435e-38f,
     1e10f,
     -3e9f
   )
@@ -58,6 +59,7 @@ class IntrinsicTableSuite extends munit.FunSuite {
     Double.PositiveInfinity,
     Double.NegativeInfinity,
     4.9e-324,
+    2.2250738585072014e-308,
     1e19,
     -1e19,
     1.23,
@@ -178,9 +180,12 @@ class IntrinsicTableSuite extends munit.FunSuite {
           cross(List(samples(params.head), rotateAmount))
         else cross(params.map(samples))
       inputs.flatMap { args =>
-        val expected = normalise(method.invoke(null, args.map(_.asInstanceOf[AnyRef])*))
+        val expected =
+          try Right(normalise(method.invoke(null, args.map(_.asInstanceOf[AnyRef])*)))
+          catch { case e: InvocationTargetException => Left(e.getCause.toString) }
         val actual =
-          observed(vm.call(fn.name, args.zip(params).map((a, t) => interpreted(a, t))), rtn)
+          try Right(observed(vm.call(fn.name, args.zip(params).map((a, t) => interpreted(a, t))), rtn))
+          catch { case e: Interpreter.AssertionRaised => Left(s"java.lang.ArithmeticException: ${e.message}") }
         Option.when(expected != actual)(s"${key.repr}(${args.mkString(", ")}): expected $expected, got $actual")
       }
     }

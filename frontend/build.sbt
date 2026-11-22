@@ -529,6 +529,8 @@ lazy val compiler = project
 lazy val cudaSuites =
   Set(
     "ArrayMemberSuite.scala",
+    "CudaExactIntrinsicSuite.scala",
+    "CudaIntrinsicBase.scala",
     "CudaIntrinsicSuite.scala",
     "DevirtSuite.scala",
     "ExceptionClassSuite.scala",

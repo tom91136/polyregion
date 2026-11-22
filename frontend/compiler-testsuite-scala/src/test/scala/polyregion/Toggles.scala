@@ -19,6 +19,8 @@ object Toggles {
   final inline val GivenSuite            = true
   final inline val InlineArraySuite      = true
   final inline val IntrinsicSuite        = true
+  final inline val JvmExactSuite         = true
+  final inline val JvmIeeeIntrinsicSuite = true
   final inline val JvmIntrinsicSuite     = true
   final inline val LengthSuite           = true
   final inline val LogicSuite            = true

@@ -15,6 +15,8 @@ object Interpreter {
     def asD: Double = this match { case D(d) => d; case I(x) => x.toDouble; case U => 0 }
   }
 
+  final case class AssertionRaised(code: Long, message: String) extends RuntimeException(message)
+
   private final class Ret(val v: V) extends scala.util.control.ControlThrowable
   private object Brk                extends scala.util.control.ControlThrowable
   private object Cnt                extends scala.util.control.ControlThrowable
@@ -398,7 +400,7 @@ object Interpreter {
       case p.Expr.Alias(t)              => evalT(t, fr)
       case p.Expr.IntrOp(op)            => intr(op, fr)
       case p.Expr.MathOp(op)            => mathOp(op, fr)
-      case p.Expr.SpecOp(op)            => spec(op)
+      case p.Expr.SpecOp(op)            => spec(op, fr)
       case p.Expr.Cast(from, as)        => cast(evalT(from, fr), from.tpe, as)
       case p.Expr.BitCast(from, as)     => decode(encode(evalT(from, fr), from.tpe), as)
       case p.Expr.Index(lhs, idx, comp) => load(base(lhs, fr) + evalT(idx, fr).asI * sizeOf(comp), comp)
@@ -562,7 +564,7 @@ object Interpreter {
       }
     }
 
-    private def spec(op: p.Spec): V = op match {
+    private def spec(op: p.Spec, fr: Frame): V = op match {
       case p.Spec.GpuGlobalIdx(_)  => V.I(globalId)
       case p.Spec.GpuGlobalSize(_) => V.I(globalSize)
       case p.Spec.GpuGroupIdx(_)   => V.I(groupIdx)
@@ -572,6 +574,8 @@ object Interpreter {
       case p.Spec.GpuBarrierGlobal | p.Spec.GpuBarrierLocal | p.Spec.GpuBarrierAll =>
         barrierCount += 1
         V.U
+      case p.Spec.Assert(code, message) =>
+        throw AssertionRaised(evalT(code, fr).asI, message match { case p.Term.StringConst(m) => m; case _ => "" })
       case _ => V.U
     }
 
