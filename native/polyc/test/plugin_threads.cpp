@@ -20,7 +20,10 @@ const char anchor = 0;
 
 std::string pluginPath() {
   std::string error;
-  for (const auto &plugin : polypass::resolvePlugins(error))
+  const auto plugins = polypass::resolvePlugins(error);
+  CAPTURE(error);
+  REQUIRE(error.empty());
+  for (const auto &plugin : plugins)
     if (plugin.kind == polypass::PluginKind::Dso) return plugin.path;
   return {};
 }
@@ -29,7 +32,7 @@ std::string pluginPath() {
 
 TEST_CASE("plugin thread probe", "[.][plugin-thread-probe]") {
   const auto path = pluginPath();
-  REQUIRE_FALSE(path.empty());
+  if (path.empty()) SKIP("no DSO pass plugin resolved");
   polypass::DsoPassRunner runner(path);
   std::string loadError;
   std::thread([&] { loadError = runner.load(); }).join();
@@ -42,6 +45,7 @@ TEST_CASE("plugin thread probe", "[.][plugin-thread-probe]") {
 }
 
 TEST_CASE("a plugin first loaded on a finished thread survives later collections", "[plugin-thread]") {
+  if (pluginPath().empty()) SKIP("no DSO pass plugin resolved");
   const auto exe = llvm::sys::fs::getMainExecutable(nullptr, reinterpret_cast<void *>(const_cast<char *>(&anchor)));
   REQUIRE_FALSE(exe.empty());
   CHECK(llvm::sys::ExecuteAndWait(exe, {exe, ProbeTag}) == 0);
