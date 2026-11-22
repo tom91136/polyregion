@@ -6,7 +6,13 @@ import scala.annotation.tailrec
 
 object Devirtualise {
 
-  case class Candidate(receiver: p.Type.Struct, impl: p.Sym, tag: Int, args: Option[List[Int]] = None)
+  case class Candidate(
+      receiver: p.Type.Struct,
+      impl: p.Sym,
+      tag: Int,
+      args: Option[List[Int]] = None,
+      implReceiver: Option[p.Type.Struct] = None
+  )
 
   def tagsOf(classes: Iterable[p.Sym]): Map[p.Sym, Int] =
     classes.toList.distinct.sortBy(_.fqcn).zipWithIndex.map((c, i) => c -> (i + 1)).toMap
@@ -173,15 +179,17 @@ class Devirtualise(candidates: Map[p.Sym, List[Devirtualise.Candidate]]) extends
           )
         case _ =>
       }
-      val as = recv.tpe match {
-        case p.Type.Ptr(_, space) => p.Type.Ptr(c.receiver, space)
-        case _                    => c.receiver
+      def viewAs(struct: p.Type.Struct): p.Type = recv.tpe match {
+        case p.Type.Ptr(_, space) => p.Type.Ptr(struct, space)
+        case _                    => struct
       }
-      val (cast, target) =
-        if (as == recv.tpe) (Nil, recv: p.Term)
-        else {
-          val n = fresh(as)
-          (List(p.Stmt.Var(n, Some(p.Expr.Cast(recv, as)))), p.Term.Select(n, Nil, as): p.Term)
+      val (cast, target) = (c.receiver :: c.implReceiver.filter(_ != c.receiver).toList)
+        .map(viewAs(_))
+        .foldLeft((List.empty[p.Stmt], recv: p.Term)) {
+          case (acc @ (_, from), as) if as == from.tpe => acc
+          case ((stmts, from), as) =>
+            val n = fresh(as)
+            (stmts :+ p.Stmt.Var(n, Some(p.Expr.Cast(from, as))), p.Term.Select(n, Nil, as))
         }
       val call =
         p.Expr.Invoke(p.Type.FnRef(c.impl), ivk.tpeArgs, Some(target), c.args.fold(ivk.args)(_.map(ivk.args)), ivk.rtn)

@@ -8,7 +8,7 @@ import scala.util.Try
 object Dispatch {
 
   case class Site(method: p.Sym, receivers: Set[p.Sym], arms: List[Arm])
-  case class Arm(cls: p.Sym, impl: p.Sym)
+  case class Arm(cls: p.Sym, impl: p.Sym, implOwner: p.Sym)
 
   def sealedDescendants(using q: Quoted)(sym: q.Symbol): List[q.Symbol] =
     Try(sym.children).getOrElse(Nil).flatMap(c => c :: sealedDescendants(c))
@@ -41,9 +41,13 @@ object Dispatch {
     Try(c.typeRef.baseClasses.contains(owner)).getOrElse(false)
 
   private def implementation(using q: Quoted)(method: q.Symbol, cls: q.Symbol): Option[q.Symbol] =
-    Some(method.overridingSymbol(cls))
-      .filter(s => !s.isNoSymbol && s.isDefDef && s.maybeOwner == cls)
-      .orElse(Option.when(method.maybeOwner == cls && isConcrete(cls) && method.isDefDef)(method))
+    cls.typeRef.baseClasses.view.flatMap { base =>
+      Some(method.overridingSymbol(base))
+        .filter(s => !s.isNoSymbol && s.isDefDef && s.maybeOwner == base && !s.flags.is(q.Flags.Deferred))
+        .orElse(
+          Option.when(base == method.maybeOwner && method.isDefDef && !method.flags.is(q.Flags.Deferred))(method)
+        )
+    }.headOption
 
   def classesOf(using q: Quoted)(method: q.Symbol, known: List[q.Symbol]): List[(q.Symbol, q.Symbol)] = {
     val owner    = method.maybeOwner
@@ -65,7 +69,14 @@ object Dispatch {
 
   def table(sites: List[Site], tags: Map[p.Sym, Int]): Map[p.Sym, List[Devirtualise.Candidate]] =
     sites.map { site =>
-      site.method -> site.arms.map(a => Devirtualise.Candidate(p.Type.Struct(a.cls, Nil), a.impl, tags(a.cls)))
+      site.method -> site.arms.map { a =>
+        Devirtualise.Candidate(
+          p.Type.Struct(a.cls, Nil),
+          a.impl,
+          tags(a.cls),
+          implReceiver = Option.when(a.implOwner != a.cls)(p.Type.Struct(a.implOwner, Nil))
+        )
+      }
     }.toMap
 
   def isRoot(sdef: p.StructDef, tags: Map[p.Sym, Int]): Boolean =
@@ -75,8 +86,13 @@ object Dispatch {
     val owner = root.widenTermRefByName.typeSymbol
     (sealedDescendants(owner) ::: compilationUnit).distinct
       .filter(c => isConcrete(c) && subtype(c, owner))
-      .map(c => Retyper.structName0(c) -> c.typeRef)
-      .filter((name, _) => tags.contains(name))
+      .map { c =>
+        val tpe = c.typeRef
+        (Retyper.structName0(c), tpe, Try(tpe.baseClasses.size).getOrElse(0))
+      }
+      .filter((name, _, _) => tags.contains(name))
+      .sortBy((name, _, depth) => (-depth, tags(name)))
+      .map((name, tpe, _) => name -> tpe)
   }
 
   def tagMetadata(tags: Map[p.Sym, Int]): List[p.MetaEntry] =

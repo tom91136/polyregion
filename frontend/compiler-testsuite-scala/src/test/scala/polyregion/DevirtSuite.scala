@@ -48,6 +48,24 @@ object DevirtSuite {
   class Doubler(val base: Int) extends Gauge { def read(x: Int): Int = base + x * 2   }
   class Adder(val base: Int)   extends Gauge { def read(x: Int): Int = base + x + 100 }
 
+  sealed trait Polygon {
+    def sides: Int
+  }
+  sealed trait Quadrilateral extends Polygon {
+    def sides: Int = 4
+  }
+  case class Triangle(a: Int) extends Polygon { def sides: Int = 3 + a * 0 }
+  case class Kite(a: Int)     extends Quadrilateral
+  case class Square4(a: Int)  extends Quadrilateral
+
+  abstract class Meter {
+    def read(x: Int): Int
+  }
+  class Linear(val base: Int)             extends Meter        { def read(x: Int): Int = base + x               }
+  class Offset(base: Int, val extra: Int) extends Linear(base)
+  class Flat                              extends Meter        { def read(x: Int): Int = 0                      }
+  class Steep(base: Int)                  extends Linear(base) { override def read(x: Int): Int = base + x * 10 }
+
   class Inc(val n: Int) extends Op {
     def apply(x: Int): Int = x + n
   }
@@ -152,6 +170,51 @@ class DevirtSuite extends munit.FunSuite {
           }
         }
         assertEquals((0 until 3).map(out(_)).toList, List(21, 112, 23))
+      }
+    }
+
+    test(s"[$label] a class that only inherits a trait implementation dispatches to it") {
+      withContext(label, device) { ctx =>
+        val polygons = mutable.ListBuffer[Polygon](Triangle(1), Kite(2), Square4(3), Triangle(4))
+        val out      = Buffer.ofDim[Int](4)
+        launch(ctx) {
+          var i = 0
+          while (i < 4) {
+            out(i) = polygons(i).sides
+            i += 1
+          }
+        }
+        assertEquals((0 until 4).map(out(_)).toList, List(3, 4, 4, 3))
+      }
+    }
+
+    test(s"[$label] a class that only inherits a superclass implementation dispatches to it") {
+      withContext(label, device) { ctx =>
+        val meters = mutable.ListBuffer[Meter](new Linear(1), new Offset(20, 7), new Flat, new Offset(300, 8))
+        val out    = Buffer.ofDim[Int](4)
+        launch(ctx) {
+          var i = 0
+          while (i < 4) {
+            out(i) = meters(i).read(5)
+            i += 1
+          }
+        }
+        assertEquals((0 until 4).map(out(_)).toList, List(6, 25, 0, 305))
+      }
+    }
+
+    test(s"[$label] a subclass that overrides an inherited implementation dispatches to its own") {
+      withContext(label, device) { ctx =>
+        val meters = mutable.ListBuffer[Meter](new Linear(1), new Steep(2), new Offset(3, 9), new Steep(4))
+        val out    = Buffer.ofDim[Int](4)
+        launch(ctx) {
+          var i = 0
+          while (i < 4) {
+            out(i) = meters(i).read(5)
+            i += 1
+          }
+        }
+        assertEquals((0 until 4).map(out(_)).toList, List(6, 52, 8, 54))
       }
     }
 

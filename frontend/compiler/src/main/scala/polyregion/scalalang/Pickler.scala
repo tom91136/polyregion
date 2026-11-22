@@ -380,7 +380,6 @@ object Pickler {
             )
           Candidate(mapping, repr, tags(name))
         }
-        .sortBy(_.tag)
 
     def writeTag(buffer: Expr[ByteBuffer], base: Expr[Int], mapping: StructMapping[q.Term]): Expr[Unit] =
       if (mapping.tagOffset < 0) '{ () }

@@ -17,6 +17,7 @@ class DevirtualiseSuite extends munit.FunSuite {
   private val shape  = struct("Shape")
   private val circle = struct("Circle")
   private val rect   = struct("Rect")
+  private val mid    = struct("Mid")
 
   private def structDef(tpe: p.Type.Struct, members: (String, p.Type)*): p.StructDef =
     p.StructDef(
@@ -29,7 +30,8 @@ class DevirtualiseSuite extends munit.FunSuite {
   private val defs = List(
     structDef(shape),
     structDef(circle, "r" -> i32),
-    structDef(rect, "w"   -> i32, "h" -> i32)
+    structDef(rect, "w"   -> i32, "h" -> i32),
+    structDef(mid, "r"    -> i32)
   )
 
   private def method(
@@ -72,6 +74,17 @@ class DevirtualiseSuite extends munit.FunSuite {
     i32,
     List(
       p.Stmt.Var(named("rr"), Some(mul(field(circle, "r"), field(circle, "r")))),
+      p.Stmt.Var(named("a"), Some(mul(selectT("rr"), selectT(k)))),
+      ret(select("a"))
+    )
+  )
+  private val areaMid = method(
+    mid,
+    "area",
+    List(p.Arg(k)),
+    i32,
+    List(
+      p.Stmt.Var(named("rr"), Some(mul(field(mid, "r"), field(mid, "r")))),
       p.Stmt.Var(named("a"), Some(mul(selectT("rr"), selectT(k)))),
       ret(select("a"))
     )
@@ -121,7 +134,7 @@ class DevirtualiseSuite extends munit.FunSuite {
   private def program(body: List[p.Stmt]): p.Program =
     PassTest.program(
       entry(args = List(p.Arg(out), p.Arg(receiver), p.Arg(k)), body = body :+ ret(unit)),
-      List(areaAbstract, areaCircle, areaRect, growAbstract, growCircle, growRect),
+      List(areaAbstract, areaCircle, areaMid, areaRect, growAbstract, growCircle, growRect),
       defs
     )
 
@@ -177,6 +190,18 @@ class DevirtualiseSuite extends munit.FunSuite {
     val in = program(areaBody)
     assertEquals(run(in, 1, 2).out, 18L)
     assertEquals(run(in, 2, 2).out, 30L)
+  }
+
+  test("a candidate whose implementation is declared by another struct calls it through that struct") {
+    val inherited = Map(
+      sym("Shape", "area") -> List(
+        Devirtualise.Candidate(circle, sym("Mid", "area"), 1, implReceiver = Some(mid)),
+        Devirtualise.Candidate(rect, sym("Rect", "area"), 2)
+      )
+    )
+    val in = program(areaBody)
+    assertEquals(run(in, 1, 2, inherited).out, 18L)
+    assertEquals(run(in, 2, 2, inherited).out, 30L)
   }
 
   test("tags start at one so a zeroed receiver matches no class and raises") {

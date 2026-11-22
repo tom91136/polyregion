@@ -864,7 +864,8 @@ object Compiler {
       else
         s"Cannot devirtualise generic candidate classes, a tag identifies a class but not its type arguments: ${genericArms.mkString(", ")}".fail
     armClasses      = virtualCalls.flatMap(_._2.map(_._1))
-    allClassSymbols = (declaredClasses ++ armClasses).distinct
+    implClasses     = virtualCalls.flatMap(_._2.map(_._2.maybeOwner)).filter(_.isClassDef)
+    allClassSymbols = (declaredClasses ++ armClasses ++ implClasses).distinct
     depsWithOverrides = exprDeps.functions.flatMap { (sym, ivks) =>
       val symOwner = sym.maybeOwner
       val overridesFromHierarchy = allClassSymbols
@@ -946,7 +947,11 @@ object Compiler {
         p.Sym(method.fullName),
         receivers,
         arms.map((cls, impl) =>
-          Dispatch.Arm(structName0(cls), syntheticOverrideNames.getOrElse(impl, p.Sym(impl.fullName)))
+          Dispatch.Arm(
+            structName0(cls),
+            syntheticOverrideNames.getOrElse(impl, p.Sym(impl.fullName)),
+            structName0(impl.maybeOwner)
+          )
         )
       )
     }
@@ -956,7 +961,7 @@ object Compiler {
     exprDeps <- exprDeps
       .copy(
         functions = depsWithOverrides,
-        classes = exprDeps.classes ++ armClasses
+        classes = exprDeps.classes ++ (armClasses ++ implClasses)
           .filterNot(exprDeps.classes.contains)
           .distinct
           .map(c => c -> Set[p.Type.Struct](p.Type.Struct(structName0(c), Nil)))
