@@ -40,18 +40,16 @@
 
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringMap.h"
-#include "llvm/BinaryFormat/COFF.h"
 #include "llvm/BinaryFormat/Magic.h"
 #include "llvm/Config/llvm-config.h"
 #include "llvm/ExecutionEngine/JITLink/JITLinkMemoryManager.h"
+#include "llvm/ExecutionEngine/JITLink/x86_64.h"
 #include "llvm/ExecutionEngine/Orc/AbsoluteSymbols.h"
 #include "llvm/ExecutionEngine/Orc/EHFrameRegistrationPlugin.h"
 #include "llvm/ExecutionEngine/Orc/ExecutionUtils.h"
 #include "llvm/ExecutionEngine/Orc/ObjectLinkingLayer.h"
 #include "llvm/ExecutionEngine/Orc/SelfExecutorProcessControl.h"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
-#include "llvm/Object/COFF.h"
-#include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/DynamicLibrary.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -583,57 +581,62 @@ static std::string withGlobalPrefix(char prefix, std::string_view name) {
 
 static void *malloc_(size_t size) { return std::malloc(size); }
 
-// RuntimeDyldCOFFX86_64 zero-extends the 4-byte REL32 addend, so RIP-rel insns with a trailing imm
-// (vpinsrw, vextractf128) encoding -1..-5 in the patch-site overflow the INT32_MAX assert; rewrite each
-// to IMAGE_REL_AMD64_REL32_N (N=1..5) with a zero patch-site so RuntimeDyld computes Delta=4+N itself.
-// raw constants since winnt.h's IMAGE_REL_AMD64_* macros collide with llvm::COFF::* enums under MSVC
-static void rewriteCOFFRel32NegativeAddends(llvm::MutableArrayRef<char> buf) {
-  constexpr uint16_t Rel32 = 0x0004;
-  constexpr uint16_t FileMachineAMD64 = 0x8664;
-  constexpr size_t CoffHeaderMin = 20;
+namespace {
+// JITLink's COFF x86_64 backend places no stubs and has no image base, both of which RuntimeDyld provided:
+// - direct branches to symbols outside the slab (libm, malloc) are routed through jump stubs
+// - ADDR32NB relocations (.pdata, .xdata) are relative to an image base at the lowest block of the graph, so every RVA fits in 32 bits
+class CoffPlugin final : public llvm::orc::LinkGraphLinkingLayer::Plugin {
+  using LinkGraph = llvm::jitlink::LinkGraph;
 
-  if (buf.size() < CoffHeaderMin) return;
-  uint16_t machine;
-  std::memcpy(&machine, buf.data(), 2);
-  if (machine != FileMachineAMD64) return; // not an x86_64 COFF; ELF/Mach-O/import-lib skip the parse
-
-  const auto memBuf = llvm::MemoryBufferRef(llvm::StringRef(buf.data(), buf.size()), "<coff>");
-  auto objOrErr = llvm::object::ObjectFile::createObjectFile(memBuf);
-  if (!objOrErr) {
-    llvm::consumeError(objOrErr.takeError());
-    return;
+  static bool isRel32Branch(const llvm::jitlink::Block &block, const llvm::jitlink::Edge &edge) {
+    const auto offset = edge.getOffset();
+    if (offset < 2) return false;
+    const auto code = block.getContent();
+    const auto opcode = static_cast<uint8_t>(code[offset - 1]);
+    return opcode == 0xe8 || opcode == 0xe9 || (static_cast<uint8_t>(code[offset - 2]) == 0x0f && (opcode & 0xf0) == 0x80);
   }
-  const auto *coff = llvm::dyn_cast<llvm::object::COFFObjectFile>(objOrErr->get());
-  if (!coff) return;
 
-  char *const base = buf.data();
-  const size_t size = buf.size();
-
-  for (const auto &secRef : coff->sections()) {
-    const llvm::object::coff_section *cs = coff->getCOFFSection(secRef);
-    if (!cs || cs->NumberOfRelocations == 0 || cs->SizeOfRawData == 0) continue;
-    constexpr size_t Reloc = 10; // sizeof(coff_relocation)
-    size_t i = 0;
-    for (const auto &rel : coff->getRelocations(cs)) {
-      const size_t relOff = static_cast<size_t>(cs->PointerToRelocations) + (i * Reloc);
-      ++i;
-      if (rel.Type != Rel32 || rel.VirtualAddress < cs->VirtualAddress) continue;
-      const uint32_t off = rel.VirtualAddress - cs->VirtualAddress;
-      if (off + 4 > cs->SizeOfRawData) continue;
-      const size_t patchOff = static_cast<size_t>(cs->PointerToRawData) + off;
-      if (patchOff + 4 > size || relOff + Reloc > size) continue;
-
-      int32_t addend;
-      std::memcpy(&addend, base + patchOff, 4);
-      if (addend < -5 || addend > -1) continue;
-
-      const uint16_t newType = static_cast<uint16_t>(Rel32 + (-addend));
-      std::memcpy(base + relOff + offsetof(llvm::object::coff_relocation, Type), &newType, 2);
-      const uint32_t zero = 0;
-      std::memcpy(base + patchOff, &zero, 4);
-    }
+  static llvm::Error stubExternalBranches(LinkGraph &g) {
+    namespace x86_64 = llvm::jitlink::x86_64;
+    using namespace llvm::BitmaskEnumDetail;
+    // XXX COFF_x86_64.cpp keeps its PCRel32 kind private; it is the first platform relocation
+    constexpr auto CoffPCRel32 = x86_64::FirstPlatformRelocation;
+    llvm::jitlink::Section *pointers = nullptr, *stubs = nullptr;
+    llvm::DenseMap<llvm::jitlink::Symbol *, llvm::jitlink::Symbol *> stubFor;
+    for (auto *block : g.blocks())
+      for (auto &edge : block->edges()) {
+        if (edge.getKind() != CoffPCRel32 || !edge.getTarget().isExternal() || !isRel32Branch(*block, edge)) continue;
+        auto &stub = stubFor[&edge.getTarget()];
+        if (!stub) {
+          if (!pointers) pointers = &g.createSection("$POLY_POINTERS", llvm::orc::MemProt::Read);
+          if (!stubs) stubs = &g.createSection("$POLY_STUBS", llvm::orc::MemProt::Read | llvm::orc::MemProt::Exec);
+          stub = &x86_64::createAnonymousPointerJumpStub(g, *stubs, x86_64::createAnonymousPointer(g, *pointers, &edge.getTarget()));
+        }
+        edge.setTarget(*stub);
+      }
+    return llvm::Error::success();
   }
-}
+
+  static llvm::Error placeImageBase(LinkGraph &g) {
+    const auto base = g.findExternalSymbolByName(g.intern("__ImageBase"));
+    if (!base) return llvm::Error::success();
+    auto lowest = llvm::orc::ExecutorAddr(UINT64_MAX);
+    for (const auto *block : g.blocks())
+      lowest = std::min(lowest, block->getAddress());
+    g.makeAbsolute(*base, lowest);
+    return llvm::Error::success();
+  }
+
+public:
+  void modifyPassConfig(llvm::orc::MaterializationResponsibility &, LinkGraph &, llvm::jitlink::PassConfiguration &config) override {
+    config.PostPrunePasses.push_back(stubExternalBranches);
+    config.PostAllocationPasses.push_back(placeImageBase);
+  }
+  llvm::Error notifyFailed(llvm::orc::MaterializationResponsibility &) override { return llvm::Error::success(); }
+  llvm::Error notifyRemovingResources(llvm::orc::JITDylib &, llvm::orc::ResourceKey) override { return llvm::Error::success(); }
+  void notifyTransferringResources(llvm::orc::JITDylib &, llvm::orc::ResourceKey, llvm::orc::ResourceKey) override {}
+};
+} // namespace
 
 RelocatableDevice::RelocatableDevice() {
   POLYINVOKE_TRACE();
@@ -647,9 +650,10 @@ RelocatableDevice::RelocatableDevice() {
   // XXX RTDyld: SIGBUS on x86_64 macOS after libm kernels; missing R_RISCV_BRANCH (riscv64), TOC relocs (ppc64le)
   // and R_ARM_REL32 (arm), which PIC uses for every string literal reference
   const auto elfArch = hostTriple.isOSBinFormatELF() ? hostTriple.getArch() : llvm::Triple::UnknownArch;
-  const bool useJITLink = hostTriple.isOSBinFormatMachO() || elfArch == llvm::Triple::x86_64 || elfArch == llvm::Triple::riscv64
-                          || elfArch == llvm::Triple::aarch64 || elfArch == llvm::Triple::ppc64le || elfArch == llvm::Triple::arm
-                          || elfArch == llvm::Triple::thumb;
+  const bool coffX86_64 = hostTriple.isOSBinFormatCOFF() && hostTriple.getArch() == llvm::Triple::x86_64;
+  const bool useJITLink = hostTriple.isOSBinFormatMachO() || coffX86_64 || elfArch == llvm::Triple::x86_64
+                          || elfArch == llvm::Triple::riscv64 || elfArch == llvm::Triple::aarch64 || elfArch == llvm::Triple::ppc64le
+                          || elfArch == llvm::Triple::arm || elfArch == llvm::Triple::thumb;
   if (useJITLink) {
     auto mm = llvm::jitlink::InProcessMemoryManager::Create();
     if (!mm) POLYINVOKE_FATAL(RELOBJ_PREFIX, "Cannot create JITLink memory manager: %s", toString(mm.takeError()).c_str());
@@ -659,6 +663,7 @@ RelocatableDevice::RelocatableDevice() {
     if (!ehFrames)
       POLYINVOKE_FATAL(RELOBJ_PREFIX, "Cannot create EH frame registration plugin: %s", toString(ehFrames.takeError()).c_str());
     layer->addPlugin(std::move(*ehFrames));
+    if (coffX86_64) layer->addPlugin(std::make_unique<CoffPlugin>());
     // promote our object flags so duplicate symbols across modules don't fail materialisation
     layer->setOverrideObjectFlagsWithResponsibilityFlags(true);
     layer->setAutoClaimResponsibilityForObjectSymbols(true);
@@ -747,7 +752,6 @@ void RelocatableDevice::loadModule(const std::string &name, const std::string &i
     auto wbuf = llvm::WritableMemoryBuffer::getNewUninitMemBuffer(image.size(), name);
     if (!wbuf) POLYINVOKE_FATAL(RELOBJ_PREFIX, "Cannot allocate %zu-byte writable buffer for %s", image.size(), name.c_str());
     std::memcpy(wbuf->getBufferStart(), image.data(), image.size());
-    rewriteCOFFRel32NegativeAddends(wbuf->getBuffer());
     if (auto err = ol->add(jd, std::unique_ptr<llvm::MemoryBuffer>(std::move(wbuf)))) {
       POLYINVOKE_FATAL(RELOBJ_PREFIX, "Cannot load module: %s", toString(std::move(err)).c_str());
     }
