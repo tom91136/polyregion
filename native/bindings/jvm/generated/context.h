@@ -26,6 +26,8 @@ namespace polyregion::generated::registry::Context {
 [[maybe_unused]] jint platformCount0(JNIEnv *env, jclass);
 [[maybe_unused]] jlongArray platformInfo0(JNIEnv *env, jclass, jint platform);
 [[maybe_unused]] jstring platformName0(JNIEnv *env, jclass, jint platform);
+[[maybe_unused]] void recordHost0(JNIEnv *env, jclass, jlong address, jlong bytes);
+[[maybe_unused]] void releaseHost0(JNIEnv *env, jclass, jlong address);
 [[maybe_unused]] jint select0(JNIEnv *env, jclass, jlong context, jobjectArray imageNames, jbyteArray imageTargets,
                               jobjectArray imageFeatures, jobjectArray images);
 [[maybe_unused]] jboolean sharedAddressSpace0(JNIEnv *env, jclass, jlong context);
@@ -44,7 +46,7 @@ static void unregisterMethods(JNIEnv *env) {
 [[nodiscard]] static bool registerMethods(JNIEnv *env) {
   jclass found = env->FindClass("polyregion/jvm/runtime/Context");
   if (!found) return false;
-  const static JNINativeMethod methods[23] = {
+  const static JNINativeMethod methods[25] = {
       {.name = const_cast<char *>("address0"),
        .signature = const_cast<char *>("(Ljava/nio/ByteBuffer;)J"),
        .fnPtr = reinterpret_cast<void *>(&address0)},
@@ -95,6 +97,12 @@ static void unregisterMethods(JNIEnv *env) {
       {.name = const_cast<char *>("platformName0"),
        .signature = const_cast<char *>("(I)Ljava/lang/String;"),
        .fnPtr = reinterpret_cast<void *>(&platformName0)},
+      {.name = const_cast<char *>("recordHost0"),
+       .signature = const_cast<char *>("(JJ)V"),
+       .fnPtr = reinterpret_cast<void *>(&recordHost0)},
+      {.name = const_cast<char *>("releaseHost0"),
+       .signature = const_cast<char *>("(J)V"),
+       .fnPtr = reinterpret_cast<void *>(&releaseHost0)},
       {.name = const_cast<char *>("select0"),
        .signature = const_cast<char *>("(J[Ljava/lang/String;[B[[Ljava/lang/String;[[B)I"),
        .fnPtr = reinterpret_cast<void *>(&select0)},
@@ -102,7 +110,7 @@ static void unregisterMethods(JNIEnv *env) {
        .signature = const_cast<char *>("(J)Z"),
        .fnPtr = reinterpret_cast<void *>(&sharedAddressSpace0)},
       {.name = const_cast<char *>("stats0"), .signature = const_cast<char *>("(J)[J"), .fnPtr = reinterpret_cast<void *>(&stats0)}};
-  const jint result = env->RegisterNatives(found, methods, 23);
+  const jint result = env->RegisterNatives(found, methods, 25);
   env->DeleteLocalRef(found);
   return result == 0;
 }

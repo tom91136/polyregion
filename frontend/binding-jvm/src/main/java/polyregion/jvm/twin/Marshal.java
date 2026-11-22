@@ -132,7 +132,10 @@ public final class Marshal implements AutoCloseable {
   public long stage(ByteBuffer host) {
     requireOpen();
     Queue.requireNotCompletionThread();
-    if (shared()) return register(host, Context.addressOf(host));
+    if (shared()) {
+      Context.recordHost(host);
+      return register(host, Context.addressOf(host));
+    }
     Settled settled = new Settled();
     long pointer = register(host, queue.invalidate(host, settled));
     settled.await();
@@ -414,10 +417,11 @@ public final class Marshal implements AutoCloseable {
   public void close() {
     closed = true;
     RuntimeException failure = null;
-    if (!staged.isEmpty() && !shared())
+    if (!staged.isEmpty())
       for (Staged s : staged)
         try {
-          queue.release(s.buffer);
+          if (shared()) Context.releaseHost(s.buffer);
+          else queue.release(s.buffer);
         } catch (RuntimeException e) {
           if (failure == null) failure = e;
           else failure.addSuppressed(e);

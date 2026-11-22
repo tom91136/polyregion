@@ -45,6 +45,10 @@ public final class Context implements AutoCloseable {
 
   static native long address0(ByteBuffer buffer);
 
+  static native void recordHost0(long address, long bytes);
+
+  static native void releaseHost0(long address);
+
   static native boolean sharedAddressSpace0(long context);
 
   static native long[] stats0(long context);
@@ -187,6 +191,21 @@ public final class Context implements AutoCloseable {
   public static long addressOf(ByteBuffer buffer) {
     ensureLoaded();
     return address0(buffer);
+  }
+
+  /**
+   * Makes a host buffer known to the runtime, which sizes what a capture points at by the buffers
+   * recorded here. A launch on the default context that passes a host pointer needs it recorded.
+   */
+  public static void recordHost(ByteBuffer buffer) {
+    ensureLoaded();
+    recordHost0(address0(buffer), buffer.capacity());
+  }
+
+  /** Forgets a buffer recorded with {@link #recordHost}. */
+  public static void releaseHost(ByteBuffer buffer) {
+    ensureLoaded();
+    releaseHost0(address0(buffer));
   }
 
   void requireOpen() {

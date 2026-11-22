@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -17,7 +18,9 @@
 #include "polyregion/enums.h"
 #include "polyregion/env_keys.h"
 #include "polyregion/types.h"
+#include "polyrt/mem.hpp"
 #include "polyrt/rt.h"
+#include "polyrt/sma_runtime.hpp"
 
 #include "generated/context.h"
 #include "jni_utils.h"
@@ -33,6 +36,40 @@ using namespace generated::registry;
 static constexpr const char *EX = "polyregion/jvm/runtime/PolyregionRuntimeException";
 
 static JavaVM *CurrentVM = nullptr;
+
+namespace {
+
+struct HostBlocks {
+  std::mutex mutex;
+  std::map<uintptr_t, size_t> blocks;
+};
+
+HostBlocks &hostBlocks() {
+  static auto *blocks = new HostBlocks();
+  return *blocks;
+}
+
+auto &hostAllocations() {
+  static auto *allocations = new polyrt::SynchronisedMemAllocation(
+      [](const void *ptr) -> polyrt::PtrQuery {
+        auto &host = hostBlocks();
+        const std::scoped_lock lock(host.mutex);
+        const auto address = reinterpret_cast<uintptr_t>(ptr);
+        const auto upper = host.blocks.upper_bound(address);
+        if (upper == host.blocks.begin()) return {0, 0};
+        const auto &[base, size] = *std::prev(upper);
+        return address - base <= size ? polyrt::PtrQuery{.sizeInBytes = size, .offsetInBytes = address - base} : polyrt::PtrQuery{0, 0};
+      },
+      polyrt::sma::stdRemoteAlloc(), polyrt::sma::stdRemoteRead(), polyrt::sma::stdRemoteWrite(), polyrt::sma::stdRemoteRelease());
+  return *allocations;
+}
+
+polyrt::sma::CaptureMarshal &hostCaptureMarshal() {
+  static auto *marshal = new polyrt::sma::CaptureMarshalOf<std::remove_reference_t<decltype(hostAllocations())>>(hostAllocations());
+  return *marshal;
+}
+
+} // namespace
 
 [[maybe_unused]] JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *) {
   if (const char *d = std::getenv(env::PolyregionDebug); d && *d) fprintf(stderr, "OnLoad polyrt\n");
@@ -52,11 +89,13 @@ static JavaVM *CurrentVM = nullptr;
   if (!promoted) return JNI_ERR;
 #endif
   if (!Context::registerMethods(env)) return JNI_ERR;
+  polyregion::polyrt::sma::registerCaptureMarshal(&hostCaptureMarshal());
   return JNI_VERSION_1_1;
 }
 
 [[maybe_unused]] JNIEXPORT void JNICALL JNI_OnUnload(JavaVM *vm, void *) {
   if (const char *d = std::getenv(env::PolyregionDebug); d && *d) fprintf(stderr, "OnUnload polyrt\n");
+  polyregion::polyrt::sma::registerCaptureMarshal(nullptr);
   if (JNIEnv *env = getEnv(vm); env) Context::unregisterMethods(env);
 }
 
@@ -425,6 +464,25 @@ jlong Context::address0(JNIEnv *env, jclass, jobject buffer) {
     const auto *address = env->GetDirectBufferAddress(buffer);
     if (!address) throw std::runtime_error("The buffer is not a direct buffer");
     return static_cast<jlong>(reinterpret_cast<uintptr_t>(address));
+  });
+}
+
+void Context::recordHost0(JNIEnv *env, jclass, jlong address, jlong bytes) {
+  wrapException(env, EX, [&] {
+    auto &host = hostBlocks();
+    const std::scoped_lock lock(host.mutex);
+    host.blocks[static_cast<uintptr_t>(address)] = static_cast<size_t>(bytes);
+  });
+}
+
+void Context::releaseHost0(JNIEnv *env, jclass, jlong address) {
+  wrapException(env, EX, [&] {
+    {
+      auto &host = hostBlocks();
+      const std::scoped_lock lock(host.mutex);
+      host.blocks.erase(static_cast<uintptr_t>(address));
+    }
+    hostAllocations().disassociate(reinterpret_cast<const void *>(address), /*releaseRemote*/ false);
   });
 }
 
