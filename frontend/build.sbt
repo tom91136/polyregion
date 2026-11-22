@@ -553,6 +553,7 @@ lazy val cudaSuiteSupport =
   Set(
     "BaseSuite.scala",
     "ClosureFixtures.scala",
+    "CudaProbe.scala",
     "DevirtFixtures.scala",
     "ParCases.scala",
     "RangeSuiteBase.scala",

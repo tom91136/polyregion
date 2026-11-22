@@ -14,9 +14,7 @@ object RecursionSuite {
 
 class RecursionSuite extends munit.FunSuite {
 
-  private lazy val hasCuda =
-    try blocking.CUDA.devices.nonEmpty
-    catch { case _: Throwable => false }
+  private lazy val hasCuda = CudaProbe.hasDevice
 
   private inline def downFrom(inline depth: Int): Int = {
     def down(n: Int): Int = if (n <= 0) 0 else 1 + down(n - 1)

@@ -9,9 +9,7 @@ import scala.reflect.ClassTag
 
 trait CudaIntrinsicBase extends BaseSuite {
 
-  protected lazy val hasCuda =
-    try polyregion.scalalang.blocking.CUDA.devices.nonEmpty
-    catch { case _: Throwable => false }
+  protected lazy val hasCuda = CudaProbe.hasDevice
 
   protected inline def onCuda[A](inline f: => A): A = {
     val ctx   = polyregion.scalalang.blocking.CUDA.devices.head.context
