@@ -78,7 +78,7 @@ MetalDevice::MetalDevice(decltype(device) device_)
           [this](auto &&image) {
             POLYINVOKE_TRACE();
             auto options = MTL::CompileOptions::alloc()->init();
-            options->setFastMathEnabled(true);
+            options->setFastMathEnabled(false);
             NS::Error *error = nil;
             return NOT_NIL_ERROR(device->newLibrary(NS::String::string(image.c_str(), NS::StringEncoding::UTF8StringEncoding), //
                                                     options,                                                                   //
