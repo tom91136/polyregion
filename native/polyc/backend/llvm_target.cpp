@@ -451,12 +451,20 @@ llvmc::TargetInfo LLVMBackend::Options::targetInfo() const {
                              + Triple::getArchTypeName(archTpe).str() + " but the host arch is different ("
                              + Triple::getArchTypeName(defaultTriple.getArch()).str() + ")");
 
-    Triple triple = defaultTriple;
-    triple.setArch(archTpe);
+    const auto matchesArch = [&](const Triple &t) {
+      return t.getArch() == archTpe || (archTpe == Triple::ArchType::arm && t.getArch() == Triple::ArchType::thumb);
+    };
+    Triple resolved = defaultTriple;
+    if (triple.empty()) resolved.setArch(archTpe);
+    else {
+      resolved = Triple(triple);
+      if (!matchesArch(resolved))
+        throw BackendException("Triple `" + triple + "` does not match the " + Triple::getArchTypeName(archTpe).str() + " target");
+    }
     return llvmc::TargetInfo{
-        .triple = triple,
+        .triple = resolved,
         .layout = {},
-        .target = llvmc::targetFromTriple(triple),
+        .target = llvmc::targetFromTriple(resolved),
         .cpu = wantHost ? llvmc::hostCpuInfo() : llvmc::CpuInfo{.uArch = arch, .features = {}},
     };
   };

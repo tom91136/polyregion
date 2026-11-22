@@ -154,6 +154,7 @@ static backend::LLVMBackend::Options toLLVMBackendOptions(const compiler::Option
   }();
   opts.emitBitcode = options.hostMirroring;
   opts.workgroupMemoryBytes = options.workgroupMemoryBytes;
+  opts.triple = options.triple;
   return opts;
 }
 

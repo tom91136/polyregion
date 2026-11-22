@@ -964,11 +964,12 @@ TEST_CASE("CPU remote-operation ABI follows the target pointer width", "[backend
 
   checkAbi(polyregion::compiler::compile(p, {Target::Object_LLVM_HOST, "native"}, OptLevel::O0), sizeof(void *) == 4 ? "i32" : "i64");
 
-  auto armTriple = llvm::Triple(llvm::sys::getProcessTriple());
-  armTriple.setArch(llvm::Triple::arm);
+  llvm::Triple armTriple("armv7-unknown-linux-gnueabihf");
   std::string targetError;
   if (llvm::TargetRegistry::lookupTarget("", armTriple, targetError)) {
-    checkAbi(polyregion::compiler::compile(p, {Target::Object_LLVM_ARM, "cortex-a7"}, OptLevel::O0), "i32");
+    polyregion::compiler::Options armOptions{Target::Object_LLVM_ARM, "cortex-a7"};
+    armOptions.triple = armTriple.str();
+    checkAbi(polyregion::compiler::compile(p, armOptions, OptLevel::O0), "i32");
   } else WARN("ARM target is unavailable in this LLVM distribution: " << targetError);
 }
 

@@ -29,6 +29,7 @@ public:
     bool emitBitcode = false;
     uint32_t workgroupMemoryBytes = 32768;
     bool spirvVersion13 = false;
+    std::string triple;
     [[nodiscard]] llvmc::TargetInfo targetInfo() const;
   };
 

@@ -41,6 +41,7 @@ struct POLYREGION_EXPORT Options {
   POLYREGION_EXPORT std::string pipelineSpec = {}; // pipeline spec ("Name(k=v,k=v); Name; ...")
   POLYREGION_EXPORT bool hostMirroring = false;    // compile only Host-affinity functions, emit bitcode
   POLYREGION_EXPORT uint32_t workgroupMemoryBytes = defaultWorkgroupMemoryBytes(target);
+  POLYREGION_EXPORT std::string triple; // CPU targets only; empty derives the triple from the host
 };
 
 struct POLYREGION_EXPORT Staged {
