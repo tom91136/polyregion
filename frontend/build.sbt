@@ -530,6 +530,7 @@ lazy val cudaSuites =
   Set(
     "ArrayMemberSuite.scala",
     "AssertSuite.scala",
+    "ClosureDeviceSuite.scala",
     "CudaExactIntrinsicSuite.scala",
     "CudaIntrinsicBase.scala",
     "CudaIntrinsicSuite.scala",

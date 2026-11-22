@@ -141,6 +141,23 @@ class ClosureSuite extends BaseSuite {
     def quad(g: Int => Int, x: Int): Int  = twice(g, twice(g, x))
     quad(_ + 1, 0)
   }
+  testExpr("hof-lambda-captures-callable-parameter") {
+    def twice(f: Int => Int, x: Int): Int = f(f(x))
+    def quad(g: Int => Int, x: Int): Int  = twice(y => g(y) + 1, x)
+    quad(_ * 2, 3)
+  }
+  testExpr("hof-lambda-captures-callable-parameter-and-local") {
+    val k                                 = 10
+    def twice(f: Int => Int, x: Int): Int = f(f(x))
+    def quad(g: Int => Int, x: Int): Int  = twice(y => g(y) + k, x)
+    quad(_ * 2, 3) + quad(_ - 1, 4)
+  }
+  testExpr("hof-lambda-captures-callable-parameter-two-levels") {
+    def twice(f: Int => Int, x: Int): Int = f(f(x))
+    def quad(g: Int => Int, x: Int): Int  = twice(y => g(y) + 1, x)
+    def oct(h: Int => Int, x: Int): Int   = quad(y => h(y) * 2, x)
+    oct(_ + 3, 1)
+  }
   testExpr("hof-inline") {
     inline def twice(inline f: Int => Int, x: Int): Int = f(f(x))
     twice(_ + 1, 40)

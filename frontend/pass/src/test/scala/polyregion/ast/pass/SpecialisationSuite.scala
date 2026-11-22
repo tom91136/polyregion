@@ -513,6 +513,88 @@ class SpecialisationSuite extends munit.FunSuite {
     )
   }
 
+  test("a lambda over a callable parameter is specialised with its enclosing function") {
+    val i32                                = p.Type.IntS32
+    def callable(name: String): p.Type.Var = p.Type.Var(name)
+    def call(callee: p.Type, f: p.Named, x: p.Term, tpeArgs: List[p.Type] = Nil): p.Expr =
+      p.Expr.Invoke(callee, tpeArgs, Some(selectT(f)), List(x), i32)
+    def poison(name: p.Sym): p.Term = p.Term.Poison(p.Type.FnRef(name))
+
+    val double = fn(
+      "double",
+      args = List(arg("x")),
+      rtn = i32,
+      body = List(p.Stmt.Return(p.Expr.IntrOp(p.Intr.Mul(selectT("x"), p.Term.IntS32Const(2), i32))))
+    )
+    val g1Var = callable("g#fn")
+    val g1    = named("g", g1Var)
+    val lambda = fn(
+      "lambda$anonfun",
+      args = List(arg("y")),
+      rtn = i32,
+      tpeVars = List("g#fn"),
+      termCaptures = List(p.Arg(g1)),
+      body = List(
+        p.Stmt.Var(named("r"), Some(call(g1Var, g1, selectT("y")))),
+        p.Stmt.Return(p.Expr.IntrOp(p.Intr.Add(selectT("r"), p.Term.IntS32Const(1), i32)))
+      )
+    )
+    val fVar = callable("f#fn")
+    val f    = named("f", fVar)
+    val twice = fn(
+      "twice",
+      args = List(p.Arg(f), arg("x")),
+      rtn = i32,
+      tpeVars = List("f#fn"),
+      body = List(
+        p.Stmt.Var(named("a"), Some(call(fVar, f, selectT("x")))),
+        p.Stmt.Return(call(fVar, f, selectT("a")))
+      )
+    )
+    val quad = fn(
+      "quad",
+      args = List(p.Arg(g1), arg("x")),
+      rtn = i32,
+      tpeVars = List("g#fn"),
+      body = List(
+        p.Stmt.Return(
+          p.Expr.Invoke(
+            p.Type.FnRef(twice.name),
+            List(p.Type.FnRef(lambda.name)),
+            None,
+            List(poison(lambda.name), selectT("x")),
+            i32
+          )
+        )
+      )
+    )
+    val e = entry(body =
+      List(
+        p.Stmt.Var(
+          named("r"),
+          Some(
+            p.Expr.Invoke(
+              p.Type.FnRef(quad.name),
+              List(p.Type.FnRef(double.name)),
+              None,
+              List(poison(double.name), p.Term.IntS32Const(3)),
+              i32
+            )
+          )
+        ),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+    val out     = Specialisation(program(e, List(double, lambda, twice, quad)), NoopLog)
+    val defined = out.functions.map(_.name).toSet
+    val callees = (out.entry.toList ::: out.functions).flatMap(_.collectWhere[p.Expr] {
+      case p.Expr.Invoke(p.Type.FnRef(name), _, _, _, _) => name :: Nil
+      case _                                             => Nil
+    }.flatten)
+    assert(callees.forall(defined), s"undefined callees: ${callees.filterNot(defined).map(_.repr)}")
+    assert(out.functions.forall(_.tpeVars.isEmpty), out.functions.map(f => f.name.repr -> f.tpeVars).toString)
+  }
+
   test("remote launch inference selects the matching overloaded kernel") {
     val name = sym("overloaded.kernel")
     val unary = fn(

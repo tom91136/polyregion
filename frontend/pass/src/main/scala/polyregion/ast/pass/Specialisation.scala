@@ -30,7 +30,8 @@ object Specialisation extends ProgramPass {
       tpeArgs: List[p.Type],
       templateKey: String,
       identityKey: String,
-      function: p.Function
+      function: p.Function,
+      companions: List[(String, p.Function)] = Nil
   )
 
   private def appliedTypeArgs(receiver: Option[p.Term], tpeArgs: List[p.Type]): List[p.Type] =
@@ -417,6 +418,45 @@ object Specialisation extends ProgramPass {
     }
   }
 
+  private def isClosure(name: p.Sym): Boolean = name.fqn.lastOption.exists(_.contains("$anonfun"))
+
+  private def closureTemplates(
+      fn: p.Function,
+      tpeLut: Map[String, p.Type],
+      overloads: Map[p.Sym, List[p.Function]]
+  ): List[p.Function] =
+    fn.collectWhere[p.Type] { case p.Type.FnRef(name) if isClosure(name) => name :: Nil }
+      .flatten
+      .distinct
+      .flatMap(name =>
+        overloads.getOrElse(name, Nil) match {
+          case template :: Nil
+              if template.name != fn.name && template.tpeVars.nonEmpty &&
+                template.tpeVars.forall(variable => tpeLut.contains(variable.name)) =>
+            template :: Nil
+          case _ => Nil
+        }
+      )
+
+  private def closureArgs(template: p.Function, tpeLut: Map[String, p.Type]): List[p.Type] =
+    template.tpeVars.map(variable => tpeLut(variable.name))
+
+  private def closureName(template: p.Function, tpeLut: Map[String, p.Type]): p.Sym =
+    monomorphicName(template.name, closureArgs(template, tpeLut))
+
+  private def closureCompanions(
+      fn: p.Function,
+      tpeLut: Map[String, p.Type],
+      overloads: Map[p.Sym, List[p.Function]]
+  ): List[(String, p.Function)] =
+    closureTemplates(fn, tpeLut, overloads).flatMap { template =>
+      val args = closureArgs(template, tpeLut)
+      instantiate(template, args, closureName(template, tpeLut), overloads).toList.flatMap { companion =>
+        val key = (template.signatureKey :: args.map(_.canonicalName)).mkString("\u0000")
+        (key -> companion) :: closureCompanions(template, template.tpeVars.map(_.name).zip(args).toMap, overloads)
+      }
+    }
+
   private def instantiate(
       fn: p.Function,
       tpeArgs: List[p.Type],
@@ -426,12 +466,14 @@ object Specialisation extends ProgramPass {
     if (fn.tpeVars.isEmpty) Option.when(tpeArgs.isEmpty)(fn.copy(decl = fn.decl.copy(name = newName)))
     else
       Option.when(fn.tpeVars.size == tpeArgs.size) {
-        val tpeLut = fn.tpeVars.map(_.name).zip(tpeArgs).toMap
+        val tpeLut  = fn.tpeVars.map(_.name).zip(tpeArgs).toMap
+        val renames = closureTemplates(fn, tpeLut, overloads).map(t => t.name -> closureName(t, tpeLut)).toMap
         val substituted = fn
           .copy(decl = fn.decl.copy(name = newName, tpeVars = Nil))
           .modifyAll[p.Type](Binders.protectExec(ExecBinderPrefix))
           .modifyAll[p.Type] {
             case v @ p.Type.Var(name, _) => tpeLut.getOrElse(name, v)
+            case p.Type.FnRef(name)      => p.Type.FnRef(renames.getOrElse(name, name))
             case x                       => x
           }
           .modifyAll[p.Type](Binders.unprotectExec(ExecBinderPrefix))
@@ -534,7 +576,15 @@ object Specialisation extends ProgramPass {
               instantiate(fn, args, monomorphicName(fn, args, callables.map(_._2.name), overloads), overloads)
             )
             .map(materialiseErasedCallables(callsite, _, overloads))
-            .map(Candidate(args, fn.signatureKey, identity.mkString("\u0000"), _))
+            .map(
+              Candidate(
+                args,
+                fn.signatureKey,
+                identity.mkString("\u0000"),
+                _,
+                closureCompanions(fn, fn.tpeVars.map(_.name).zip(args).toMap, overloads)
+              )
+            )
         }
       }
       .filter(candidate => matches(callsite, candidate.function, allowScalarConversion))
@@ -631,12 +681,21 @@ object Specialisation extends ProgramPass {
                   )
                 case _ => ()
               }
-              recursiveSpecialise(
-                fnOverloads,
-                specialisedFnImpl,
-                overloadState.copy(functions = overloadState.functions + (key -> specialisedFnImpl)),
-                ancestry.updated(candidate.templateKey, history :+ candidate.tpeArgs)
+              val companions =
+                candidate.companions.filterNot((companionKey, _) => overloadState.functions.contains(companionKey))
+              val registered = overloadState.copy(functions =
+                overloadState.functions + (key -> specialisedFnImpl) ++ companions
+                  .map((k, f) => k -> inferLaunchArguments(f, fnOverloads))
               )
+              (specialisedFnImpl :: companions.map((_, f) => inferLaunchArguments(f, fnOverloads)))
+                .foldLeft(registered) { (acc, impl) =>
+                  recursiveSpecialise(
+                    fnOverloads,
+                    impl,
+                    acc,
+                    ancestry.updated(candidate.templateKey, history :+ candidate.tpeArgs)
+                  )
+                }
             }
           }
         }
