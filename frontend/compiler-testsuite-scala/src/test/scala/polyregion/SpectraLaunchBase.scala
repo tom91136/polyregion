@@ -44,6 +44,29 @@ trait SpectraLaunchBase extends munit.FunSuite {
     assertEquals(spectra.reduce(ctx, xs, xs.length, 0, (a: Int, b: Int) => a + b), xs.sum)
   }
 
+  protected def reduceOrderCase(ctx: rt.Context): Unit = {
+    val xs = Array.tabulate(100000)(_ + 1)
+    assertEquals(spectra.reduce(ctx, xs, xs.length, 0, (_: Int, b: Int) => b), xs.last)
+  }
+
+  protected def transformReduceOrderCase(ctx: rt.Context): Unit = {
+    val xs = Array.tabulate(100000)(_ + 1)
+    assertEquals(spectra.transform_reduce(ctx, xs, xs.length, 0, (x: Int) => x * 2, (_: Int, b: Int) => b), xs.last * 2)
+  }
+
+  protected def reduceUnorderedCase(ctx: rt.Context): Unit = {
+    val xs = Array.tabulate(100000)(_ + 1)
+    assertEquals(spectra.reduce_unordered(ctx, xs, xs.length, 0, (a: Int, b: Int) => a + b), xs.sum)
+  }
+
+  protected def transformReduceUnorderedCase(ctx: rt.Context): Unit = {
+    val xs = Array.tabulate(1000)(_ + 1)
+    assertEquals(
+      spectra.transform_reduce_unordered(ctx, xs, xs.length, 0, (x: Int) => x % 7, (a: Int, b: Int) => a + b),
+      xs.map(_ % 7).sum
+    )
+  }
+
   protected def captureCase(ctx: rt.Context): Unit = {
     val xs     = Array.tabulate(1000)(identity)
     val out    = Array.ofDim[Int](xs.length)
@@ -123,6 +146,14 @@ trait SpectraLaunchBase extends munit.FunSuite {
     test("spectra.sort sorts on the selected device")(onSelected(sortCase(_)))
     test("spectra.transform maps on the selected device")(onSelected(transformCase(_)))
     test("spectra.reduce reduces on the selected device")(onSelected(reduceCase(_)))
+    test("spectra.reduce keeps encounter order on the selected device")(onSelected(reduceOrderCase(_)))
+    test("spectra.transform_reduce keeps encounter order on the selected device")(
+      onSelected(transformReduceOrderCase(_))
+    )
+    test("spectra.reduce_unordered reduces on the selected device")(onSelected(reduceUnorderedCase(_)))
+    test("spectra.transform_reduce_unordered reduces on the selected device")(
+      onSelected(transformReduceUnorderedCase(_))
+    )
     test("spectra.sort by a captured key array on the selected device")(onSelected(sortByKeyArrayCase(_)))
   }
 
@@ -149,6 +180,14 @@ trait SpectraLaunchBase extends munit.FunSuite {
     test(s"spectra.sort sorts on $kind")(withContext(created)(launched(sortCase(_))))
     test(s"spectra.transform maps on $kind")(withContext(created)(launched(transformCase(_))))
     test(s"spectra.reduce reduces on $kind")(withContext(created)(launched(reduceCase(_))))
+    test(s"spectra.reduce keeps encounter order on $kind")(withContext(created)(launched(reduceOrderCase(_))))
+    test(s"spectra.transform_reduce keeps encounter order on $kind")(
+      withContext(created)(launched(transformReduceOrderCase(_)))
+    )
+    test(s"spectra.reduce_unordered reduces on $kind")(withContext(created)(launched(reduceUnorderedCase(_))))
+    test(s"spectra.transform_reduce_unordered reduces on $kind")(
+      withContext(created)(launched(transformReduceUnorderedCase(_)))
+    )
   }
 
   test("a pointer-bearing capture reads the host array in place on the host")(host(pointerCaptureCase(_)))
@@ -160,6 +199,10 @@ trait SpectraLaunchBase extends munit.FunSuite {
   test("spectra.sort by a captured key array on the host")(host(sortByKeyArrayCase(_)))
   test("spectra.transform maps on the host")(host(transformCase(_)))
   test("spectra.reduce reduces on the host")(host(reduceCase(_)))
+  test("spectra.reduce keeps encounter order on the host")(host(reduceOrderCase(_)))
+  test("spectra.transform_reduce keeps encounter order on the host")(host(transformReduceOrderCase(_)))
+  test("spectra.reduce_unordered reduces on the host")(host(reduceUnorderedCase(_)))
+  test("spectra.transform_reduce_unordered reduces on the host")(host(transformReduceUnorderedCase(_)))
 
   test("a struct-array launch argument is rejected at expansion") {
     val errors = typeCheckErrors("""

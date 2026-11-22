@@ -117,6 +117,16 @@ abstract class ParCases extends munit.FunSuite {
     assertEquals(xs.par.on(ctx).map(_ - 5).reduce(_ + _), xs.map(_ - 5).reduce(_ + _))
   }
 
+  check("reduce and fold keep encounter order for a non-commutative operator") { ctx =>
+    val xs = ints(100000).map(_ + 1)
+    assertEquals(xs.par.on(ctx).reduce((_, b) => b), xs.reduce((_, b) => b))
+    assertEquals(xs.par.on(ctx).map(_ * 2).reduce((_, b) => b), xs.map(_ * 2).reduce((_, b) => b))
+    assertEquals(xs.par.on(ctx).filter(_ % 3 != 0).reduce((_, b) => b), xs.filter(_ % 3 != 0).reduce((_, b) => b))
+    assertEquals(xs.par.on(ctx).fold(0)((_, b) => b), xs.fold(0)((_, b) => b))
+    assertEquals((0 until 100000).par.on(ctx).reduce((_, b) => b), 99999)
+    assertEquals((0 until 100000).par.on(ctx).fold(7)((_, b) => b), 99999)
+  }
+
   check("reduce of a filtered chain materialises first") { ctx =>
     val xs = ints(1000)
     assertEquals(xs.par.on(ctx).filter(_ > 0).reduce(_ + _), xs.filter(_ > 0).reduce(_ + _))

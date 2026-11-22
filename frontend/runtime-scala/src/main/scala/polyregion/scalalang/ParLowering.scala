@@ -8,15 +8,16 @@ import scala.quoted.*
 object ParLowering {
 
   object Spectra {
-    val Transform: String       = "spectra:spectra.transform"
-    val Tabulate: String        = "spectra:spectra.tabulate"
-    val CopyIf: String          = "spectra:spectra.copy_if"
-    val TransformReduce: String = "spectra:spectra.transform_reduce"
-    val AnyOf: String           = "spectra:spectra.any_of"
-    val AllOf: String           = "spectra:spectra.all_of"
-    val CountIf: String         = "spectra:spectra.count_if"
-    val Sort: String            = "spectra:spectra.sort"
-    val StableSort: String      = "spectra:spectra.stable_sort"
+    val Transform: String                = "spectra:spectra.transform"
+    val Tabulate: String                 = "spectra:spectra.tabulate"
+    val CopyIf: String                   = "spectra:spectra.copy_if"
+    val TransformReduce: String          = "spectra:spectra.transform_reduce"
+    val TransformReduceUnordered: String = "spectra:spectra.transform_reduce_unordered"
+    val AnyOf: String                    = "spectra:spectra.any_of"
+    val AllOf: String                    = "spectra:spectra.all_of"
+    val CountIf: String                  = "spectra:spectra.count_if"
+    val Sort: String                     = "spectra:spectra.sort"
+    val StableSort: String               = "spectra:spectra.stable_sort"
   }
 
   def toArray[T: Type](xs: Expr[Any])(using q: Quotes): Expr[Array[T]]    = Lowerer(q).toArray[T](xs)
@@ -38,6 +39,10 @@ object ParLowering {
 
 class Lowerer(val q: Quotes) extends ParChain {
   import q.reflect.*
+
+  private enum Order {
+    case Ordered, Unordered
+  }
 
   private enum Bound {
     case Held(array: Term, elem: TypeRepr)
@@ -211,16 +216,27 @@ class Lowerer(val q: Quotes) extends ParChain {
       )
     }.asTerm
 
-  private def coreReduce[R: Type](ctx: Term, n: Term, init: Term, map: Term, op: Term): Term =
-    '{
-      polyregion.offload.transform_reduce[R](
-        ${ ctx.asExprOf[rt.Context] },
-        ${ n.asExprOf[Long] },
-        ${ init.asExprOf[R] },
-        ${ map.asExprOf[Long => R] },
-        ${ op.asExprOf[(R, R) => R] }
-      )
-    }.asTerm
+  private def coreReduce[R: Type](order: Order, ctx: Term, n: Term, init: Term, map: Term, op: Term): Term =
+    if (order == Order.Ordered)
+      '{
+        polyregion.offload.transform_reduce[R](
+          ${ ctx.asExprOf[rt.Context] },
+          ${ n.asExprOf[Long] },
+          ${ init.asExprOf[R] },
+          ${ map.asExprOf[Long => R] },
+          ${ op.asExprOf[(R, R) => R] }
+        )
+      }.asTerm
+    else
+      '{
+        polyregion.offload.transform_reduce_unordered[R](
+          ${ ctx.asExprOf[rt.Context] },
+          ${ n.asExprOf[Long] },
+          ${ init.asExprOf[R] },
+          ${ map.asExprOf[Long => R] },
+          ${ op.asExprOf[(R, R) => R] }
+        )
+      }.asTerm
 
   private def newArray(elem: TypeRepr, n: Term): Term = elem.asType match {
     case '[t] =>
@@ -351,17 +367,19 @@ class Lowerer(val q: Quotes) extends ParChain {
       whenPositive[Unit](frame.length, unit)(coreForEach(frame.context, Select.unique(frame.length, "toLong"), body))
     }.asExprOf[Unit]
 
-  private def reduceNeutral[R: Type](frame: Frame, neutral: Term, op: Term, leaf: Term => Term): Term =
+  private def reduceNeutral[R: Type](order: Order, frame: Frame, neutral: Term, op: Term, leaf: Term => Term): Term =
     whenPositive[R](frame.length, neutral) {
       frame.source match {
         case Bound.Held(array, _) =>
           call[R](
-            ParLowering.Spectra.TransformReduce,
+            if (order == Order.Ordered) ParLowering.Spectra.TransformReduce
+            else ParLowering.Spectra.TransformReduceUnordered,
             frame.context,
             List(array, frame.length, neutral, over(frame, TypeRepr.of[R])(leaf, neutral), op)
           )
         case Bound.Indexed(_, _) =>
           coreReduce[R](
+            order,
             frame.context,
             Select.unique(frame.length, "toLong"),
             neutral,
@@ -379,7 +397,9 @@ class Lowerer(val q: Quotes) extends ParChain {
 
   private def arithmetic[T: Type](xs: Expr[Any], what: String, neutral: Int, op: String): Expr[T] = {
     val tpe = numeric[T](what)
-    bind(xs)(frame => reduceNeutral[T](frame, literal(tpe, neutral), combine(tpe)(infix(_, op, _)), identity))
+    bind(xs)(frame =>
+      reduceNeutral[T](Order.Unordered, frame, literal(tpe, neutral), combine(tpe)(infix(_, op, _)), identity)
+    )
       .asExprOf[T]
   }
 
@@ -390,11 +410,11 @@ class Lowerer(val q: Quotes) extends ParChain {
   def fold[T: Type](xs: Expr[Any], z: Expr[T], op: Expr[Any]): Expr[T] =
     bind(xs)(frame =>
       ValDef.let(Symbol.spliceOwner, "neutral", z.asTerm)(neutral =>
-        reduceNeutral[T](frame, neutral, stripped(op.asTerm), identity)
+        reduceNeutral[T](Order.Ordered, frame, neutral, stripped(op.asTerm), identity)
       )
     ).asExprOf[T]
 
-  private def reduceFirst[R: Type](frame: Frame, op: Term, what: String): Term = {
+  private def reduceFirst[R: Type](order: Order, frame: Frame, op: Term, what: String): Term = {
     val owner = Symbol.spliceOwner
     '{
       if (${ frame.length.asExprOf[Int] } == 0) throw UnsupportedOperationException(${ Expr(s"empty.$what") })
@@ -412,6 +432,7 @@ class Lowerer(val q: Quotes) extends ParChain {
                 else
                   ${
                     coreReduce[R](
+                      order,
                       frame.context,
                       infix(Select.unique(frame.length, "toLong"), "-", Literal(LongConstant(1))),
                       head,
@@ -432,24 +453,24 @@ class Lowerer(val q: Quotes) extends ParChain {
     }.asTerm
   }
 
-  private def reduceAny[R: Type](xs: Expr[Any], op: Term, what: String): Term =
+  private def reduceAny[R: Type](order: Order, xs: Expr[Any], op: Term, what: String): Term =
     bind(xs) { frame =>
-      if (!frame.filtered) reduceFirst[R](frame, op, what)
+      if (!frame.filtered) reduceFirst[R](order, frame, op, what)
       else
         materialise(frame) { (array, m) =>
-          reduceFirst[R](Frame(Bound.Held(array, frame.elem), m, frame.context, Nil, frame.elem), op, what)
+          reduceFirst[R](order, Frame(Bound.Held(array, frame.elem), m, frame.context, Nil, frame.elem), op, what)
         }
     }
 
   def reduce[T: Type](xs: Expr[Any], op: Expr[Any]): Expr[T] =
-    reduceAny[T](xs, stripped(op.asTerm), "reduceLeft").asExprOf[T]
+    reduceAny[T](Order.Ordered, xs, stripped(op.asTerm), "reduceLeft").asExprOf[T]
 
   def extremum[T: Type](xs: Expr[Any], what: String): Expr[T] = {
     val tpe = numeric[T](what)
     val pick = combine(tpe) { (a, b) =>
       if (what == "min") If(lessThan(tpe, b, a), b, a) else If(lessThan(tpe, a, b), b, a)
     }
-    reduceAny[T](xs, pick, what).asExprOf[T]
+    reduceAny[T](Order.Unordered, xs, pick, what).asExprOf[T]
   }
 
   private def counted(xs: Expr[Any], pred: Term => Term): Term =
@@ -465,6 +486,7 @@ class Lowerer(val q: Quotes) extends ParChain {
           )
         case Bound.Indexed(_, _) =>
           reduceNeutral[Int](
+            Order.Unordered,
             frame,
             Literal(IntConstant(0)),
             combine(TypeRepr.of[Int])(infix(_, "+", _)),
@@ -499,6 +521,7 @@ class Lowerer(val q: Quotes) extends ParChain {
           val other   = literal(TypeRepr.of[Int], if (all) 1 else 0)
           infix(
             reduceNeutral[Int](
+              Order.Unordered,
               frame,
               literal(TypeRepr.of[Int], 0),
               combine(TypeRepr.of[Int])(infix(_, "+", _)),
