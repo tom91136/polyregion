@@ -119,9 +119,30 @@ int runSvmOwnership() {
   return ctx.failed ? 1 : 0;
 }
 
+cl_int CL_API_CALL invalidValue(cl_platform_id, cl_device_type, cl_uint, cl_device_id *, cl_uint *) { return CL_INVALID_VALUE; }
+
+cl_int CL_API_CALL noDevicesFound(cl_platform_id, cl_device_type, cl_uint, cl_device_id *, cl_uint *) { return CL_DEVICE_NOT_FOUND; }
+
+size_t emptyCountCalls = 0;
+cl_int CL_API_CALL emptyCount(cl_platform_id, cl_device_type, cl_uint, cl_device_id *, cl_uint *count) {
+  ++emptyCountCalls;
+  if (count) *count = 0;
+  return CL_SUCCESS;
+}
+
+int runPlatformEnumerationFailure() {
+  Context ctx;
+  const std::vector<cl_platform_id> platforms{reinterpret_cast<cl_platform_id>(uintptr_t{0x1})};
+  POLYTEST_CHECK(ctx, details::enumerateDevices(platforms, &invalidValue).empty());
+  POLYTEST_CHECK(ctx, details::enumerateDevices(platforms, &noDevicesFound).empty());
+  POLYTEST_CHECK(ctx, details::enumerateDevices(platforms, &emptyCount).empty());
+  POLYTEST_CHECK(ctx, emptyCountCalls == 1);
+  return ctx.failed ? 1 : 0;
+}
+
 std::vector<Task> discoverAll() {
   return {Task{"cl-launch-dimensions", "", &runLaunchDimensions}, Task{"cl-error-strings", "", &runErrorStrings},
-          Task{"cl-svm-ownership", "", &runSvmOwnership}};
+          Task{"cl-svm-ownership", "", &runSvmOwnership}, Task{"cl-platform-enumeration-failure", "", &runPlatformEnumerationFailure}};
 }
 
 } // namespace

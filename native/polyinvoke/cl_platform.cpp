@@ -6,6 +6,7 @@
 #include <cinttypes>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
@@ -340,24 +341,28 @@ PlatformKind ClPlatform::kind() {
   POLYINVOKE_TRACE();
   return PlatformKind::Managed;
 }
-std::vector<std::unique_ptr<Device>> ClPlatform::enumerate() {
-  POLYINVOKE_TRACE();
-  cl_uint numPlatforms = 0;
-  if (const auto r = clGetPlatformIDs(0, nullptr, &numPlatforms); r == -1001 || numPlatforms == 0) return {};
-  else CHECKED(r);
-  std::vector<cl_platform_id> platforms(numPlatforms);
-  CHECKED(clGetPlatformIDs(numPlatforms, platforms.data(), nullptr));
-  std::vector<std::unique_ptr<Device>> clDevices;
-  const cl_device_type AcceleratorMask = CL_DEVICE_TYPE_ALL;
-  for (const auto &platform : platforms) {
-    cl_uint numDevices = 0;
-    if (const auto deviceIdResult = clGetDeviceIDs(platform, AcceleratorMask, 0, nullptr, &numDevices);
-        deviceIdResult == CL_DEVICE_NOT_FOUND) {
-      continue;
-    } else CHECKED(deviceIdResult);
+static std::vector<cl_device_id> platformDeviceIds(size_t index, cl_platform_id platform, cl_details::ClGetDeviceIDs_fn getDeviceIDs) {
+  const auto dropped = [&](cl_int error) {
+    if (error != CL_DEVICE_NOT_FOUND)
+      fmt::print(stderr, "polyinvoke: OpenCL platform {} dropped: clGetDeviceIDs returned {}\n", index, cl_details::errorString(error));
+    return std::vector<cl_device_id>{};
+  };
+  cl_uint numDevices = 0;
+  if (const auto r = getDeviceIDs(platform, CL_DEVICE_TYPE_ALL, 0, nullptr, &numDevices); r != CL_SUCCESS) return dropped(r);
+  if (numDevices == 0) return {};
 
-    std::vector<cl_device_id> devices(numDevices);
-    CHECKED(clGetDeviceIDs(platform, AcceleratorMask, numDevices, devices.data(), nullptr));
+  std::vector<cl_device_id> devices(numDevices);
+  if (const auto r = getDeviceIDs(platform, CL_DEVICE_TYPE_ALL, numDevices, devices.data(), nullptr); r != CL_SUCCESS) return dropped(r);
+  return devices;
+}
+
+std::vector<std::unique_ptr<Device>> cl_details::enumerateDevices(const std::vector<cl_platform_id> &platforms,
+                                                                  cl_details::ClGetDeviceIDs_fn getDeviceIDs) {
+  std::vector<std::unique_ptr<Device>> clDevices;
+  for (size_t index = 0; index < platforms.size(); ++index) {
+    const auto platform = platforms[index];
+    const auto devices = platformDeviceIds(index, platform, getDeviceIDs);
+    if (devices.empty()) continue;
     const auto platformName = queryPlatformInfo(platform, CL_PLATFORM_NAME);
     auto ilFn =
         reinterpret_cast<cl_details::ClCreateProgramWithIL_fn>(clGetExtensionFunctionAddressForPlatform(platform, "clCreateProgramWithIL"));
@@ -373,6 +378,16 @@ std::vector<std::unique_ptr<Device>> ClPlatform::enumerate() {
     }
   }
   return clDevices;
+}
+
+std::vector<std::unique_ptr<Device>> ClPlatform::enumerate() {
+  POLYINVOKE_TRACE();
+  cl_uint numPlatforms = 0;
+  if (const auto r = clGetPlatformIDs(0, nullptr, &numPlatforms); r == -1001 || numPlatforms == 0) return {};
+  else CHECKED(r);
+  std::vector<cl_platform_id> platforms(numPlatforms);
+  CHECKED(clGetPlatformIDs(numPlatforms, platforms.data(), nullptr));
+  return cl_details::enumerateDevices(platforms, clGetDeviceIDs);
 }
 ClPlatform::~ClPlatform() { POLYINVOKE_TRACE(); }
 

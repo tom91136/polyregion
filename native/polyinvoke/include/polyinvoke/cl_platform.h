@@ -31,6 +31,7 @@ public:
 namespace details {
 using ClModuleStore = detail::ModuleStore<cl_program, cl_kernel>;
 using ClCreateProgramWithIL_fn = cl_program(CL_API_CALL *)(cl_context, const void *, size_t, cl_int *);
+using ClGetDeviceIDs_fn = decltype(clGetDeviceIDs);
 
 struct LaunchDimensions {
   Dim3 global;
@@ -41,6 +42,8 @@ POLYREGION_EXPORT LaunchDimensions launchDimensions(const Dim3 &groups, const Di
 POLYREGION_EXPORT std::optional<LaunchDimensions> retryLaunchDimensions(cl_int error, const Dim3 &groups, const Dim3 &local,
                                                                         size_t kernelMax);
 POLYREGION_EXPORT std::string errorString(cl_int error);
+POLYREGION_EXPORT std::vector<std::unique_ptr<Device>> enumerateDevices(const std::vector<cl_platform_id> &platforms,
+                                                                        ClGetDeviceIDs_fn getDeviceIDs);
 
 struct SVMTracker {
   enum class Ownership { Device, Host, InheritedHost };
