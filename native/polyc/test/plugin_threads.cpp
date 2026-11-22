@@ -1,8 +1,8 @@
-#include <cstdlib>
 #include <string>
 #include <thread>
 
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Program.h"
 
 #include "catch2/catch_test_macros.hpp"
 
@@ -44,5 +44,5 @@ TEST_CASE("plugin thread probe", "[.][plugin-thread-probe]") {
 TEST_CASE("a plugin first loaded on a finished thread survives later collections", "[plugin-thread]") {
   const auto exe = llvm::sys::fs::getMainExecutable(nullptr, reinterpret_cast<void *>(const_cast<char *>(&anchor)));
   REQUIRE_FALSE(exe.empty());
-  CHECK(std::system(("\"" + exe + "\" \"" + ProbeTag + "\"").c_str()) == 0);
+  CHECK(llvm::sys::ExecuteAndWait(exe, {exe, ProbeTag}) == 0);
 }
