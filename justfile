@@ -297,6 +297,9 @@ list-jvm-rows profile='emulators':
 # Run the Scala Spectra launch suite against one profile target; $EMULATORS selects a Polyregion emulator bundle.
 test-jvm-scala target='host@native!host@*': (_test-jvm target "compiler-testsuite-spectra/testOnly polyregion.SpectraLaunchSuite")
 
+# Run the Java Spectra launch suites against one profile target; $EMULATORS selects a Polyregion emulator bundle.
+test-jvm-java target='host@native!host@*': (_test-jvm target "compiler-testsuite-java/testOnly polyregion.SpectraLaunchTest")
+
 _test-jvm target command:
     #!/usr/bin/env bash
     set -uo pipefail

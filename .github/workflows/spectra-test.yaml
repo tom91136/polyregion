@@ -135,12 +135,16 @@ jobs:
         working-directory: .
         run: just test-jvm-scala "$JVM_ROW"
 
-      - name: Annotate scala results
+      - name: Run Java launch suites (${{ matrix.row.id }})
+        working-directory: .
+        run: just test-jvm-java "$JVM_ROW"
+
+      - name: Annotate JVM results
         if: always()
         uses: ./.github/actions/annotate-junit
         with:
           junit: frontend/target/out/**/test-reports/*.xml
-          label: jvm-scala-${{ matrix.row.id }}
+          label: jvm-${{ matrix.row.id }}
 
       - name: Upload test results
         continue-on-error: true
