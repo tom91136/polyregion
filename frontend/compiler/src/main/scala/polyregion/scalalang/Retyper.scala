@@ -104,7 +104,7 @@ object Retyper {
   }
 
   def structDef0(using q: Quoted)(clsSym: q.Symbol): Result[p.StructDef] = {
-    // Abstract / package symbols can't be reflected via .tree — treat them as opaque empty structs.
+    // Abstract / package symbols can't be reflected via .tree, so treat them as opaque empty structs.
     // Concrete instantiation isn't possible from inside a kernel, but they can still appear as
     // type witnesses (e.g. inherited base classes, package-prefix in chained selects).
     if (clsSym.isPackageDef || clsSym.flags.is(q.Flags.Abstract)) {
@@ -153,8 +153,8 @@ object Retyper {
   // !isTypeParam  && !isAbstractType => class C{ type A = Concrete }
   def clsTypeCtorNames(using q: Quoted)(clsSym: q.Symbol): List[String] =
     // typeMembers can throw an internal assertion ("Unknown type member found") in some Scala 3
-    // versions when sorting type members of certain stdlib classes (e.g. via sortWith → typeMembers
-    // recursion). Treat those as "no abstract type members" — symbols we can't introspect can't
+    // versions when sorting type members of certain stdlib classes (e.g. via sortWith -> typeMembers
+    // recursion). Treat those as "no abstract type members"; symbols we can't introspect can't
     // contribute usable type ctor names anyway.
     Try(clsSym.typeMembers).toEither.toOption.toList.flatten
       .filter(t => t.isAbstractType && t.isTypeParam)

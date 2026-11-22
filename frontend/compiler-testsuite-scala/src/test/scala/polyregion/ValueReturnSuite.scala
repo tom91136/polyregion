@@ -34,7 +34,7 @@ class ValueReturnSuite extends BaseSuite {
 
   // FIXME relies on reference identity surviving capture (`b.fieldA = a` assumes b's view of
   // fieldA mutates when a does). The kernel-side capture is value-copied (inline struct
-  // layout), so b.fieldA is a snapshot of a — `a.fieldA *= 10` and `b.fieldA.fieldA` see
+  // layout), so b.fieldA is a snapshot of a: `a.fieldA *= 10` and `b.fieldA.fieldA` see
   // independent storage. Test design needs reference-aware capture or to be rewritten as
   // value semantics.
   // assertOffloadEffect {

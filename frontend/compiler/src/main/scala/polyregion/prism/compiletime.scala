@@ -79,7 +79,7 @@ object compiletime {
       mirrorToSourceTable = typeLUT.toMap
       // Per-witness table: when two source classes share a mirror class (e.g. ListBuffer and
       // polyregion.scalalang.Buffer both mirror to MutableSeq), the global toMap drops one
-      // entry. For each witness, override the current mirror→source mapping so the rewrites
+      // entry. For each witness, override the current mirror-to-source mapping so the rewrites
       // in this mirror's body resolve to *its* source class, not whichever one toMap picked.
       data <- witnesses.zip(typeLUT).traverse { case ((s, m), (mSym, sSym)) =>
         derivePackedMirrorsImpl(s, m)(mirrorToSourceTable + (mSym -> sSym))

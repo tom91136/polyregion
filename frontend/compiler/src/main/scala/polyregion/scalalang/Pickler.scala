@@ -126,7 +126,7 @@ object Pickler {
       // For array-element struct types (`Type.Ptr(Struct, ...)`) we have no parent TermRef path
       // to descend through. The parent struct here is always a single-type-param container
       // (ListBuffer[A], Buffer[A], Array[A], MutableSeq[A]) where the lone type arg IS the array
-      // element type — extract it from the parent's AppliedType so the element's write/read
+      // element type: extract it from the parent's AppliedType so the element's write/read
       // helpers get registered.
       def descendArrayElement(name: p.Sym): List[(p.StructDef, q.TypeRepr)] =
         if (added0.contains(name)) Nil
@@ -188,7 +188,7 @@ object Pickler {
 
     // For struct types that appear with multiple distinct generic instantiations in the same
     // capture set (e.g. `Monoid[Int]`, `Monoid[Float]`, `Monoid[Float2]` all sharing the polymorphic
-    // `Monoid` StructDef), reprs only tracks ONE instantiation — whichever ended up last in the
+    // `Monoid` StructDef), reprs only tracks ONE instantiation: whichever ended up last in the
     // merged map. Pinning the read/write method signatures to that one would reject the other
     // call sites at typecheck time. Widening to `Any` for empty-member structs (which are opaque
     // to the kernel anyway) lets all instantiations call the same method safely.
@@ -211,7 +211,7 @@ object Pickler {
 
     // Index by struct name (p.Sym) rather than StructDef instance: callers' `lut(name)` can return
     // a StructDef whose `parents` (or other derived fields) differ from the one stored in `reprs`,
-    // even when they refer to the same logical type — using the name as the key avoids that
+    // even when they refer to the same logical type; using the name as the key avoids that
     // identity mismatch.
     val writeSymbols: Map[p.Sym, q.Symbol] = methodSyms("write", (_, _) => q.TypeRepr.of[Long])(Seq(marshalArg))
     val fillSymbols: Map[p.Sym, q.Symbol] = methodSyms("fill", (_, _) => q.TypeRepr.of[Unit])(
@@ -316,7 +316,7 @@ object Pickler {
       // match the struct's layout size, not the pointer size.
       val elementSizeInBytes = elementSize(comp)
       if (elementSizeInBytes == 0) '{
-        // Unit-element arrays carry no data — allocate a 1-byte placeholder so the kernel still
+        // Unit-element arrays carry no data: allocate a 1-byte placeholder so the kernel still
         // gets a valid pointer and we don't try to allocate or write into a 0-byte buffer.
         $m.stage(${ allocateBuffer('{ 1 }) })
       }
@@ -484,7 +484,7 @@ object Pickler {
         mapping: StructMapping[q.Term]
     ): Expr[Unit] = {
       val elementSizeInBytes = elementSize(comp)
-      if (elementSizeInBytes == 0) '{ () } // Unit-element array — nothing to read back.
+      if (elementSizeInBytes == 0) '{ () } // Unit-element array; nothing to read back.
       else
         '{
 
@@ -519,7 +519,7 @@ object Pickler {
                   }
                 case p.Type.Struct(name, _) if lut.contains(name) =>
                   // Element bytes live INLINE at arrBuffer[i*structSize]. Reconstruct the struct
-                  // directly via readMapping using the inline element address — bypassing callRead
+                  // directly via readMapping using the inline element address, bypassing callRead
                   // since the result-holder slot was never written by the host (so the identity map
                   // would have no entry for it and readMethod would throw).
                   val structMapping = mappings(name)
@@ -618,12 +618,12 @@ object Pickler {
               case (_, p.Type.Struct(name, _)) if lut.contains(name) =>
                 '{ () }
               case (_, p.Type.Struct(_, _)) =>
-                // Opaque struct member — kernel doesn't write this back, skip update.
+                // Opaque struct member: kernel doesn't write this back, skip update.
                 '{ () }
               case (_, _) =>
                 // Primitive field write-back: only assign when the field is actually mutable
                 // (a `var`). Immutable `val` fields can't be reassigned and the kernel can't
-                // mutate them either. Also skip prismed mappings — for those the member
+                // mutate them either. Also skip prismed mappings; for those the member
                 // names belong to the mirror class, not the host source type, so calling
                 // `m.select(root)` on the source would fail to typecheck.
                 if (mapping.write.isDefined) '{ () }
@@ -677,7 +677,7 @@ object Pickler {
                 } => // default no-arg ctor
               // For traits we can't `new T()`. Trait-typed mirror structs (e.g. a `given Monoid[A]`
               // captured into the kernel as an opaque struct with no members) aren't modified by the
-              // kernel — just return the captured root unchanged. For concrete classes with no
+              // kernel; just return the captured root unchanged. For concrete classes with no
               // params, instantiate normally.
               val sym     = q.TypeRepr.of[t].widenTermRefByName.typeSymbol
               val isTrait = sym.flags.is(q.Flags.Trait)
@@ -724,12 +724,12 @@ object Pickler {
                     case p.Type.Ptr(comp, _) =>
                       '{ ??? }.asTerm
                     case p.Type.Struct(name, _) if lut.contains(name) =>
-                      // Nested struct field laid out inline — pass `parentPtr + memberOffset` as
+                      // Nested struct field laid out inline: pass `parentPtr + memberOffset` as
                       // the struct pointer so callRead wraps the inline slice and reconstructs.
                       val nestedPtr = '{ $ptr + ${ memberOffset }.toLong }
                       callRead(name, '{ null }, nestedPtr, m).asTerm
                     case p.Type.Struct(_, _) =>
-                      // Opaque struct field — synthesise null since we can't reconstruct it from kernel side.
+                      // Opaque struct field: synthesise null since we can't reconstruct it from kernel side.
                       '{ null }.asTerm
                     case _ => readPrim('buffer, memberOffset, member.tpe).asTerm
                   }

@@ -24,7 +24,7 @@ class CollectionLengthSuite extends BaseSuite {
       x.a + x.a + x.u.a
     }
     testExpr(xs.length)
-    // FIXME `xs.length + xs.size + 10` — though Specialisation now tolerates duplicated
+    // FIXME `xs.length + xs.size + 10`: though Specialisation now tolerates duplicated
     // tpeVars from inherited traits, the resulting specialised function names still mangle in
     // `#CC_#C` placeholders, so the verifier rejects calls (function signature contains unbound
     // tpeVars). A full fix needs the upstream Compiler/Remapper to dedupe & flatten inherited

@@ -191,7 +191,7 @@ class StructSuite extends BaseSuite {
 
   // FIXME `a.field += 1` test assumes JDK and Offload runs see the same starting `a.field`.
   // With class-field write-back enabled, the first run mutates the host's `a.field`, so the
-  // second run starts from the post-mutation state — they return different values. The test
+  // second run starts from the post-mutation state; they return different values. The test
   // would only be valid if `a` were re-initialised between runs. Skipped until we have a
   // per-target capture-snapshot.
   // {

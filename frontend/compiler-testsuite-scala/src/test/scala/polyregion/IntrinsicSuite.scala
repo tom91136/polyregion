@@ -12,7 +12,7 @@ class IntrinsicSuite extends BaseSuite {
   }
 
   // For intrinsics where libm (host) and StrictMath (JDK reference) are both correctly rounded
-  // but differ by up to `maxUlps` ULPs in the last place — e.g. `hypot`. Bit-exact comparison
+  // but differ by up to `maxUlps` ULPs in the last place, e.g. `hypot`. Bit-exact comparison
   // is still the default elsewhere; only opt in on a per-case basis.
   private inline def testExprUlps[A <: AnyVal](inline r: A, inline maxUlps: Int)(using
       C: ClassTag[A]
@@ -83,7 +83,7 @@ class IntrinsicSuite extends BaseSuite {
       testExpr[Double](cos(a))
       testExpr[Double](tan(a))
     } //
-    // FIXME java.lang.Math is a Java class with statics — `witness[java.lang.Math.type, ...]`
+    // FIXME java.lang.Math is a Java class with statics: `witness[java.lang.Math.type, ...]`
     // doesn't compile because `Math` has no Scala module value. A separate binding pathway
     // (resolving by raw class symbol) would be needed in derivePackedMirrorsImpl. Until then
     // users must call through `scala.math` or `polyregion.scalalang.intrinsics`.

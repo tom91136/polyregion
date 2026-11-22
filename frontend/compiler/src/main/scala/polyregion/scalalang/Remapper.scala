@@ -688,7 +688,7 @@ object Remapper {
           } yield (p.Named("this", tpe), c)
 
           // When a ref is owned by a class/object (i.e. `c.root`), we add an implicit `this` reference.
-          // Only fire for bare idents and `this.x`-style selects — for `param.x` (e.g. `that.a` in
+          // Only fire for bare idents and `this.x`-style selects; for `param.x` (e.g. `that.a` in
           // `def +(that: Float2) = ... + that.a`) the qualifier is the parameter itself, NOT this,
           // and rewriting it to `this.a` silently drops the parameter access.
           def handleThisRef(ref: q.Ref, named: p.Named) =
@@ -880,7 +880,7 @@ object Remapper {
       // Short-circuit: scala.reflect.ClassTag[T] construction. When Array.ofDim[T](n) summons
       // an implicit ClassTag, Scala 3.7's stdlib inlines `ClassTag.apply` into the call site,
       // producing a Block(If(WeakReference cache lookup)) that the term mapper can't traverse
-      // (and shouldn't — the kernel never reads ClassTag fields). Replace any sub-expression of
+      // (and shouldn't: the kernel never reads ClassTag fields). Replace any sub-expression of
       // ClassTag[T] type with an empty ClassTag struct, which matches the StdLib mirror.
       val isClassTagTpe = termTpe.widenTermRefByName.dealias match {
         case q.AppliedType(ctor, _) => ctor.typeSymbol.fullName == "scala.reflect.ClassTag"

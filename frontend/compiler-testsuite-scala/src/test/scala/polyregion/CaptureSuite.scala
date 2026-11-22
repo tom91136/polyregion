@@ -36,7 +36,7 @@ class CaptureSuite extends BaseSuite {
 
       }
       val x = new Foo
-      // Note: Node case class with `next: Option[Node]` recursion still disabled — Option fields
+      // Note: Node case class with `next: Option[Node]` recursion still disabled; Option fields
       // are kernel-opaque and the host-side Pickler can't reconstruct an Option ctor through depth-2.
       // case class Node(elem: Int, next: Option[Node])
       case class CaseClassA(b: Int, c: Int)

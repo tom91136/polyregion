@@ -113,7 +113,7 @@ trait BaseSuite extends munit.FunSuite {
         assertEquals(a, e)
     }
 
-  // Compare two floating-point values with a ULP tolerance — useful for intrinsics whose
+  // Compare two floating-point values with a ULP tolerance: useful for intrinsics whose
   // host (libm) and reference (JDK StrictMath) implementations are correctly rounded but
   // differ by a handful of last-place units (e.g. `hypot`).
   def assertValEqualsUlps(actual: Double, expected: Double, maxUlps: Long): Unit = {
