@@ -55,7 +55,7 @@
 
 #pragma region case: offload-region-extent-overflow
 #pragma region offload-only
-#pragma region do: POLYFRONT_LIBRARY_PATH= polycpp {polycpp_defaults} {polycpp_stdpar} -DOVERFLOW -o {output} {input}
+#pragma region do: POLYFRONT_LIBRARY_PATH= polycpp {polycpp_defaults} {polycpp_stdpar} -DEXTENT_OVERFLOW -o {output} {input}
 #pragma region do: {output}
 #pragma region requires: overflow overflow
 
@@ -102,7 +102,7 @@ int main() {
   std::printf("%d %d %d", last, init, grid);
   return 0;
 }
-#elif defined(OVERFLOW)
+#elif defined(EXTENT_OVERFLOW)
 int main() {
   const std::int64_t big = std::int64_t{1} << 32;
   try {
