@@ -85,7 +85,11 @@ trait SpectraLaunchBase extends munit.FunSuite {
     assertEquals(out.toList, xs.map(_ * 3 + 6 + 100).toList)
   }
 
-  private def launched(f: rt.Context => Unit): rt.Context => Unit = ctx => {
+  private def skippingGaps(f: rt.Context => Unit): rt.Context => Unit = ctx =>
+    try f(ctx)
+    catch { case gap: rt.CapabilityGapException => assume(false, gap.getMessage) }
+
+  private def launched(f: rt.Context => Unit): rt.Context => Unit = skippingGaps { ctx =>
     val before = ctx.stats().launches
     f(ctx)
     assert(ctx.stats().launches > before, "the call did not launch on the device")
@@ -94,6 +98,7 @@ trait SpectraLaunchBase extends munit.FunSuite {
   protected def mirrorsOrRefuses(device: Option[rt.DeviceInfo])(f: rt.Context => Unit): Unit =
     withContext(device)(ctx =>
       scala.util.Try(f(ctx)).failed.foreach {
+        case gap: rt.CapabilityGapException => assume(false, gap.getMessage)
         case refused: rt.PolyregionRuntimeException =>
           assert(refused.getMessage.contains("created context"), refused.getMessage)
         case other => throw other

@@ -21,6 +21,15 @@ object LaunchRuntime {
 
   private val Targets: Map[Byte, Target] = Target.VALUES.map(target => target.value() -> target).toMap
 
+  private val Outcomes: Map[Int, rt.LoadOutcome] = rt.LoadOutcome.VALUES.map(o => o.value.toInt -> o).toMap
+
+  def refusal(message: String, outcomes: Iterable[rt.LoadOutcome]): rt.PolyregionRuntimeException =
+    if (outcomes.maxByOption(_.value).contains(rt.LoadOutcome.LACKS)) rt.CapabilityGapException(message)
+    else rt.PolyregionRuntimeException(message)
+
+  def refusal(message: String, selected: Int): rt.PolyregionRuntimeException =
+    refusal(message, List(Outcomes(-selected)))
+
   class Group(val program: String, bundle: Array[String], val hostOnly: Boolean) {
     private lazy val decoded: p.Compile.Bundle =
       MsgPack.decode[MsgPack.Versioned[p.Compile.Bundle]](java.util.Base64.getDecoder.decode(bundle.mkString)) match {
@@ -37,7 +46,12 @@ object LaunchRuntime {
       )
     }.toArray
 
-    def accepts(ctx: rt.Context): Boolean = hostOnly || ctx.select(modules) >= 0
+    def refusal(ctx: rt.Context): Option[rt.LoadOutcome] =
+      if (hostOnly) None
+      else {
+        val found = ctx.select(modules)
+        if (found >= 0) None else Some(Outcomes(-found))
+      }
 
     def load(): Unit =
       ensureLoaded(program, rt.Context.hostProgramLoaded(program))(
@@ -53,9 +67,17 @@ object LaunchRuntime {
 
     val twins: Twins = Twins.decode(layouts)
 
-    def select(ctx: rt.Context): Group = ordered
-      .find(_.accepts(ctx))
-      .getOrElse(throw rt.PolyregionRuntimeException(s"No compiled variant of `$entry` accepts $ctx"))
+    def select(ctx: rt.Context): Group = {
+      val refusals = List.newBuilder[rt.LoadOutcome]
+      ordered
+        .find(group =>
+          group.refusal(ctx) match {
+            case None          => true
+            case Some(refusal) => refusals += refusal; false
+          }
+        )
+        .getOrElse(throw refusal(s"No compiled variant of `$entry` accepts $ctx", refusals.result()))
+    }
   }
 
   private val loaded = ConcurrentHashMap.newKeySet[String]()

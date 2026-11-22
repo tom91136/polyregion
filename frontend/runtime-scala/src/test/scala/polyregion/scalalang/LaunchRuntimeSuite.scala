@@ -7,12 +7,18 @@ import java.util.concurrent.{CountDownLatch, TimeUnit}
 
 class LaunchRuntimeSuite extends munit.FunSuite {
 
-  private class AcceptingGroup(program: String, hostOnly: Boolean)
+  private class FixedGroup(program: String, hostOnly: Boolean, refused: Option[rt.LoadOutcome])
       extends LaunchRuntime.Group(program, Array.empty[String], hostOnly) {
-    override def accepts(ctx: rt.Context): Boolean = true
+    override def refusal(ctx: rt.Context): Option[rt.LoadOutcome] = refused
   }
 
-  private def group(program: String, hostOnly: Boolean): LaunchRuntime.Group = AcceptingGroup(program, hostOnly)
+  private def group(program: String, hostOnly: Boolean): LaunchRuntime.Group = FixedGroup(program, hostOnly, None)
+
+  private def refusedSite(outcomes: rt.LoadOutcome*): LaunchRuntime.Site = LaunchRuntime.Site(
+    s"refused-${outcomes.mkString("-")}",
+    outcomes.zipWithIndex.map((o, i) => FixedGroup(s"g$i", false, Some(o))).toArray,
+    polyregion.jvm.twin.Layout.encodeAll(java.util.List.of())
+  )
 
   test("a concurrent first use waits for the load in progress") {
     val started    = CountDownLatch(1)
@@ -56,6 +62,22 @@ class LaunchRuntimeSuite extends munit.FunSuite {
     val site =
       LaunchRuntime.Site("ordering", Array(host, device), polyregion.jvm.twin.Layout.encodeAll(java.util.List.of()))
     assertEquals(site.select(null).program, "device")
+  }
+
+  test("a site refused only for lacking features raises a capability gap") {
+    import rt.LoadOutcome.*
+    intercept[rt.CapabilityGapException](refusedSite(LACKS).select(null))
+    intercept[rt.CapabilityGapException](refusedSite(FORMAT, LACKS).select(null))
+    intercept[rt.CapabilityGapException](refusedSite(LACKS, LACKS, FORMAT).select(null))
+  }
+
+  test("a site refused on format alone or blocked anywhere raises a plain runtime exception") {
+    import rt.LoadOutcome.*
+    List(refusedSite(FORMAT), refusedSite(LACKS, UNPREPARED), refusedSite(NO_DEVICE, LACKS), refusedSite()).foreach {
+      site =>
+        val e = intercept[rt.PolyregionRuntimeException](site.select(null))
+        assert(!e.isInstanceOf[rt.CapabilityGapException], e.toString)
+    }
   }
 
   test("a launch keeps its scalar arguments reachable until the marshal closes") {

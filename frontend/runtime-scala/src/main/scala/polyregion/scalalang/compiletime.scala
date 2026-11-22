@@ -308,10 +308,11 @@ object compiletime {
           try {
             marshal = Marshal($ctx.queue, null, Platforms.directBufferFromPointer(_, _))
             val found = $ctx.select(modules)
-            if (found == -1)
+            if (found < 0)
               Left(
-                new java.lang.RuntimeException(
-                  s"The context does not accept any of the following binaries: ${modules.map(_.target).mkString(",")}"
+                polyregion.scalalang.LaunchRuntime.refusal(
+                  s"The context does not accept any of the following binaries: ${modules.map(_.target).mkString(",")}",
+                  found
                 )
               )
             else {
