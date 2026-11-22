@@ -83,6 +83,7 @@ public final class Streams {
   public static final String SCAN = "scan";
   public static final String TAIL = "tail";
   public static final String EACH = "each";
+  public static final String SUMS = "sums";
 
   public static final char FILTER_STAGE = 'F';
   public static final char NO_NEUTRAL = 'I';
@@ -460,6 +461,27 @@ public final class Streams {
       return all;
     }
 
+    Ops.Sum compensated(long[] kept) {
+      Ops.Sum total = null;
+      long step = step(INDEX_CHUNK);
+      for (long offset = 0; offset < n; offset += step) {
+        long length = length(offset, step);
+        int blocks = (int) ((length + Ops.BLOCK - 1) / Ops.BLOCK);
+        double[] out = new double[4 * blocks];
+        Object[] all = java.util.Arrays.copyOf(flat(base(offset), length), captured.length + 3);
+        all[all.length - 1] = out;
+        Launch.step(home, site(SUMS), context, new Object[] {(long) blocks, null}, all);
+        for (int b = 0; b < blocks; b++) {
+          long count = (long) out[4 * b + 3];
+          if (count == 0) continue;
+          kept[0] += count;
+          Ops.Sum block = new Ops.Sum(out[4 * b], out[4 * b + 1], out[4 * b + 2]);
+          total = total == null ? block : Ops.sumMerge(total, block);
+        }
+      }
+      return total;
+    }
+
     Object launch(String role, Object base, Object neutral, Object... args) {
       return Launch.step(home, site(role), context, args, flat(base, neutral));
     }
@@ -553,7 +575,12 @@ public final class Streams {
           if (!filtered) return n;
           return n == 0 ? (Object) 0L : total('J', 0L, How.SUM);
         case SUM:
-          return n == 0 ? zero(out) : total(out, zero(out), How.SUM);
+          {
+            if (n == 0) return zero(out);
+            if (out != 'D') return total(out, zero(out), How.SUM);
+            Ops.Sum sum = compensated(new long[1]);
+            return sum == null ? zero(out) : (Object) Ops.sumValue(sum);
+          }
         case REDUCE_ID:
           return n == 0 ? extra : total(out, extra, How.DEVICE);
         case ANY:
@@ -564,7 +591,12 @@ public final class Streams {
         case AVERAGE:
           {
             if (n == 0) return OptionalDouble.empty();
-            char wide = out == 'D' ? 'D' : 'J';
+            if (out == 'D') {
+              long[] count = {0};
+              Ops.Sum sum = compensated(count);
+              return sum == null ? OptionalDouble.empty() : OptionalDouble.of(Ops.sumValue(sum) / count[0]);
+            }
+            char wide = 'J';
             if (!filtered) {
               Object sum = total(wide, zero(wide), How.SUM);
               return OptionalDouble.of(((Number) sum).doubleValue() / n);

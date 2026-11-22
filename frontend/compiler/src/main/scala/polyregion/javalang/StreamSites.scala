@@ -70,6 +70,12 @@ object StreamSites {
     case Bit(lam: Lam)
     case NotBit(lam: Lam)
     case Consume(lam: Lam)
+    case Accumulate(
+        high: JSymbol.VarSymbol,
+        compensation: JSymbol.VarSymbol,
+        simple: JSymbol.VarSymbol,
+        kept: JSymbol.VarSymbol
+    )
   }
 
   private enum Order {
@@ -86,6 +92,7 @@ object StreamSites {
     case Element(kind: Char, stages: List[Stage], leaf: Leaf, ret: Char, neutral: Option[Char] = None)
     case Index(index: Char, origin: Origin, stages: List[Stage], leaf: Leaf, ret: Char, neutral: Option[Char] = None)
     case Binary(lam: Lam, kind: Char, ret: Char, neutral: Option[Char] = None)
+    case Blocks(kind: Char, held: Boolean, stages: List[Stage])
   }
 
   private enum Arg {
@@ -175,7 +182,8 @@ object StreamSites {
       originType: JType,
       neutralType: JType,
       trailing: List[JType],
-      ret: JType
+      ret: JType,
+      extra: List[JType] = Nil
   )(
       body: (
           JSymbol.MethodSymbol,
@@ -185,7 +193,7 @@ object StreamSites {
       ) => Result[List[JCTree.JCStatement]]
   ): Result[(JCTree.JCMethodDecl, JSymbol.MethodSymbol, Int)] = {
     val synth  = frame.synth
-    val prefix = originType :: neutralType :: frame.gTypes
+    val prefix = originType :: neutralType :: frame.gTypes ::: extra
     val all    = prefix ::: trailing
     val msym = JSymbol.MethodSymbol(
       Flags.STATIC | Flags.SYNTHETIC,
@@ -262,6 +270,66 @@ object StreamSites {
           }
           entry.flatMap((decl, x) => body(frame, msym, sn, g, x, stages, leaf).map(decl.toList ::: _))
         }
+      case Program.Blocks(kind, held, stages) =>
+        build(
+          frame,
+          name,
+          frame.originType,
+          synth.tpe('J'),
+          List(synth.tpe('J')),
+          synth.tpe('V'),
+          List(synth.array('D'))
+        ) { (msym, sn, gOut, args) =>
+          val (g, out) = (gOut.dropRight(1), gOut.last)
+          def local(symbol: String, kind: Char) =
+            JSymbol.VarSymbol(0L, synth.names.fromString(symbol), synth.tpe(kind), msym)
+          val (j, from, to) = (local("j", 'J'), local("from", 'J'), local("to", 'J'))
+          val (high, error, simple, kept) =
+            (local("high", 'D'), local("error", 'D'), local("simple", 'D'), local("kept", 'D'))
+          val x = local("x", kind)
+          for {
+            blockFrom <- frame.ops("blockFrom")
+            blockTo   <- frame.ops("blockTo")
+            below     <- frame.ops("ltJ")
+            add       <- frame.ops("sumJ")
+            put       <- frame.ops("putD")
+            slot      <- frame.ops("slot")
+            read      <- frame.ops(if (held) s"get${suffix(kind)}" else s"at${suffix(kind)}J")
+            inner     <- body(frame, msym, sn, g, make.Ident(x), stages, Leaf.Accumulate(high, error, simple, kept))
+          } yield {
+            def ident(v: JSymbol.VarSymbol) = make.Ident(v)
+            def store(k: Int, v: JSymbol.VarSymbol): JCTree.JCStatement =
+              make.Exec(
+                synth.call(put, List(out, synth.call(slot, List(args.head, make.Literal(Int.box(k)))), ident(v)))
+              )
+            val advance = make.Assign(ident(j), synth.call(add, List(ident(j), make.Literal(Long.box(1L)))))
+            advance.setType(synth.tpe('J'))
+            val loop = make.ForLoop(
+              JList.of[JCTree.JCStatement](make.VarDef(j, ident(from))),
+              synth.call(below, List(ident(j), ident(to))),
+              JList.of(make.Exec(advance)),
+              make.Block(
+                0,
+                JList.from(
+                  ((make.VarDef(x, synth.call(read, List(sn.head, ident(j)))): JCTree.JCStatement) :: inner).asJava
+                )
+              )
+            )
+            List[JCTree.JCStatement](
+              make.VarDef(from, synth.call(blockFrom, List(args.head))),
+              make.VarDef(to, synth.call(blockTo, List(sn(1), args.head))),
+              make.VarDef(high, make.Literal(Double.box(0.0))),
+              make.VarDef(error, make.Literal(Double.box(0.0))),
+              make.VarDef(simple, make.Literal(Double.box(0.0))),
+              make.VarDef(kept, make.Literal(Double.box(0.0))),
+              loop,
+              store(0, high),
+              store(1, error),
+              store(2, simple),
+              store(3, kept)
+            )
+          }
+        }
     }
   }
 
@@ -278,9 +346,9 @@ object StreamSites {
     import synth.make
     val neutral = sn(1)
     val fallback: Option[JCTree.JCStatement] = leaf match {
-      case Leaf.Consume(_) => None
-      case Leaf.True       => Some(make.Return(synth.literal('Z', 0)))
-      case _               => Some(make.Return(neutral))
+      case Leaf.Consume(_) | Leaf.Accumulate(_, _, _, _) => None
+      case Leaf.True                                     => Some(make.Return(synth.literal('Z', 0)))
+      case _                                             => Some(make.Return(neutral))
     }
     def finish(cur: JCTree.JCExpression): Result[List[JCTree.JCStatement]] = leaf match {
       case Leaf.Identity => List(make.Return(cur): JCTree.JCStatement).success
@@ -297,6 +365,22 @@ object StreamSites {
           .ops("notBit")
           .map(b => List(make.Return(synth.call(b, List(applyLam(frame, lam, g, List(cur))))): JCTree.JCStatement))
       case Leaf.Consume(lam) => List(make.Exec(applyLam(frame, lam, g, List(cur))): JCTree.JCStatement).success
+      case Leaf.Accumulate(high, compensation, simple, kept) =>
+        for {
+          error <- frame.ops("compensation")
+          next  <- frame.ops("compensated")
+          add   <- frame.ops("sumD")
+        } yield {
+          val delta                       = JSymbol.VarSymbol(0L, synth.names.fromString("delta"), synth.tpe('D'), msym)
+          def ident(v: JSymbol.VarSymbol) = make.Ident(v)
+          List[JCTree.JCStatement](
+            make.VarDef(delta, synth.call(error, List(ident(high), ident(compensation), cur))),
+            make.Assignment(high, synth.call(next, List(ident(high), ident(compensation), cur))),
+            make.Assignment(compensation, ident(delta)),
+            make.Assignment(simple, synth.call(add, List(ident(simple), cur))),
+            make.Assignment(kept, synth.call(add, List(ident(kept), make.Literal(Double.box(1.0)))))
+          )
+        }
     }
     def go(rest: List[Stage], cur: JCTree.JCExpression, n: Int): Result[List[JCTree.JCStatement]] = rest match {
       case Nil => finish(cur)
@@ -322,6 +406,11 @@ object StreamSites {
   private def prim(kind: Char): Prim = LaunchSites.Prims.values.find(_.code == kind).get
 
   private def combine(op: String, kind: Char): Arg = Arg.Forward(s"$op${suffix(kind)}")
+
+  private def compensated(chain: Chain): Boolean = chain.elem == 'D' && (chain.terminal match {
+    case Terminal.Sum | Terminal.Average => true
+    case _                               => false
+  })
 
   private def orderOf(chain: Chain): Order = chain.terminal match {
     case Terminal.Reduce(_) | Terminal.ReduceId(_, _) => Order.Ordered
@@ -452,6 +541,19 @@ object StreamSites {
             case _               => false
           }) =>
         "`sorted` is only lowered as the last stage before `toArray`".fail
+      case Terminal.Sum | Terminal.Average if compensated(chain) =>
+        val (kind, held) = chain.source match {
+          case Source.Array(_, k)     => (k, true)
+          case Source.Range(elem = k) => (k, false)
+        }
+        List(
+          Step(
+            Streams.SUMS,
+            s"${Core}for_each",
+            List(Arg.Scalar('J'), Arg.Fn(Program.Blocks(kind, held, chain.stages))),
+            None
+          )
+        ).success
       case Terminal.Sum => List(reduceStep(chain, Streams.MAIN, out, Leaf.Identity, combine("sum", out))).success
       case Terminal.Count =>
         if (filtered) List(counting(chain, Streams.MAIN)).success else Nil.success

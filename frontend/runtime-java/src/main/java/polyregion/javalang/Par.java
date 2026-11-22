@@ -24,8 +24,13 @@ import polyregion.jvm.runtime.Context;
  * associative. {@code sum}, {@code count}, {@code min}, {@code max} and the match operations use
  * any order, which is exact for them. Every element runs through every stage, so {@code anyMatch},
  * {@code allMatch} and {@code noneMatch} evaluate their predicate on all elements rather than
- * stopping at the first decisive one. {@code double} sums and averages add in the device's order
- * without the JDK's compensation, so the last digits can differ from {@code DoubleStream.sum}.
+ * stopping at the first decisive one.
+ *
+ * <p>{@code double} sums and averages use the JDK's compensated summation. Elements are summed in
+ * contiguous blocks of {@link Ops#BLOCK}, each block with the JDK's sequential accumulation, and
+ * the blocks are combined in encounter order with the JDK's combiner. A chain of at most {@code
+ * Ops.BLOCK} elements gives exactly the result of the sequential {@code DoubleStream.sum}; a longer
+ * one gives the result of a parallel JDK stream whose leaves are blocks of that size.
  */
 public final class Par {
 

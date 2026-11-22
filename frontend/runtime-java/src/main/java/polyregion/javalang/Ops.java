@@ -6,6 +6,62 @@ public final class Ops {
     throw new AssertionError();
   }
 
+  public static final class Sum {
+    final double high;
+    final double compensation;
+    final double simple;
+
+    Sum(double high, double compensation, double simple) {
+      this.high = high;
+      this.compensation = compensation;
+      this.simple = simple;
+    }
+  }
+
+  public static Sum sumMerge(Sum a, Sum b) {
+    double high = a.high;
+    double tmp = b.high - a.compensation;
+    double next = high + tmp;
+    double compensation = (next - high) - tmp;
+    high = next;
+    tmp = -b.compensation - compensation;
+    next = high + tmp;
+    compensation = (next - high) - tmp;
+    return new Sum(next, compensation, a.simple + b.simple);
+  }
+
+  public static final int BLOCK = 1024;
+
+  public static long blockFrom(long block) {
+    return block * BLOCK;
+  }
+
+  public static long blockTo(long n, long block) {
+    return Math.min(n, (block + 1) * BLOCK);
+  }
+
+  public static int slot(long block, int field) {
+    return (int) (4 * block + field);
+  }
+
+  public static void putD(double[] a, int i, double v) {
+    a[i] = v;
+  }
+
+  public static double compensated(double high, double error, double x) {
+    return high + (x - error);
+  }
+
+  public static double compensation(double high, double error, double x) {
+    double tmp = x - error;
+    return ((high + tmp) - high) - tmp;
+  }
+
+  public static double sumValue(Sum a) {
+    double value = a.high - a.compensation;
+    return Double.isNaN(value) && Double.isInfinite(a.simple) ? a.simple : value;
+  }
+
   public static int atIJ(int origin, long index) {
     return (int) (origin + index);
   }
