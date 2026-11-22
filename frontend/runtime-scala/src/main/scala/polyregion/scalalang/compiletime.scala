@@ -57,37 +57,6 @@ object compiletime {
     '{}
   }
 
-//  inline def deriveNativeStruct[A]: NativeStruct[A] = ${ deriveNativeStructImpl[A] }
-//  def deriveNativeStructImpl[A: Type](using q: Quotes): Expr[NativeStruct[A]] = {
-//    import q.reflect.*
-//    val Q = Quoted(q)
-//
-//    val compiler = ct.Compiler.create()
-//
-//    val repr   = Q.TypeRepr.of[A]
-//    val opt    = ct.Options.of(ct.Target.LLVM_HOST, "native")
-//    val layout = Pickler.layoutOf(using Q)(compiler, opt, repr)
-//
-//    val code = '{
-//      new NativeStruct[A] {
-//        override def sizeInBytes: Int = ${ Expr(layout.sizeInBytes.toInt) }
-//        override def decode(buffer: ByteBuffer, index: Int): A = ${
-//          ???
-//          // Pickler.getStruct(using Q)(compiler, opt, 'buffer, '{ 0 }, 'index, repr).asExprOf[A]
-//        }
-//        override def encode(buffer: ByteBuffer, index: Int, a: A): Unit = ${
-//          // Pickler.putStruct(using Q)(compiler, opt, 'buffer, '{ 0 }, 'index, ???, repr, 'a)
-//          ???
-//        }
-//      }
-//    }
-//
-//    compiler.close()
-//    given Q.Printer[Q.Tree] = Q.Printer.TreeAnsiCode
-//    println("Code=" + code.asTerm.show)
-//    code
-//  }
-
   private case class ReifiedConfig(name: String, target: ct.Target, arch: String, opt: ct.Opt)
 
   private def reifiedConfigs(compiler: ct.Compiler, config: LaunchConfig): Result[List[ReifiedConfig]] =
@@ -442,9 +411,6 @@ object compiletime {
     }
     result
   }
-
-  type PtrMapTpe = scala.collection.mutable.Map[Any, Long]
-  type ObjMapTpe = scala.collection.mutable.Map[Long, Any]
 
   // Basic steps:
   // 1. Creating struct mapping

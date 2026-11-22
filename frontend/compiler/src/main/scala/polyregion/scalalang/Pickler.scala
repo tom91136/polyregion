@@ -18,19 +18,6 @@ object Pickler {
   private val DEBUG                                   = sys.env.contains(Env.PolyregionDebug)
   private inline def debug(inline s: => String): Unit = if (DEBUG) println(s)
 
-  def liftTpe(using q: Quotes)(t: p.Type) = t match {
-    case p.Type.Bool1   => Type.of[Boolean]
-    case p.Type.IntU16  => Type.of[Char]
-    case p.Type.IntS8   => Type.of[Byte]
-    case p.Type.IntS16  => Type.of[Short]
-    case p.Type.IntS32  => Type.of[Int]
-    case p.Type.IntS64  => Type.of[Long]
-    case p.Type.Float32 => Type.of[Float]
-    case p.Type.Float64 => Type.of[Double]
-    case p.Type.Unit0   => Type.of[Unit]
-    case illegal        => throw RuntimeException(s"liftTpe: Cannot lift $illegal")
-  }
-
   def tpeAsRuntimeTpe(t: p.Type): rt.Type = t match {
     case p.Type.Bool1        => rt.Type.BOOL
     case p.Type.IntS8        => rt.Type.BYTE

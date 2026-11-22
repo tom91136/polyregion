@@ -40,17 +40,6 @@ object compiletime {
       inline termPrisms: List[TermPrism[Any, Any]]
   ): List[Prism] = ${ derivePackedTypeMirrorsImpl[T]('termPrisms) }
 
-  inline def showTree(inline f: Any): Any =
-    ${ showTreeImpl('{ 2 }) }
-
-  def showTreeImpl(f: Expr[Int])(using Q: Quotes): Expr[Int] = {
-    import Q.reflect.*
-    // f.asTerm.as
-    // Expr(f)
-    // ???
-    f
-  }
-
   private def derivePackedTypeMirrorsImpl[T <: Tuple](using
       Q: Quotes,
       t: Type[T]

@@ -11,11 +11,6 @@ import scala.quoted.{Expr, Quotes, Type}
 
 object StdLib {
 
-  class Tuple2[T1, T2](val v1: T1, val v2: T2) {
-    def _1 = v1
-    def _2 = v2
-  }
-
   class Range(val start: Int, val end: Int, val step: Int, val isInclusive: Boolean, val isEmpty: Boolean) {
     def by(step: Int): Range = {
       if (step == 0) intrinsics.raise[java.lang.IllegalArgumentException]("step cannot be 0.")
@@ -750,15 +745,6 @@ object StdLib {
       // mirrorToSourceTable (only one source per mirror is kept, dropping the existing Buffer
       // / ListBuffer entries in some rewrite paths). Re-enable once the rewriter consults
       // per-call-site bindings everywhere.
-      // witness[scala.Tuple2[?, ?], Tuple2[?, ?]]( //
-      //   { case (_ @ given Quotes, x) =>
-      //     x match { case '{ $x: scala.Tuple2[t0, t1] } => '{ new Tuple2[t0, t1]($x._1, $x._2) } }
-      //   },
-      //   { case (_ @ given Quotes, x) =>
-      //     x match { case '{ $x: Tuple2[t0, t1] } => '{ scala.Tuple2[t0, t1]($x._1, $x._2) } }
-      //   },
-      //   { case (_ @ given Quotes, ys, _) => '{ () } }
-      // ),
 
       // Immutable types, restore simply uses the original instance
       witness[scala.reflect.ClassTag[?], ClassTag[?]]( //
@@ -838,12 +824,4 @@ object StdLib {
         x.source -> x.structDef.copy(name = x.source)
       }
       .toMap
-
-  @main def main(): Unit = {
-    Functions.values.foreach { case (fn, deps) =>
-      println(s"${fn.repr.linesIterator.map("\t" + _).mkString("\n")}")
-    }
-    ()
-  }
-
 }

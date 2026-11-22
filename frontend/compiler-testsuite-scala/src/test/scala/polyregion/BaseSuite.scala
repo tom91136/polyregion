@@ -1,6 +1,6 @@
 package polyregion
 
-import polyregion.scalalang.{NativeStruct, Platforms}
+import polyregion.scalalang.Platforms
 
 import java.util.concurrent.{CountDownLatch, TimeUnit}
 import scala.compiletime.*

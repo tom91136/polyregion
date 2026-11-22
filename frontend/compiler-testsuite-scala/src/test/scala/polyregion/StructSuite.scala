@@ -10,7 +10,6 @@ import scala.reflect.ClassTag
 class StructSuite extends BaseSuite {
 
   // case class T3[A <: AnyVal](val a: A, b: A, c: A)
-  // given [A <:AnyVal ]: NativeStruct[T3[A]]    = nativeStructOf
 
   case class Char3(a: Char, b: Char, c: Char)
   case class Byte3(a: Byte, b: Byte, c: Byte)
@@ -42,26 +41,6 @@ class StructSuite extends BaseSuite {
       g: Double3,
       h: Boolean3
   )
-
-//  inline def dummyNativeStruct[A] = new NativeStruct[A] {
-//    def name: String                                                       = ""
-//    def sizeInBytes: Int                                                   = 1
-//    def encode(buffer: java.nio.ByteBuffer, index: Int, a: A): Unit = ()
-//    def decode(buffer: java.nio.ByteBuffer, index: Int): A          = ???
-//  }
-
-  // inline given NativeStruct[Char3]    = if (Toggles.StructSuite) dummyNativeStruct else dummyNativeStruct
-  // inline given NativeStruct[Byte3]    = if (Toggles.StructSuite) dummyNativeStruct else dummyNativeStruct
-  // inline given NativeStruct[Short3]   = if (Toggles.StructSuite) dummyNativeStruct else dummyNativeStruct
-  // inline given NativeStruct[Int3]     = if (Toggles.StructSuite) dummyNativeStruct else dummyNativeStruct
-  // inline given NativeStruct[Long3]    = if (Toggles.StructSuite) dummyNativeStruct else dummyNativeStruct
-  // inline given NativeStruct[Float3]   = if (Toggles.StructSuite) dummyNativeStruct else dummyNativeStruct
-  // inline given NativeStruct[Double3]  = if (Toggles.StructSuite) dummyNativeStruct else dummyNativeStruct
-  // // inline given NativeStruct[Boolean3] = if (Toggles.StructSuite) dummyNativeStruct else dummyNativeStruct
-
-  // inline def testExpr[A <: AnyRef: NativeStruct](inline name: String)(inline r: => A) = if (Toggles.StructSuite) {
-  //   test(name)(assertOffload(r))
-  // }
 
   private inline def testExpr[A](inline name: String)(inline r: => A) = if (Toggles.StructSuite) {
     test(name)(assertOffloadValue(offload1(r)))
@@ -124,9 +103,8 @@ class StructSuite extends BaseSuite {
 
   {
     // Top-level `Array[Float3]` captures aren't accepted by bindWrite ("Top level arrays at
-    // parameter boundary is illegal"); `Buffer.tabulate[Float3]` hits a `???` in
-    // `StructBuffer.apply` (NativeStruct deriving is unimplemented on the host side). Use a
-    // `scala.collection.mutable.ListBuffer` — it's wired through the StdLib prism as a
+    // parameter boundary is illegal") and `Buffer` holds primitives only. Use a
+    // `scala.collection.mutable.ListBuffer` - it's wired through the StdLib prism as a
     // MutableSeq and marshals as a sized struct capture.
     val xs = scala.collection.mutable.ListBuffer.tabulate[Float3](10)(x =>
       Float3(

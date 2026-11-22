@@ -220,36 +220,6 @@ object Buffer {
     }
   }
 
-  object StructBuffer {
-    inline def apply[A](inline dim: Int): StructBuffer[A] = {
-      val ns: NativeStruct[A] = ??? // compiletime.deriveNativeStruct[A]
-      mkBuffer(
-        ns.sizeInBytes,
-        dim,
-        identity,
-        new StructBuffer[A](_, _, IdCounter.getAndIncrement())(using ns, summonInline[ClassTag[A]])
-      )
-    }
-  }
-  class StructBuffer[A](
-      val backing: nio.ByteBuffer,
-      val buffer: nio.ByteBuffer,
-      val id: Long
-  )(using S: NativeStruct[A], C: ClassTag[A])
-      extends Buffer[A] {
-    override val name                            = C.runtimeClass.getName
-    override def update(idx: Int, elem: A): Unit = S.encode(buffer, idx, elem)
-    override def apply(i: Int): A                = S.decode(buffer, i)
-    override def length: Int                     = buffer.capacity() / S.sizeInBytes
-    override def putAll(xs: A*): this.type       = updateAll(this, xs*)
-    override def copyToArray: Array[A]           = this.toArray
-    override def hashCode(): Int                 = Objects.hashCode(id)
-    override def equals(other: Any): Boolean = other match {
-      case that: StructBuffer[_] => super.equals(that) && that.canEqual(this) && id == that.id
-      case _                     => false
-    }
-  }
-
   inline def ofDim[A](inline dim: Int): Buffer[A] = inline erasedValue[A] match {
     case _: Double /* */ | _: jl.Double    => DoubleBuffer(dim).asInstanceOf
     case _: Float /*  */ | _: jl.Float     => FloatBuffer(dim).asInstanceOf
@@ -260,9 +230,7 @@ object Buffer {
     case _: Boolean /**/ | _: jl.Boolean   => BoolBuffer(dim).asInstanceOf
     case _: Byte /*   */ | _: jl.Byte      => ByteBuffer(dim).asInstanceOf
     case _: Unit /*   */ | _: jl.Void      => UnitBuffer(dim).asInstanceOf
-    case _: AnyRef                         => StructBuffer[A](dim).asInstanceOf
-    case _ => // should not happen
-      error("Unexpected element type: cannot instantiate Buffer with a type that isn't <: AnyVal or <: AnyRef)")
+    case _ => error("Unexpected element type: cannot instantiate Buffer with a type that isn't a primitive")
   }
 
   private inline def eachN[A](n: Int, a: A)(inline f: (A, Int) => Unit): A = {
