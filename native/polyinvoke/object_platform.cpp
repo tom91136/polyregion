@@ -648,7 +648,8 @@ RelocatableDevice::RelocatableDevice() {
   // and R_ARM_REL32 (arm), which PIC uses for every string literal reference
   const auto elfArch = hostTriple.isOSBinFormatELF() ? hostTriple.getArch() : llvm::Triple::UnknownArch;
   const bool useJITLink = hostTriple.isOSBinFormatMachO() || elfArch == llvm::Triple::x86_64 || elfArch == llvm::Triple::riscv64
-                          || elfArch == llvm::Triple::ppc64le || elfArch == llvm::Triple::arm || elfArch == llvm::Triple::thumb;
+                          || elfArch == llvm::Triple::aarch64 || elfArch == llvm::Triple::ppc64le || elfArch == llvm::Triple::arm
+                          || elfArch == llvm::Triple::thumb;
   if (useJITLink) {
     auto mm = llvm::jitlink::InProcessMemoryManager::Create();
     if (!mm) POLYINVOKE_FATAL(RELOBJ_PREFIX, "Cannot create JITLink memory manager: %s", toString(mm.takeError()).c_str());
