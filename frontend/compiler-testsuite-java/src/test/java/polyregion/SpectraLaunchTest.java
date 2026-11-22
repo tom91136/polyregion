@@ -4,7 +4,6 @@ import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
-import static org.junit.Assume.assumeTrue;
 import static polyregion.javalang.Runtime.offload;
 
 import java.util.Arrays;
@@ -12,7 +11,6 @@ import java.util.Random;
 import java.util.function.IntSupplier;
 import org.junit.Test;
 import polyregion.jvm.runtime.Context;
-import polyregion.jvm.runtime.PolyregionRuntimeException;
 import polyregion.javalang.OffloadFunction;
 
 public class SpectraLaunchTest {
@@ -39,15 +37,6 @@ public class SpectraLaunchTest {
   {
     instanceSorted = instanceData.clone();
     Spectra.sort(instanceSorted, N, (a, b) -> a < b);
-  }
-
-  private static void capturingArrays(Runnable body) {
-    try {
-      body.run();
-    } catch (PolyregionRuntimeException e) {
-      if (e.getMessage() == null || !e.getMessage().contains("no capture marshal")) throw e;
-      assumeTrue("the device refuses pointer-bearing captures: " + e.getMessage(), false);
-    }
   }
 
   private static int sum(int[] xs) {
@@ -126,16 +115,13 @@ public class SpectraLaunchTest {
 
   @Test
   public void sortsByAKeyArrayTheComparatorCaptures() {
-    capturingArrays(
-        () -> {
-          int[] keys = shuffled(4);
-          int[] order = new int[N];
-          for (int i = 0; i < N; i++) order[i] = i;
-          int[] expected = new int[N];
-          for (int i = 0; i < N; i++) expected[keys[i]] = i;
-          Spectra.sort(order, N, (a, b) -> keys[a] < keys[b]);
-          assertArrayEquals(expected, order);
-        });
+      int[] keys = shuffled(4);
+      int[] order = new int[N];
+      for (int i = 0; i < N; i++) order[i] = i;
+      int[] expected = new int[N];
+      for (int i = 0; i < N; i++) expected[keys[i]] = i;
+      Spectra.sort(order, N, (a, b) -> keys[a] < keys[b]);
+      assertArrayEquals(expected, order);
   }
 
   @Test
@@ -160,67 +146,52 @@ public class SpectraLaunchTest {
 
   @Test
   public void transformReduceComputesADotProduct() {
-    capturingArrays(
-        () -> {
-          int[] xs = ints(7);
-          int[] ys = ints(8);
-          long expected = 0;
-          for (int i = 0; i < N; i++) expected += (long) xs[i] * ys[i];
-          long actual = Offload.transform_reduce(N, 0L, i -> (long) xs[(int) i] * ys[(int) i], (a, b) -> a + b);
-          assertEquals(expected, actual);
-        });
+      int[] xs = ints(7);
+      int[] ys = ints(8);
+      long expected = 0;
+      for (int i = 0; i < N; i++) expected += (long) xs[i] * ys[i];
+      long actual = Offload.transform_reduce(N, 0L, i -> (long) xs[(int) i] * ys[(int) i], (a, b) -> a + b);
+      assertEquals(expected, actual);
   }
 
   @Test
   public void transformReduceMapsAndCombinesDoubles() {
-    capturingArrays(
-        () -> {
-          int[] xs = ints(9);
-          double scale = 0.5;
-          double expected = 0;
-          for (int i = 0; i < N; i++) expected = Math.max(expected, Math.abs(xs[i] * scale));
-          double actual =
-              Offload.transform_reduce(
-                  N, 0.0, i -> Math.abs(xs[(int) i] * scale), (a, b) -> a > b ? a : b);
-          assertEquals(expected, actual, 0.0);
-        });
+      int[] xs = ints(9);
+      double scale = 0.5;
+      double expected = 0;
+      for (int i = 0; i < N; i++) expected = Math.max(expected, Math.abs(xs[i] * scale));
+      double actual =
+          Offload.transform_reduce(
+              N, 0.0, i -> Math.abs(xs[(int) i] * scale), (a, b) -> a > b ? a : b);
+      assertEquals(expected, actual, 0.0);
   }
 
   @Test
   public void forEachWritesCapturedArrays() {
-    capturingArrays(
-        () -> {
-          int[] in = ints(10);
-          int[] out = new int[N];
-          Offload.for_each(N, i -> out[(int) i] = in[(int) i] * 2 + 1);
-          int[] expected = new int[N];
-          for (int i = 0; i < N; i++) expected[i] = in[i] * 2 + 1;
-          assertArrayEquals(expected, out);
-        });
+      int[] in = ints(10);
+      int[] out = new int[N];
+      Offload.for_each(N, i -> out[(int) i] = in[(int) i] * 2 + 1);
+      int[] expected = new int[N];
+      for (int i = 0; i < N; i++) expected[i] = in[i] * 2 + 1;
+      assertArrayEquals(expected, out);
   }
 
   @Test
   public void aTaskIsAForEachOfOne() {
-    capturingArrays(
-        () -> {
-          int[] cell = new int[1];
-          int v = 41;
-          Offload.for_each(1, i -> cell[0] = v + 1);
-          assertEquals(42, cell[0]);
-        });
+      int[] cell = new int[1];
+      int v = 41;
+      Offload.for_each(1, i -> cell[0] = v + 1);
+      assertEquals(42, cell[0]);
   }
 
   @Test
   public void anExplicitContextSelectsTheDevice() {
-    capturingArrays(
-        () -> {
-          int[] in = ints(11);
-          int[] out = new int[N];
-          Offload.for_each(Context.current(), N, i -> out[(int) i] = in[(int) i] - 1);
-          int[] expected = new int[N];
-          for (int i = 0; i < N; i++) expected[i] = in[i] - 1;
-          assertArrayEquals(expected, out);
-        });
+      int[] in = ints(11);
+      int[] out = new int[N];
+      Offload.for_each(Context.current(), N, i -> out[(int) i] = in[(int) i] - 1);
+      int[] expected = new int[N];
+      for (int i = 0; i < N; i++) expected[i] = in[i] - 1;
+      assertArrayEquals(expected, out);
   }
 
   @Test
