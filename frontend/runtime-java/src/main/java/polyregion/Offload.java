@@ -124,7 +124,7 @@ public final class Offload {
 
   @Interface("polyregion.core:polyregion.core.transform_reduce_unordered")
   public static int transform_reduce_unordered(long n, Integer init, FnJ_I map, FnII_I combine) {
-    throw new UnsupportedOperationException("compiler did not replace polyregion.core.transform_reduce_unordered");
+    return (Integer) Launch.call("polyregion.core:polyregion.core.transform_reduce_unordered", null, new Object[] {n, init, map, combine});
   }
 
   @Interface("polyregion.core:polyregion.core.transform_reduce_unordered")
@@ -134,12 +134,12 @@ public final class Offload {
       Integer init,
       FnJ_I map,
       FnII_I combine) {
-    throw new UnsupportedOperationException("compiler did not replace polyregion.core.transform_reduce_unordered");
+    return (Integer) Launch.call("polyregion.core:polyregion.core.transform_reduce_unordered", context, new Object[] {n, init, map, combine});
   }
 
   @Interface("polyregion.core:polyregion.core.transform_reduce_unordered")
   public static long transform_reduce_unordered(long n, Long init, FnJ_J map, FnJJ_J combine) {
-    throw new UnsupportedOperationException("compiler did not replace polyregion.core.transform_reduce_unordered");
+    return (Long) Launch.call("polyregion.core:polyregion.core.transform_reduce_unordered", null, new Object[] {n, init, map, combine});
   }
 
   @Interface("polyregion.core:polyregion.core.transform_reduce_unordered")
@@ -149,12 +149,12 @@ public final class Offload {
       Long init,
       FnJ_J map,
       FnJJ_J combine) {
-    throw new UnsupportedOperationException("compiler did not replace polyregion.core.transform_reduce_unordered");
+    return (Long) Launch.call("polyregion.core:polyregion.core.transform_reduce_unordered", context, new Object[] {n, init, map, combine});
   }
 
   @Interface("polyregion.core:polyregion.core.transform_reduce_unordered")
   public static float transform_reduce_unordered(long n, Float init, FnJ_F map, FnFF_F combine) {
-    throw new UnsupportedOperationException("compiler did not replace polyregion.core.transform_reduce_unordered");
+    return (Float) Launch.call("polyregion.core:polyregion.core.transform_reduce_unordered", null, new Object[] {n, init, map, combine});
   }
 
   @Interface("polyregion.core:polyregion.core.transform_reduce_unordered")
@@ -164,12 +164,12 @@ public final class Offload {
       Float init,
       FnJ_F map,
       FnFF_F combine) {
-    throw new UnsupportedOperationException("compiler did not replace polyregion.core.transform_reduce_unordered");
+    return (Float) Launch.call("polyregion.core:polyregion.core.transform_reduce_unordered", context, new Object[] {n, init, map, combine});
   }
 
   @Interface("polyregion.core:polyregion.core.transform_reduce_unordered")
   public static double transform_reduce_unordered(long n, Double init, FnJ_D map, FnDD_D combine) {
-    throw new UnsupportedOperationException("compiler did not replace polyregion.core.transform_reduce_unordered");
+    return (Double) Launch.call("polyregion.core:polyregion.core.transform_reduce_unordered", null, new Object[] {n, init, map, combine});
   }
 
   @Interface("polyregion.core:polyregion.core.transform_reduce_unordered")
@@ -179,6 +179,6 @@ public final class Offload {
       Double init,
       FnJ_D map,
       FnDD_D combine) {
-    throw new UnsupportedOperationException("compiler did not replace polyregion.core.transform_reduce_unordered");
+    return (Double) Launch.call("polyregion.core:polyregion.core.transform_reduce_unordered", context, new Object[] {n, init, map, combine});
   }
 }

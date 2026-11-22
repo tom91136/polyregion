@@ -2741,27 +2741,28 @@ public final class Spectra {
 
   @Interface("spectra:spectra.reduce_unordered")
   public static int reduce_unordered(int[] in, int n, int init, FnII_I op) {
-    throw new UnsupportedOperationException("compiler did not replace spectra.reduce_unordered");
+    return (Integer) Launch.call("spectra:spectra.reduce_unordered", null, new Object[] {in, n, init, op});
   }
 
   @Interface("spectra:spectra.reduce_unordered")
   public static long reduce_unordered(long[] in, int n, long init, FnJJ_J op) {
-    throw new UnsupportedOperationException("compiler did not replace spectra.reduce_unordered");
+    return (Long) Launch.call("spectra:spectra.reduce_unordered", null, new Object[] {in, n, init, op});
   }
 
   @Interface("spectra:spectra.reduce_unordered")
   public static float reduce_unordered(float[] in, int n, float init, FnFF_F op) {
-    throw new UnsupportedOperationException("compiler did not replace spectra.reduce_unordered");
+    return (Float) Launch.call("spectra:spectra.reduce_unordered", null, new Object[] {in, n, init, op});
   }
 
   @Interface("spectra:spectra.reduce_unordered")
   public static double reduce_unordered(double[] in, int n, double init, FnDD_D op) {
-    throw new UnsupportedOperationException("compiler did not replace spectra.reduce_unordered");
+    return (Double) Launch.call("spectra:spectra.reduce_unordered", null, new Object[] {in, n, init, op});
   }
 
   @Interface("spectra:spectra.reduce_unordered")
+  @SuppressWarnings("unchecked")
   public static <T> T reduce_unordered(T[] in, int n, T init, FnLL_L<T, T, T> op) {
-    throw new UnsupportedOperationException("compiler did not replace spectra.reduce_unordered");
+    return (T) Launch.call("spectra:spectra.reduce_unordered", null, new Object[] {in, n, init, op});
   }
 
   @Interface("spectra:spectra.remove")
@@ -4238,12 +4239,12 @@ public final class Spectra {
       Integer init,
       FnI_I map,
       FnII_I op) {
-    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
+    return (Integer) Launch.call("spectra:spectra.transform_reduce_unordered", null, new Object[] {in, n, init, map, op});
   }
 
   @Interface("spectra:spectra.transform_reduce_unordered")
   public static long transform_reduce_unordered(int[] in, int n, Long init, FnI_J map, FnJJ_J op) {
-    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
+    return (Long) Launch.call("spectra:spectra.transform_reduce_unordered", null, new Object[] {in, n, init, map, op});
   }
 
   @Interface("spectra:spectra.transform_reduce_unordered")
@@ -4253,7 +4254,7 @@ public final class Spectra {
       Float init,
       FnI_F map,
       FnFF_F op) {
-    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
+    return (Float) Launch.call("spectra:spectra.transform_reduce_unordered", null, new Object[] {in, n, init, map, op});
   }
 
   @Interface("spectra:spectra.transform_reduce_unordered")
@@ -4263,7 +4264,7 @@ public final class Spectra {
       Double init,
       FnI_D map,
       FnDD_D op) {
-    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
+    return (Double) Launch.call("spectra:spectra.transform_reduce_unordered", null, new Object[] {in, n, init, map, op});
   }
 
   @Interface("spectra:spectra.transform_reduce_unordered")
@@ -4273,12 +4274,12 @@ public final class Spectra {
       Integer init,
       FnJ_I map,
       FnII_I op) {
-    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
+    return (Integer) Launch.call("spectra:spectra.transform_reduce_unordered", null, new Object[] {in, n, init, map, op});
   }
 
   @Interface("spectra:spectra.transform_reduce_unordered")
   public static long transform_reduce_unordered(long[] in, int n, Long init, FnJ_J map, FnJJ_J op) {
-    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
+    return (Long) Launch.call("spectra:spectra.transform_reduce_unordered", null, new Object[] {in, n, init, map, op});
   }
 
   @Interface("spectra:spectra.transform_reduce_unordered")
@@ -4288,7 +4289,7 @@ public final class Spectra {
       Float init,
       FnJ_F map,
       FnFF_F op) {
-    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
+    return (Float) Launch.call("spectra:spectra.transform_reduce_unordered", null, new Object[] {in, n, init, map, op});
   }
 
   @Interface("spectra:spectra.transform_reduce_unordered")
@@ -4298,7 +4299,7 @@ public final class Spectra {
       Double init,
       FnJ_D map,
       FnDD_D op) {
-    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
+    return (Double) Launch.call("spectra:spectra.transform_reduce_unordered", null, new Object[] {in, n, init, map, op});
   }
 
   @Interface("spectra:spectra.transform_reduce_unordered")
@@ -4308,7 +4309,7 @@ public final class Spectra {
       Integer init,
       FnF_I map,
       FnII_I op) {
-    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
+    return (Integer) Launch.call("spectra:spectra.transform_reduce_unordered", null, new Object[] {in, n, init, map, op});
   }
 
   @Interface("spectra:spectra.transform_reduce_unordered")
@@ -4318,7 +4319,7 @@ public final class Spectra {
       Long init,
       FnF_J map,
       FnJJ_J op) {
-    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
+    return (Long) Launch.call("spectra:spectra.transform_reduce_unordered", null, new Object[] {in, n, init, map, op});
   }
 
   @Interface("spectra:spectra.transform_reduce_unordered")
@@ -4328,7 +4329,7 @@ public final class Spectra {
       Float init,
       FnF_F map,
       FnFF_F op) {
-    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
+    return (Float) Launch.call("spectra:spectra.transform_reduce_unordered", null, new Object[] {in, n, init, map, op});
   }
 
   @Interface("spectra:spectra.transform_reduce_unordered")
@@ -4338,7 +4339,7 @@ public final class Spectra {
       Double init,
       FnF_D map,
       FnDD_D op) {
-    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
+    return (Double) Launch.call("spectra:spectra.transform_reduce_unordered", null, new Object[] {in, n, init, map, op});
   }
 
   @Interface("spectra:spectra.transform_reduce_unordered")
@@ -4348,7 +4349,7 @@ public final class Spectra {
       Integer init,
       FnD_I map,
       FnII_I op) {
-    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
+    return (Integer) Launch.call("spectra:spectra.transform_reduce_unordered", null, new Object[] {in, n, init, map, op});
   }
 
   @Interface("spectra:spectra.transform_reduce_unordered")
@@ -4358,7 +4359,7 @@ public final class Spectra {
       Long init,
       FnD_J map,
       FnJJ_J op) {
-    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
+    return (Long) Launch.call("spectra:spectra.transform_reduce_unordered", null, new Object[] {in, n, init, map, op});
   }
 
   @Interface("spectra:spectra.transform_reduce_unordered")
@@ -4368,7 +4369,7 @@ public final class Spectra {
       Float init,
       FnD_F map,
       FnFF_F op) {
-    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
+    return (Float) Launch.call("spectra:spectra.transform_reduce_unordered", null, new Object[] {in, n, init, map, op});
   }
 
   @Interface("spectra:spectra.transform_reduce_unordered")
@@ -4378,17 +4379,18 @@ public final class Spectra {
       Double init,
       FnD_D map,
       FnDD_D op) {
-    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
+    return (Double) Launch.call("spectra:spectra.transform_reduce_unordered", null, new Object[] {in, n, init, map, op});
   }
 
   @Interface("spectra:spectra.transform_reduce_unordered")
+  @SuppressWarnings("unchecked")
   public static <T, U> U transform_reduce_unordered(
       T[] in,
       int n,
       U init,
       FnL_L<T, U> map,
       FnLL_L<U, U, U> op) {
-    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
+    return (U) Launch.call("spectra:spectra.transform_reduce_unordered", null, new Object[] {in, n, init, map, op});
   }
 
   @Interface("spectra:spectra.unique")
