@@ -72,6 +72,10 @@ object StreamSites {
     case Consume(lam: Lam)
   }
 
+  private enum Order {
+    case Ordered, Unordered
+  }
+
   private enum Origin {
     case Held(kind: Char)
     case Counted(kind: Char)
@@ -319,11 +323,21 @@ object StreamSites {
 
   private def combine(op: String, kind: Char): Arg = Arg.Forward(s"$op${suffix(kind)}")
 
+  private def orderOf(chain: Chain): Order = chain.terminal match {
+    case Terminal.Reduce(_) | Terminal.ReduceId(_, _) => Order.Ordered
+    case _                                            => Order.Unordered
+  }
+
+  private def reduction(library: String, chain: Chain): String = orderOf(chain) match {
+    case Order.Ordered   => s"${library}transform_reduce"
+    case Order.Unordered => s"${library}transform_reduce_unordered"
+  }
+
   private def reduceStep(chain: Chain, role: String, w: Char, leaf: Leaf, combiner: Arg): Step = chain.source match {
     case Source.Array(_, k) =>
       Step(
         role,
-        s"${Spectra}transform_reduce",
+        reduction(Spectra, chain),
         List(
           Arg.Array(k),
           Arg.Scalar('I'),
@@ -336,7 +350,7 @@ object StreamSites {
     case Source.Range(elem = k) =>
       Step(
         role,
-        s"${Core}transform_reduce",
+        reduction(Core, chain),
         List(
           Arg.Scalar('J'),
           Arg.Scalar(w),
@@ -410,7 +424,7 @@ object StreamSites {
   private def survivorStep(chain: Chain, w: Char, leaf: Leaf, combiner: Arg): Step =
     Step(
       Streams.MAIN,
-      s"${Spectra}transform_reduce",
+      reduction(Spectra, chain),
       List(
         Arg.Array(chain.elem),
         Arg.Scalar('I'),
