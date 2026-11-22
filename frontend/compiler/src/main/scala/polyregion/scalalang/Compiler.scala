@@ -524,18 +524,27 @@ object Compiler {
 
     } yield (mappedFn, mappedFnDeps, structDefs, deps.modules.keySet)
 
-  private def dropClosureReceivers(program: p.Program): p.Program = {
-    def receiverless(fn: p.Function): Boolean =
-      fn.name.fqn.lastOption.exists(_.contains("$anonfun")) &&
-        fn.receiver.exists { recv =>
-          fn.collectFirst_[p.Term] { case p.Term.Select(root, _, _) if root == recv.named => true }.isEmpty
-        }
-    val names = (program.entry.toList ::: program.functions).filter(receiverless(_)).map(_.name).toSet
+  private def liftClosureReceivers(program: p.Program): p.Program = {
+    def usesReceiver(fn: p.Function, recv: p.Arg): Boolean =
+      fn.collectFirst_[p.Term] { case p.Term.Select(root, _, _) if root == recv.named => true }.isDefined
+    val closures = (program.entry.toList ::: program.functions).filter { fn =>
+      fn.name.fqn.lastOption.exists(_.contains("$anonfun")) && fn.receiver.nonEmpty
+    }
+    val (lifted, dropped) = closures.partition(fn => fn.receiver.exists(usesReceiver(fn, _)))
+    val liftedNames       = lifted.map(_.name).toSet
+    val droppedNames      = dropped.map(_.name).toSet
     def fix(fn: p.Function): p.Function = {
-      val base = if (names(fn.name)) fn.copy(decl = fn.decl.copy(receiver = None)) else fn
+      val base =
+        if (droppedNames(fn.name)) fn.copy(decl = fn.decl.copy(receiver = None))
+        else if (liftedNames(fn.name))
+          fn.copy(decl = fn.decl.copy(receiver = None, termCaptures = fn.receiver.toList ::: fn.termCaptures))
+        else fn
       base.modifyAll[p.Expr] {
-        case ivk @ p.Expr.Invoke(p.Type.FnRef(name), _, Some(_), _, _) if names(name) => ivk.copy(receiver = None)
-        case expr                                                                     => expr
+        case ivk @ p.Expr.Invoke(p.Type.FnRef(name), _, Some(_), _, _) if droppedNames(name) =>
+          ivk.copy(receiver = None)
+        case ivk @ p.Expr.Invoke(p.Type.FnRef(name), _, Some(recv), args, _) if liftedNames(name) =>
+          ivk.copy(receiver = None, args = recv :: args)
+        case expr => expr
       }
     }
     program.copy(entry = program.entry.map(fix(_)), functions = program.functions.map(fix(_)))
@@ -1028,7 +1037,7 @@ object Compiler {
       if (!callable) (rootFn, abstractFnsWithAssertBody ::: allRootDependentFns ::: exprDeps.resolvedFunctions).success
       else lambdaEntry(rootFn, abstractFnsWithAssertBody ::: allRootDependentFns ::: exprDeps.resolvedFunctions)
 
-    unopt = dropClosureReceivers(
+    unopt = liftClosureReceivers(
       Devirtualise(dispatchTable)(
         p.Program(
           Some(entryFn),

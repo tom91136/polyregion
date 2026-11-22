@@ -2,6 +2,8 @@ package polyregion
 
 class ClosureSuite extends BaseSuite {
 
+  import ClosureFixtures.*
+
   private inline def testExpr[A](inline name: String)(inline r: => A) = if (Toggles.ClosureSuite) {
     test(name)(assertOffloadValue(offload1(r)))
   }
@@ -157,6 +159,24 @@ class ClosureSuite extends BaseSuite {
     def quad(g: Int => Int, x: Int): Int  = twice(y => g(y) + 1, x)
     def oct(h: Int => Int, x: Int): Int   = quad(y => h(y) * 2, x)
     oct(_ + 3, 1)
+  }
+  testExpr("this-lambda-field") {
+    new Scaler(3).byField(5)
+  }
+  testExpr("this-lambda-method") {
+    new Scaler(3).byMethod(5)
+  }
+  testExpr("this-lambda-field-and-method") {
+    new Scaler(3).byBoth(5)
+  }
+  testExpr("this-lambda-nested") {
+    new Scaler(3).nested(5)
+  }
+  testExpr("this-lambda-explicit-this") {
+    new Scaler(3).viaThis(5)
+  }
+  testExpr("this-lambda-in-range-map") {
+    new Scaler(3).plain(5)
   }
   testExpr("hof-inline") {
     inline def twice(inline f: Int => Int, x: Int): Int = f(f(x))

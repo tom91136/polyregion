@@ -110,18 +110,18 @@ object Remapper {
     case _ => false
   }
 
+  private def isOwnMember(using q: Quoted)(root: q.Symbol, ref: q.Ref): Boolean = {
+    val viaThisOrAbsent = ref match {
+      case _: q.Ident             => true
+      case q.Select(_: q.This, _) => true
+      case _                      => false
+    }
+    viaThisOrAbsent && Retyper.owningClassSymbol(root).contains(ref.symbol.maybeOwner)
+  }
+
   private def isIntrinsicRaise(using q: Quoted)(sym: q.Symbol): Boolean =
     sym.name == "raise" && sym.owner.fullName.stripSuffix("$") == "polyregion.scalalang.intrinsics"
 
-  private def exceptionClassName(using q: Quoted)(tpe: q.TypeRepr): Either[String, String] = {
-    def binaryName(sym: q.Symbol): Option[String] = {
-      val owner      = sym.maybeOwner
-      val ownerFlags = owner.flags
-      val ownerName  = owner.fullName
-      val base       = sym.name.stripSuffix("$")
-      val self       = if (sym.flags.is(q.Flags.Module)) "$" else ""
-      if (owner.isNoSymbol) None
-      else if (ownerFlags.is(q.Flags.Package))
   private def isMethod(using q: Quoted)(sym: q.Symbol, owner: String, name: String): Boolean =
     sym.name == name && sym.owner.fullName.stripSuffix("$") == owner
 
@@ -143,6 +143,15 @@ object Remapper {
       case _ => Left(s"Unexpected arguments to $what")
     }
 
+  private def exceptionClassName(using q: Quoted)(tpe: q.TypeRepr): Either[String, String] = {
+    def binaryName(sym: q.Symbol): Option[String] = {
+      val owner      = sym.maybeOwner
+      val ownerFlags = owner.flags
+      val ownerName  = owner.fullName
+      val base       = sym.name.stripSuffix("$")
+      val self       = if (sym.flags.is(q.Flags.Module)) "$" else ""
+      if (owner.isNoSymbol) None
+      else if (ownerFlags.is(q.Flags.Package))
         Some((if (ownerName.startsWith("<")) base else s"$ownerName.$base") + self)
       else if (owner.isClassDef && ownerFlags.is(q.Flags.Module))
         binaryName(owner).map(o => (if (o.endsWith("$")) o + base else s"$o$$$base") + self)
@@ -306,7 +315,9 @@ object Remapper {
         for {
           (captures, c) <- RefOutliner
             .outline(RenderedLog(""), defDef.rhs.get)
-            .map((captures, v) => captures.filterNot(cap => argSymbols.contains(cap._2.symbol)))
+            .map((captures, _) =>
+              captures.filterNot(cap => argSymbols.contains(cap._2.symbol) || isOwnMember(defSymbol, cap._2))
+            )
             .map(xs =>
               xs.foldLeft(List.empty[(q.Symbol, p.Named)] -> c) { case ((acc, c0), (_, ref, (term, tpe))) =>
                 val sym = ref.symbol
@@ -680,13 +691,8 @@ object Remapper {
           // Only fire for bare idents and `this.x`-style selects — for `param.x` (e.g. `that.a` in
           // `def +(that: Float2) = ... + that.a`) the qualifier is the parameter itself, NOT this,
           // and rewriting it to `this.a` silently drops the parameter access.
-          def handleThisRef(ref: q.Ref, named: p.Named) = {
-            val rootIsThisOrAbsent = ref match {
-              case _: q.Ident             => true
-              case q.Select(_: q.This, _) => true
-              case _                      => false
-            }
-            if (rootIsThisOrAbsent && Retyper.owningClassSymbol(c.root).contains(ref.symbol.maybeOwner)) {
+          def handleThisRef(ref: q.Ref, named: p.Named) =
+            if (isOwnMember(c.root, ref)) {
               val ownerSym = ref.symbol.owner
               Some(for {
                 (thisCls, c) <- mkThisVar(ownerSym)
@@ -979,12 +985,6 @@ object Remapper {
                 )
               } yield (res, c)
           }
-        case (tpeArgs, termArgs0, ap @ q.Apply(fun, args)) => // *single* application of some terms: `$fun($args...)`
-          val closure = fun match {
-            case r: q.Ref => c1.closures.get(r.symbol).orElse(closureDefOf(fun))
-            case _        => closureDefOf(fun)
-          }
-          closure match {
         case (Nil, Nil, ap @ q.Apply(r: q.Ref, args))
             if isMethod(r.symbol, "scala.runtime.Scala3RunTime", "assertFailed") =>
           failureText("assert", "assertion failed", args) match {
@@ -1010,6 +1010,12 @@ object Remapper {
               )
               (c1 !! ap).mapTerm(q.If(requirement, q.Literal(q.UnitConstant()), raise))
           }
+        case (tpeArgs, termArgs0, ap @ q.Apply(fun, args)) => // *single* application of some terms: `$fun($args...)`
+          val closure = fun match {
+            case r: q.Ref => c1.closures.get(r.symbol).orElse(closureDefOf(fun))
+            case _        => closureDefOf(fun)
+          }
+          closure match {
             case Some(dd) =>
               for {
                 (_, c)        <- (c1 !! ap).mapTerm(fun)
