@@ -548,17 +548,7 @@ object StdLib {
     }
   }
 
-  class Class[T] {}
-
   class Numeric[T]
-
-  class ClassTag[T] { // extends scala.Equals {
-    // override def canEqual(that: Any): Boolean = true
-    // TODO
-  }
-  object ClassTag {
-    def apply[T](runtimeClass1: java.lang.Class[?]): ClassTag[T] = new ClassTag[T]
-  }
 
   class RichInt(val x: Int) {
     def min(that: Int)         = java.lang.Math.min(x, that)
@@ -747,15 +737,6 @@ object StdLib {
       // per-call-site bindings everywhere.
 
       // Immutable types, restore simply uses the original instance
-      witness[scala.reflect.ClassTag[?], ClassTag[?]]( //
-        { case (_ @ given Quotes, x) => '{ new ClassTag[Any]() } },
-        { case (_ @ given Quotes, x) =>
-          x match { // TODO not sure if this will actually work
-            case '{ $cls: ClassTag[t] } => '{ scala.compiletime.summonInline[scala.reflect.ClassTag[t]] }
-          }
-        },
-        { case (_ @ given Quotes, ys, _) => '{ () } }
-      ),
       witness[scala.collection.immutable.IndexedSeq[?], IndexedSeq[?]]( //
         { case (q @ given Quotes, _) => '{ throw new java.lang.AssertionError("No") } },
         { case (q @ given Quotes, _) => '{ throw new java.lang.AssertionError("No") } },
@@ -764,15 +745,6 @@ object StdLib {
       witness[scala.math.Numeric[?], Numeric[?]]( //
         { case (_ @ given Quotes, _) => '{ new Numeric[Any]() } },
         { case (_ @ given Quotes, _) => '{ throw new java.lang.AssertionError("No") } },
-        { case (_ @ given Quotes, ys, _) => '{ () } }
-      ),
-      witness[java.lang.Class[?], Class[?]]( //
-        { case (_ @ given Quotes, _) => '{ new Class[Any]() } },
-        { case (_ @ given Quotes, x) =>
-          x match { // TODO not sure if this will actually work
-            case '{ $cls: Class[t] } => '{ scala.compiletime.summonInline[java.lang.Class[t]] }
-          }
-        },
         { case (_ @ given Quotes, ys, _) => '{ () } }
       ),
       witness[scala.collection.immutable.Range, Range](
@@ -789,11 +761,6 @@ object StdLib {
         { case (_ @ given Quotes, r) => '{ Inclusive($r.start, $r.end, $r.step, $r.isEmpty) } },
         { case (_ @ given Quotes, r) => '{ scala.collection.immutable.Range.inclusive($r.start, $r.end, $r.step) } },
         { case (_ @ given Quotes, _, _) => '{ () } }
-      ),
-      witness[scala.reflect.ClassTag.type, ClassTag.type](
-        { case (_ @ given Quotes, _) => '{ ClassTag } },
-        { case (_ @ given Quotes, _) => '{ scala.reflect.ClassTag } },
-        { case (_ @ given Quotes, _, _) => '{ scala.reflect.ClassTag } }
       ),
       witness[scala.runtime.RichInt, RichInt](
         { case (_ @ given Quotes, x) => '{ RichInt($x.self) } },
