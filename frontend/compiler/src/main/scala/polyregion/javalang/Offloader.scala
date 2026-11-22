@@ -247,16 +247,18 @@ object Offloader {
       .map(Executable(fqcn, _))
 
   def optimise(
-      region: TreeRemapper.Region,
+      tags: Map[String, Int],
+      dispatch: Map[p.Sym, List[Devirtualise.Candidate]],
+      owners: Map[p.Sym, List[p.Sym]],
       raw: p.Program,
       entry: p.Function,
       symbol: String,
       log: Log
   ): Result[(Map[p.Sym, p.Sym], p.Program)] = {
-    val tagged    = region.tags.map((fqn, tag) => p.Sym(fqn) -> tag)
-    val decorated = raw.copy(defs = Devirtualise.decorate(raw.defs, region.owners, tagged), entry = Some(entry))
+    val tagged    = tags.map((fqn, tag) => p.Sym(fqn) -> tag)
+    val decorated = raw.copy(defs = Devirtualise.decorate(raw.defs, owners, tagged), entry = Some(entry))
     for {
-      named <- Either.catchNonFatal(Devirtualise(region.dispatch)(decorated, log))
+      named <- Either.catchNonFatal(Devirtualise(dispatch)(decorated, log))
       (monoToPoly, prog) = runPasses(named, log)
       failures           = Verify(prog, log, verifyFunction = false).filter(_._2.nonEmpty)
       _ <-

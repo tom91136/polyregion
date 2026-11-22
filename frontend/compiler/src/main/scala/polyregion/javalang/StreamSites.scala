@@ -7,7 +7,8 @@ import com.sun.tools.javac.processing.JavacProcessingEnvironment
 import com.sun.tools.javac.tree.{JCTree, TreeMaker, TreeScanner}
 import com.sun.tools.javac.util.{List as JList, Names, Position}
 import polyregion.ast.*
-import polyregion.javalang.LaunchSites.{Mode, Prim, StepArg}
+import polyregion.javalang.LaunchCore.{Mode, Prim}
+import polyregion.javalang.LaunchSites.StepArg
 import polyregion.javalang.StreamChain.*
 import polyregion.scalalang.LaunchConfig
 
@@ -403,7 +404,7 @@ object StreamSites {
     go(stages, start, 0)
   }
 
-  private def prim(kind: Char): Prim = LaunchSites.Prims.values.find(_.code == kind).get
+  private def prim(kind: Char): Prim = LaunchCore.Prims.values.find(_.code == kind).get
 
   private def combine(op: String, kind: Char): Arg = Arg.Forward(s"$op${suffix(kind)}")
 
@@ -702,7 +703,7 @@ object StreamSites {
           steps <- plan(chain)
           lowered <- steps.traverse { step =>
             val fqcn      = Streams.siteName(provisional, step.role)
-            val entryName = LaunchSites.normalise(fqcn.substring(fqcn.lastIndexOf('.') + 1))
+            val entryName = LaunchCore.normalise(fqcn.substring(fqcn.lastIndexOf('.') + 1))
             step.args.zipWithIndex
               .traverse {
                 case (Arg.Scalar(kind), _) => StepArg.Scalar(prim(kind)).success
