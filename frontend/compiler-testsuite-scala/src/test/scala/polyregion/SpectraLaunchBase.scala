@@ -60,6 +60,13 @@ trait SpectraLaunchBase extends munit.FunSuite {
     assertEquals(xs.toList, (0 to 9).reverse.toList)
   }
 
+  protected def sortByKeyArrayCase(ctx: rt.Context): Unit = {
+    val keys  = Array(4, 8, 1, 9, 3, 0, 7, 2, 6, 5)
+    val order = Array.tabulate(keys.length)(identity)
+    spectra.sort(ctx, order, order.length, (a: Int, b: Int) => keys(a) < keys(b))
+    assertEquals(order.toList, keys.indices.sortBy(keys).toList)
+  }
+
   protected def pointerCaptureCase(ctx: rt.Context): Unit = {
     val xs     = Array.tabulate(1000)(identity)
     val out    = Array.ofDim[Int](xs.length)
@@ -78,18 +85,10 @@ trait SpectraLaunchBase extends munit.FunSuite {
     assertEquals(out.toList, xs.map(_ * 3 + 6 + 100).toList)
   }
 
-  // XXX flip when JVM launches register a capture marshal
-  private val JvmCaptureMarshal = false
-
   private def launched(f: rt.Context => Unit): rt.Context => Unit = ctx => {
     val before = ctx.stats().launches
     f(ctx)
     assert(ctx.stats().launches > before, "the call did not launch on the device")
-  }
-
-  private def refusedWith(expected: String)(f: => Unit): Unit = {
-    val refused = intercept[rt.PolyregionRuntimeException](f)
-    assert(refused.getMessage.contains(expected), refused.getMessage)
   }
 
   protected def mirrorsOrRefuses(device: Option[rt.DeviceInfo])(f: rt.Context => Unit): Unit =
@@ -105,10 +104,7 @@ trait SpectraLaunchBase extends munit.FunSuite {
 
   private def pointerBearingOnDefault(device: Option[rt.DeviceInfo])(f: rt.Context => Unit): Unit = {
     assume(device.isDefined, "no matching device")
-    discreteDefault(ctx =>
-      if (device.get.systemPaging || JvmCaptureMarshal) launched(f)(ctx)
-      else refusedWith("no capture marshal")(f(ctx))
-    )
+    launchedOnDefault(f)
   }
 
   protected lazy val selectedBackend: Option[String] =
@@ -122,13 +118,14 @@ trait SpectraLaunchBase extends munit.FunSuite {
     test("spectra.sort sorts on the selected device")(onSelected(sortCase(_)))
     test("spectra.transform maps on the selected device")(onSelected(transformCase(_)))
     test("spectra.reduce reduces on the selected device")(onSelected(reduceCase(_)))
+    test("spectra.sort by a captured key array on the selected device")(onSelected(sortByKeyArrayCase(_)))
   }
 
   protected def deviceTests(kind: String, created: => Option[rt.DeviceInfo]): Unit = {
-    test(s"a pointer-bearing capture on the default $kind context follows the device paging")(
+    test(s"a pointer-bearing capture on the default $kind context")(
       pointerBearingOnDefault(created)(pointerCaptureCase(_))
     )
-    test(s"a nested pointer in the environment on the default $kind context follows the device paging")(
+    test(s"a nested pointer in the environment on the default $kind context")(
       pointerBearingOnDefault(created)(nestedPointerCase(_))
     )
     test(s"a pointer-bearing capture mirrors or is refused on a created $kind context")(
@@ -137,7 +134,7 @@ trait SpectraLaunchBase extends munit.FunSuite {
     test(s"a nested pointer in the environment mirrors or is refused on a created $kind context")(
       mirrorsOrRefuses(created)(nestedPointerCase(_))
     )
-    test(s"spectra.transform captures a scalar and an array on the default $kind context per the device paging")(
+    test(s"spectra.transform captures a scalar and an array on the default $kind context")(
       pointerBearingOnDefault(created)(captureCase(_))
     )
     test(s"spectra.sort orders by a capturing comparator on $kind") {
@@ -155,6 +152,7 @@ trait SpectraLaunchBase extends munit.FunSuite {
   test("spectra.sort sorts on the host")(host(sortCase(_)))
   test("spectra.transform captures a scalar and an array on the host")(host(captureCase(_)))
   test("spectra.sort orders by a capturing comparator on the host")(host(sortDescendingCase(_)))
+  test("spectra.sort by a captured key array on the host")(host(sortByKeyArrayCase(_)))
   test("spectra.transform maps on the host")(host(transformCase(_)))
   test("spectra.reduce reduces on the host")(host(reduceCase(_)))
 
