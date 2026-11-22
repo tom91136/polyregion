@@ -47,7 +47,7 @@ find_program(_SYSTEM_LLD ld.lld REQUIRED)
 set(USE_LINKER "${_SYSTEM_LLD}")
 
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
-# ONLY restricts find_* to the sysroot — correct when cross-building, but with no sysroot ONLY
+# ONLY restricts find_* to the sysroot: correct when cross-building, but with no sysroot ONLY
 # resolves to "nowhere" and find_package(ZLIB) etc. fails. Setting CMAKE_SYSROOT=/ as a workaround
 # also strips the leading `/` from absolute rpath entries (CMake's sysroot relative-path logic),
 # which then breaks the linker runpath that points at libLLVM.so at runtime.

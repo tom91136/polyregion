@@ -1427,7 +1427,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
           }
           if (kind != BlockKind::Terminal) B.CreateBr(loopTest);
         }
-        // The loopExit block is a normal continuation point — `loop_test` falls through to it
+        // The loopExit block is a normal continuation point: `loop_test` falls through to it
         // when the condition first turns false. Return `Normal` (not `Terminal`) so that the
         // caller knows the current block isn't yet closed; otherwise we may emerge from an
         // enclosing Cond branch with `kind == Terminal` and skip emitting a branch into the
@@ -1890,7 +1890,7 @@ Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program, c
       throw BackendException(fmt::format("{} while lowering function `{}`", error.what(), fqcn(fn.decl.name)));
     }
     // Abstract method bodies (e.g. typeclass methods like `Monoid.mempty`) emit no terminator.
-    // Insert an `unreachable` so LLVM module verification is happy — the symbol should never
+    // Insert an `unreachable` so LLVM module verification is happy; the symbol should never
     // actually be invoked since DynamicDispatchPass routes calls through a vtable.
     if (auto *bb = B.GetInsertBlock(); bb && (bb->empty() || !bb->back().isTerminator())) {
       B.CreateUnreachable();

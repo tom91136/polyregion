@@ -421,8 +421,8 @@ struct TypeLayout {
 
         std::fprintf(fd, " (%zu bytes) ", m.sizeInBytes);
         if (show && m.type) {
-          const size_t currentColumn = 8 + 3 + 1 +                                        // "+%3zu~%-3zu │"
-                                       level +                                            // "│"
+          const size_t currentColumn = 8 + 3 + 1 +                                        // "+%3zu~%-3zu |"
+                                       level +                                            // "|"
                                        (std::min)(maxCol, nextOffset - m.offsetInBytes) + // blocks
                                        std::strlen(m.name) + 2 +                          // "name: "
                                        (m.type ? std::strlen(m.type->name) : 3) +         // "type" or "???"

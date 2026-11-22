@@ -503,7 +503,7 @@ HsaDeviceQueue::~HsaDeviceQueue() {
 }
 
 // Submit + sync-wait for one async copy. Cleanup runs on the calling thread, not via
-// `hsa_amd_signal_async_handler` — the async-handler thread can race a tight back-to-back
+// `hsa_amd_signal_async_handler`: the async-handler thread can race a tight back-to-back
 // `createSignal` and trigger SIGSEGV inside `hsa_signal_wait_scacquire` on later enqueues.
 // `hostUnlockHandle` is the locked-pointer returned by `hsa_amd_memory_lock`, or nullptr
 // for D2D where neither end is host memory.

@@ -230,7 +230,7 @@ StructInfo TargetedContext::resolveStruct(const StructDef &def, const Map<std::s
 
 Map<std::string, StructInfo> TargetedContext::resolveLayouts(const std::vector<StructDef> &structs, const Set<std::string> &deAliasedUnions,
                                                              const std::function<bool(const std::string &)> &isDiscontinuityName) {
-  // Two-phase resolution to handle recursive defs (e.g., Node → Option[Node] → Node).
+  // Two-phase resolution to handle recursive defs (e.g., Node -> Option[Node] -> Node).
   // Phase 1: create opaque struct types for every def so subsequent type resolution can refer
   // to them by name without requiring the full body.
   // Also create opaque types for any structs referenced (transitively through members) but not
@@ -260,7 +260,7 @@ Map<std::string, StructInfo> TargetedContext::resolveLayouts(const std::vector<S
                            | map([&](const auto &name) { return std::pair{name, llvm::StructType::create(actual, name)}; }) //
                            | to<Map>();
   // Synthesise StructDefs for any types we created opaque shells for but weren't in the input.
-  // We give them a single i8 placeholder member so LLVM treats them as sized (size 1) — empty
+  // We give them a single i8 placeholder member so LLVM treats them as sized (size 1); empty
   // structs aren't well-supported by `DataLayout::getAlignment`.
   const auto originalNames = structs | map([](const auto &d) { return fqcn(d.name); }) | to<Set>();
   const auto syntheticDefs = structNames ^ collect([&](const auto &name) -> Opt<StructDef> {
@@ -279,7 +279,7 @@ Map<std::string, StructInfo> TargetedContext::resolveLayouts(const std::vector<S
       | to<Map>();
   // Phase 2b: setBody on every struct so all types are sized (recursive defs can ask each other for size).
   // Struct-typed fields are laid out inline (functionBoundary=false) so the layout matches what a
-  // host C++ compiler produces for a captured-by-value struct — the kernel receives a pointer to the
+  // host C++ compiler produces for a captured-by-value struct; the kernel receives a pointer to the
   // outer struct and reads inline fields directly. The previous design used functionBoundary=true
   // (8-byte pointer slots) to defend against empty-struct fields computing to 0 bytes; we keep that
   // defence narrowly by giving empty structs a single placeholder byte.

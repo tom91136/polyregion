@@ -92,7 +92,7 @@ if (WIN32)
     add_dist_check(polyfc-offload  polyfc    offload.f95 ${STDPAR_FLAGS})
 endif ()
 
-# Cross-target codegen — compile-only, can't run on the host.
+# Cross-target codegen: compile-only, can't run on the host.
 function(add_target_compile_check name driver source arch)
     set(out ${CMAKE_CURRENT_BINARY_DIR}/${name}.o)
     add_test(NAME ${name}
