@@ -2,6 +2,9 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstring>
+#include <iterator>
+#include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -11,6 +14,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "polyrt/rt.h"
+#include "polyrt/sma_runtime.hpp"
 
 #include "kernels/generated_cpu_reloc_fma.hpp"
 #include "kernels/generated_cuda_fma.hpp"
@@ -157,6 +161,68 @@ void loadConcurrently(const Selection &selection) {
 }
 
 std::string lastError() { return polyrt_error_message(); }
+
+constexpr auto refusalProbe = "host pointers cannot reach this device";
+
+std::map<uintptr_t, size_t> &hostBlocks() {
+  static std::map<uintptr_t, size_t> blocks;
+  return blocks;
+}
+
+const auto hostBlockReflect = [](const void *ptr) -> polyregion::polyrt::PtrQuery {
+  const auto address = reinterpret_cast<uintptr_t>(ptr);
+  const auto upper = hostBlocks().upper_bound(address);
+  if (upper == hostBlocks().begin()) return {0, 0};
+  const auto &[base, size] = *std::prev(upper);
+  return address - base < size ? polyregion::polyrt::PtrQuery{.sizeInBytes = size, .offsetInBytes = address - base}
+                               : polyregion::polyrt::PtrQuery{0, 0};
+};
+
+std::unique_ptr<polyregion::polyrt::sma::CaptureMarshal> hostBlockMarshal(polyregion::polyrt::ExecutionContext &context) {
+  return polyregion::polyrt::sma::makeStdMarshal(context, hostBlockReflect);
+}
+
+class HostBlocks {
+  polyregion::polyrt::sma::CaptureMarshalFactory previous = polyregion::polyrt::sma::captureMarshalFactory();
+  std::vector<uintptr_t> recorded;
+
+public:
+  HostBlocks() { polyregion::polyrt::sma::registerCaptureMarshalFactory(&hostBlockMarshal); }
+  HostBlocks(const HostBlocks &) = delete;
+  HostBlocks &operator=(const HostBlocks &) = delete;
+  ~HostBlocks() {
+    for (const auto address : recorded)
+      hostBlocks().erase(address);
+    polyregion::polyrt::sma::registerCaptureMarshalFactory(previous);
+  }
+  void record(const void *block, const size_t bytes) {
+    recorded.emplace_back(reinterpret_cast<uintptr_t>(block));
+    hostBlocks()[reinterpret_cast<uintptr_t>(block)] = bytes;
+  }
+};
+
+float launchFmaIntoHostBlock(void *context, const Selection &selection, const char *module, const float a, const float b, const float c) {
+  HostBlocks blocks;
+  float out = 0;
+  blocks.record(&out, sizeof(out));
+  REQUIRE(polyrt_context_acquire(context));
+  const auto &image = cudaImage(selection.info);
+  REQUIRE(polyrt_remote_load(context, module, selection.info.platformKind, selection.info.moduleFormat, 0, nullptr, image.size(),
+                             image.data()));
+  float x = a, y = b, z = c;
+  auto outPointer = reinterpret_cast<uintptr_t>(&out);
+  const std::array<uint8_t, 4> types{static_cast<uint8_t>(Type::Float32), static_cast<uint8_t>(Type::Float32),
+                                     static_cast<uint8_t>(Type::Float32), static_cast<uint8_t>(Type::Ptr)};
+  const std::array<void *, 4> arguments{&x, &y, &z, &outPointer};
+  const std::array<size_t, 4> mirrorSizes{0, 0, 0, sizeof(out)};
+  const std::array<uint8_t, 4> mirrorKinds{0, 0, 0, 3};
+  const auto launched = polyrt_remote_launch_marshalled(context, module, "_fma", 1, 1, 1, 0, 0, 0, 0, types.size(), types.data(),
+                                                        arguments.data(), mirrorSizes.data(), mirrorKinds.data(), nullptr);
+  INFO(polyrt_error_message());
+  REQUIRE(launched);
+  REQUIRE(polyrt_context_release(context));
+  return out;
+}
 
 } // namespace
 
@@ -343,9 +409,9 @@ TEST_CASE("release reports a mirror refusal recorded during the transaction") {
   REQUIRE(host);
   Created created(host);
   REQUIRE(polyrt_context_acquire(created.context));
-  REQUIRE(polyregion::polyrt::sma::foreignContextActive("probe"));
+  REQUIRE(polyregion::polyrt::sma::refuseCapture("probe", refusalProbe));
   CHECK_FALSE(polyrt_context_release(created.context));
-  CHECK(lastError().find("created context") != std::string::npos);
+  CHECK(lastError().find(refusalProbe) != std::string::npos);
   REQUIRE(polyrt_context_acquire(created.context));
   CHECK(polyrt_context_release(created.context));
 }
@@ -356,32 +422,14 @@ TEST_CASE("a recorded mirror refusal is reported once, through the host program 
   Created created(host);
   REQUIRE(polyrt_context_acquire(created.context));
   const auto previous = polyrt_raise_host_failures(true);
-  REQUIRE(polyregion::polyrt::sma::foreignContextActive("probe"));
+  REQUIRE(polyregion::polyrt::sma::refuseCapture("probe", refusalProbe));
   uintptr_t memory = 0;
   REQUIRE(polyrt_remote_malloc(created.context, 8, &memory));
   CHECK(polyrt_remote_failed());
-  CHECK(lastError().find("created context") != std::string::npos);
+  CHECK(lastError().find(refusalProbe) != std::string::npos);
   CHECK(polyrt_remote_free(created.context, memory));
   CHECK_FALSE(polyrt_remote_failed());
   polyrt_raise_host_failures(previous);
-  CHECK(polyrt_context_release(created.context));
-}
-
-TEST_CASE("a recorded mirror refusal is left to the release when host failures are not raised") {
-  const auto host = find(RelocatableBackend);
-  REQUIRE(host);
-  Created created(host);
-  REQUIRE(polyrt_context_acquire(created.context));
-  REQUIRE_FALSE(polyrt_raise_host_failures(false));
-  REQUIRE(polyregion::polyrt::sma::foreignContextActive("probe"));
-  uintptr_t memory = 0;
-  REQUIRE(polyrt_remote_malloc(created.context, 8, &memory));
-  CHECK_FALSE(polyrt_remote_failed());
-  CHECK(polyrt_remote_free(created.context, memory));
-  CHECK_FALSE(polyrt_remote_failed());
-  CHECK_FALSE(polyrt_context_release(created.context));
-  CHECK(lastError().find("created context") != std::string::npos);
-  REQUIRE(polyrt_context_acquire(created.context));
   CHECK(polyrt_context_release(created.context));
 }
 
@@ -419,9 +467,9 @@ TEST_CASE("a failed release still reports a pending mirror refusal") {
   REQUIRE(host);
   Created created(host);
   REQUIRE(polyrt_context_acquire(created.context));
-  REQUIRE(polyregion::polyrt::sma::foreignContextActive("probe"));
+  REQUIRE(polyregion::polyrt::sma::refuseCapture("probe", refusalProbe));
   CHECK_FALSE(polyrt_context_release_failed(created.context));
-  CHECK(lastError().find("created context") != std::string::npos);
+  CHECK(lastError().find(refusalProbe) != std::string::npos);
   REQUIRE(polyrt_context_acquire(created.context));
   CHECK(polyrt_context_release(created.context));
 }
@@ -530,6 +578,14 @@ TEST_CASE("a created CUDA context is released while the default context is live"
   CHECK(launchFma(current, fallback, imageFor(fallback), "fma_cuda_default_after", 1.f, 2.f, 1.f) == 3.f);
   Created again(cuda);
   CHECK(launchFma(again.context, cuda, cudaImage(cuda.info), "fma_cuda_again", 2.f, 5.f, 1.f) == 11.f);
+}
+
+TEST_CASE("a created CUDA context marshals a host pointer capture") {
+  const auto cuda = find(CudaBackend);
+  if (!cuda) SKIP("no CUDA device");
+  Created created(cuda);
+  CHECK(launchFmaIntoHostBlock(created.context, cuda, "fma_marshal", 2.f, 3.f, 4.f) == 10.f);
+  CHECK(launchFmaIntoHostBlock(created.context, cuda, "fma_marshal", 5.f, 6.f, 7.f) == 37.f);
 }
 
 TEST_CASE("destroying a CUDA context returns its device memory") {

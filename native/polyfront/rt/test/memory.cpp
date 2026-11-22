@@ -187,17 +187,24 @@ struct StubQueue final : object::ObjectDeviceQueue {
 
 struct WithStubDevice {
   std::unique_ptr<Device> previous;
+  polyregion::polyrt::ExecutionContext *defaultContext;
+  Device *previousDefault = nullptr;
   StubDevice *stub;
 
   explicit WithStubDevice(const bool shared, const bool cpu = true, const size_t threads = 1024, const size_t subgroup = 1,
                           const ModuleFormat format = ModuleFormat::Object) {
     polyregion::polyrt::initialise();
+    defaultContext = polyregion::polyrt::currentContext();
     previous = std::move(polyregion::polyrt::currentDevice);
     auto owned = std::make_unique<StubDevice>(shared, cpu, threads, subgroup, format);
     stub = owned.get();
     polyregion::polyrt::currentDevice = std::move(owned);
+    if (defaultContext) previousDefault = std::exchange(defaultContext->device, stub);
   }
-  ~WithStubDevice() { polyregion::polyrt::currentDevice = std::move(previous); }
+  ~WithStubDevice() {
+    if (defaultContext) defaultContext->device = previousDefault;
+    polyregion::polyrt::currentDevice = std::move(previous);
+  }
 };
 
 struct StubManagedPlatform final : Platform {
@@ -213,13 +220,24 @@ std::unique_ptr<Platform> takeCurrentPlatform() {
 }
 
 struct WithStubManagedPlatform {
+  polyregion::polyrt::ExecutionContext *defaultContext = polyregion::polyrt::currentContext();
   std::unique_ptr<Platform> previousPlatform = takeCurrentPlatform();
   std::unique_ptr<DeviceQueue> previousQueue = std::move(polyregion::polyrt::currentQueue);
+  Platform *previousDefaultPlatform = nullptr;
+  DeviceQueue *previousDefaultQueue = nullptr;
   WithStubManagedPlatform() {
     polyregion::polyrt::currentPlatform = std::make_unique<StubManagedPlatform>();
     polyregion::polyrt::currentQueue = std::make_unique<StubQueue>(std::chrono::seconds(1));
+    if (defaultContext) {
+      previousDefaultPlatform = std::exchange(defaultContext->platform, polyregion::polyrt::currentPlatform.get());
+      previousDefaultQueue = std::exchange(defaultContext->queue, polyregion::polyrt::currentQueue.get());
+    }
   }
   ~WithStubManagedPlatform() {
+    if (defaultContext) {
+      defaultContext->platform = previousDefaultPlatform;
+      defaultContext->queue = previousDefaultQueue;
+    }
     polyregion::polyrt::currentQueue = std::move(previousQueue);
     polyregion::polyrt::currentPlatform = std::move(previousPlatform);
   }
@@ -456,45 +474,15 @@ TEST_CASE("remote launch releases mirrored arguments after a failure") {
   CHECK(context.remoteAllocations.empty());
 }
 
-TEST_CASE("a created context refuses captures only the process mirror can marshal") {
-  WithStubDevice device(false, false);
-  WithStubManagedPlatform platform;
-  StubQueue queue(std::chrono::seconds(1));
-  polyregion::polyrt::ExecutionContext context{polyregion::polyrt::currentPlatform.get(), device.stub, &queue};
-  context.processMarshal = false;
-  std::array<uint8_t, 8> local{};
-  auto hostPointer = reinterpret_cast<uintptr_t>(local.data());
-  const std::array<uint8_t, 1> types{static_cast<uint8_t>(Type::Ptr)};
-  const std::array<void *, 1> arguments{&hostPointer};
-  const std::array<size_t, 1> mirrorSizes{local.size()};
-  const std::array<uint8_t, 1> mirrorKinds{3};
-
-  SECTION("a host pointer is refused") {
-    CHECK_FALSE(polyrt_remote_launch_marshalled(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
-                                                arguments.data(), mirrorSizes.data(), mirrorKinds.data(), nullptr));
-    CHECK(std::string(polyrt_error_message()).find("created context") != std::string::npos);
-    CHECK(queue.invokedTypes.empty());
-  }
-
-  SECTION("a device pointer passes through") {
-    auto remote = remoteAlloc(&context, local.size());
-    const std::array<void *, 1> remoteArguments{&remote};
-    REQUIRE(polyrt_remote_launch_marshalled(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, remoteArguments.size(), types.data(),
-                                            remoteArguments.data(), mirrorSizes.data(), mirrorKinds.data(), nullptr));
-    CHECK(queue.invokedTypes == std::vector{Type::Ptr, Type::Void});
-    REQUIRE(polyrt_remote_free(&context, remote));
-  }
-}
-
 TEST_CASE("a launch with host pointers is refused when no capture marshal can mirror them and the device cannot page host memory") {
   WithStubDevice device(false, false);
   WithStubManagedPlatform platform;
   StubQueue queue(std::chrono::seconds(1));
   polyregion::polyrt::ExecutionContext context{polyregion::polyrt::currentPlatform.get(), device.stub, &queue};
   struct Unregistered {
-    polyregion::polyrt::sma::CaptureMarshal *previous = polyregion::polyrt::sma::captureMarshal();
-    Unregistered() { polyregion::polyrt::sma::registerCaptureMarshal(nullptr); }
-    ~Unregistered() { polyregion::polyrt::sma::registerCaptureMarshal(previous); }
+    polyregion::polyrt::sma::CaptureMarshalFactory previous = polyregion::polyrt::sma::captureMarshalFactory();
+    Unregistered() { polyregion::polyrt::sma::registerCaptureMarshalFactory(nullptr); }
+    ~Unregistered() { polyregion::polyrt::sma::registerCaptureMarshalFactory(previous); }
   } unregistered;
   std::array<uint8_t, 8> local{};
   auto hostPointer = reinterpret_cast<uintptr_t>(local.data());
@@ -550,9 +538,9 @@ TEST_CASE("a by-value aggregate is refused only for the host pointers it holds")
   polyregion::polyrt::ExecutionContext context{polyregion::polyrt::currentPlatform.get(), device.stub, &queue};
   device.stub->advertised = std::vector<std::string>{"paging:Managed"};
   struct Unregistered {
-    polyregion::polyrt::sma::CaptureMarshal *previous = polyregion::polyrt::sma::captureMarshal();
-    Unregistered() { polyregion::polyrt::sma::registerCaptureMarshal(nullptr); }
-    ~Unregistered() { polyregion::polyrt::sma::registerCaptureMarshal(previous); }
+    polyregion::polyrt::sma::CaptureMarshalFactory previous = polyregion::polyrt::sma::captureMarshalFactory();
+    Unregistered() { polyregion::polyrt::sma::registerCaptureMarshalFactory(nullptr); }
+    ~Unregistered() { polyregion::polyrt::sma::registerCaptureMarshalFactory(previous); }
   } unregistered;
   const polyregion::runtime::AggregateMember member{.name = "pointer",
                                                     .offsetInBytes = 0,
@@ -591,46 +579,6 @@ TEST_CASE("a by-value aggregate is refused only for the host pointers it holds")
                                             arguments.data(), mirrorSizes.data(), mirrorKinds.data(), layouts.data()));
     CHECK(queue.invokedTypes == std::vector{Type::Ptr, Type::Void});
     REQUIRE(polyrt_remote_free(&context, remote));
-  }
-}
-
-TEST_CASE("mirror tables refuse a transaction on a created context") {
-  WithStubDevice device(false, false);
-  WithStubManagedPlatform platform;
-  StubQueue queue(std::chrono::seconds(1));
-  polyregion::polyrt::ExecutionContext context{polyregion::polyrt::currentPlatform.get(), device.stub, &queue};
-  context.processMarshal = false;
-
-  SECTION("a refusal fails the release that ends the transaction") {
-    CHECK_FALSE(polyregion::polyrt::sma::foreignContextActive("outside"));
-    REQUIRE(polyrt_context_acquire(&context));
-    CHECK(polyregion::polyrt::sma::foreignContextActive("inside"));
-    CHECK(std::string(polyrt_error_message()).find("inside: a created context cannot marshal") != std::string::npos);
-    CHECK_FALSE(polyrt_context_release(&context));
-    CHECK(std::string(polyrt_error_message()).find("created context cannot marshal") != std::string::npos);
-    CHECK_FALSE(polyregion::polyrt::sma::foreignContextActive("after"));
-    REQUIRE(polyrt_context_acquire(&context));
-    CHECK(polyrt_context_release(&context));
-  }
-
-  SECTION("a launch after a refusal is skipped and the release reports it once") {
-    REQUIRE(polyrt_context_acquire(&context));
-    CHECK(polyregion::polyrt::sma::foreignContextActive("inside"));
-    const std::array<uint8_t, 0> types{};
-    const std::array<void *, 0> arguments{};
-    CHECK(polyrt_remote_launch(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, 0, types.data(), arguments.data()));
-    CHECK(queue.invokedTypes.empty());
-    CHECK_FALSE(polyrt_context_release(&context));
-    CHECK(std::string(polyrt_error_message()).find("created context cannot marshal") != std::string::npos);
-    REQUIRE(polyrt_context_acquire(&context));
-    CHECK(polyrt_context_release(&context));
-  }
-
-  SECTION("the default marshaller context is never foreign") {
-    context.processMarshal = true;
-    REQUIRE(polyrt_context_acquire(&context));
-    CHECK_FALSE(polyregion::polyrt::sma::foreignContextActive("inside"));
-    REQUIRE(polyrt_context_release(&context));
   }
 }
 
@@ -1176,6 +1124,124 @@ struct Fixture {
   }
 };
 
+namespace {
+template <typename SMA> class SmaView final : public polyregion::polyrt::sma::CaptureMarshal {
+  SMA &sma;
+
+public:
+  explicit SmaView(SMA &sma) : sma(sma) {}
+  void visitClear() override { sma.unmirrorVisitClear(); }
+  uintptr_t ensure(const void *local, const size_t minSize) override { return sma.mirrorEnsure(local, minSize, minSize != 0); }
+  void readAlloc(const void *local) override { sma.unmirrorReadAlloc(local); }
+  uintptr_t mirror(const void *capture, const TypeLayout &layout) override { return sma.syncLocalToRemote(capture, layout); }
+  void readMirror(void *capture) override {
+    sma.syncRemoteToLocalAfterLaunch(capture);
+    sma.disassociate(capture);
+  }
+  polyregion::polyrt::sma::ArenaImage arena(const void *capture, const TypeLayout &layout,
+                                            polyregion::polyrt::ArenaPlacement placement) override {
+    return polyregion::polyrt::sma::arenaMarshal(sma, capture, layout, std::move(placement), *polyregion::polyrt::currentDevice);
+  }
+  void readArena() override { sma.genArenaReadback(); }
+  void releaseArena() override { sma.releaseArenaGuards(); }
+  void forget(const void *host, const size_t sizeInBytes) override { sma.forget(host, sizeInBytes); }
+  void reclaim(const void *host, const size_t sizeInBytes, const bool forWrite) override { sma.reclaimRange(host, sizeInBytes, forWrite); }
+  void disassociate(const void *host, const bool releaseRemote) override { sma.disassociate(host, releaseRemote); }
+  void releaseAll() override { sma.releaseAll(); }
+};
+
+void installMarshal(polyregion::polyrt::ExecutionContext &context, std::unique_ptr<polyregion::polyrt::sma::CaptureMarshal> marshal) {
+  const std::scoped_lock lock(context.marshalMutex);
+  context.marshal = std::move(marshal);
+  context.marshalLive.store(context.marshal.get(), std::memory_order_release);
+}
+
+void removeMarshal(polyregion::polyrt::ExecutionContext &context) {
+  context.marshalLive.store(nullptr, std::memory_order_release);
+  context.marshal.reset();
+}
+} // namespace
+
+TEST_CASE("a context marshals host pointers through its own marshal") {
+  WithStubDevice device(false, false);
+  WithStubManagedPlatform platform;
+  StubQueue queue(std::chrono::seconds(1));
+  polyregion::polyrt::ExecutionContext context{polyregion::polyrt::currentPlatform.get(), device.stub, &queue};
+  Fixture fixture;
+  installMarshal(context, std::make_unique<SmaView<decltype(fixture.allocation)>>(fixture.allocation));
+  struct Remove {
+    polyregion::polyrt::ExecutionContext &context;
+    ~Remove() { removeMarshal(context); }
+  } remove{context};
+  auto *local = fixture.mallocLocal<uint8_t>(8);
+  auto hostPointer = reinterpret_cast<uintptr_t>(local);
+  const std::array<uint8_t, 1> types{static_cast<uint8_t>(Type::Ptr)};
+  const std::array<size_t, 1> mirrorSizes{8};
+  const std::array<uint8_t, 1> mirrorKinds{3};
+
+  SECTION("a host pointer is mirrored and read back") {
+    queue.mutateFirstPointer = true;
+    const std::array<void *, 1> arguments{&hostPointer};
+    REQUIRE(polyrt_remote_launch_marshalled(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
+                                            arguments.data(), mirrorSizes.data(), mirrorKinds.data(), nullptr));
+    CHECK(queue.invokedTypes == std::vector{Type::Ptr, Type::Void});
+    CHECK(queue.firstPointer != 0);
+    CHECK(queue.firstPointer != hostPointer);
+    CHECK(fixture.remoteAllocations.size() == 1);
+    CHECK(*reinterpret_cast<uint64_t *>(local) == 0x123456789ABCDEF0ull);
+  }
+
+  SECTION("a device pointer passes through") {
+    auto remote = remoteAlloc(&context, 8);
+    const std::array<void *, 1> arguments{&remote};
+    REQUIRE(polyrt_remote_launch_marshalled(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
+                                            arguments.data(), mirrorSizes.data(), mirrorKinds.data(), nullptr));
+    CHECK(queue.firstPointer == remote);
+    CHECK(fixture.remoteAllocations.empty());
+    REQUIRE(polyrt_remote_free(&context, remote));
+  }
+
+  SECTION("releasing everything frees the device mirrors") {
+    const std::array<void *, 1> arguments{&hostPointer};
+    REQUIRE(polyrt_remote_launch_marshalled(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
+                                            arguments.data(), mirrorSizes.data(), mirrorKinds.data(), nullptr));
+    context.marshal->releaseAll();
+    CHECK(fixture.releasedRemote.size() == fixture.remoteAllocations.size());
+  }
+}
+
+static int registeredBuilt = 0;
+
+TEST_CASE("each context builds its own marshal and transactions select it") {
+  WithStubDevice device(false, false);
+  WithStubManagedPlatform platform;
+  StubQueue first(std::chrono::seconds(1)), second(std::chrono::seconds(1));
+  polyregion::polyrt::ExecutionContext a{polyregion::polyrt::currentPlatform.get(), device.stub, &first};
+  polyregion::polyrt::ExecutionContext b{polyregion::polyrt::currentPlatform.get(), device.stub, &second};
+  struct Registered {
+    polyregion::polyrt::sma::CaptureMarshalFactory previous = polyregion::polyrt::sma::captureMarshalFactory();
+    Registered() {
+      polyregion::polyrt::sma::registerCaptureMarshalFactory(+[](polyregion::polyrt::ExecutionContext &context) {
+        ++registeredBuilt;
+        return polyregion::polyrt::sma::makeStdMarshal(context, [](const void *) { return polyregion::polyrt::PtrQuery{0, 0}; });
+      });
+    }
+    ~Registered() { polyregion::polyrt::sma::registerCaptureMarshalFactory(previous); }
+  } registered;
+  CHECK(polyregion::polyrt::sma::captureMarshal(a) != nullptr);
+  CHECK(polyregion::polyrt::sma::captureMarshal(a) == polyregion::polyrt::sma::captureMarshal(a));
+  CHECK(polyregion::polyrt::sma::captureMarshal(b) != polyregion::polyrt::sma::captureMarshal(a));
+  CHECK(registeredBuilt == 2);
+
+  REQUIRE(polyrt_context_acquire(&a));
+  CHECK(&polyregion::polyrt::sma::activeContext() == &a);
+  REQUIRE(polyrt_context_acquire(&b));
+  CHECK(&polyregion::polyrt::sma::activeContext() == &b);
+  REQUIRE(polyrt_context_release(&b));
+  CHECK(&polyregion::polyrt::sma::activeContext() == &a);
+  REQUIRE(polyrt_context_release(&a));
+}
+
 TEST_CASE("generated mirror refreshes cached allocations between launches") {
   Fixture fixture;
   auto x = fixture.mallocLocal<int32_t>();
@@ -1322,16 +1388,16 @@ TEST_CASE("stats count the host transfers of the shared runtime") {
     REQUIRE(polyrt_stats(&context, &value));
     return value;
   };
-  polyregion::polyrt::sma::stdRemoteWrite()(local.data(), remote, 0, local.size());
-  polyregion::polyrt::sma::stdRemoteRead()(local.data(), remote, 0, local.size());
+  polyregion::polyrt::sma::stdRemoteWrite(context)(local.data(), remote, 0, local.size());
+  polyregion::polyrt::sma::stdRemoteRead(context)(local.data(), remote, 0, local.size());
   REQUIRE(polyrt_remote_memcpy(&context, remote, reinterpret_cast<uintptr_t>(local.data()), local.size(), 0));
   REQUIRE(polyrt_remote_memcpy(&context, reinterpret_cast<uintptr_t>(local.data()), remote, local.size(), 1));
   CHECK(stats().h2dCopies == 2);
   CHECK(stats().d2hCopies == 2);
   CHECK(stats().waits == 4);
   queue.idle = true;
-  polyregion::polyrt::sma::stdRemoteWrite()(local.data(), remote, 0, local.size());
-  polyregion::polyrt::sma::stdRemoteRead()(local.data(), remote, 0, local.size());
+  polyregion::polyrt::sma::stdRemoteWrite(context)(local.data(), remote, 0, local.size());
+  polyregion::polyrt::sma::stdRemoteRead(context)(local.data(), remote, 0, local.size());
   CHECK(stats().h2dCopies == 3);
   CHECK(stats().d2hCopies == 3);
   CHECK(stats().waits == 4);
@@ -2709,11 +2775,11 @@ TEST_CASE("a capture that references package memory is rejected when the device 
   StubQueue queue(std::chrono::seconds(1));
   polyregion::polyrt::ExecutionContext context{polyregion::polyrt::currentPlatform.get(), device.stub, &queue};
   Fixture fixture;
-  polyregion::polyrt::sma::CaptureMarshalOf<decltype(fixture.allocation)> marshal{fixture.allocation};
-  polyregion::polyrt::sma::registerCaptureMarshal(&marshal);
-  struct Unregister {
-    ~Unregister() { polyregion::polyrt::sma::registerCaptureMarshal(nullptr); }
-  } unregister;
+  installMarshal(context, std::make_unique<SmaView<decltype(fixture.allocation)>>(fixture.allocation));
+  struct Remove {
+    polyregion::polyrt::ExecutionContext &context;
+    ~Remove() { removeMarshal(context); }
+  } remove{context};
 
   const auto begin = remoteAlloc(&context, 100 * sizeof(int32_t));
   Grid grid{reinterpret_cast<int32_t *>(begin), reinterpret_cast<int32_t *>(begin + 100 * sizeof(int32_t))};
@@ -2744,34 +2810,38 @@ TEST_CASE("a stdpar capture that references package memory is rejected when the 
 
   const auto begin = remoteAlloc(&context, 100 * sizeof(int32_t));
   Grid grid{reinterpret_cast<int32_t *>(begin), reinterpret_cast<int32_t *>(begin + 100 * sizeof(int32_t))};
-  CHECK_THROWS_AS(
-      polyregion::polyrt::sma::arenaMarshal(fixture.allocation, &grid, *gridLayout, polyregion::polyrt::sma::arenaPlacementOf(&context)),
-      std::logic_error);
+  CHECK_THROWS_AS(polyregion::polyrt::sma::arenaMarshal(fixture.allocation, &grid, *gridLayout,
+                                                        polyregion::polyrt::sma::arenaPlacementOf(&context), *device.stub),
+                  std::logic_error);
 
   auto *host = fixture.mallocLocal<int32_t>(16);
   Grid plain{host, host + 16};
-  CHECK_NOTHROW(
-      polyregion::polyrt::sma::arenaMarshal(fixture.allocation, &plain, *gridLayout, polyregion::polyrt::sma::arenaPlacementOf(&context)));
+  CHECK_NOTHROW(polyregion::polyrt::sma::arenaMarshal(fixture.allocation, &plain, *gridLayout,
+                                                      polyregion::polyrt::sma::arenaPlacementOf(&context), *device.stub));
 }
 
 namespace {
 struct RootedMarshal final : polyregion::polyrt::sma::CaptureMarshal {
-  polyregion::polyrt::sma::CaptureMarshal &inner;
+  std::unique_ptr<polyregion::polyrt::sma::CaptureMarshal> inner;
   int64_t root;
-  RootedMarshal(polyregion::polyrt::sma::CaptureMarshal &inner, const int64_t root) : inner(inner), root(root) {}
-  void visitClear() override { inner.visitClear(); }
-  uintptr_t ensure(const void *local, const size_t minSize) override { return inner.ensure(local, minSize); }
-  void readAlloc(const void *local) override { inner.readAlloc(local); }
-  uintptr_t mirror(const void *capture, const TypeLayout &layout) override { return inner.mirror(capture, layout); }
-  void readMirror(void *capture) override { inner.readMirror(capture); }
+  RootedMarshal(std::unique_ptr<polyregion::polyrt::sma::CaptureMarshal> inner, const int64_t root) : inner(std::move(inner)), root(root) {}
+  void visitClear() override { inner->visitClear(); }
+  uintptr_t ensure(const void *local, const size_t minSize) override { return inner->ensure(local, minSize); }
+  void readAlloc(const void *local) override { inner->readAlloc(local); }
+  uintptr_t mirror(const void *capture, const TypeLayout &layout) override { return inner->mirror(capture, layout); }
+  void readMirror(void *capture) override { inner->readMirror(capture); }
   polyregion::polyrt::sma::ArenaImage arena(const void *capture, const TypeLayout &layout,
                                             polyregion::polyrt::ArenaPlacement placement) override {
-    auto image = inner.arena(capture, layout, std::move(placement));
+    auto image = inner->arena(capture, layout, std::move(placement));
     image.root = root;
     return image;
   }
-  void readArena() override { inner.readArena(); }
-  void releaseArena() override { inner.releaseArena(); }
+  void readArena() override { inner->readArena(); }
+  void releaseArena() override { inner->releaseArena(); }
+  void forget(const void *host, const size_t sizeInBytes) override { inner->forget(host, sizeInBytes); }
+  void reclaim(const void *host, const size_t sizeInBytes, const bool forWrite) override { inner->reclaim(host, sizeInBytes, forWrite); }
+  void disassociate(const void *host, const bool releaseRemote) override { inner->disassociate(host, releaseRemote); }
+  void releaseAll() override { inner->releaseAll(); }
 };
 
 struct RootLaunch {
@@ -2780,20 +2850,19 @@ struct RootLaunch {
   WithStubManagedPlatform platform;
   polyregion::polyrt::ExecutionContext context{polyregion::polyrt::currentPlatform.get(), device.stub, &queue};
   Fixture fixture;
-  polyregion::polyrt::sma::CaptureMarshalOf<decltype(fixture.allocation)> plain{fixture.allocation};
-  RootedMarshal rooted;
   struct Span {
     int32_t *data;
     int64_t length;
   } span{};
 
-  explicit RootLaunch(const int64_t root, const std::optional<size_t> viewStart) : rooted(plain, root) {
+  explicit RootLaunch(const int64_t root, const std::optional<size_t> viewStart) {
     span = {fixture.mallocLocal<int32_t>(4), 4};
     device.stub->advertised = std::vector<std::string>{"overread_pad:4096"};
     device.stub->viewStart = viewStart;
-    polyregion::polyrt::sma::registerCaptureMarshal(&rooted);
+    installMarshal(context,
+                   std::make_unique<RootedMarshal>(std::make_unique<SmaView<decltype(fixture.allocation)>>(fixture.allocation), root));
   }
-  ~RootLaunch() { polyregion::polyrt::sma::registerCaptureMarshal(nullptr); }
+  ~RootLaunch() { removeMarshal(context); }
 
   void launch() {
     auto layout = Struct_(Span, StructMember_(Span, data, &int32Type), StructMember_(Span, length, &int64Type));
@@ -2932,14 +3001,15 @@ struct HeapArena {
   WithStubManagedPlatform platform;
   HeapRouting f;
   Fixture fixture;
-  polyregion::polyrt::sma::CaptureMarshalOf<decltype(fixture.allocation)> marshal{fixture.allocation};
 
   explicit HeapArena(const size_t limit = size_t{1} << 26, const ModuleFormat format = ModuleFormat::SPIRV_GLCompute)
       : f(HeapLimits{limit, 64}, format) {
     f.device.stub->viewStart = 0;
-    polyregion::polyrt::sma::registerCaptureMarshal(&marshal);
+    installMarshal(f.context, std::make_unique<SmaView<decltype(fixture.allocation)>>(fixture.allocation));
   }
-  ~HeapArena() { polyregion::polyrt::sma::registerCaptureMarshal(nullptr); }
+  ~HeapArena() {
+    if (f.owned) removeMarshal(f.context);
+  }
 
   uintptr_t heap() { return fixture.allocation.genArenaDevBase; }
   uint64_t window() { return fixture.allocation.genArenaWindow; }
@@ -3402,7 +3472,7 @@ TEST_CASE("a launch cannot move an arena between the device heap and a separate 
   auto *small = a.fixture.mallocLocal<int32_t>(16);
   Grid grid{nullptr, nullptr, small};
   REQUIRE(a.launch(&grid, *gridLayout));
-  CHECK_THROWS_AS(polyregion::polyrt::sma::arenaMarshal(a.fixture.allocation, &grid, *gridLayout, {}), std::logic_error);
+  CHECK_THROWS_AS(polyregion::polyrt::sma::arenaMarshal(a.fixture.allocation, &grid, *gridLayout, {}, *a.f.device.stub), std::logic_error);
 }
 
 TEST_CASE("a window next to free space grows in place") {
