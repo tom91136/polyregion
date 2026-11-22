@@ -396,6 +396,17 @@ public final class Launch {
     return execute(plan, context, args, captured);
   }
 
+  static Object step(Class<?> home, String name, Context context, Object[] args, Object[] captured) {
+    Plan plan = PLANS.get(siteClass(name, home.getClassLoader()));
+    if (plan.unsupported != null) throw new UnsupportedOperationException(plan.unsupported);
+    if (plan.specs.length != args.length)
+      throw new IllegalStateException(
+          "`" + name + "` was compiled for " + plan.specs.length + " arguments, called with " + args.length);
+    Object[][] each = new Object[args.length][];
+    java.util.Arrays.fill(each, captured);
+    return execute(plan, context, args, each);
+  }
+
   static Object region(LaunchSite site, Object[] captured) {
     Plan plan = PLANS.get(site.getClass());
     if (plan.unsupported != null) throw new UnsupportedOperationException(plan.unsupported);

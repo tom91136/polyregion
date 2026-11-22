@@ -281,11 +281,12 @@ class Processor(scan: Tree => LaunchSites.Collected) extends AbstractProcessor {
           }
 
           val regionImpls = xs.flatMap { case (_, m: JCTree.JCMethodDecl) => Option(m.sym).toList; case _ => Nil }.toSet
-          guard(Either.catchNonFatal(scan(scope))) match {
+          val scanned     = guard(Either.catchNonFatal(scan(scope)))
+          val nestedImpls = scanned.toOption.fold(Set.empty[MethodSymbol])(_.sites.flatMap(LaunchSites.callables).toSet)
+          scanned match {
             case Left(failure) => report(s"find launch sites in ${e.getTypeElement}", failure)
             case Right(collected) =>
-              val nested                                    = collected.sites.flatMap(LaunchSites.callables).toSet
-              def hostSide(site: LaunchSites.Site): Boolean = !site.within.exists(w => regionImpls(w) || nested(w))
+              def hostSide(site: LaunchSites.Site): Boolean = !site.within.exists(w => regionImpls(w) || nestedImpls(w))
 
               collected.references.filter(hostSide(_)).foreach { reference =>
                 report(
@@ -316,10 +317,49 @@ class Processor(scan: Tree => LaunchSites.Collected) extends AbstractProcessor {
               }
           }
 
+          lowerStreams(scope, sources, regionImpls ++ nestedImpls)
+
         case _ =>
       }
 
     }
+
+    private def note(message: String): Unit =
+      processingEnv.getMessager.printMessage(Diagnostic.Kind.NOTE, s"[PolyRegion] $message")
+
+    private val compiledChains = mutable.Map.empty[String, Result[StreamSites.Compiled]]
+
+    private def lowerStreams(scope: Tree, sources: TreeRemapper.Sources, excluded: Set[MethodSymbol]): Unit =
+      guard(Either.catchNonFatal(StreamSites.collect(scope))) match {
+        case Left(failure) => debug(failure)
+        case Right(sites) =>
+          sites.filterNot(_.within.exists(excluded)).foreach { site =>
+            val par = site.decoded.via == StreamChain.Via.Par
+            def refuse(label: String, failure: Throwable): Unit =
+              if (par) report(label, failure) else note(s"$label, using the JDK: ${failure.getMessage}")
+            val label = s"lower ${site.decoded.root}"
+            site.decoded.chain match {
+              case Left(failure)                           => if (par) report(label, failure) else debug(failure)
+              case Right(chain) if !par && !chain.parallel => ()
+              case Right(chain) =>
+                val config = launchConfig
+                  .leftMap(CompilerException(_))
+                  .filterOrElse(_.roots.nonEmpty, CompilerException("polyregion.library.path is not set"))
+                val compiled = config.flatMap { config =>
+                  val key = StreamSites.identify(chain).key
+                  compiledChains.getOrElseUpdate(key, guard(StreamSites.compile(sources, config, chain, site.home)))
+                }
+                compiled match {
+                  case Left(failure) => if (par || config.isRight) refuse(label, failure) else debug(failure)
+                  case Right(done) =>
+                    done.classes.foreach { (fqcn, exe) =>
+                      if (!generated.contains(fqcn)) emit(fqcn, label, Right(exe), classOf[LaunchSite])
+                    }
+                    guard(StreamSites.rewrite(sources, site, chain, done)).left.foreach(refuse(label, _))
+                }
+            }
+          }
+      }
 
     override def finished(e: TaskEvent): Unit = {
       debug(s"[  ENDED]  =>  $e")

@@ -25,9 +25,9 @@ object LaunchSites {
   private val CoreIdentity = "polyregion.core:polyregion.core.for_each"
   private val ContextType  = "polyregion.jvm.runtime.Context"
 
-  private case class Prim(code: Char, tpe: p.Type, size: Int)
+  case class Prim(code: Char, tpe: p.Type, size: Int)
 
-  private val Prims: Map[TypeKind, Prim] = Map(
+  val Prims: Map[TypeKind, Prim] = Map(
     TypeKind.INT     -> Prim('I', p.Type.IntS32, 4),
     TypeKind.LONG    -> Prim('J', p.Type.IntS64, 8),
     TypeKind.FLOAT   -> Prim('F', p.Type.Float32, 4),
@@ -49,7 +49,7 @@ object LaunchSites {
     "java.lang.Boolean"   -> TypeKind.BOOLEAN
   )
 
-  private val PrimOfType: Map[p.Type, Prim] = Prims.values.map(prim => prim.tpe -> prim).toMap
+  val PrimOfType: Map[p.Type, Prim] = Prims.values.map(prim => prim.tpe -> prim).toMap
 
   private enum Kind {
     case Context
@@ -105,7 +105,7 @@ object LaunchSites {
     case other                  => other
   }
 
-  private def lambdaOf(tree: ExpressionTree): Option[(MethodInvocationTree, JSymbol.MethodSymbol)] =
+  def lambdaOf(tree: ExpressionTree): Option[(MethodInvocationTree, JSymbol.MethodSymbol)] =
     peel(tree) match {
       case mi: MethodInvocationTree =>
         TreeRemapper.dynamicSym(mi).flatMap(TreeRemapper.metafactoryImpl(_)).map(mi -> _)
@@ -177,18 +177,18 @@ object LaunchSites {
       parts     <- arguments.traverse(partOf(_))
     } yield LaunchSite.nameOf(site.identity, parts.asJava)
 
-  private def normalise(s: String): String = s.map(c => if (c.isLetterOrDigit || c == '_') c else '_')
+  def normalise(s: String): String = s.map(c => if (c.isLetterOrDigit || c == '_') c else '_')
 
   class Inexpressible(message: String) extends Exception(message)
 
   private def inexpressible(message: String): Result[Nothing] = Left(Inexpressible(message))
 
-  private enum Mode {
+  enum Mode {
     case Site
     case Region
   }
 
-  private case class Callable(
+  case class Callable(
       function: p.Function,
       dependencies: List[p.Function],
       environment: Option[Environment],
@@ -196,9 +196,9 @@ object LaunchSites {
       result: Char
   )
 
-  private case class Field(offset: Int, kind: Char, capture: Int)
+  case class Field(offset: Int, kind: Char, capture: Int)
 
-  private case class Environment(definition: p.StructDef, size: Int, fields: List[Field])
+  case class Environment(definition: p.StructDef, size: Int, fields: List[Field])
 
   private def kindOfCapture(tpe: p.Type): Option[Char] = tpe match {
     case p.Type.Ptr(component, _) if PrimOfType.contains(component) => Some('a')
@@ -230,7 +230,7 @@ object LaunchSites {
     finally compiler.close()
   }
 
-  private def lowerCallable(
+  def lowerCallable(
       sources: TreeRemapper.Sources,
       config: LaunchConfig,
       entryName: String,
@@ -476,7 +476,55 @@ object LaunchSites {
     } yield executable
   }
 
-  private def treeOf(sources: TreeRemapper.Sources, impl: JSymbol.MethodSymbol): Result[MethodTree] =
+  enum StepArg {
+    case Scalar(prim: Prim)
+    case Array(prim: Prim)
+    case Fn(callable: Callable)
+  }
+
+  def compileStep(
+      config: LaunchConfig,
+      fqcn: String,
+      identity: String,
+      args: List[StepArg],
+      result: Option[Prim]
+  ): Result[Offloader.Executable] =
+    for {
+      split <- identity.split(":", 2).toList match {
+        case a :: b :: Nil => (a, b).success
+        case _             => s"malformed launch identity `$identity`".fail
+      }
+      (rtn, rtnCode) = result.fold((p.Type.Unit0: p.Type, 'V'))(prim => (prim.tpe, prim.code))
+      specs = args.map {
+        case StepArg.Scalar(prim) => s"P${prim.code}"
+        case StepArg.Array(prim)  => s"A${prim.code}"
+        case StepArg.Fn(callable) => specOf(callable.environment)
+      }
+      argumentTypes = args.map {
+        case StepArg.Scalar(prim) => prim.tpe
+        case StepArg.Array(prim)  => p.Type.Ptr(prim.tpe, p.Type.Space.Global)
+        case StepArg.Fn(callable) => callableType(callable)
+      }
+      sizes = args.collect {
+        case StepArg.Scalar(prim) => p.Program.TypeSize(prim.tpe, prim.size)
+        case StepArg.Array(prim)  => p.Program.TypeSize(prim.tpe, prim.size)
+      }
+      executable <- assemble(
+        config,
+        fqcn,
+        split,
+        rtn,
+        rtnCode,
+        argumentTypes,
+        sizes,
+        specs,
+        args.collect { case StepArg.Fn(callable) => callable },
+        'V',
+        classOf[LaunchSite]
+      )
+    } yield executable
+
+  def treeOf(sources: TreeRemapper.Sources, impl: JSymbol.MethodSymbol): Result[MethodTree] =
     sources.localTrees.get(impl).fold(forwarderOf(sources, impl))(_.success)
 
   private def forwarderOf(sources: TreeRemapper.Sources, impl: JSymbol.MethodSymbol): Result[MethodTree] =
