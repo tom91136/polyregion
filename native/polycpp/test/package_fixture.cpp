@@ -694,7 +694,7 @@ int main(int argc, char **argv) {
                           .widen()}),
                 ret()},
                FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), CallConvention::RegularCall());
-  const auto transformReduceName = Sym({"polyregion", "core", "transform_reduce"});
+  const auto transformReduceName = Sym({"polyregion", "core", "transform_reduce_unordered"});
   const auto transformReduceDecl =
       FunctionDecl(transformReduceName, {Type::Var("T")}, {},
                    {Arg(Named("n", i64), {}), Arg(Named("init", t), {}), Arg(Named("map", Type::Exec({}, {i64}, t)), {}),
@@ -706,7 +706,7 @@ int main(int argc, char **argv) {
   const auto [mapReceiverDecl, mapReceiver] = callableReceiver("map", "Map");
   const auto [combineReceiverDecl, combineReceiver] = callableReceiver("combine", "Combine");
   const auto transformReduceImplementation =
-      Function(FunctionDecl(Sym({"polyregion", "core", "host", "transform_reduce"}),
+      Function(FunctionDecl(Sym({"polyregion", "core", "host", "transform_reduce_unordered"}),
                             {*value.get<Type::Var>(), Type::Var("Map"), Type::Var("Combine")}, {},
                             {Arg(Named("n", i64), {}), Arg(Named("init", value), {}), Arg(Named("map", Type::Var("Map")), {}),
                              Arg(Named("combine", Type::Var("Combine")), {})},
@@ -846,8 +846,8 @@ int main(int argc, char **argv) {
         positive("positive", Type::Bool1()), bytes("bytes", Type::IntU64()), raw("raw", Type::Ptr(Type::IntU8(), TypeSpace::Global())),
         out("out", valuePtr), capture("capture", reduceCaptureType), resultRef("resultRef", valuePtr);
     return Function(
-        FunctionDecl(Sym({"polyregion", "core", "device", "transform_reduce"}), {*value.get<Type::Var>(), mapType, combineType}, {},
-                     {Arg(context, {}), Arg(n, {}), Arg(init, {}), Arg(map, {}), Arg(combine, {})}, {}, {}, value,
+        FunctionDecl(Sym({"polyregion", "core", "device", "transform_reduce_unordered"}), {*value.get<Type::Var>(), mapType, combineType},
+                     {}, {Arg(context, {}), Arg(n, {}), Arg(init, {}), Arg(map, {}), Arg(combine, {})}, {}, {}, value,
                      FunctionAffinity::Host()),
         {local(result, Expr::Alias(selected(init)), true), local(positive, Expr::IntrOp(Intr::LogicGt(selected(n), Term::IntS64Const(0)))),
          Stmt::Cond(selected(positive),

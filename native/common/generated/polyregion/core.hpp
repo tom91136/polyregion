@@ -56,6 +56,24 @@ POLYREGION_POLYREGION_CORE_ANNOTATE("polyregion_interface:polyregion.core:polyre
   POLYREGION_POLYREGION_CORE_IMPLEMENT(transform_reduce, context, n, init, map, combine);
 }
 
+template <class T, class Map, class Combine> //
+POLYREGION_POLYREGION_CORE_ANNOTATE("polyregion_interface:polyregion.core:polyregion.core.transform_reduce_unordered")
+    POLYREGION_POLYREGION_CORE_FALLBACK //
+    inline T transform_reduce_unordered(std::int64_t n, T init, Map map, Combine combine) {
+  static_assert(std::is_same_v<std::invoke_result_t<Map &, const std::int64_t &>, T>, "callable signature mismatch");
+  static_assert(std::is_same_v<std::invoke_result_t<Combine &, const T &, const T &>, T>, "callable signature mismatch");
+  POLYREGION_POLYREGION_CORE_IMPLEMENT(transform_reduce_unordered, n, init, map, combine);
+}
+
+template <class T, class Map, class Combine> //
+POLYREGION_POLYREGION_CORE_ANNOTATE("polyregion_interface:polyregion.core:polyregion.core.transform_reduce_unordered")
+    POLYREGION_POLYREGION_CORE_ANNOTATE("polyregion_interface_context") POLYREGION_POLYREGION_CORE_FALLBACK //
+    inline T transform_reduce_unordered(void *context, std::int64_t n, T init, Map map, Combine combine) {
+  static_assert(std::is_same_v<std::invoke_result_t<Map &, const std::int64_t &>, T>, "callable signature mismatch");
+  static_assert(std::is_same_v<std::invoke_result_t<Combine &, const T &, const T &>, T>, "callable signature mismatch");
+  POLYREGION_POLYREGION_CORE_IMPLEMENT(transform_reduce_unordered, context, n, init, map, combine);
+}
+
 } // namespace polyregion::core
 
 #undef POLYREGION_POLYREGION_CORE_FALLBACK

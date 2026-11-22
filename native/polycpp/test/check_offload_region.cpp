@@ -47,6 +47,12 @@
 #pragma region do: POLYRT_HOST_FALLBACK=1 {output}
 #pragma region fails-with: no kernel image matches device
 
+#pragma region case: offload-region-ordered-fallback
+#pragma region offload-only
+#pragma region do: POLYFRONT_LIBRARY_PATH= polycpp {polycpp_defaults} {polycpp_stdpar} -DORDERED -o {output} {input}
+#pragma region do: {output}
+#pragma region requires: 99999 7 99999
+
 #pragma region case: offload-region-extent-overflow
 #pragma region offload-only
 #pragma region do: POLYFRONT_LIBRARY_PATH= polycpp {polycpp_defaults} {polycpp_stdpar} -DOVERFLOW -o {output} {input}
@@ -79,12 +85,21 @@ int main() {
   int *p = xs.data();
   off::for_each(8, [p](std::int64_t i) { p[i] = static_cast<int>(2 * i); });
   const int sum =
-      off::transform_reduce(100, 0, [](std::int64_t i) { return static_cast<int>(i); }, [](int a, int b) { return plus(a, b); });
+      off::transform_reduce_unordered(100, 0, [](std::int64_t i) { return static_cast<int>(i); }, [](int a, int b) { return plus(a, b); });
   off::for_each(6, 4, [p](std::int64_t i, std::int64_t j) { p[i * 4 + j] += static_cast<int>(100 * i + j); });
-  const int sum2d = off::transform_reduce(
+  const int sum2d = off::transform_reduce_unordered(
       5, 4, 0, [](std::int64_t i, std::int64_t j) { return static_cast<int>(10 * i + j); }, [](int a, int b) { return plus(a, b); });
   off::task([p] { p[0] = 42; });
   std::printf("%d %d %d %d %d", p[7], sum, sum2d, p[5], p[0]);
+  return 0;
+}
+#elif defined(ORDERED)
+int main() {
+  const int last = off::transform_reduce(100000, 0, [](std::int64_t i) { return static_cast<int>(i); }, [](int, int b) { return b; });
+  const int init = off::transform_reduce(100000, 7, [](std::int64_t i) { return static_cast<int>(i); }, [](int a, int) { return a; });
+  const int grid = off::transform_reduce(
+      250, 400, 0, [](std::int64_t i, std::int64_t j) { return static_cast<int>(400 * i + j); }, [](int, int b) { return b; });
+  std::printf("%d %d %d", last, init, grid);
   return 0;
 }
 #elif defined(OVERFLOW)
@@ -110,8 +125,8 @@ int main() {
     PolyrtDeviceInfo info{};
     if (!polyrt_device_info(device.platform, device.device, &info) || info.deviceKind != 1) continue;
     const off::Context context(device);
-    const int sum =
-        off::transform_reduce(context, 4, 0, [](std::int64_t i) { return static_cast<int>(i); }, [](int a, int b) { return plus(a, b); });
+    const int sum = off::transform_reduce_unordered(
+        context, 4, 0, [](std::int64_t i) { return static_cast<int>(i); }, [](int a, int b) { return plus(a, b); });
     std::printf("ran %d", sum);
     return 0;
   }
@@ -131,9 +146,9 @@ off::Context::Device defaultDevice() {
 
 int main() {
   const off::Context context(defaultDevice());
-  const int sum =
-      off::transform_reduce(context, 100, 0, [](std::int64_t i) { return static_cast<int>(i); }, [](int a, int b) { return plus(a, b); });
-  const int sum2d = off::transform_reduce(
+  const int sum = off::transform_reduce_unordered(
+      context, 100, 0, [](std::int64_t i) { return static_cast<int>(i); }, [](int a, int b) { return plus(a, b); });
+  const int sum2d = off::transform_reduce_unordered(
       context, 5, 4, 0, [](std::int64_t i, std::int64_t j) { return static_cast<int>(10 * i + j); },
       [](int a, int b) { return plus(a, b); });
   #if defined(REDUCE_ONLY)

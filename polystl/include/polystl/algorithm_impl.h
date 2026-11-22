@@ -261,8 +261,35 @@ template <class Body> [[clang::annotate("polystl_host_fallback")]] void core_for
     body(i);
 }
 
-template <class T, class Map, class Combine> T core_transform_reduce(int64_t n, T init, Map map, Combine combine) {
+template <class T, class Map, class Combine> T core_transform_reduce_unordered(int64_t n, T init, Map map, Combine combine) {
   return parallel_reduce(n, init, map, combine);
+}
+
+template <class T, class Map, class Combine> T core_transform_reduce(int64_t n, T init, Map map, Combine combine) {
+  if (n <= 0) return init;
+  constexpr int64_t maxChunks = 4096;
+  const int64_t step = (n + maxChunks - 1) / maxChunks;
+  const int64_t chunks = (n + step - 1) / step;
+  std::vector<T> partial(chunks);
+  parallel_for(chunks, [map, combine, n, step, out = partial.data()](int64_t chunk) {
+    const int64_t begin = chunk * step;
+    const int64_t end = begin + step < n ? begin + step : n;
+    T acc = element(map, begin);
+    for (int64_t i = begin + 1; i < end; ++i)
+      acc = combine(acc, element(map, i));
+    out[chunk] = acc;
+  });
+  for (int64_t chunk = 0; chunk < chunks; ++chunk)
+    init = combine(init, partial[chunk]);
+  return init;
+}
+
+template <class T, class Map, class Combine>
+[[clang::annotate("polystl_host_fallback")]] T core_transform_reduce_unordered(void *context, int64_t n, T init, Map map, Combine combine) {
+  polyrt_context_fallback(context, "polyregion.core.transform_reduce_unordered");
+  for (int64_t i = 0; i < n; ++i)
+    init = combine(init, map(i));
+  return init;
 }
 
 template <class T, class Map, class Combine>
@@ -409,7 +436,7 @@ template <class ForwardIt1, class ForwardIt2, class ForwardIt3, class BinaryOper
 
 template <class ForwardIt1, class ForwardIt2, class T, polyregion::polystl::details::random_access_t<ForwardIt1, ForwardIt2> = 0>
 T transform_reduce(execution::parallel_unsequenced_policy, ForwardIt1 first1, ForwardIt1 last1, ForwardIt2 first2, T init) {
-  return polyregion::core::transform_reduce<T>(
+  return polyregion::core::transform_reduce_unordered<T>(
       last1 - first1, init, //
       [first1, first2](int64_t idx) -> T { return *(first1 + idx) * *(first2 + idx); }, [](T l, T r) -> T { return l + r; });
 }
@@ -426,7 +453,7 @@ T transform_reduce(execution::parallel_unsequenced_policy, ForwardIt1 first1, Fo
                    BinaryReductionOp reduce, BinaryTransformOp transform) {
   // XXX Wrap `reduce` in a by-value lambda; perfect-forwarded references confuse SPIR-V
   // storage-class tracking and IGC emits null pointers.
-  return polyregion::core::transform_reduce<T>(
+  return polyregion::core::transform_reduce_unordered<T>(
       last1 - first1, init, [transform, first1, first2](int64_t idx) -> T { return transform(*(first1 + idx), *(first2 + idx)); },
       [reduce](T l, T r) -> T { return reduce(l, r); });
 }
@@ -443,7 +470,7 @@ template <class ForwardIt, class T, class BinaryReductionOp, class UnaryTransfor
           polyregion::polystl::details::random_access_t<ForwardIt> = 0>
 T transform_reduce(execution::parallel_unsequenced_policy, ForwardIt first, ForwardIt last, T init, BinaryReductionOp reduce,
                    UnaryTransformOp transform) {
-  return polyregion::core::transform_reduce<T>(
+  return polyregion::core::transform_reduce_unordered<T>(
       last - first, init, [transform, first](int64_t idx) -> T { return transform(*(first + idx)); },
       [reduce](T l, T r) -> T { return reduce(l, r); });
 }
@@ -457,7 +484,7 @@ template <class ForwardIt, class T, class BinaryReductionOp, class UnaryTransfor
 
 template <class ForwardIt, class T, polyregion::polystl::details::random_access_t<ForwardIt> = 0>
 T reduce(execution::parallel_unsequenced_policy, ForwardIt first, ForwardIt last, T init) {
-  return polyregion::core::transform_reduce<T>(
+  return polyregion::core::transform_reduce_unordered<T>(
       last - first, init, [first](int64_t idx) -> T { return *(first + idx); }, [](T l, T r) -> T { return l + r; });
 }
 
@@ -469,7 +496,7 @@ typename std::iterator_traits<ForwardIt>::value_type reduce(execution::parallel_
 
 template <class ForwardIt, class T, class BinaryOp, polyregion::polystl::details::random_access_t<ForwardIt> = 0>
 T reduce(execution::parallel_unsequenced_policy, ForwardIt first, ForwardIt last, T init, BinaryOp op) {
-  return polyregion::core::transform_reduce<T>(
+  return polyregion::core::transform_reduce_unordered<T>(
       last - first, init, [first](int64_t idx) -> T { return *(first + idx); }, [op](T l, T r) -> T { return op(l, r); });
 }
 

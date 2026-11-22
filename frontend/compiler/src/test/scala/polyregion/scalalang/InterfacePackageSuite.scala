@@ -108,6 +108,7 @@ class InterfacePackageSuite extends munit.FunSuite {
     val names = pkg.interface.declarations.map(_.name.fqcn).toSet
     assert(names("polyregion.core.for_each"), names.toString)
     assert(names("polyregion.core.transform_reduce"), names.toString)
+    assert(names("polyregion.core.transform_reduce_unordered"), names.toString)
     val implementations = pkg.program.functions.filter(_.implements.nonEmpty)
     val implemented     = implementations.flatMap(_.implements).toSet
     pkg.interface.declarations.foreach(decl =>

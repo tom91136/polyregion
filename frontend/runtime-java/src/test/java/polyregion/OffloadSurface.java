@@ -42,5 +42,29 @@ public final class OffloadSurface {
 
     // transform_reduce: T=double: context
     Offload.transform_reduce(context, 0L, 0.0, (arg0) -> 0.0, (arg0, arg1) -> 0.0);
+
+    // transform_reduce_unordered: T=int
+    Offload.transform_reduce_unordered(0L, 0, (arg0) -> 0, (arg0, arg1) -> 0);
+
+    // transform_reduce_unordered: T=int: context
+    Offload.transform_reduce_unordered(context, 0L, 0, (arg0) -> 0, (arg0, arg1) -> 0);
+
+    // transform_reduce_unordered: T=long
+    Offload.transform_reduce_unordered(0L, 0L, (arg0) -> 0L, (arg0, arg1) -> 0L);
+
+    // transform_reduce_unordered: T=long: context
+    Offload.transform_reduce_unordered(context, 0L, 0L, (arg0) -> 0L, (arg0, arg1) -> 0L);
+
+    // transform_reduce_unordered: T=float
+    Offload.transform_reduce_unordered(0L, 0.0f, (arg0) -> 0.0f, (arg0, arg1) -> 0.0f);
+
+    // transform_reduce_unordered: T=float: context
+    Offload.transform_reduce_unordered(context, 0L, 0.0f, (arg0) -> 0.0f, (arg0, arg1) -> 0.0f);
+
+    // transform_reduce_unordered: T=double
+    Offload.transform_reduce_unordered(0L, 0.0, (arg0) -> 0.0, (arg0, arg1) -> 0.0);
+
+    // transform_reduce_unordered: T=double: context
+    Offload.transform_reduce_unordered(context, 0L, 0.0, (arg0) -> 0.0, (arg0, arg1) -> 0.0);
   }
 }

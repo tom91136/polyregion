@@ -22,7 +22,7 @@ using namespace aspartame;
 
 [[noreturn]] void unlowered(const std::string &reason, mlir::Location loc);
 
-// a `do concurrent ... reduce(...)` rewritten for polyregion.core.transform_reduce: the loop lists its reduce operators, and the
+// a `do concurrent ... reduce(...)` rewritten for polyregion.core.transform_reduce_unordered: the loop lists its reduce operators, and the
 // body's final store of each per-iteration accumulator into its host result slot names that accumulator's result field
 inline constexpr llvm::StringLiteral CoreReduceAttr = "polyfc.core_reduce";
 inline constexpr llvm::StringLiteral CoreReduceResultAttr = "polyfc.core_reduce_result";

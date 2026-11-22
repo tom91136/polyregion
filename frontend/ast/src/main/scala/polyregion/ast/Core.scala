@@ -28,16 +28,15 @@ object Core {
 
   private val n = p.Arg(p.Named("n", p.Type.IntS64))
 
+  private val reduceArgs: List[p.Arg] =
+    List(n, p.Arg(p.Named("init", t)), callable("map", List(p.Type.IntS64), t), callable("combine", List(t, t), t))
+
   val interfaceDef: p.Interface = p.Interface(
     p.Sym(List("polyregion", "core")),
     List(
       declaration("for_each", Nil, List(n, callable("body", List(p.Type.IntS64), p.Type.Unit0)), p.Type.Unit0),
-      declaration(
-        "transform_reduce",
-        List(t),
-        List(n, p.Arg(p.Named("init", t)), callable("map", List(p.Type.IntS64), t), callable("combine", List(t, t), t)),
-        t
-      )
+      declaration("transform_reduce", List(t), reduceArgs, t),
+      declaration("transform_reduce_unordered", List(t), reduceArgs, t)
     )
   )
 }

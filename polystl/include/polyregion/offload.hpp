@@ -70,6 +70,10 @@ template <class T, class Map, class Combine> inline T transform_reduce(std::int6
   return ::polyregion::core::transform_reduce(n, init, map, combine);
 }
 
+template <class T, class Map, class Combine> inline T transform_reduce_unordered(std::int64_t n, T init, Map map, Combine combine) {
+  return ::polyregion::core::transform_reduce_unordered(n, init, map, combine);
+}
+
 template <class Body> inline void for_each(const Context &context, std::int64_t n, Body body) {
   ::polyregion::core::for_each(context.handle(), n, body);
 }
@@ -77,6 +81,11 @@ template <class Body> inline void for_each(const Context &context, std::int64_t 
 template <class T, class Map, class Combine>
 inline T transform_reduce(const Context &context, std::int64_t n, T init, Map map, Combine combine) {
   return ::polyregion::core::transform_reduce(context.handle(), n, init, map, combine);
+}
+
+template <class T, class Map, class Combine>
+inline T transform_reduce_unordered(const Context &context, std::int64_t n, T init, Map map, Combine combine) {
+  return ::polyregion::core::transform_reduce_unordered(context.handle(), n, init, map, combine);
 }
 
 template <class Body> inline void for_each(std::int64_t n0, std::int64_t n1, Body body) {
@@ -113,6 +122,30 @@ inline T transform_reduce(std::int64_t n0, std::int64_t n1, std::int64_t n2, T i
 template <class T, class Map, class Combine>
 inline T transform_reduce(const Context &context, std::int64_t n0, std::int64_t n1, std::int64_t n2, T init, Map map, Combine combine) {
   return transform_reduce(
+      context, detail::extent(detail::extent(n0, n1), n2), init, [=](std::int64_t i) { return map(i / (n1 * n2), i / n2 % n1, i % n2); },
+      combine);
+}
+
+template <class T, class Map, class Combine>
+inline T transform_reduce_unordered(std::int64_t n0, std::int64_t n1, T init, Map map, Combine combine) {
+  return transform_reduce_unordered(detail::extent(n0, n1), init, [=](std::int64_t i) { return map(i / n1, i % n1); }, combine);
+}
+
+template <class T, class Map, class Combine>
+inline T transform_reduce_unordered(const Context &context, std::int64_t n0, std::int64_t n1, T init, Map map, Combine combine) {
+  return transform_reduce_unordered(context, detail::extent(n0, n1), init, [=](std::int64_t i) { return map(i / n1, i % n1); }, combine);
+}
+
+template <class T, class Map, class Combine>
+inline T transform_reduce_unordered(std::int64_t n0, std::int64_t n1, std::int64_t n2, T init, Map map, Combine combine) {
+  return transform_reduce_unordered(
+      detail::extent(detail::extent(n0, n1), n2), init, [=](std::int64_t i) { return map(i / (n1 * n2), i / n2 % n1, i % n2); }, combine);
+}
+
+template <class T, class Map, class Combine>
+inline T transform_reduce_unordered(const Context &context, std::int64_t n0, std::int64_t n1, std::int64_t n2, T init, Map map,
+                                    Combine combine) {
+  return transform_reduce_unordered(
       context, detail::extent(detail::extent(n0, n1), n2), init, [=](std::int64_t i) { return map(i / (n1 * n2), i / n2 % n1, i % n2); },
       combine);
 }

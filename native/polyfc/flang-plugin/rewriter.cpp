@@ -489,8 +489,8 @@ public:
     std::shared_future<std::shared_ptr<interface_resolution::PackageLink>> link;
   };
 
-  // starts linking the loop against `polyregion.core.for_each`, or `polyregion.core.transform_reduce` for a core reduction, over a
-  // closure of its body; empty when the loop cannot take either
+  // starts linking the loop against `polyregion.core.for_each`, or `polyregion.core.transform_reduce_unordered` for a core reduction, over
+  // a closure of its body; empty when the loop cannot take either
   std::optional<CoreSite> prepareCore(llvm::ThreadPoolInterface &pool, const std::string &diagLoc, const polyfront::Options &opts,
                                       const std::string &moduleId, fir::DoLoopOp &doLoop, const polyfront::package::Archive &core) {
     if (doLoop.getNumResults() != 0 || !doLoop.getReduceOperands().empty()) return {};
@@ -507,7 +507,7 @@ public:
     std::vector<polyast::ProgramTypeSize> typeSizes{{polyast::Type::IntS64().widen(), 8},
                                                     {captureType, static_cast<int32_t>(region.captureLayout.sizeInBytes)}};
     if (reduction) typeSizes.emplace_back(reduction->resultType, static_cast<int32_t>(reduction->resultLayout.sizeInBytes));
-    auto root = reduction ? program::importRoot(entryName, polyast::Sym({"polyregion", "core", "transform_reduce"}),
+    auto root = reduction ? program::importRoot(entryName, polyast::Sym({"polyregion", "core", "transform_reduce_unordered"}),
                                                 {polyast::Type::IntS64().widen(), reduction->resultType, captureType,
                                                  polyast::Type::FnRef(reduction->combine).widen()},
                                                 reduction->resultType)
@@ -1021,7 +1021,7 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
   const auto coreReduceSupported = [&] {
     if (!coreTransformReduce) {
       const auto core = interface_resolution::corePackage(diag, opts);
-      coreTransformReduce = core && interface_resolution::implements(*core, "polyregion.core.transform_reduce", opts);
+      coreTransformReduce = core && interface_resolution::implements(*core, "polyregion.core.transform_reduce_unordered", opts);
     }
     return *coreTransformReduce;
   };

@@ -736,7 +736,10 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
     assert(!plain.contains("void *context"))
 
     val withContext = InterfaceCodeGen.cppHeader(Core.interfaceDef, true)
-    assertEquals("""polyregion_interface_context""".r.findAllIn(withContext).size, 2 * 1)
+    assertEquals(
+      """polyregion_interface_context""".r.findAllIn(withContext).size,
+      Core.interfaceDef.declarations.size * 1
+    )
     assert(withContext.contains("inline void for_each(void *context, std::int64_t n, Body body)"))
     assert(withContext.contains("POLYREGION_POLYREGION_CORE_IMPLEMENT(for_each, context, n, body);"))
     assert(
@@ -789,7 +792,7 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
         "def transform_reduce[T](\n      context: polyregion.jvm.runtime.Context,\n      n: Long,\n      init: T"
       )
     )
-    assertEquals("""@compileTimeOnly""".r.findAllIn(source).size, 4)
+    assertEquals("""@compileTimeOnly""".r.findAllIn(source).size, 2 * Core.interfaceDef.declarations.size)
     assert(source.contains("inline def for_each(n0: Long, n1: Long, inline body: (Long, Long) => Unit): Unit ="))
     assert(source.contains("body(i / n1, i % n1)"))
     assert(source.contains("body(i / (n1 * n2), i / n2 % n1, i % n2)"))
@@ -839,7 +842,7 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
     val source = InterfaceCodeGen.javaClass(Core.interfaceDef, JavaConfig("polyregion", "Offload"))
     assert(!source.contains("Context"))
     val withRegion = InterfaceCodeGen.javaClass(Core.interfaceDef, regionJava)
-    assertEquals("""@Interface""".r.findAllIn(withRegion).size, 2 * (1 + 4))
+    assertEquals("""@Interface""".r.findAllIn(withRegion).size, 2 + 8 * (Core.interfaceDef.declarations.size - 1))
   }
 
   test("Scala region surface calls every overload and sugar form") {

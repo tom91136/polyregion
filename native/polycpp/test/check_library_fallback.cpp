@@ -70,7 +70,7 @@
 #pragma region offload-only
 #pragma region do: {package_fixture} --sized-core {output}.packages
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCORE_WIDTH -fstdpar-library-path={output}.packages -o {output} {input}
-#pragma region stderr-count: 1 bound to polyregion.core (polyregion.core.host.transform_reduce)
+#pragma region stderr-count: 1 bound to polyregion.core (polyregion.core.host.transform_reduce_unordered)
 #pragma region stderr-count: 2 uses the inline body: no implementation fits
 #pragma region stderr-count: 1 uses the inline body: no implementation fits `F64` of 8 bytes (sizes: 4)
 #pragma region do: {output}

@@ -45,6 +45,34 @@ object offload {
       combine
     )
 
+  @compileTimeOnly("polyregion_interface:polyregion.core:polyregion.core.transform_reduce_unordered")
+  inline def transform_reduce_unordered[T](n: Long, init: T, inline map: Long => T, inline combine: (T, T) => T): T =
+    polyregion.scalalang.launch.call[T](
+      "polyregion.core:polyregion.core.transform_reduce_unordered",
+      polyregion.jvm.runtime.Context.current(),
+      n,
+      init,
+      map,
+      combine
+    )
+
+  @compileTimeOnly("polyregion_interface:polyregion.core:polyregion.core.transform_reduce_unordered")
+  inline def transform_reduce_unordered[T](
+      context: polyregion.jvm.runtime.Context,
+      n: Long,
+      init: T,
+      inline map: Long => T,
+      inline combine: (T, T) => T
+  ): T =
+    polyregion.scalalang.launch.call[T](
+      "polyregion.core:polyregion.core.transform_reduce_unordered",
+      context,
+      n,
+      init,
+      map,
+      combine
+    )
+
   inline def for_each(n0: Long, n1: Long, inline body: (Long, Long) => Unit): Unit =
     for_each(Math.multiplyExact(n0, n1), (i: Long) => body(i / n1, i % n1))
 
@@ -116,6 +144,57 @@ object offload {
       inline combine: (T, T) => T
   ): T =
     transform_reduce(
+      context,
+      Math.multiplyExact(Math.multiplyExact(n0, n1), n2),
+      init,
+      (i: Long) => map(i / (n1 * n2), i / n2 % n1, i % n2),
+      combine
+    )
+
+  inline def transform_reduce_unordered[T](
+      n0: Long,
+      n1: Long,
+      init: T,
+      inline map: (Long, Long) => T,
+      inline combine: (T, T) => T
+  ): T =
+    transform_reduce_unordered(Math.multiplyExact(n0, n1), init, (i: Long) => map(i / n1, i % n1), combine)
+
+  inline def transform_reduce_unordered[T](
+      n0: Long,
+      n1: Long,
+      n2: Long,
+      init: T,
+      inline map: (Long, Long, Long) => T,
+      inline combine: (T, T) => T
+  ): T =
+    transform_reduce_unordered(
+      Math.multiplyExact(Math.multiplyExact(n0, n1), n2),
+      init,
+      (i: Long) => map(i / (n1 * n2), i / n2 % n1, i % n2),
+      combine
+    )
+
+  inline def transform_reduce_unordered[T](
+      context: polyregion.jvm.runtime.Context,
+      n0: Long,
+      n1: Long,
+      init: T,
+      inline map: (Long, Long) => T,
+      inline combine: (T, T) => T
+  ): T =
+    transform_reduce_unordered(context, Math.multiplyExact(n0, n1), init, (i: Long) => map(i / n1, i % n1), combine)
+
+  inline def transform_reduce_unordered[T](
+      context: polyregion.jvm.runtime.Context,
+      n0: Long,
+      n1: Long,
+      n2: Long,
+      init: T,
+      inline map: (Long, Long, Long) => T,
+      inline combine: (T, T) => T
+  ): T =
+    transform_reduce_unordered(
       context,
       Math.multiplyExact(Math.multiplyExact(n0, n1), n2),
       init,
