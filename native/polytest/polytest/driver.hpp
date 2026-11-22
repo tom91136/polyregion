@@ -319,6 +319,12 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
   return kvs ^ map([](const auto &k, const auto &v) { return k + "=" + v; });
 }
 
+inline std::vector<std::string> targetEnv(const DriverConfig &cfg, const std::string &target) {
+  const Task task{Mode::Offload, "", "", {}, "", "", std::nullopt, {}, {}, std::nullopt};
+  return baseEnvs(task, cfg, false, target)
+         ^ filter([](const auto &kv) { return !(kv ^ starts_with(std::string(polyregion::env::PolyfrontImageManifest) + "=")); });
+}
+
 inline std::string resolveBin(const std::string &name, const DriverConfig &cfg) {
   // XXX Prefer cwd for generated test binaries: a stale copy in binaryDir from a previous build would otherwise shadow the fresh one.
   const auto exists = [](llvm::StringRef p) -> std::optional<std::string> {
@@ -878,6 +884,7 @@ struct RunnerOptions {
   bool listBucketWeights = false;
   std::string extraWeights = {};
   bool listTargets = false;
+  std::string targetEnv = {};
   std::string emitFile = {};
   std::string emitEnv = {};
   std::string emitPrefix = {};
@@ -1051,6 +1058,10 @@ inline std::vector<Task> selectTasks(const std::vector<Task> &tasks, const std::
 inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
   // XXX ROCr writes a ~150 MB gpucore.<pid> per GPU VM fault (honours RLIMIT_CORE)
   disableUncollectedCoreDumps();
+  if (!opts.targetEnv.empty()) {
+    detail::targetEnv(cfg, opts.targetEnv) | for_each([](const auto &kv) { std::fprintf(stdout, "%s\n", kv.c_str()); });
+    return 0;
+  }
   if (opts.listTargets) {
     loadTestTargets(cfg.profileDir) | for_each([](const auto &t) { std::fprintf(stdout, "%s\n", t.c_str()); });
     return 0;
@@ -1242,6 +1253,8 @@ inline int fired_main( //
     bool listBucketWeights = fire::arg({"--list-bucket-weights", "Enumerate run entries per shard and bucket (tab separated) and exit"}),
     fire::optional<std::string> extraWeights = fire::arg({"--extra-weights", "Weights file of another suite to add (with --list-shards)"}),
     bool listTargets = fire::arg({"--list-targets", "Enumerate the profile's test targets (one per line) and exit"}),
+    fire::optional<std::string> targetEnv =
+        fire::arg({"--target-env", "Print the environment a test child gets for this target (KEY=VALUE per line) and exit"}),
     fire::optional<std::string> emitCtest = fire::arg({"--emit-ctest", "Write a CTestTestfile fragment to this path and exit"}),
     fire::optional<std::string> emitPrefix = fire::arg({"--emit-prefix", "ctest test-name prefix (with --emit-ctest)"}),
     fire::optional<std::string> emitBinary = fire::arg({"--emit-binary", "Binary ctest invokes (with --emit-ctest)"}),
@@ -1265,6 +1278,7 @@ inline int fired_main( //
   if (runOnlyTask) opts.runOnlyTask = runOnlyTask.value();
   if (cleanupTask) opts.cleanupTask = cleanupTask.value();
   if (source) opts.source = source.value();
+  if (targetEnv) opts.targetEnv = targetEnv.value();
   if (extraWeights) opts.extraWeights = extraWeights.value();
   if (emitCtest) opts.emitFile = emitCtest.value();
   if (emitPrefix) opts.emitPrefix = emitPrefix.value();

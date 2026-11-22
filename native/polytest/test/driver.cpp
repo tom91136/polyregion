@@ -526,6 +526,11 @@ TEST_CASE("A run selects its own device in the child environment") {
   CHECK(has(poclEnv, "OCL_ICD_VENDORS=" + dir.path + "/pocl.icd"));
   CHECK_FALSE(hasKey(poclEnv, "GALLIUM_DRIVER"));
   CHECK(has(poclEnv, "POLYINVOKE_DISABLE_SVM=1"));
+
+  const auto row = detail::targetEnv(cfg, "opencl1_1@!opencl1_1@*Portable*source*");
+  CHECK(has(row, "POLYRT_PLATFORM=opencl1_1@!opencl1_1@*Portable*source*"));
+  CHECK(has(row, "OCL_ICD_VENDORS=" + dir.path + "/pocl.icd"));
+  CHECK_FALSE(hasKey(row, "POLYFRONT_IMAGE_MANIFEST"));
 }
 
 #endif
