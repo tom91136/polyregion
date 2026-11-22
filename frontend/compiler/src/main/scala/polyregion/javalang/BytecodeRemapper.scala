@@ -24,6 +24,27 @@ object BytecodeRemapper {
 
   def symbolOf(owner: String, name: String): p.Sym = p.Sym(s"$owner.$name")
 
+  // a box is its primitive on the device: a lambda's result is boxed by javac and only that, never null
+  private val Boxes: Map[String, (String, p.Type)] = Map(
+    "java/lang/Integer"   -> ("int", p.Type.IntS32),
+    "java/lang/Long"      -> ("long", p.Type.IntS64),
+    "java/lang/Float"     -> ("float", p.Type.Float32),
+    "java/lang/Double"    -> ("double", p.Type.Float64),
+    "java/lang/Short"     -> ("short", p.Type.IntS16),
+    "java/lang/Byte"      -> ("byte", p.Type.IntS8),
+    "java/lang/Character" -> ("char", p.Type.IntU16),
+    "java/lang/Boolean"   -> ("boolean", p.Type.Bool1)
+  )
+
+  private def boxedOf(t: VarType): Option[p.Type] =
+    Option.when(t.arrayDim == 0 && t.`type` == CodeType.OBJECT)(Boxes.get(t.value).map(_._2)).flatten
+
+  private def boxing(callee: MethodRef): Option[p.Type] =
+    Boxes.get(callee.owner.replace('.', '/')).collect {
+      case (_, tpe) if callee.name == "valueOf" && callee.desc.startsWith("(") && !callee.desc.startsWith("(Ljava") =>
+        tpe
+    }
+
   // the JVM computes on int, long, float and double only, narrower integrals are truncated back by i2b/i2c/i2s
   private def widen(t: p.Type): p.Type = t match {
     case p.Type.Bool1 | p.Type.IntS8 | p.Type.IntS16 | p.Type.IntU16 => p.Type.IntS32
@@ -147,11 +168,11 @@ object BytecodeRemapper {
       if (t.arrayDim == 0 && t.`type` == CodeType.OBJECT) reference(t.value) else ClassLayouts.typeOf(t)
 
     // an object lives in the frame of the method that built it, so it cannot leave through a return
-    def returned(t: VarType, what: String): Result[p.Type] = typeOf(t).flatMap {
+    def returned(t: VarType, what: String): Result[p.Type] = boxedOf(t).fold(typeOf(t).flatMap {
       case p.Type.Ptr(p.Type.Struct(name, _), _) =>
         s"Cannot lower `$what`: an object of `${name.repr}` cannot be returned, its storage ends with the call".fail
       case other => other.success
-    }
+    })(_.success)
 
     def superOf(internal: String): Result[Option[String]] = ClassLayouts.superOf(internal, bytesOf)
 
@@ -287,7 +308,13 @@ object BytecodeRemapper {
           )
         } yield p.Term.Unit0Const
 
-    private def callStatic(callee: MethodRef, args: List[p.Term], buf: mutable.ListBuffer[p.Stmt]): Result[p.Term] = {
+    private def callStatic(callee: MethodRef, args: List[p.Term], buf: mutable.ListBuffer[p.Stmt]): Result[p.Term] =
+      boxing(callee).zip(args.headOption) match {
+        case Some((tpe, value)) => coerce(buf, value, tpe).success
+        case None               => callResolved(callee, args, buf)
+      }
+
+    private def callResolved(callee: MethodRef, args: List[p.Term], buf: mutable.ListBuffer[p.Stmt]): Result[p.Term] = {
       val md = MethodDescriptor.parseDescriptor(callee.desc)
       for {
         _      <- classes.refuseStub(callee)
@@ -362,7 +389,13 @@ object BytecodeRemapper {
 
     // a call through a receiver is direct where nothing can override it: a final class or method, or a private one
     // any other is left for the shared devirtualiser, to be given the classes the region can see
-    private def callInstance(i: InvocationExprent, recv: p.Term, buf: mutable.ListBuffer[p.Stmt]): Result[p.Term] = {
+    private def callInstance(i: InvocationExprent, recv: p.Term, buf: mutable.ListBuffer[p.Stmt]): Result[p.Term] =
+      Boxes.get(i.getClassname).filter((primitive, _) => i.getName == s"${primitive}Value") match {
+        case Some((_, tpe)) => coerce(buf, recv, tpe).success
+        case None           => callMember(i, recv, buf)
+      }
+
+    private def callMember(i: InvocationExprent, recv: p.Term, buf: mutable.ListBuffer[p.Stmt]): Result[p.Term] = {
       val target = i.getClassname.replace('/', '.')
       val callee = MethodRef(target, i.getName, i.getStringDescriptor, instance = true)
       def closed(cls: Int, method: Option[Int]): Boolean = method.exists { m =>
