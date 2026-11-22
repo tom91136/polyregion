@@ -9,8 +9,10 @@ import com.sun.tools.javac.tree.{JCTree, TreeInfo, TreeMaker, TreeScanner}
 import polyregion.ast.generated.PolyPackageWireSchema
 import polyregion.ast.pass.*
 import polyregion.intrinsic.IntrinsicTable
-import polyregion.ast.{CodeGen, MsgPack, PolyAST as p, *}
+import polyregion.ast.{CodeGen, MsgPack, PolyAST as p, given, *}
+import polyregion.ast.Traversal.*
 import polyregion.jvm.compiler as ct
+import polyregion.jvm.twin.Layout
 import polyregion.scalalang.LaunchConfig
 
 import java.io.{ByteArrayOutputStream, DataOutputStream}
@@ -193,27 +195,32 @@ object LaunchSites {
       dependencies: List[p.Function],
       environment: Option[Environment],
       defs: List[p.StructDef],
-      result: Char
+      result: Char,
+      layouts: List[Layout],
+      twins: List[TwinEmitter.Emitted]
   )
 
-  case class Field(offset: Int, kind: Char, capture: Int)
+  case class Field(offset: Int, kind: Char, source: String)
 
   case class Environment(definition: p.StructDef, size: Int, fields: List[Field])
 
-  private def kindOfCapture(tpe: p.Type): Option[Char] = tpe match {
-    case p.Type.Ptr(component, _) if PrimOfType.contains(component) => Some('a')
-    case other                                                      => PrimOfType.get(other).map(_.code)
+  private def kindOfCapture(tpe: p.Type, mode: Mode): Option[Char] = tpe match {
+    case p.Type.Ptr(component, _) if mode == Mode.Region || PrimOfType.contains(component) => Some('a')
+    case other => PrimOfType.get(other).map(_.code)
   }
 
-  private def layoutOf(definition: p.StructDef, config: LaunchConfig): Result[ct.Layout] = {
+  private def layoutOf(definition: p.StructDef, others: List[p.StructDef], config: LaunchConfig): Result[ct.Layout] = {
     val compiler = ct.Compiler.create()
     try
       for {
-        encoded <- Either.catchNonFatal(MsgPack.encode(CodeGen.structDefsVersioned(List(definition))))
+        encoded <- Either.catchNonFatal(MsgPack.encode(CodeGen.structDefsVersioned(others :+ definition)))
         layouts <- (LaunchConfig.Default.targets ::: config.targets).distinct.traverse { target =>
           Either.catchNonFatal(
             s"${target.name}@${target.arch}" ->
-              compiler.layoutOf(encoded, ct.Options.of(compiler.targetByName(target.name), target.arch)).head
+              compiler
+                .layoutOf(encoded, ct.Options.of(compiler.targetByName(target.name), target.arch))
+                .find(_.name == definition.name.repr)
+                .get
           )
         }
         shape = (layout: ct.Layout) =>
@@ -230,6 +237,40 @@ object LaunchSites {
     finally compiler.close()
   }
 
+  private def stored(named: p.Named): p.Named = named.tpe match {
+    case p.Type.Ptr(referent @ p.Type.Struct(_, _), p.Type.Space.Private) =>
+      named.copy(tpe = p.Type.Ptr(referent, p.Type.Space.Global))
+    case _ => named
+  }
+
+  private def withUniqueNames(functions: List[p.Function]): List[p.Function] = {
+    val overloaded = functions.groupBy(_.name).filter(_._2.map(_.decl).distinct.sizeIs > 1)
+    if (overloaded.isEmpty) functions
+    else {
+      val renamed = overloaded.map { (name, group) =>
+        name -> group.distinctBy(_.decl).zipWithIndex.map((fn, i) => fn.decl -> (name :+ s"$$$i"))
+      }
+      def choose(name: p.Sym, args: List[p.Type], rtn: p.Type): p.Sym = {
+        val candidates = overloaded(name).distinctBy(_.decl)
+        val found = candidates
+          .find(fn => fn.args.map(_.named.tpe) == args && fn.rtn == rtn)
+          .orElse(candidates.find(fn => fn.args.sizeIs == args.size && fn.rtn == rtn))
+          .getOrElse(candidates.head)
+        renamed(name).find(_._1 == found.decl).get._2
+      }
+      functions.map { fn =>
+        val rewritten = fn.modifyAll[p.Expr] {
+          case invoke @ p.Expr.Invoke(p.Type.FnRef(name), _, _, args, rtn) if overloaded.contains(name) =>
+            invoke.copy(callee = p.Type.FnRef(choose(name, args.map(_.tpe), rtn)))
+          case other => other
+        }
+        if (overloaded.contains(fn.name))
+          rewritten.modifyDecl(_.copy(name = renamed(fn.name).find(_._1 == fn.decl).get._2))
+        else rewritten
+      }
+    }
+  }
+
   def lowerCallable(
       sources: TreeRemapper.Sources,
       config: LaunchConfig,
@@ -243,25 +284,39 @@ object LaunchSites {
     val symbol = s"${entryName}_callable$index"
     for {
       _ <-
-        if (impl.isStatic) ().success
+        if (mode == Mode.Region || impl.isStatic) ().success
         else inexpressible("a launch callable cannot use `this`")
-      region   <- TreeRemapper.compileRegion(sources, tree)
+      region   <- TreeRemapper.compileRegion(sources, tree, byReference = mode == Mode.Region)
       raw      <- Offloader.withFieldStructs(region.program, sources.classTable, region.outerRefs)
       rawEntry <- raw.entry.failIfEmpty(s"launch callable `$symbol` has no entry")
-      _ <-
-        if (mode == Mode.Site || raw.defs.isEmpty) ().success
-        else inexpressible(s"region `$symbol` uses objects")
-      _ <-
-        if (mode == Mode.Site || raw.functions.map(_.name).distinct.sizeIs == raw.functions.size) ().success
-        else inexpressible(s"region `$symbol` calls overloaded helpers")
-      resultCode <- rawEntry.rtn match {
-        case p.Type.Unit0 => 'V'.success
-        case other        => PrimOfType.get(other).map(_.code).toRight(Inexpressible(s"result of type `${other.repr}`"))
-      }
       routed = if (mode == Mode.Region) Offloader.routeReturnThroughCapture(rawEntry) else rawEntry
       optimised <- Offloader.optimise(region, raw, routed, symbol, PluginEntry.defaultLog)
-      (_, program) = optimised
+      (monoToPoly, optimisedProgram) = optimised
+      unique                         = withUniqueNames(optimisedProgram.entry.toList ::: optimisedProgram.functions)
+      program = optimisedProgram.copy(
+        entry = unique.headOption.filter(_ => optimisedProgram.entry.isDefined),
+        functions = unique.drop(optimisedProgram.entry.toList.size)
+      )
+      resultCode <- rawEntry.rtn match {
+        case p.Type.Unit0 => 'V'.success
+        case other =>
+          PrimOfType
+            .get(other)
+            .map(_.code)
+            .toRight(
+              Inexpressible(
+                other match {
+                  case p.Type.Ptr(_, _) => s"result of type `${other.repr}` escapes the region"
+                  case _                => s"result of type `${other.repr}` cannot be returned from the region"
+                }
+              )
+            )
+      }
       entry <- program.entry.failIfEmpty(s"launch callable `$symbol` lost its entry")
+      twinned <-
+        if (mode == Mode.Region && program.defs.nonEmpty)
+          Offloader.twinsOf(sources, program, monoToPoly, region.tags, entryName)
+        else (List.empty[Layout], List.empty[TwinEmitter.Emitted]).success
       (results, plain) = entry.decl.termCaptures.partition(_.named.symbol == Offloader.ResultCapture)
       origins <- plain.traverse { arg =>
         region.captures
@@ -272,33 +327,39 @@ object LaunchSites {
       _ <-
         if (entry.moduleCaptures.isEmpty && entry.decl.args.isEmpty) ().success
         else s"launch callable `$symbol` captures modules".fail
-      split <- origins.foldLeft[Result[(List[(p.Arg, Int, Boolean)], List[(p.Arg, Int)])]]((Nil, Nil).success) {
+      split <- origins.foldLeft[Result[(List[(p.Named, Char, String)], List[(p.Arg, Int)])]]((Nil, Nil).success) {
         case (acc, (arg, capture)) =>
+          def env(kind: Option[Char], source: String) =
+            kind
+              .map(k => (arg.named, k, source))
+              .toRight(
+                Inexpressible(
+                  s"launch callable capture `${arg.named.symbol}` of type `${arg.named.tpe.repr}` is not supported"
+                )
+              )
           acc.flatMap { (envs, params) =>
             capture match {
-              case TreeRemapper.Capture.Arg(i) if i < captured    => (envs :+ (arg, i, false), params).success
-              case TreeRemapper.Capture.Arg(i)                    => (envs, params :+ (arg, i)).success
-              case TreeRemapper.Capture.Length(i) if i < captured => (envs :+ (arg, i, true), params).success
+              case TreeRemapper.Capture.Arg(i) if mode == Mode.Region || i < captured =>
+                env(kindOfCapture(arg.named.tpe, mode), i.toString).map(e => (envs :+ e, params))
+              case TreeRemapper.Capture.Arg(i) => (envs, params :+ (arg, i)).success
+              case TreeRemapper.Capture.Length(i) if mode == Mode.Region || i < captured =>
+                env(kindOfCapture(arg.named.tpe, mode).map(_ => 'l'), i.toString).map(e => (envs :+ e, params))
+              case TreeRemapper.Capture.RowLengths(i) if mode == Mode.Region =>
+                env(Some('R'), i.toString).map(e => (envs :+ e, params))
+              case TreeRemapper.Capture.StaticField(owner, name) if mode == Mode.Region =>
+                env(Some('s'), s"$owner#$name").map(e => (envs :+ e, params))
               case other => inexpressible(s"launch callable `${impl.name}` uses an unsupported capture $other")
             }
           }
       }
-      (envArgs, paramArgs) = split
-      captures <- envArgs.traverse { (arg, i, isLength) =>
-        kindOfCapture(arg.named.tpe)
-          .map(kind => (arg.named, if (isLength) 'l' else kind, i))
-          .toRight(
-            Inexpressible(
-              s"launch callable capture `${arg.named.symbol}` of type `${arg.named.tpe.repr}` is not supported"
-            )
-          )
-      }
-      fields = captures ++ results.map(arg => (arg.named, 'r', 0))
+      (envFields, paramArgs) = split
+      receiver               = entry.decl.receiver.map(r => (r.named, 'a', "0")).toList
+      fields                 = receiver ++ envFields ++ results.map(arg => (arg.named, 'r', "0"))
       environment <-
         if (fields.isEmpty) None.success
         else {
-          val definition = p.StructDef(p.Sym(s"${entryName}_env$index"), Nil, fields.map(_._1), Nil)
-          layoutOf(definition, config).map { layout =>
+          val definition = p.StructDef(p.Sym(s"${entryName}_env$index"), Nil, fields.map(f => stored(f._1)), Nil)
+          layoutOf(definition, program.defs, config).map { layout =>
             val offsets = layout.members.map(m => m.name -> m.offsetInBytes.toInt).toMap
             Some(
               Environment(
@@ -310,15 +371,27 @@ object LaunchSites {
           }
         }
       self = environment.map(e =>
-        p.Named("this", p.Type.Ptr(p.Type.Struct(e.definition.name, Nil), p.Type.Space.Global))
+        p.Named("#env", p.Type.Ptr(p.Type.Struct(e.definition.name, Nil), p.Type.Space.Global))
       )
       loads = self.toList.flatMap { s =>
-        fields.map((named, _, _) =>
+        fields.map { (named, _, _) =>
+          val steps = List(p.PathStep.Deref, p.PathStep.Field(named.symbol))
+          val field = p.Term.Select(s, steps, stored(named).tpe)
           p.Stmt.Var(
             named,
-            Some(p.Expr.Alias(p.Term.Select(s, List(p.PathStep.Deref, p.PathStep.Field(named.symbol)), named.tpe)))
+            Some(named.tpe match {
+              case p.Type.Ptr(referent @ p.Type.Struct(_, _), p.Type.Space.Private) =>
+                p.Expr.RefTo(
+                  p.Term.Select(s, steps :+ p.PathStep.Deref, referent),
+                  None,
+                  referent,
+                  p.Type.Space.Private,
+                  p.Region.Rooted(s)
+                )
+              case _ => p.Expr.Alias(field)
+            })
           )
-        )
+        }
       }
     } yield Callable(
       entry.copy(
@@ -339,7 +412,9 @@ object LaunchSites {
       program.functions,
       environment,
       program.defs,
-      resultCode
+      resultCode,
+      twinned._1,
+      twinned._2
     )
   }
 
@@ -556,7 +631,7 @@ object LaunchSites {
 
   private def specOf(environment: Option[Environment]): String =
     environment.fold("C0:") { e =>
-      s"C${e.size}:${e.fields.map(f => s"${f.offset}${f.kind}${f.capture}").mkString(",")}"
+      s"C${e.size}:${e.fields.map(f => s"${f.offset}${f.kind}${f.source}").mkString(",")}"
     }
 
   private def callableType(callable: Callable): p.Type = callable.environment match {
@@ -592,10 +667,12 @@ object LaunchSites {
     for {
       encoded <- Either.catchNonFatal(MsgPack.encode(MsgPack.Versioned(PolyPackageWireSchema.Hash, request)))
       groups  <- compileBundles(packageName, declaration, entryName, encoded, config)
-      base       = s"$entryName|$rtnCode|${specs.mkString(";")}"
-      descriptor = if (regionResult == 'V') base else s"$base|$regionResult"
+      twins   = callables.flatMap(_.twins)
+      layouts = Layout.encodeAll(callables.flatMap(_.layouts).asJava)
+      descriptor =
+        s"$entryName|$rtnCode|${specs.mkString(";")}|$regionResult|$layouts|${twins.map(_.fqcn).mkString(",")}"
       bytes <- Offloader.emitClass(fqcn, encodeGroups(groups), descriptor, parent)
-    } yield Offloader.Executable(fqcn, bytes)
+    } yield Offloader.Executable(fqcn, bytes, twins)
   }
 
   def compileRegion(
@@ -603,33 +680,30 @@ object LaunchSites {
       config: LaunchConfig,
       entry: MethodTree,
       fqcn: String
-  ): Result[Option[Offloader.Executable]] = {
+  ): Result[Offloader.Executable] = {
     val entryName = normalise(fqcn.substring(fqcn.lastIndexOf('.') + 1))
     val hostOnly  = config.copy(targets = LaunchConfig.Default.targets)
     entry match {
-      case decl: JCTree.JCMethodDecl if config.roots.nonEmpty =>
+      case decl: JCTree.JCMethodDecl =>
         val impl = decl.sym
-        lowerCallable(sources, hostOnly, entryName, 0, entry, impl, impl.params.size, Mode.Region)
-          .map(Option(_))
-          .recover { case _: Inexpressible => None }
-          .flatMap {
-            case None => None.success
-            case Some(callable) =>
-              assemble(
-                hostOnly,
-                fqcn,
-                CoreIdentity.split(":", 2) match { case Array(a, b) => (a, b) },
-                p.Type.Unit0,
-                'V',
-                List(p.Type.IntS64, callableType(callable)),
-                List(p.Program.TypeSize(p.Type.IntS64, 8)),
-                List("LJ1", specOf(callable.environment)),
-                List(callable),
-                callable.result,
-                classOf[LaunchRegion]
-              ).map(Option(_))
-          }
-      case _ => None.success
+        for {
+          _        <- if (config.roots.nonEmpty) ().success else "polyregion.library.path is not set".fail
+          callable <- lowerCallable(sources, hostOnly, entryName, 0, entry, impl, impl.params.size, Mode.Region)
+          executable <- assemble(
+            hostOnly,
+            fqcn,
+            CoreIdentity.split(":", 2) match { case Array(a, b) => (a, b) },
+            p.Type.Unit0,
+            'V',
+            List(p.Type.IntS64, callableType(callable)),
+            List(p.Program.TypeSize(p.Type.IntS64, 8)),
+            List("LJ1", specOf(callable.environment)),
+            List(callable),
+            callable.result,
+            classOf[LaunchRegion]
+          )
+        } yield executable
+      case _ => s"region `$fqcn` is not a method".fail
     }
   }
 }

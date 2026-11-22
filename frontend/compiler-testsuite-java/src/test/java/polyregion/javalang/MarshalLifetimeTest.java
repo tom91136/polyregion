@@ -9,7 +9,7 @@ public class MarshalLifetimeTest {
 
   @After
   public void clearSeam() {
-    BinaryOffloadExecutable.afterPack = null;
+    Launch.afterPack = null;
   }
 
   private static void collect() {
@@ -27,7 +27,7 @@ public class MarshalLifetimeTest {
   @Test
   public void pointerRowSurvivesACollectionBeforeLaunch() {
     int[][] grid = {{1, 2}, {3, 4}};
-    BinaryOffloadExecutable.afterPack = MarshalLifetimeTest::collect;
+    Launch.afterPack = MarshalLifetimeTest::collect;
     OffloadFunction<Integer> f = () -> grid[0][0] + grid[1][1];
     assertEquals(Integer.valueOf(5), Runtime.offload(f));
   }
@@ -35,7 +35,7 @@ public class MarshalLifetimeTest {
   @Test
   public void nestedPointerRowsSurviveACollectionBeforeLaunch() {
     int[][][] cube = {{{1, 2}, {3, 4}}, {{5, 6}, {7, 8}}};
-    BinaryOffloadExecutable.afterPack = MarshalLifetimeTest::collect;
+    Launch.afterPack = MarshalLifetimeTest::collect;
     OffloadFunction<Integer> f = () -> cube[0][1][0] + cube[1][0][1];
     assertEquals(Integer.valueOf(9), Runtime.offload(f));
   }

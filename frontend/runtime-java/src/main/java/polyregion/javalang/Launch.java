@@ -26,6 +26,8 @@ import polyregion.jvm.runtime.PolyregionRuntimeException;
 import polyregion.jvm.runtime.Type;
 import polyregion.jvm.twin.Layout;
 import polyregion.jvm.twin.Marshal;
+import polyregion.jvm.twin.Twin;
+import polyregion.jvm.twin.TwinException;
 import polyregion.jvm.twin.Twins;
 
 public final class Launch {
@@ -60,12 +62,16 @@ public final class Launch {
   private static final class Field {
     final int offset;
     final char kind;
-    final int capture;
+    final String source;
 
-    Field(int offset, char kind, int capture) {
+    Field(int offset, char kind, String source) {
       this.offset = offset;
       this.kind = kind;
-      this.capture = capture;
+      this.source = source;
+    }
+
+    int capture() {
+      return Integer.parseInt(source);
     }
   }
 
@@ -92,7 +98,7 @@ public final class Launch {
     final char regionResult;
     final Spec[] specs;
     final Group[] groups;
-    final Twins twins = Twins.decode(Layout.encodeAll(Collections.<Layout>emptyList()));
+    final Twins twins;
 
     Plan(
         String unsupported,
@@ -100,13 +106,15 @@ public final class Launch {
         char result,
         char regionResult,
         Spec[] specs,
-        Group[] groups) {
+        Group[] groups,
+        Twins twins) {
       this.unsupported = unsupported;
       this.entry = entry;
       this.result = result;
       this.regionResult = regionResult;
       this.specs = specs;
       this.groups = groups;
+      this.twins = twins;
     }
 
     Group select(Context context) {
@@ -141,6 +149,8 @@ public final class Launch {
           return new ConcurrentHashMap<>();
         }
       };
+
+  static Runnable afterPack;
 
   private static final Set<String> LOADED = ConcurrentHashMap.newKeySet();
 
@@ -187,9 +197,16 @@ public final class Launch {
   private static Plan decode(LaunchSite site) {
     String descriptor = site.descriptor();
     if (descriptor.startsWith("!"))
-      return new Plan(descriptor.substring(1), "", 'V', 'V', new Spec[0], new Group[0]);
-    String[] parts = descriptor.split("\\|", 4);
-    if (parts.length < 3) throw new IllegalStateException("Malformed descriptor: " + descriptor);
+      return new Plan(
+          descriptor.substring(1),
+          "",
+          'V',
+          'V',
+          new Spec[0],
+          new Group[0],
+          Twins.decode(Layout.encodeAll(Collections.<Layout>emptyList())));
+    String[] parts = descriptor.split("\\|", 6);
+    if (parts.length != 6) throw new IllegalStateException("Malformed descriptor: " + descriptor);
     String[] args = parts[2].isEmpty() ? new String[0] : parts[2].split(";");
     Spec[] specs = new Spec[args.length];
     for (int i = 0; i < args.length; i++) {
@@ -216,7 +233,7 @@ public final class Launch {
                 new Field(
                     Integer.parseInt(field.substring(0, kind)),
                     field.charAt(kind),
-                    Integer.parseInt(field.substring(kind + 1)));
+                    field.substring(kind + 1));
           }
           specs[i] = new Spec('C', 'V', size, decoded, 0);
           break;
@@ -228,9 +245,26 @@ public final class Launch {
         null,
         parts[0],
         parts[1].charAt(0),
-        parts.length == 4 ? parts[3].charAt(0) : 'V',
+        parts[3].charAt(0),
         specs,
-        decodeGroups(site.binary()));
+        decodeGroups(site.binary()),
+        twinsOf(site, parts[4], parts[5]));
+  }
+
+  private static Twins twinsOf(LaunchSite site, String layouts, String generated) {
+    Twins twins = Twins.decode(layouts);
+    if (!generated.isEmpty())
+      for (String name : generated.split(","))
+        try {
+          twins.add(
+              (Twin)
+                  Class.forName(name, true, site.getClass().getClassLoader())
+                      .getConstructor(Twins.class)
+                      .newInstance(twins));
+        } catch (ReflectiveOperationException e) {
+          throw new TwinException("Cannot create the generated twin " + name, e);
+        }
+    return twins;
   }
 
   private static Class<?> siteClass(String name, ClassLoader loader) {
@@ -440,6 +474,7 @@ public final class Launch {
     ensureLoaded(group);
 
     List<Long> pointers = new ArrayList<>();
+    List<StaticBinding> statics = new ArrayList<>();
     ByteBuffer cell = null;
     ByteBuffer regionCell = null;
     try (Marshal m =
@@ -476,19 +511,32 @@ public final class Launch {
                     break;
                   case 'a':
                     {
-                      Object value = captured[i][field.capture];
-                      env.putLong(field.offset, value == null ? 0L : m.array(value));
+                      Object value = captured[i][field.capture()];
+                      env.putLong(field.offset, value == null ? 0L : pointerOf(m, value));
                       break;
                     }
                   case 'l':
                     {
-                      Object value = captured[i][field.capture];
+                      Object value = captured[i][field.capture()];
                       env.putInt(field.offset, value == null ? 0 : Array.getLength(value));
+                      break;
+                    }
+                  case 'R':
+                    {
+                      Object value = captured[i][field.capture()];
+                      env.putLong(field.offset, value == null ? 0L : m.array(rowLengthsOf((Object[]) value)));
+                      break;
+                    }
+                  case 's':
+                    {
+                      StaticBinding binding = StaticBinding.of(field.source);
+                      statics.add(binding);
+                      env.putLong(field.offset, m.array(binding.box));
                       break;
                     }
                   default:
                     {
-                      Object value = captured[i][field.capture];
+                      Object value = captured[i][field.capture()];
                       put(env, field.offset, field.kind, value instanceof Enum ? ((Enum<?>) value).ordinal() : value);
                     }
                 }
@@ -505,11 +553,23 @@ public final class Launch {
       java.util.Arrays.fill(types, Type.PTR.value());
       ByteBuffer data = ByteBuffer.allocate(8 * types.length).order(ByteOrder.nativeOrder());
       for (long pointer : pointers) data.putLong(pointer);
+      if (afterPack != null) afterPack.run();
       ctx.callHost(group.modules, group.program, plan.entry, types, data.array());
       m.settle();
+      for (StaticBinding binding : statics) binding.writeBack();
     }
     if (regionCell != null) return get(regionCell, plan.regionResult);
     return cell == null ? null : get(cell, plan.result);
+  }
+
+  private static long pointerOf(Marshal m, Object value) {
+    return value.getClass().isArray() ? m.array(value) : m.instance(value);
+  }
+
+  private static int[] rowLengthsOf(Object[] rows) {
+    int[] lengths = new int[rows.length];
+    for (int r = 0; r < rows.length; r++) lengths[r] = rows[r] == null ? 0 : Array.getLength(rows[r]);
+    return lengths;
   }
 
   private static Object literal(Spec spec) {

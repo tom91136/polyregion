@@ -272,10 +272,9 @@ class Processor(scan: Tree => LaunchSites.Collected) extends AbstractProcessor {
                 fqcn,
                 s"offload $cls.${x.getName}",
                 guard(
-                  launchConfig
-                    .fold(_ => Right(None), LaunchSites.compileRegion(sources, _, x, fqcn))
-                    .flatMap(_.fold(Offloader.compile(sources, x, fqcn))(Right(_)))
-                )
+                  launchConfig.leftMap(CompilerException(_)).flatMap(LaunchSites.compileRegion(sources, _, x, fqcn))
+                ),
+                classOf[LaunchRegion]
               )
             }
           }

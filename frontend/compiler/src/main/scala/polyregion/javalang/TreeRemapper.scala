@@ -313,9 +313,13 @@ object TreeRemapper {
     else p.Type.IntS32
 
   private def coerce(scope: Scope, buf: mutable.ListBuffer[p.Stmt], t: p.Term, target: p.Type): p.Term = t.tpe match {
-    case same if same == target                                            => t
-    case p.Type.Ptr(pointee @ p.Type.Struct(_, _), _) if pointee == target => t
-    case _                                                                 => bind(scope, buf, p.Expr.Cast(t, target))
+    case same if same == target => t
+    case p.Type.Ptr(pointee @ p.Type.Struct(_, _), _) if pointee == target =>
+      t match {
+        case sel: p.Term.Select => p.Term.Select(sel.root, sel.steps :+ p.PathStep.Deref, pointee)
+        case _                  => t
+      }
+    case _ => bind(scope, buf, p.Expr.Cast(t, target))
   }
 
   // a subtype handed to a parameter of its supertype goes by reference, as a copy into the smaller supertype would truncate it
@@ -2086,10 +2090,12 @@ object TreeRemapper {
       _        <- emitCases(scope, buf, selector, s.getCases.asScala.toList, None)
     } yield ()
 
-  private def passed(isEntry: Boolean, tpe: p.Type): p.Type = if (isEntry) tpe else referenceTo(tpe)
+  private def passed(isEntry: Boolean, byReference: Boolean, tpe: p.Type): p.Type =
+    if (!isEntry || byReference) referenceTo(tpe) else tpe
 
   private enum Role {
     case Entry
+    case ReferencingEntry
     case Callee
   }
 
@@ -2100,20 +2106,23 @@ object TreeRemapper {
       plan: Option[Plan]
   ): Result[(p.Function, List[JSymbol.VarSymbol], List[Captured])] = m match {
     case md: JCTree.JCMethodDecl =>
-      JavaTyper.typer(md.sym.getReturnType).flatMap(compileBody(md, deps, role == Role.Entry, plan, _))
+      JavaTyper
+        .typer(md.sym.getReturnType)
+        .flatMap(compileBody(md, deps, role != Role.Callee, role != Role.Entry, plan, _))
   }
 
   private def compileBody(
       md: JCTree.JCMethodDecl,
       deps: DepCollector,
       isEntry: Boolean,
+      byReference: Boolean,
       plan: Option[Plan],
       rtn: p.Type
   ): Result[(p.Function, List[JSymbol.VarSymbol], List[Captured])] = {
     val receiver =
       if (md.sym.isStatic) None
       else
-        Some(p.Arg(p.Named("this", passed(isEntry, p.Type.Struct(p.Sym(ownerName(md.sym)), Nil)))))
+        Some(p.Arg(p.Named("this", passed(isEntry, byReference, p.Type.Struct(p.Sym(ownerName(md.sym)), Nil)))))
     val scope      = Scope(deps, isEntry, plan, rtn, receiver.map(_.named))
     val params     = md.getParameters.asScala.toVector
     val shift      = if (receiver.isDefined) 1 else 0
@@ -2122,7 +2131,7 @@ object TreeRemapper {
       typed <- params.toList.traverse { v =>
         deps.capturedClosures.get(declOf(v)).filter(_ => isEntry) match {
           case Some(c) => (Left(c): Either[Closure, p.Type]).success
-          case None    => JavaTyper.typer(jcType(v)).map(tpe => Right(passed(isEntry, tpe)))
+          case None    => JavaTyper.typer(jcType(v)).map(tpe => Right(passed(isEntry, byReference, tpe)))
         }
       }
       args = {
@@ -2323,7 +2332,8 @@ object TreeRemapper {
       }
     }
 
-  def compileRegion(sources: Sources, entry: MethodTree): Result[Region] = {
+  def compileRegion(sources: Sources, entry: MethodTree, byReference: Boolean = false): Result[Region] = {
+    val role = if (byReference) Role.ReferencingEntry else Role.Entry
     import sources.*
     val entrySym = methodDeclSym(entry)
     val deps = DepCollector(
@@ -2337,11 +2347,11 @@ object TreeRemapper {
     )
     for {
       // exploratory lowering, discarded: learns the call graph and statics needed to size signatures
-      _ <- compileMethod(entry, deps, Role.Entry, None)
+      _ <- compileMethod(entry, deps, role, None)
       _ <- settle(trees, deps, entrySym, plan = None)
       plan = Some(Plan(planStatics(deps), planLengths(deps)))
       _    = deps.dispatch.clear()
-      entryAndStatics <- compileMethod(entry, deps, Role.Entry, plan)
+      entryAndStatics <- compileMethod(entry, deps, role, plan)
       (entryFn, _, captures) = entryAndStatics
       settled <- settle(trees, deps, entrySym, plan = plan)
       (sourceFns, bytecode) = settled

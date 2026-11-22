@@ -346,6 +346,31 @@ object Offloader {
     } yield (monoToPoly, prog)
   }
 
+  def twinsOf(
+      sources: TreeRemapper.Sources,
+      prog: p.Program,
+      monoToPoly: Map[p.Sym, p.Sym],
+      tags: Map[String, Int],
+      owner: String
+  ): Result[(List[Layout], List[TwinEmitter.Emitted])] = {
+    import sources.{classTable, env}
+    val hosts = prog.defs.flatMap { d =>
+      val original = monoToPoly.getOrElse(d.name, d.name)
+      val fqn      = original.fqn.mkString(".")
+      classTable.get(fqn).map(e => d.name.repr -> Host(e, env.getElementUtils.getBinaryName(e).toString, fqn))
+    }.toMap
+    layoutsOf(prog, hosts, tags, env).map { layouts =>
+      val twins = layouts.zipWithIndex.flatMap { (layout, i) =>
+        hosts.values.find(_.binary == layout.className).flatMap { host =>
+          val pkg  = env.getElementUtils.getPackageOf(host.elem).getQualifiedName.toString
+          val name = s"$owner$$Twin$$$i"
+          TwinEmitter.emit(if (pkg.isEmpty) name else s"$pkg.$name", layout, hostFieldsOf(env, host))
+        }
+      }
+      (layouts, twins)
+    }
+  }
+
   def compile(sources: TreeRemapper.Sources, entry: MethodTree, fqcn: String): Result[Executable] = {
     import sources.{classTable, env}
     val log    = PluginEntry.defaultLog
@@ -359,23 +384,11 @@ object Offloader {
       slots  <- slotsOf(routed, region.captures, resultTpe != p.Type.Unit0)
       passed <- optimise(region, raw, routed, symbol, log)
       (monoToPoly, prog) = passed
-      hosts = prog.defs.flatMap { d =>
-        val original = monoToPoly.getOrElse(d.name, d.name)
-        val fqn      = original.fqn.mkString(".")
-        classTable.get(fqn).map(e => d.name.repr -> Host(e, env.getElementUtils.getBinaryName(e).toString, fqn))
-      }.toMap
-      layouts  <- layoutsOf(prog, hosts, region.tags, env)
+      twinned  <- twinsOf(sources, prog, monoToPoly, region.tags, fqcn.substring(fqcn.lastIndexOf('.') + 1))
       _        <- prog.entry.failIfEmpty(s"Region `$symbol` lost its entry")
       compiled <- compileToObject(prog)
       (image, features, entryArgs) = compiled
-      twins = layouts.zipWithIndex.flatMap { (layout, i) =>
-        hosts.values.find(_.binary == layout.className).flatMap { host =>
-          val pkg    = env.getElementUtils.getPackageOf(host.elem).getQualifiedName.toString
-          val simple = fqcn.substring(fqcn.lastIndexOf('.') + 1)
-          val name   = s"$simple$$Twin$$$i"
-          TwinEmitter.emit(if (pkg.isEmpty) name else s"$pkg.$name", layout, hostFieldsOf(env, host))
-        }
-      }
+      (layouts, twins)             = twinned
       descriptor <- descriptorOf(
         entryArgs,
         slots,
