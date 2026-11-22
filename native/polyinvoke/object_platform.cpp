@@ -973,7 +973,11 @@ void SharedDevice::loadModule(const std::string &name, const std::string &image)
     // TODO fileless load: Linux memfd_create, Windows MemoryModule; dlopen needs a real file for now
     llvm::SmallString<256> model;
     llvm::sys::path::system_temp_directory(/*ErasedOnReboot=*/true, model);
+#ifdef _WIN32
+    llvm::sys::path::append(model, "polyinvoke-shobj-%%%%%%%%.dll");
+#else
     llvm::sys::path::append(model, "polyinvoke-shobj-%%%%%%%%");
+#endif
     llvm::SmallString<256> tmpPath;
     int objectFd = -1;
     if (const auto ec = llvm::sys::fs::createUniqueFile(model, objectFd, tmpPath)) {
