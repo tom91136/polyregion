@@ -550,7 +550,7 @@ lazy val cudaSuiteSupport =
   Set("BaseSuite.scala", "DevirtFixtures.scala", "ParCases.scala", "RangeSuiteBase.scala", "Toggles.scala") ++
     spectraSuiteBase
 lazy val hipSuites        = Set("SpectraHipLaunchSuite.scala")
-lazy val spectraSuiteBase = Set("SpectraLaunchBase.scala", "LaunchPoint.scala")
+lazy val spectraSuiteBase = Set("SpectraLaunchBase.scala", "SpectraRaw.scala", "LaunchPoint.scala")
 
 def compilerTestsuiteSettings(projectName: String) = Seq(
   fork                      := true,
@@ -597,6 +597,10 @@ def deviceSuiteProject(
       commonSettings,
       polyregionSettings(targets),
       compilerTestsuiteSettings(projectName),
+      Test / javaOptions ++= Seq(
+        s"-Dpolyregion.library.path=${polyregionLibraryPath.value}",
+        s"-Dpolyregion.library.capabilities=${polyregionCapabilities.value.mkString(",")}"
+      ),
       Test / unmanagedSourceDirectories := Seq(
         (ThisBuild / baseDirectory).value / "compiler-testsuite-scala" / "src" / "test" / "scala"
       ),

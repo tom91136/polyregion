@@ -1,5 +1,7 @@
 package polyregion
 
+import polyregion.SpectraRaw.*
+import polyregion.ast.PolyAST as p
 import polyregion.jvm.runtime as rt
 import polyregion.scalalang.*
 import polyregion.scalalang.blocking.Host
@@ -98,6 +100,89 @@ trait SpectraLaunchBase extends munit.FunSuite {
     assertEquals(out.toList, xs.map(_ + 7).toList)
   }
 
+  protected def zeroDivisionCase(ctx: rt.Context): Unit = {
+    val xs  = Array(1, 2, 0, 4)
+    val out = Array.ofDim[Int](xs.length)
+    val e   = intercept[ArithmeticException](spectra.transform(ctx, xs, out, xs.length, (x: Int) => 10 / x))
+    assertEquals(e.getMessage, "/ by zero")
+  }
+
+  protected def zeroRemainderCase(ctx: rt.Context): Unit = {
+    val xs  = Array(1, 2, 0, 4)
+    val out = Array.ofDim[Int](xs.length)
+    val e   = intercept[ArithmeticException](spectra.transform(ctx, xs, out, xs.length, (x: Int) => 10 % x))
+    assertEquals(e.getMessage, "/ by zero")
+  }
+
+  protected def minDivisionCase(ctx: rt.Context): Unit = {
+    val xs    = Array(Int.MinValue, 7, -7, Int.MinValue)
+    val out   = Array.ofDim[Int](xs.length)
+    val minus = -1
+    spectra.transform(ctx, xs, out, xs.length, (x: Int) => x / minus)
+    assertEquals(out.toList, xs.map(_ / minus).toList)
+    spectra.transform(ctx, xs, out, xs.length, (x: Int) => x % minus)
+    assertEquals(out.toList, xs.map(_ % minus).toList)
+  }
+
+  private def zeroReadOp: p.Function = {
+    val (x, xRef)         = select(i32, "x")
+    val (fresh, freshRef) = select(ptrI32, "fresh")
+    val (last, lastRef)   = select(i32, "last")
+    val (v, vRef)         = select(i32, "v")
+    callable(
+      "rawZeroRead",
+      x,
+      i32,
+      List(
+        p.Stmt.Var(fresh, Some(p.Expr.Alloc(i32, xRef, g, p.Region.Opaque))),
+        p.Stmt.Var(last, Some(p.Expr.IntrOp(p.Intr.Sub(xRef, p.Term.IntS32Const(1), i32)))),
+        p.Stmt.Var(v, Some(p.Expr.Index(freshRef, lastRef, i32))),
+        p.Stmt.Return(p.Expr.Alias(vRef))
+      )
+    )
+  }
+
+  private def escapingOp: p.Function = {
+    val (x, xRef)       = select(i32, "x")
+    val (arr, arrRef)   = select(ptrI32, "arr")
+    val (addr, addrRef) = select(p.Type.IntS64, "addr")
+    val (r, rRef)       = select(i32, "r")
+    callable(
+      "rawEscape",
+      x,
+      i32,
+      List(
+        p.Stmt.Var(arr, Some(p.Expr.Alloc(i32, xRef, g, p.Region.Opaque))),
+        p.Stmt.Var(addr, Some(p.Expr.Cast(arrRef, p.Type.IntS64))),
+        p.Stmt.Var(r, Some(p.Expr.Cast(addrRef, i32))),
+        p.Stmt.Return(p.Expr.Alias(rRef))
+      )
+    )
+  }
+
+  protected def zeroedAllocationCase(ctx: rt.Context): Unit = {
+    val out = Array(-1)
+    dirtyHeap(64)
+    rawLaunch(ctx, zeroReadOp, Array(16), out)
+    assertEquals(out.toList, List(0))
+  }
+
+  protected def refusedEscapeCase(): Unit = {
+    val e = intercept[Exception](compile(escapingOp, hostOnly = false))
+    assert(e.getMessage.contains("may not let an allocation escape"), e.getMessage)
+    assert(e.getMessage.contains("converted to an integer"), e.getMessage)
+  }
+
+  protected def jvmSemanticsTests(kind: String, created: => Option[rt.DeviceInfo]): Unit = {
+    test(s"a division by zero in a spectra.transform lambda raises ArithmeticException on $kind")(
+      withContext(created)(zeroDivisionCase(_))
+    )
+    test(s"a remainder by zero in a spectra.transform lambda raises ArithmeticException on $kind")(
+      withContext(created)(zeroRemainderCase(_))
+    )
+    test(s"MIN / -1 and MIN % -1 in a spectra.transform lambda wrap on $kind")(withContext(created)(minDivisionCase(_)))
+  }
+
   protected def nestedPointerCase(ctx: rt.Context): Unit = {
     val xs    = Array.tabulate(1000)(identity)
     val out   = Array.ofDim[Int](xs.length)
@@ -189,6 +274,13 @@ trait SpectraLaunchBase extends munit.FunSuite {
       withContext(created)(launched(transformReduceUnorderedCase(_)))
     )
   }
+
+  test("an allocation escaping a spectra.transform callable is refused")(refusedEscapeCase())
+  test("a dynamically sized allocation in a spectra.transform callable is zero filled on the host")(
+    host(zeroedAllocationCase(_))
+  )
+
+  jvmSemanticsTests("the host", device(d => d.platformKind == 1 && d.moduleFormat == 2))
 
   test("a pointer-bearing capture reads the host array in place on the host")(host(pointerCaptureCase(_)))
   test("a nested pointer in the environment reads the host arrays in place on the host")(host(nestedPointerCase(_)))
