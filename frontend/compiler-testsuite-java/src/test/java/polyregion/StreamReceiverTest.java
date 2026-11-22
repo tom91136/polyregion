@@ -5,12 +5,16 @@ import static org.junit.Assert.assertEquals;
 
 import java.util.Arrays;
 import java.util.stream.IntStream;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TestRule;
 import polyregion.jvm.runtime.Context;
 
 public class StreamReceiverTest {
 
   private static final int N = 1000;
+
+  @Rule public final TestRule kernels = LaunchRule.skipOnGap();
 
   private final int bias = 3;
 

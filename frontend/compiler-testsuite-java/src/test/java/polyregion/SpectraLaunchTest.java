@@ -9,7 +9,9 @@ import static polyregion.javalang.Runtime.offload;
 import java.util.Arrays;
 import java.util.Random;
 import java.util.function.IntSupplier;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TestRule;
 import polyregion.jvm.runtime.Context;
 import polyregion.javalang.OffloadFunction;
 
@@ -17,27 +19,7 @@ public class SpectraLaunchTest {
 
   private static final int N = 4096;
 
-  private static final int[] FIELD_DATA = ints(30);
-
-  private static final int FIELD_TOTAL = Spectra.reduce(FIELD_DATA, N, 0, (a, b) -> a + b);
-
-  private static final int[] FIELD_SORTED;
-
-  static {
-    FIELD_SORTED = FIELD_DATA.clone();
-    Spectra.sort(FIELD_SORTED, N, (a, b) -> a < b);
-  }
-
-  private final int[] instanceData = ints(31);
-
-  private final int instanceTotal = Spectra.reduce(instanceData, N, 0, (a, b) -> a + b);
-
-  private final int[] instanceSorted;
-
-  {
-    instanceSorted = instanceData.clone();
-    Spectra.sort(instanceSorted, N, (a, b) -> a < b);
-  }
+  @Rule public final TestRule kernels = LaunchRule.skipOnGap();
 
   private static int sum(int[] xs) {
     int total = 0;
@@ -218,16 +200,37 @@ public class SpectraLaunchTest {
     }
   }
 
+  static final class FieldInitialisers {
+    static final int[] DATA = ints(30);
+    static final int TOTAL = Spectra.reduce(DATA, N, 0, (a, b) -> a + b);
+    static final int[] SORTED;
+    static {
+      SORTED = DATA.clone();
+      Spectra.sort(SORTED, N, (a, b) -> a < b);
+    }
+  }
+
   @Test
   public void staticInitialisersLaunch() {
-    assertEquals(sum(FIELD_DATA), FIELD_TOTAL);
-    assertArrayEquals(sorted(FIELD_DATA), FIELD_SORTED);
+    assertEquals(sum(FieldInitialisers.DATA), FieldInitialisers.TOTAL);
+    assertArrayEquals(sorted(FieldInitialisers.DATA), FieldInitialisers.SORTED);
+  }
+
+  static final class InstanceInitialisers {
+    final int[] data = ints(31);
+    final int total = Spectra.reduce(data, N, 0, (a, b) -> a + b);
+    final int[] sorted;
+    {
+      sorted = data.clone();
+      Spectra.sort(sorted, N, (a, b) -> a < b);
+    }
   }
 
   @Test
   public void instanceInitialisersLaunch() {
-    assertEquals(sum(instanceData), instanceTotal);
-    assertArrayEquals(sorted(instanceData), instanceSorted);
+    InstanceInitialisers holder = new InstanceInitialisers();
+    assertEquals(sum(holder.data), holder.total);
+    assertArrayEquals(sorted(holder.data), holder.sorted);
   }
 
   static final class MemberClass {

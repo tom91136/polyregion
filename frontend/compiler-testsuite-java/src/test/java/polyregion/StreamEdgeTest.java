@@ -16,11 +16,9 @@ import java.util.Random;
 import java.util.stream.DoubleStream;
 import java.util.stream.IntStream;
 import java.util.stream.LongStream;
-import org.junit.After;
-import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
-import org.junit.rules.TestName;
+import org.junit.rules.TestRule;
 import polyregion.javalang.Par;
 import polyregion.jvm.runtime.Context;
 
@@ -30,21 +28,10 @@ public class StreamEdgeTest {
 
   private static final long SPAN = 4_294_967_306L;
 
-  @Rule public final TestName name = new TestName();
-
-  private long launchedBefore;
-
-  @Before
-  public void snapshotLaunches() {
-    launchedBefore = Context.current().stats().launches;
-  }
-
-  @After
-  public void everyChainLaunchedAKernel() {
-    String method = name.getMethodName();
-    if (!(method.startsWith("fallsBack") || method.startsWith("refuses")))
-      assertTrue(method + " ran no kernel", Context.current().stats().launches > launchedBefore);
-  }
+  @Rule
+  public final TestRule kernels =
+      LaunchRule.requireLaunch(
+          method -> method.startsWith("fallsBack") || method.startsWith("refuses"));
 
   private static long launches(Runnable body) {
     Context context = Context.current();

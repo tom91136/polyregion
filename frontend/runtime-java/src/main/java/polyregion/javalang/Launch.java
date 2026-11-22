@@ -17,7 +17,9 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 import polyregion.jvm.compiler.Target;
+import polyregion.jvm.runtime.CapabilityGapException;
 import polyregion.jvm.runtime.Context;
+import polyregion.jvm.runtime.LoadOutcome;
 import polyregion.jvm.runtime.ModuleImage;
 import polyregion.jvm.runtime.Platforms;
 import polyregion.jvm.runtime.PolyregionRuntimeException;
@@ -36,6 +38,13 @@ public final class Launch {
     static final Platforms PLATFORMS = Platforms.create();
   }
 
+  static PolyregionRuntimeException refusal(String message, Iterable<LoadOutcome> outcomes) {
+    LoadOutcome worst = null;
+    for (LoadOutcome outcome : outcomes)
+      if (worst == null || outcome.value() > worst.value()) worst = outcome;
+    return worst == LoadOutcome.LACKS ? new CapabilityGapException(message) : new PolyregionRuntimeException(message);
+  }
+
   private static final class Group {
     final String program;
     final byte[] hostObject;
@@ -45,10 +54,6 @@ public final class Launch {
       this.program = program;
       this.hostObject = hostObject;
       this.modules = modules;
-    }
-
-    boolean accepts(Context context) {
-      return modules.length == 0 || context.select(modules) >= 0;
     }
   }
 
@@ -106,12 +111,17 @@ public final class Launch {
 
     Group select(Context context) {
       Group chosen = null;
+      List<LoadOutcome> refusals = new ArrayList<>();
       for (Group group : groups)
         if (group.modules.length == 0) {
           if (chosen == null) chosen = group;
-        } else if (group.accepts(context)) return group;
+        } else {
+          int found = context.select(group.modules);
+          if (found >= 0) return group;
+          refusals.add(LoadOutcome.VALUES[-found]);
+        }
       if (chosen == null)
-        throw new PolyregionRuntimeException("No compiled variant of `" + entry + "` accepts " + context);
+        throw refusal("No compiled variant of `" + entry + "` accepts " + context, refusals);
       return chosen;
     }
   }

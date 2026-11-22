@@ -11,11 +11,9 @@ import java.util.OptionalLong;
 import java.util.Random;
 import java.util.stream.IntStream;
 import java.util.stream.LongStream;
-import org.junit.After;
-import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
-import org.junit.rules.TestName;
+import org.junit.rules.TestRule;
 import polyregion.javalang.Par;
 import polyregion.jvm.runtime.Context;
 
@@ -23,20 +21,7 @@ public class ParLaunchTest {
 
   private static final int N = 5000;
 
-  @Rule public final TestName name = new TestName();
-
-  private long launchedBefore;
-
-  @Before
-  public void snapshotLaunches() {
-    launchedBefore = Context.current().stats().launches;
-  }
-
-  @After
-  public void everyChainLaunchedAKernel() {
-    assertTrue(
-        name.getMethodName() + " ran no kernel", Context.current().stats().launches > launchedBefore);
-  }
+  @Rule public final TestRule kernels = LaunchRule.requireLaunch(method -> false);
 
   private static double bound(double[] terms) {
     double magnitude = 0;

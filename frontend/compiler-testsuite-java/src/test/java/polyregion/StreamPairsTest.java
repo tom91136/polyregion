@@ -6,13 +6,17 @@ import static org.junit.Assert.assertEquals;
 import java.util.Arrays;
 import java.util.Random;
 import java.util.stream.IntStream;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TestRule;
 import polyregion.javalang.Par;
 import polyregion.jvm.runtime.Context;
 
 public class StreamPairsTest {
 
   private static final int N = 4096;
+
+  @Rule public final TestRule kernels = LaunchRule.skipOnGap();
 
   private static double bound(double[] terms) {
     double magnitude = 0;

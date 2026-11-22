@@ -9,12 +9,16 @@ import java.util.OptionalLong;
 import java.util.stream.DoubleStream;
 import java.util.stream.IntStream;
 import java.util.stream.LongStream;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TestRule;
 import polyregion.javalang.Par;
 
 public class StreamOrderTest {
 
   private static final int N = 5000;
+
+  @Rule public final TestRule kernels = LaunchRule.skipOnGap();
 
   @Test
   public void keepsEncounterOrderInReduce() {
