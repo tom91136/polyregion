@@ -88,6 +88,7 @@ extern "C" bool SPIRVTranslate(Module *M, std::string &SpirvObj, std::string &Er
 #include "aspartame/all.hpp"
 #include "aspartame/ext/llvm.hpp"
 
+#include "polyregion/dl.h"
 #include "polyregion/env_keys.h"
 #include "polyregion/llvm_utils.hpp"
 
@@ -687,10 +688,6 @@ bool llvmc::captureModuleIr() {
   return std::getenv(polyregion::env::PolyregionDebug) != nullptr || std::getenv(polyregion::env::PolycVerboseNames) != nullptr;
 }
 
-// XXX getMainExecutable() needs a function address it can dladdr/GetModuleHandleEx against to
-// find the binary; this trivial symbol is that anchor.
-[[maybe_unused]] static void vendorBitcodeAnchor() {}
-
 std::string llvmc::findInDirs(llvm::StringRef name, llvm::ArrayRef<llvm::StringRef> dirs) {
   namespace fs = llvm::sys::fs;
   namespace path = llvm::sys::path;
@@ -704,16 +701,15 @@ std::string llvmc::findInDirs(llvm::StringRef name, llvm::ArrayRef<llvm::StringR
 }
 
 std::string llvmc::findVendorBitcode(llvm::StringRef name) {
-  namespace fs = llvm::sys::fs;
   namespace path = llvm::sys::path;
   llvm::SmallVector<std::string, 4> owned;
   const char *env = std::getenv(polyregion::env::PolyregionBitcodeDir);
   if (env && *env) owned.emplace_back(env);
-  const auto exe = fs::getMainExecutable(nullptr, reinterpret_cast<void *>(&vendorBitcodeAnchor));
-  if (!exe.empty()) {
-    const auto exeDir = path::parent_path(exe);
-    owned.emplace_back(exeDir.str());
-    llvm::SmallString<256> lib(exeDir);
+  const auto binary = polyregion_dl_module_path(reinterpret_cast<const void *>(&findVendorBitcode));
+  if (!binary.empty()) {
+    const auto binaryDir = path::parent_path(binary);
+    owned.emplace_back(binaryDir.str());
+    llvm::SmallString<256> lib(binaryDir);
     path::append(lib, "../lib");
     owned.emplace_back(lib.str().str());
   }

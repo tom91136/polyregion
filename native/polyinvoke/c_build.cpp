@@ -1,3 +1,5 @@
+#include "c_build.h"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -6,10 +8,6 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
-
-#if defined(__linux__) || defined(__APPLE__)
-  #include <dlfcn.h>
-#endif
 
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Config/llvm-config.h"
@@ -23,9 +21,8 @@
 #include "fmt/format.h"
 
 #include "polyregion/cache.hpp"
+#include "polyregion/dl.h"
 #include "polyregion/env_keys.h"
-
-#include "c_build.h"
 
 using namespace aspartame;
 
@@ -41,19 +38,6 @@ constexpr auto SharedSuffix = ".dylib";
 #else
 constexpr auto SharedSuffix = ".so";
 #endif
-
-[[maybe_unused]] void anchor() {}
-
-std::string moduleContaining(const void *address) {
-#if defined(__linux__) || defined(__APPLE__)
-  Dl_info info;
-  if (dladdr(address, &info) && info.dli_fname) {
-    llvm::SmallString<256> resolved;
-    if (!llvm::sys::fs::real_path(info.dli_fname, resolved)) return resolved.str().str();
-  }
-#endif
-  return {};
-}
 
 std::string compilerUnder(llvm::StringRef root) {
   llvm::SmallString<256> candidate(root);
@@ -106,10 +90,9 @@ CCompiler locateCCompiler() {
                ? CCompiler{.path = explicitPath, .unavailable = {}}
                : CCompiler{.path = {},
                            .unavailable = fmt::format("{}={} does not exist", polyregion::env::PolyinvokeCCompiler, explicitPath)};
-  const std::array<std::string, 3> found = {
+  const std::array<std::string, 2> found = {
       compilerFromBitcodeDir(),
-      compilerAbove(moduleContaining(reinterpret_cast<const void *>(&anchor))),
-      compilerAbove(llvm::sys::fs::getMainExecutable(nullptr, reinterpret_cast<void *>(&anchor))),
+      compilerAbove(polyregion_dl_module_path(reinterpret_cast<const void *>(&locateCCompiler))),
   };
   if (const auto first = found ^ find([](const auto &c) { return !c.empty(); })) return {.path = *first, .unavailable = {}};
   return {.path = {},
