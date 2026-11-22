@@ -42,6 +42,7 @@
     EXPORT_W(partition, T##W, fn<bool, T##W>)                                                                                              \
     EXPORT_W(partition_point, T##W, fn<bool, T##W>)                                                                                        \
     EXPORT_W(reduce, T##W, fn<T##W, T##W, T##W>)                                                                                           \
+    EXPORT_W(reduce_unordered, T##W, fn<T##W, T##W, T##W>)                                                                                 \
     EXPORT_W(remove, T##W, fn<bool, T##W, T##W>)                                                                                           \
     EXPORT_W(remove_copy, T##W, fn<bool, T##W, T##W>)                                                                                      \
     EXPORT_W(remove_copy_if, T##W, fn<bool, T##W>)                                                                                         \
@@ -77,6 +78,7 @@
     EXPORT_W(transform_exclusive_scan, T##TW, U##UW, fn<U##UW, T##TW>, fn2<U##UW, U##UW, U##UW>)                                           \
     EXPORT_W(transform_inclusive_scan, T##TW, U##UW, fn<U##UW, T##TW>, fn2<U##UW, U##UW, U##UW>)                                           \
     EXPORT_W(transform_reduce, T##TW, U##UW, fn<U##UW, T##TW>, fn2<U##UW, U##UW, U##UW>)                                                   \
+    EXPORT_W(transform_reduce_unordered, T##TW, U##UW, fn<U##UW, T##TW>, fn2<U##UW, U##UW, U##UW>)                                         \
   }
 
 #define SPECTRA_TUV(TW, UW, VW)                                                                                                            \

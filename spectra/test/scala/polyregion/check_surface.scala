@@ -17,6 +17,14 @@ object check_surface {
     // reduce: T=w8
     spectra.reduce(values8, n, value8, (arg0: Long, arg1: Long) => 0L)
 
+    // reduce_unordered: T=w12
+    spectra.reduce_unordered(
+      values12,
+      n,
+      value12,
+      (arg0: SpectraSurfaceValue12, arg1: SpectraSurfaceValue12) => SpectraSurfaceValue12(0, 0, 0)
+    )
+
     // transform: T=w12, U=w4
     spectra.transform(values12, values4, n, (arg0: SpectraSurfaceValue12) => 0)
 
@@ -117,6 +125,15 @@ object check_surface {
 
     // transform_reduce: T=w4, U=w8
     spectra.transform_reduce(values4, n, value8, (arg0: Int) => 0L, (arg0: Long, arg1: Long) => 0L)
+
+    // transform_reduce_unordered: T=w8, U=w12
+    spectra.transform_reduce_unordered(
+      values8,
+      n,
+      value12,
+      (arg0: Long) => SpectraSurfaceValue12(0, 0, 0),
+      (arg0: SpectraSurfaceValue12, arg1: SpectraSurfaceValue12) => SpectraSurfaceValue12(0, 0, 0)
+    )
 
     // transform_inclusive_scan: T=w4, U=w8
     spectra.transform_inclusive_scan(values4, values8, n, (arg0: Int) => 0L, (arg0: Long, arg1: Long) => 0L)

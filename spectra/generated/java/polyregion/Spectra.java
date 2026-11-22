@@ -2736,6 +2736,31 @@ public final class Spectra {
     throw new UnsupportedOperationException("compiler did not replace spectra.reduce_by_key");
   }
 
+  @Interface("spectra:spectra.reduce_unordered")
+  public static int reduce_unordered(int[] in, int n, int init, FnII_I op) {
+    throw new UnsupportedOperationException("compiler did not replace spectra.reduce_unordered");
+  }
+
+  @Interface("spectra:spectra.reduce_unordered")
+  public static long reduce_unordered(long[] in, int n, long init, FnJJ_J op) {
+    throw new UnsupportedOperationException("compiler did not replace spectra.reduce_unordered");
+  }
+
+  @Interface("spectra:spectra.reduce_unordered")
+  public static float reduce_unordered(float[] in, int n, float init, FnFF_F op) {
+    throw new UnsupportedOperationException("compiler did not replace spectra.reduce_unordered");
+  }
+
+  @Interface("spectra:spectra.reduce_unordered")
+  public static double reduce_unordered(double[] in, int n, double init, FnDD_D op) {
+    throw new UnsupportedOperationException("compiler did not replace spectra.reduce_unordered");
+  }
+
+  @Interface("spectra:spectra.reduce_unordered")
+  public static <T> T reduce_unordered(T[] in, int n, T init, FnLL_L<T, T, T> op) {
+    throw new UnsupportedOperationException("compiler did not replace spectra.reduce_unordered");
+  }
+
   @Interface("spectra:spectra.remove")
   public static int remove(int[] data, int n, int value, FnII_Z eq) {
     throw new UnsupportedOperationException("compiler did not replace spectra.remove");
@@ -4200,6 +4225,166 @@ public final class Spectra {
       FnL_L<T, U> map,
       FnLL_L<U, U, U> op) {
     throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce");
+  }
+
+  @Interface("spectra:spectra.transform_reduce_unordered")
+  public static int transform_reduce_unordered(
+      int[] in,
+      int n,
+      Integer init,
+      FnI_I map,
+      FnII_I op) {
+    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
+  }
+
+  @Interface("spectra:spectra.transform_reduce_unordered")
+  public static long transform_reduce_unordered(int[] in, int n, Long init, FnI_J map, FnJJ_J op) {
+    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
+  }
+
+  @Interface("spectra:spectra.transform_reduce_unordered")
+  public static float transform_reduce_unordered(
+      int[] in,
+      int n,
+      Float init,
+      FnI_F map,
+      FnFF_F op) {
+    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
+  }
+
+  @Interface("spectra:spectra.transform_reduce_unordered")
+  public static double transform_reduce_unordered(
+      int[] in,
+      int n,
+      Double init,
+      FnI_D map,
+      FnDD_D op) {
+    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
+  }
+
+  @Interface("spectra:spectra.transform_reduce_unordered")
+  public static int transform_reduce_unordered(
+      long[] in,
+      int n,
+      Integer init,
+      FnJ_I map,
+      FnII_I op) {
+    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
+  }
+
+  @Interface("spectra:spectra.transform_reduce_unordered")
+  public static long transform_reduce_unordered(long[] in, int n, Long init, FnJ_J map, FnJJ_J op) {
+    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
+  }
+
+  @Interface("spectra:spectra.transform_reduce_unordered")
+  public static float transform_reduce_unordered(
+      long[] in,
+      int n,
+      Float init,
+      FnJ_F map,
+      FnFF_F op) {
+    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
+  }
+
+  @Interface("spectra:spectra.transform_reduce_unordered")
+  public static double transform_reduce_unordered(
+      long[] in,
+      int n,
+      Double init,
+      FnJ_D map,
+      FnDD_D op) {
+    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
+  }
+
+  @Interface("spectra:spectra.transform_reduce_unordered")
+  public static int transform_reduce_unordered(
+      float[] in,
+      int n,
+      Integer init,
+      FnF_I map,
+      FnII_I op) {
+    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
+  }
+
+  @Interface("spectra:spectra.transform_reduce_unordered")
+  public static long transform_reduce_unordered(
+      float[] in,
+      int n,
+      Long init,
+      FnF_J map,
+      FnJJ_J op) {
+    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
+  }
+
+  @Interface("spectra:spectra.transform_reduce_unordered")
+  public static float transform_reduce_unordered(
+      float[] in,
+      int n,
+      Float init,
+      FnF_F map,
+      FnFF_F op) {
+    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
+  }
+
+  @Interface("spectra:spectra.transform_reduce_unordered")
+  public static double transform_reduce_unordered(
+      float[] in,
+      int n,
+      Double init,
+      FnF_D map,
+      FnDD_D op) {
+    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
+  }
+
+  @Interface("spectra:spectra.transform_reduce_unordered")
+  public static int transform_reduce_unordered(
+      double[] in,
+      int n,
+      Integer init,
+      FnD_I map,
+      FnII_I op) {
+    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
+  }
+
+  @Interface("spectra:spectra.transform_reduce_unordered")
+  public static long transform_reduce_unordered(
+      double[] in,
+      int n,
+      Long init,
+      FnD_J map,
+      FnJJ_J op) {
+    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
+  }
+
+  @Interface("spectra:spectra.transform_reduce_unordered")
+  public static float transform_reduce_unordered(
+      double[] in,
+      int n,
+      Float init,
+      FnD_F map,
+      FnFF_F op) {
+    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
+  }
+
+  @Interface("spectra:spectra.transform_reduce_unordered")
+  public static double transform_reduce_unordered(
+      double[] in,
+      int n,
+      Double init,
+      FnD_D map,
+      FnDD_D op) {
+    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
+  }
+
+  @Interface("spectra:spectra.transform_reduce_unordered")
+  public static <T, U> U transform_reduce_unordered(
+      T[] in,
+      int n,
+      U init,
+      FnL_L<T, U> map,
+      FnLL_L<U, U, U> op) {
+    throw new UnsupportedOperationException("compiler did not replace spectra.transform_reduce_unordered");
   }
 
   @Interface("spectra:spectra.unique")

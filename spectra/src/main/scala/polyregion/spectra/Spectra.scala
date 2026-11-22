@@ -93,6 +93,12 @@ object Spectra {
       t
     ),
     declaration(
+      "reduce_unordered",
+      T,
+      List(read("in", size = param(1)), count("n"), scalar("init"), callable("op", List(t, t), t)),
+      t
+    ),
+    declaration(
       "transform",
       TU,
       List(read("in", size = param(2)), write("out", u, param(2)), count("n"), callable("op", List(t), u)),
@@ -290,6 +296,18 @@ object Spectra {
     declaration("fill", T, List(write("out", size = param(1)), count("n"), scalar("v")), p.Type.Unit0),
     declaration(
       "transform_reduce",
+      TU,
+      List(
+        read("in", size = param(1)),
+        count("n"),
+        scalar("init", u),
+        callable("map", List(t), u),
+        callable("op", List(u, u), u)
+      ),
+      u
+    ),
+    declaration(
+      "transform_reduce_unordered",
       TU,
       List(
         read("in", size = param(1)),

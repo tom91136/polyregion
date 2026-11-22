@@ -51,7 +51,7 @@ class SpectraSuite extends munit.FunSuite {
     val declarations = Spectra.interfaceDef.declarations.map(decl => s"${decl.name.last}.cpp" -> decl).toMap
 
     assertEquals(actual, expected)
-    assertEquals(actual.size, 71)
+    assertEquals(actual.size, Spectra.interfaceDef.declarations.size)
     actual.foreach { name =>
       val text = Files.readString(dir.resolve(name))
       assert(text.contains(s"#pragma region case: ${name.stripSuffix(".cpp")}"), name)

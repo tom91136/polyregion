@@ -14,6 +14,13 @@ contains
     r = 0_c_int64_t
   end subroutine spectra_surface_reduce_op
 
+  subroutine spectra_surface_reduce_unordered_op(arg0, arg1, r)
+    type(spectra_surface_value12), intent(in) :: arg0
+    type(spectra_surface_value12), intent(in) :: arg1
+    type(spectra_surface_value12), intent(out) :: r
+    r = spectra_surface_value12(0, 0, 0)
+  end subroutine spectra_surface_reduce_unordered_op
+
   subroutine spectra_surface_transform_op(arg0, r)
     type(spectra_surface_value12), intent(in) :: arg0
     integer(c_int32_t), intent(out) :: r
@@ -166,6 +173,19 @@ contains
     integer(c_int64_t), intent(out) :: r
     r = 0_c_int64_t
   end subroutine spectra_surface_transform_reduce_op
+
+  subroutine spectra_surface_transform_reduce_unordered_map(arg0, r)
+    integer(c_int64_t), intent(in) :: arg0
+    type(spectra_surface_value12), intent(out) :: r
+    r = spectra_surface_value12(0, 0, 0)
+  end subroutine spectra_surface_transform_reduce_unordered_map
+
+  subroutine spectra_surface_transform_reduce_unordered_op(arg0, arg1, r)
+    type(spectra_surface_value12), intent(in) :: arg0
+    type(spectra_surface_value12), intent(in) :: arg1
+    type(spectra_surface_value12), intent(out) :: r
+    r = spectra_surface_value12(0, 0, 0)
+  end subroutine spectra_surface_transform_reduce_unordered_op
 
   subroutine spectra_surface_transform_inclusive_scan_map(arg0, r)
     integer(c_int32_t), intent(in) :: arg0
@@ -487,6 +507,14 @@ program check
     spectra_surface_reduce_op, &
     value8)
 
+  ! reduce_unordered: T=w12
+  call polyregion_reduce_unordered( &
+    values12, &
+    n, &
+    value12, &
+    spectra_surface_reduce_unordered_op, &
+    value12)
+
   ! transform: T=w12, U=w4
   call polyregion_transform( &
     values12, &
@@ -676,6 +704,15 @@ program check
     spectra_surface_transform_reduce_map, &
     spectra_surface_transform_reduce_op, &
     value8)
+
+  ! transform_reduce_unordered: T=w8, U=w12
+  call polyregion_transform_reduce_unordered( &
+    values8, &
+    n, &
+    value12, &
+    spectra_surface_transform_reduce_unordered_map, &
+    spectra_surface_transform_reduce_unordered_op, &
+    value12)
 
   ! transform_inclusive_scan: T=w4, U=w8
   call polyregion_transform_inclusive_scan( &

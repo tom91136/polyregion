@@ -177,10 +177,10 @@ public final class check_surface {
     // exclusive_scan: T=Value
     Spectra.exclusive_scan(values, values, n, new Value(), (arg0, arg1) -> null);
 
-    // exclusive_scan_by_key: K=int, V=int
+    // exclusive_scan_by_key: K=int: V=int
     Spectra.exclusive_scan_by_key(ints, ints, ints, n, 0, (arg0, arg1) -> false, (arg0, arg1) -> 0);
 
-    // exclusive_scan_by_key: K=int, V=long
+    // exclusive_scan_by_key: K=int: V=long
     Spectra.exclusive_scan_by_key(
         ints,
         longs,
@@ -190,7 +190,7 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0L);
 
-    // exclusive_scan_by_key: K=int, V=float
+    // exclusive_scan_by_key: K=int: V=float
     Spectra.exclusive_scan_by_key(
         ints,
         floats,
@@ -200,7 +200,7 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0.0f);
 
-    // exclusive_scan_by_key: K=int, V=double
+    // exclusive_scan_by_key: K=int: V=double
     Spectra.exclusive_scan_by_key(
         ints,
         doubles,
@@ -210,7 +210,7 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0.0);
 
-    // exclusive_scan_by_key: K=long, V=int
+    // exclusive_scan_by_key: K=long: V=int
     Spectra.exclusive_scan_by_key(
         longs,
         ints,
@@ -220,7 +220,7 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0);
 
-    // exclusive_scan_by_key: K=long, V=long
+    // exclusive_scan_by_key: K=long: V=long
     Spectra.exclusive_scan_by_key(
         longs,
         longs,
@@ -230,7 +230,7 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0L);
 
-    // exclusive_scan_by_key: K=long, V=float
+    // exclusive_scan_by_key: K=long: V=float
     Spectra.exclusive_scan_by_key(
         longs,
         floats,
@@ -240,7 +240,7 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0.0f);
 
-    // exclusive_scan_by_key: K=long, V=double
+    // exclusive_scan_by_key: K=long: V=double
     Spectra.exclusive_scan_by_key(
         longs,
         doubles,
@@ -250,7 +250,7 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0.0);
 
-    // exclusive_scan_by_key: K=float, V=int
+    // exclusive_scan_by_key: K=float: V=int
     Spectra.exclusive_scan_by_key(
         floats,
         ints,
@@ -260,7 +260,7 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0);
 
-    // exclusive_scan_by_key: K=float, V=long
+    // exclusive_scan_by_key: K=float: V=long
     Spectra.exclusive_scan_by_key(
         floats,
         longs,
@@ -270,7 +270,7 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0L);
 
-    // exclusive_scan_by_key: K=float, V=float
+    // exclusive_scan_by_key: K=float: V=float
     Spectra.exclusive_scan_by_key(
         floats,
         floats,
@@ -280,7 +280,7 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0.0f);
 
-    // exclusive_scan_by_key: K=float, V=double
+    // exclusive_scan_by_key: K=float: V=double
     Spectra.exclusive_scan_by_key(
         floats,
         doubles,
@@ -290,7 +290,7 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0.0);
 
-    // exclusive_scan_by_key: K=double, V=int
+    // exclusive_scan_by_key: K=double: V=int
     Spectra.exclusive_scan_by_key(
         doubles,
         ints,
@@ -300,7 +300,7 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0);
 
-    // exclusive_scan_by_key: K=double, V=long
+    // exclusive_scan_by_key: K=double: V=long
     Spectra.exclusive_scan_by_key(
         doubles,
         longs,
@@ -310,7 +310,7 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0L);
 
-    // exclusive_scan_by_key: K=double, V=float
+    // exclusive_scan_by_key: K=double: V=float
     Spectra.exclusive_scan_by_key(
         doubles,
         floats,
@@ -320,7 +320,7 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0.0f);
 
-    // exclusive_scan_by_key: K=double, V=double
+    // exclusive_scan_by_key: K=double: V=double
     Spectra.exclusive_scan_by_key(
         doubles,
         doubles,
@@ -330,7 +330,7 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0.0);
 
-    // exclusive_scan_by_key: K=Value, V=Value
+    // exclusive_scan_by_key: K=Value: V=Value
     Spectra.exclusive_scan_by_key(
         values,
         values,
@@ -520,13 +520,13 @@ public final class check_surface {
     // inclusive_scan: T=Value
     Spectra.inclusive_scan(values, values, n, (arg0, arg1) -> null);
 
-    // inclusive_scan_by_key: K=int, V=int
+    // inclusive_scan_by_key: K=int: V=int
     Spectra.inclusive_scan_by_key(ints, ints, ints, n, (arg0, arg1) -> false, (arg0, arg1) -> 0);
 
-    // inclusive_scan_by_key: K=int, V=long
+    // inclusive_scan_by_key: K=int: V=long
     Spectra.inclusive_scan_by_key(ints, longs, longs, n, (arg0, arg1) -> false, (arg0, arg1) -> 0L);
 
-    // inclusive_scan_by_key: K=int, V=float
+    // inclusive_scan_by_key: K=int: V=float
     Spectra.inclusive_scan_by_key(
         ints,
         floats,
@@ -535,7 +535,7 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0.0f);
 
-    // inclusive_scan_by_key: K=int, V=double
+    // inclusive_scan_by_key: K=int: V=double
     Spectra.inclusive_scan_by_key(
         ints,
         doubles,
@@ -544,10 +544,10 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0.0);
 
-    // inclusive_scan_by_key: K=long, V=int
+    // inclusive_scan_by_key: K=long: V=int
     Spectra.inclusive_scan_by_key(longs, ints, ints, n, (arg0, arg1) -> false, (arg0, arg1) -> 0);
 
-    // inclusive_scan_by_key: K=long, V=long
+    // inclusive_scan_by_key: K=long: V=long
     Spectra.inclusive_scan_by_key(
         longs,
         longs,
@@ -556,7 +556,7 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0L);
 
-    // inclusive_scan_by_key: K=long, V=float
+    // inclusive_scan_by_key: K=long: V=float
     Spectra.inclusive_scan_by_key(
         longs,
         floats,
@@ -565,7 +565,7 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0.0f);
 
-    // inclusive_scan_by_key: K=long, V=double
+    // inclusive_scan_by_key: K=long: V=double
     Spectra.inclusive_scan_by_key(
         longs,
         doubles,
@@ -574,10 +574,10 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0.0);
 
-    // inclusive_scan_by_key: K=float, V=int
+    // inclusive_scan_by_key: K=float: V=int
     Spectra.inclusive_scan_by_key(floats, ints, ints, n, (arg0, arg1) -> false, (arg0, arg1) -> 0);
 
-    // inclusive_scan_by_key: K=float, V=long
+    // inclusive_scan_by_key: K=float: V=long
     Spectra.inclusive_scan_by_key(
         floats,
         longs,
@@ -586,7 +586,7 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0L);
 
-    // inclusive_scan_by_key: K=float, V=float
+    // inclusive_scan_by_key: K=float: V=float
     Spectra.inclusive_scan_by_key(
         floats,
         floats,
@@ -595,7 +595,7 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0.0f);
 
-    // inclusive_scan_by_key: K=float, V=double
+    // inclusive_scan_by_key: K=float: V=double
     Spectra.inclusive_scan_by_key(
         floats,
         doubles,
@@ -604,10 +604,10 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0.0);
 
-    // inclusive_scan_by_key: K=double, V=int
+    // inclusive_scan_by_key: K=double: V=int
     Spectra.inclusive_scan_by_key(doubles, ints, ints, n, (arg0, arg1) -> false, (arg0, arg1) -> 0);
 
-    // inclusive_scan_by_key: K=double, V=long
+    // inclusive_scan_by_key: K=double: V=long
     Spectra.inclusive_scan_by_key(
         doubles,
         longs,
@@ -616,7 +616,7 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0L);
 
-    // inclusive_scan_by_key: K=double, V=float
+    // inclusive_scan_by_key: K=double: V=float
     Spectra.inclusive_scan_by_key(
         doubles,
         floats,
@@ -625,7 +625,7 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0.0f);
 
-    // inclusive_scan_by_key: K=double, V=double
+    // inclusive_scan_by_key: K=double: V=double
     Spectra.inclusive_scan_by_key(
         doubles,
         doubles,
@@ -634,7 +634,7 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0.0);
 
-    // inclusive_scan_by_key: K=Value, V=Value
+    // inclusive_scan_by_key: K=Value: V=Value
     Spectra.inclusive_scan_by_key(
         values,
         values,
@@ -643,199 +643,199 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> null);
 
-    // inner_product: T=int, U=int, V=int
+    // inner_product: T=int: U=int: V=int
     Spectra.inner_product(ints, ints, n, 0, (arg0, arg1) -> 0, (arg0, arg1) -> 0);
 
-    // inner_product: T=int, U=int, V=long
+    // inner_product: T=int: U=int: V=long
     Spectra.inner_product(ints, ints, n, 0L, (arg0, arg1) -> 0L, (arg0, arg1) -> 0L);
 
-    // inner_product: T=int, U=int, V=float
+    // inner_product: T=int: U=int: V=float
     Spectra.inner_product(ints, ints, n, 0.0f, (arg0, arg1) -> 0.0f, (arg0, arg1) -> 0.0f);
 
-    // inner_product: T=int, U=int, V=double
+    // inner_product: T=int: U=int: V=double
     Spectra.inner_product(ints, ints, n, 0.0, (arg0, arg1) -> 0.0, (arg0, arg1) -> 0.0);
 
-    // inner_product: T=int, U=long, V=int
+    // inner_product: T=int: U=long: V=int
     Spectra.inner_product(ints, longs, n, 0, (arg0, arg1) -> 0, (arg0, arg1) -> 0);
 
-    // inner_product: T=int, U=long, V=long
+    // inner_product: T=int: U=long: V=long
     Spectra.inner_product(ints, longs, n, 0L, (arg0, arg1) -> 0L, (arg0, arg1) -> 0L);
 
-    // inner_product: T=int, U=long, V=float
+    // inner_product: T=int: U=long: V=float
     Spectra.inner_product(ints, longs, n, 0.0f, (arg0, arg1) -> 0.0f, (arg0, arg1) -> 0.0f);
 
-    // inner_product: T=int, U=long, V=double
+    // inner_product: T=int: U=long: V=double
     Spectra.inner_product(ints, longs, n, 0.0, (arg0, arg1) -> 0.0, (arg0, arg1) -> 0.0);
 
-    // inner_product: T=int, U=float, V=int
+    // inner_product: T=int: U=float: V=int
     Spectra.inner_product(ints, floats, n, 0, (arg0, arg1) -> 0, (arg0, arg1) -> 0);
 
-    // inner_product: T=int, U=float, V=long
+    // inner_product: T=int: U=float: V=long
     Spectra.inner_product(ints, floats, n, 0L, (arg0, arg1) -> 0L, (arg0, arg1) -> 0L);
 
-    // inner_product: T=int, U=float, V=float
+    // inner_product: T=int: U=float: V=float
     Spectra.inner_product(ints, floats, n, 0.0f, (arg0, arg1) -> 0.0f, (arg0, arg1) -> 0.0f);
 
-    // inner_product: T=int, U=float, V=double
+    // inner_product: T=int: U=float: V=double
     Spectra.inner_product(ints, floats, n, 0.0, (arg0, arg1) -> 0.0, (arg0, arg1) -> 0.0);
 
-    // inner_product: T=int, U=double, V=int
+    // inner_product: T=int: U=double: V=int
     Spectra.inner_product(ints, doubles, n, 0, (arg0, arg1) -> 0, (arg0, arg1) -> 0);
 
-    // inner_product: T=int, U=double, V=long
+    // inner_product: T=int: U=double: V=long
     Spectra.inner_product(ints, doubles, n, 0L, (arg0, arg1) -> 0L, (arg0, arg1) -> 0L);
 
-    // inner_product: T=int, U=double, V=float
+    // inner_product: T=int: U=double: V=float
     Spectra.inner_product(ints, doubles, n, 0.0f, (arg0, arg1) -> 0.0f, (arg0, arg1) -> 0.0f);
 
-    // inner_product: T=int, U=double, V=double
+    // inner_product: T=int: U=double: V=double
     Spectra.inner_product(ints, doubles, n, 0.0, (arg0, arg1) -> 0.0, (arg0, arg1) -> 0.0);
 
-    // inner_product: T=long, U=int, V=int
+    // inner_product: T=long: U=int: V=int
     Spectra.inner_product(longs, ints, n, 0, (arg0, arg1) -> 0, (arg0, arg1) -> 0);
 
-    // inner_product: T=long, U=int, V=long
+    // inner_product: T=long: U=int: V=long
     Spectra.inner_product(longs, ints, n, 0L, (arg0, arg1) -> 0L, (arg0, arg1) -> 0L);
 
-    // inner_product: T=long, U=int, V=float
+    // inner_product: T=long: U=int: V=float
     Spectra.inner_product(longs, ints, n, 0.0f, (arg0, arg1) -> 0.0f, (arg0, arg1) -> 0.0f);
 
-    // inner_product: T=long, U=int, V=double
+    // inner_product: T=long: U=int: V=double
     Spectra.inner_product(longs, ints, n, 0.0, (arg0, arg1) -> 0.0, (arg0, arg1) -> 0.0);
 
-    // inner_product: T=long, U=long, V=int
+    // inner_product: T=long: U=long: V=int
     Spectra.inner_product(longs, longs, n, 0, (arg0, arg1) -> 0, (arg0, arg1) -> 0);
 
-    // inner_product: T=long, U=long, V=long
+    // inner_product: T=long: U=long: V=long
     Spectra.inner_product(longs, longs, n, 0L, (arg0, arg1) -> 0L, (arg0, arg1) -> 0L);
 
-    // inner_product: T=long, U=long, V=float
+    // inner_product: T=long: U=long: V=float
     Spectra.inner_product(longs, longs, n, 0.0f, (arg0, arg1) -> 0.0f, (arg0, arg1) -> 0.0f);
 
-    // inner_product: T=long, U=long, V=double
+    // inner_product: T=long: U=long: V=double
     Spectra.inner_product(longs, longs, n, 0.0, (arg0, arg1) -> 0.0, (arg0, arg1) -> 0.0);
 
-    // inner_product: T=long, U=float, V=int
+    // inner_product: T=long: U=float: V=int
     Spectra.inner_product(longs, floats, n, 0, (arg0, arg1) -> 0, (arg0, arg1) -> 0);
 
-    // inner_product: T=long, U=float, V=long
+    // inner_product: T=long: U=float: V=long
     Spectra.inner_product(longs, floats, n, 0L, (arg0, arg1) -> 0L, (arg0, arg1) -> 0L);
 
-    // inner_product: T=long, U=float, V=float
+    // inner_product: T=long: U=float: V=float
     Spectra.inner_product(longs, floats, n, 0.0f, (arg0, arg1) -> 0.0f, (arg0, arg1) -> 0.0f);
 
-    // inner_product: T=long, U=float, V=double
+    // inner_product: T=long: U=float: V=double
     Spectra.inner_product(longs, floats, n, 0.0, (arg0, arg1) -> 0.0, (arg0, arg1) -> 0.0);
 
-    // inner_product: T=long, U=double, V=int
+    // inner_product: T=long: U=double: V=int
     Spectra.inner_product(longs, doubles, n, 0, (arg0, arg1) -> 0, (arg0, arg1) -> 0);
 
-    // inner_product: T=long, U=double, V=long
+    // inner_product: T=long: U=double: V=long
     Spectra.inner_product(longs, doubles, n, 0L, (arg0, arg1) -> 0L, (arg0, arg1) -> 0L);
 
-    // inner_product: T=long, U=double, V=float
+    // inner_product: T=long: U=double: V=float
     Spectra.inner_product(longs, doubles, n, 0.0f, (arg0, arg1) -> 0.0f, (arg0, arg1) -> 0.0f);
 
-    // inner_product: T=long, U=double, V=double
+    // inner_product: T=long: U=double: V=double
     Spectra.inner_product(longs, doubles, n, 0.0, (arg0, arg1) -> 0.0, (arg0, arg1) -> 0.0);
 
-    // inner_product: T=float, U=int, V=int
+    // inner_product: T=float: U=int: V=int
     Spectra.inner_product(floats, ints, n, 0, (arg0, arg1) -> 0, (arg0, arg1) -> 0);
 
-    // inner_product: T=float, U=int, V=long
+    // inner_product: T=float: U=int: V=long
     Spectra.inner_product(floats, ints, n, 0L, (arg0, arg1) -> 0L, (arg0, arg1) -> 0L);
 
-    // inner_product: T=float, U=int, V=float
+    // inner_product: T=float: U=int: V=float
     Spectra.inner_product(floats, ints, n, 0.0f, (arg0, arg1) -> 0.0f, (arg0, arg1) -> 0.0f);
 
-    // inner_product: T=float, U=int, V=double
+    // inner_product: T=float: U=int: V=double
     Spectra.inner_product(floats, ints, n, 0.0, (arg0, arg1) -> 0.0, (arg0, arg1) -> 0.0);
 
-    // inner_product: T=float, U=long, V=int
+    // inner_product: T=float: U=long: V=int
     Spectra.inner_product(floats, longs, n, 0, (arg0, arg1) -> 0, (arg0, arg1) -> 0);
 
-    // inner_product: T=float, U=long, V=long
+    // inner_product: T=float: U=long: V=long
     Spectra.inner_product(floats, longs, n, 0L, (arg0, arg1) -> 0L, (arg0, arg1) -> 0L);
 
-    // inner_product: T=float, U=long, V=float
+    // inner_product: T=float: U=long: V=float
     Spectra.inner_product(floats, longs, n, 0.0f, (arg0, arg1) -> 0.0f, (arg0, arg1) -> 0.0f);
 
-    // inner_product: T=float, U=long, V=double
+    // inner_product: T=float: U=long: V=double
     Spectra.inner_product(floats, longs, n, 0.0, (arg0, arg1) -> 0.0, (arg0, arg1) -> 0.0);
 
-    // inner_product: T=float, U=float, V=int
+    // inner_product: T=float: U=float: V=int
     Spectra.inner_product(floats, floats, n, 0, (arg0, arg1) -> 0, (arg0, arg1) -> 0);
 
-    // inner_product: T=float, U=float, V=long
+    // inner_product: T=float: U=float: V=long
     Spectra.inner_product(floats, floats, n, 0L, (arg0, arg1) -> 0L, (arg0, arg1) -> 0L);
 
-    // inner_product: T=float, U=float, V=float
+    // inner_product: T=float: U=float: V=float
     Spectra.inner_product(floats, floats, n, 0.0f, (arg0, arg1) -> 0.0f, (arg0, arg1) -> 0.0f);
 
-    // inner_product: T=float, U=float, V=double
+    // inner_product: T=float: U=float: V=double
     Spectra.inner_product(floats, floats, n, 0.0, (arg0, arg1) -> 0.0, (arg0, arg1) -> 0.0);
 
-    // inner_product: T=float, U=double, V=int
+    // inner_product: T=float: U=double: V=int
     Spectra.inner_product(floats, doubles, n, 0, (arg0, arg1) -> 0, (arg0, arg1) -> 0);
 
-    // inner_product: T=float, U=double, V=long
+    // inner_product: T=float: U=double: V=long
     Spectra.inner_product(floats, doubles, n, 0L, (arg0, arg1) -> 0L, (arg0, arg1) -> 0L);
 
-    // inner_product: T=float, U=double, V=float
+    // inner_product: T=float: U=double: V=float
     Spectra.inner_product(floats, doubles, n, 0.0f, (arg0, arg1) -> 0.0f, (arg0, arg1) -> 0.0f);
 
-    // inner_product: T=float, U=double, V=double
+    // inner_product: T=float: U=double: V=double
     Spectra.inner_product(floats, doubles, n, 0.0, (arg0, arg1) -> 0.0, (arg0, arg1) -> 0.0);
 
-    // inner_product: T=double, U=int, V=int
+    // inner_product: T=double: U=int: V=int
     Spectra.inner_product(doubles, ints, n, 0, (arg0, arg1) -> 0, (arg0, arg1) -> 0);
 
-    // inner_product: T=double, U=int, V=long
+    // inner_product: T=double: U=int: V=long
     Spectra.inner_product(doubles, ints, n, 0L, (arg0, arg1) -> 0L, (arg0, arg1) -> 0L);
 
-    // inner_product: T=double, U=int, V=float
+    // inner_product: T=double: U=int: V=float
     Spectra.inner_product(doubles, ints, n, 0.0f, (arg0, arg1) -> 0.0f, (arg0, arg1) -> 0.0f);
 
-    // inner_product: T=double, U=int, V=double
+    // inner_product: T=double: U=int: V=double
     Spectra.inner_product(doubles, ints, n, 0.0, (arg0, arg1) -> 0.0, (arg0, arg1) -> 0.0);
 
-    // inner_product: T=double, U=long, V=int
+    // inner_product: T=double: U=long: V=int
     Spectra.inner_product(doubles, longs, n, 0, (arg0, arg1) -> 0, (arg0, arg1) -> 0);
 
-    // inner_product: T=double, U=long, V=long
+    // inner_product: T=double: U=long: V=long
     Spectra.inner_product(doubles, longs, n, 0L, (arg0, arg1) -> 0L, (arg0, arg1) -> 0L);
 
-    // inner_product: T=double, U=long, V=float
+    // inner_product: T=double: U=long: V=float
     Spectra.inner_product(doubles, longs, n, 0.0f, (arg0, arg1) -> 0.0f, (arg0, arg1) -> 0.0f);
 
-    // inner_product: T=double, U=long, V=double
+    // inner_product: T=double: U=long: V=double
     Spectra.inner_product(doubles, longs, n, 0.0, (arg0, arg1) -> 0.0, (arg0, arg1) -> 0.0);
 
-    // inner_product: T=double, U=float, V=int
+    // inner_product: T=double: U=float: V=int
     Spectra.inner_product(doubles, floats, n, 0, (arg0, arg1) -> 0, (arg0, arg1) -> 0);
 
-    // inner_product: T=double, U=float, V=long
+    // inner_product: T=double: U=float: V=long
     Spectra.inner_product(doubles, floats, n, 0L, (arg0, arg1) -> 0L, (arg0, arg1) -> 0L);
 
-    // inner_product: T=double, U=float, V=float
+    // inner_product: T=double: U=float: V=float
     Spectra.inner_product(doubles, floats, n, 0.0f, (arg0, arg1) -> 0.0f, (arg0, arg1) -> 0.0f);
 
-    // inner_product: T=double, U=float, V=double
+    // inner_product: T=double: U=float: V=double
     Spectra.inner_product(doubles, floats, n, 0.0, (arg0, arg1) -> 0.0, (arg0, arg1) -> 0.0);
 
-    // inner_product: T=double, U=double, V=int
+    // inner_product: T=double: U=double: V=int
     Spectra.inner_product(doubles, doubles, n, 0, (arg0, arg1) -> 0, (arg0, arg1) -> 0);
 
-    // inner_product: T=double, U=double, V=long
+    // inner_product: T=double: U=double: V=long
     Spectra.inner_product(doubles, doubles, n, 0L, (arg0, arg1) -> 0L, (arg0, arg1) -> 0L);
 
-    // inner_product: T=double, U=double, V=float
+    // inner_product: T=double: U=double: V=float
     Spectra.inner_product(doubles, doubles, n, 0.0f, (arg0, arg1) -> 0.0f, (arg0, arg1) -> 0.0f);
 
-    // inner_product: T=double, U=double, V=double
+    // inner_product: T=double: U=double: V=double
     Spectra.inner_product(doubles, doubles, n, 0.0, (arg0, arg1) -> 0.0, (arg0, arg1) -> 0.0);
 
-    // inner_product: T=Value, U=Value, V=Value
+    // inner_product: T=Value: U=Value: V=Value
     Spectra.inner_product(
         values,
         values,
@@ -1039,13 +1039,13 @@ public final class check_surface {
     // reduce: T=Value
     Spectra.reduce(values, n, new Value(), (arg0, arg1) -> null);
 
-    // reduce_by_key: K=int, V=int
+    // reduce_by_key: K=int: V=int
     Spectra.reduce_by_key(ints, ints, ints, ints, n, (arg0, arg1) -> false, (arg0, arg1) -> 0);
 
-    // reduce_by_key: K=int, V=long
+    // reduce_by_key: K=int: V=long
     Spectra.reduce_by_key(ints, longs, ints, longs, n, (arg0, arg1) -> false, (arg0, arg1) -> 0L);
 
-    // reduce_by_key: K=int, V=float
+    // reduce_by_key: K=int: V=float
     Spectra.reduce_by_key(
         ints,
         floats,
@@ -1055,7 +1055,7 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0.0f);
 
-    // reduce_by_key: K=int, V=double
+    // reduce_by_key: K=int: V=double
     Spectra.reduce_by_key(
         ints,
         doubles,
@@ -1065,13 +1065,13 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0.0);
 
-    // reduce_by_key: K=long, V=int
+    // reduce_by_key: K=long: V=int
     Spectra.reduce_by_key(longs, ints, longs, ints, n, (arg0, arg1) -> false, (arg0, arg1) -> 0);
 
-    // reduce_by_key: K=long, V=long
+    // reduce_by_key: K=long: V=long
     Spectra.reduce_by_key(longs, longs, longs, longs, n, (arg0, arg1) -> false, (arg0, arg1) -> 0L);
 
-    // reduce_by_key: K=long, V=float
+    // reduce_by_key: K=long: V=float
     Spectra.reduce_by_key(
         longs,
         floats,
@@ -1081,7 +1081,7 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0.0f);
 
-    // reduce_by_key: K=long, V=double
+    // reduce_by_key: K=long: V=double
     Spectra.reduce_by_key(
         longs,
         doubles,
@@ -1091,10 +1091,10 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0.0);
 
-    // reduce_by_key: K=float, V=int
+    // reduce_by_key: K=float: V=int
     Spectra.reduce_by_key(floats, ints, floats, ints, n, (arg0, arg1) -> false, (arg0, arg1) -> 0);
 
-    // reduce_by_key: K=float, V=long
+    // reduce_by_key: K=float: V=long
     Spectra.reduce_by_key(
         floats,
         longs,
@@ -1104,7 +1104,7 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0L);
 
-    // reduce_by_key: K=float, V=float
+    // reduce_by_key: K=float: V=float
     Spectra.reduce_by_key(
         floats,
         floats,
@@ -1114,7 +1114,7 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0.0f);
 
-    // reduce_by_key: K=float, V=double
+    // reduce_by_key: K=float: V=double
     Spectra.reduce_by_key(
         floats,
         doubles,
@@ -1124,7 +1124,7 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0.0);
 
-    // reduce_by_key: K=double, V=int
+    // reduce_by_key: K=double: V=int
     Spectra.reduce_by_key(
         doubles,
         ints,
@@ -1134,7 +1134,7 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0);
 
-    // reduce_by_key: K=double, V=long
+    // reduce_by_key: K=double: V=long
     Spectra.reduce_by_key(
         doubles,
         longs,
@@ -1144,7 +1144,7 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0L);
 
-    // reduce_by_key: K=double, V=float
+    // reduce_by_key: K=double: V=float
     Spectra.reduce_by_key(
         doubles,
         floats,
@@ -1154,7 +1154,7 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0.0f);
 
-    // reduce_by_key: K=double, V=double
+    // reduce_by_key: K=double: V=double
     Spectra.reduce_by_key(
         doubles,
         doubles,
@@ -1164,7 +1164,7 @@ public final class check_surface {
         (arg0, arg1) -> false,
         (arg0, arg1) -> 0.0);
 
-    // reduce_by_key: K=Value, V=Value
+    // reduce_by_key: K=Value: V=Value
     Spectra.reduce_by_key(
         values,
         values,
@@ -1173,6 +1173,21 @@ public final class check_surface {
         n,
         (arg0, arg1) -> false,
         (arg0, arg1) -> null);
+
+    // reduce_unordered: T=int
+    Spectra.reduce_unordered(ints, n, 0, (arg0, arg1) -> 0);
+
+    // reduce_unordered: T=long
+    Spectra.reduce_unordered(longs, n, 0L, (arg0, arg1) -> 0L);
+
+    // reduce_unordered: T=float
+    Spectra.reduce_unordered(floats, n, 0.0f, (arg0, arg1) -> 0.0f);
+
+    // reduce_unordered: T=double
+    Spectra.reduce_unordered(doubles, n, 0.0, (arg0, arg1) -> 0.0);
+
+    // reduce_unordered: T=Value
+    Spectra.reduce_unordered(values, n, new Value(), (arg0, arg1) -> null);
 
     // remove: T=int
     Spectra.remove(ints, n, 0, (arg0, arg1) -> false);
@@ -1444,55 +1459,55 @@ public final class check_surface {
     // sort: T=Value
     Spectra.sort(values, n, (arg0, arg1) -> false);
 
-    // sort_by_key: K=int, V=int
+    // sort_by_key: K=int: V=int
     Spectra.sort_by_key(ints, ints, n, (arg0, arg1) -> false);
 
-    // sort_by_key: K=int, V=long
+    // sort_by_key: K=int: V=long
     Spectra.sort_by_key(ints, longs, n, (arg0, arg1) -> false);
 
-    // sort_by_key: K=int, V=float
+    // sort_by_key: K=int: V=float
     Spectra.sort_by_key(ints, floats, n, (arg0, arg1) -> false);
 
-    // sort_by_key: K=int, V=double
+    // sort_by_key: K=int: V=double
     Spectra.sort_by_key(ints, doubles, n, (arg0, arg1) -> false);
 
-    // sort_by_key: K=long, V=int
+    // sort_by_key: K=long: V=int
     Spectra.sort_by_key(longs, ints, n, (arg0, arg1) -> false);
 
-    // sort_by_key: K=long, V=long
+    // sort_by_key: K=long: V=long
     Spectra.sort_by_key(longs, longs, n, (arg0, arg1) -> false);
 
-    // sort_by_key: K=long, V=float
+    // sort_by_key: K=long: V=float
     Spectra.sort_by_key(longs, floats, n, (arg0, arg1) -> false);
 
-    // sort_by_key: K=long, V=double
+    // sort_by_key: K=long: V=double
     Spectra.sort_by_key(longs, doubles, n, (arg0, arg1) -> false);
 
-    // sort_by_key: K=float, V=int
+    // sort_by_key: K=float: V=int
     Spectra.sort_by_key(floats, ints, n, (arg0, arg1) -> false);
 
-    // sort_by_key: K=float, V=long
+    // sort_by_key: K=float: V=long
     Spectra.sort_by_key(floats, longs, n, (arg0, arg1) -> false);
 
-    // sort_by_key: K=float, V=float
+    // sort_by_key: K=float: V=float
     Spectra.sort_by_key(floats, floats, n, (arg0, arg1) -> false);
 
-    // sort_by_key: K=float, V=double
+    // sort_by_key: K=float: V=double
     Spectra.sort_by_key(floats, doubles, n, (arg0, arg1) -> false);
 
-    // sort_by_key: K=double, V=int
+    // sort_by_key: K=double: V=int
     Spectra.sort_by_key(doubles, ints, n, (arg0, arg1) -> false);
 
-    // sort_by_key: K=double, V=long
+    // sort_by_key: K=double: V=long
     Spectra.sort_by_key(doubles, longs, n, (arg0, arg1) -> false);
 
-    // sort_by_key: K=double, V=float
+    // sort_by_key: K=double: V=float
     Spectra.sort_by_key(doubles, floats, n, (arg0, arg1) -> false);
 
-    // sort_by_key: K=double, V=double
+    // sort_by_key: K=double: V=double
     Spectra.sort_by_key(doubles, doubles, n, (arg0, arg1) -> false);
 
-    // sort_by_key: K=Value, V=Value
+    // sort_by_key: K=Value: V=Value
     Spectra.sort_by_key(values, values, n, (arg0, arg1) -> false);
 
     // stable_partition: T=int
@@ -1555,295 +1570,295 @@ public final class check_surface {
     // tabulate: T=Value
     Spectra.tabulate(values, n, (arg0) -> null);
 
-    // transform: T=int, U=int
+    // transform: T=int: U=int
     Spectra.transform(ints, ints, n, (arg0) -> 0);
 
-    // transform: T=int, U=long
+    // transform: T=int: U=long
     Spectra.transform(ints, longs, n, (arg0) -> 0L);
 
-    // transform: T=int, U=float
+    // transform: T=int: U=float
     Spectra.transform(ints, floats, n, (arg0) -> 0.0f);
 
-    // transform: T=int, U=double
+    // transform: T=int: U=double
     Spectra.transform(ints, doubles, n, (arg0) -> 0.0);
 
-    // transform: T=long, U=int
+    // transform: T=long: U=int
     Spectra.transform(longs, ints, n, (arg0) -> 0);
 
-    // transform: T=long, U=long
+    // transform: T=long: U=long
     Spectra.transform(longs, longs, n, (arg0) -> 0L);
 
-    // transform: T=long, U=float
+    // transform: T=long: U=float
     Spectra.transform(longs, floats, n, (arg0) -> 0.0f);
 
-    // transform: T=long, U=double
+    // transform: T=long: U=double
     Spectra.transform(longs, doubles, n, (arg0) -> 0.0);
 
-    // transform: T=float, U=int
+    // transform: T=float: U=int
     Spectra.transform(floats, ints, n, (arg0) -> 0);
 
-    // transform: T=float, U=long
+    // transform: T=float: U=long
     Spectra.transform(floats, longs, n, (arg0) -> 0L);
 
-    // transform: T=float, U=float
+    // transform: T=float: U=float
     Spectra.transform(floats, floats, n, (arg0) -> 0.0f);
 
-    // transform: T=float, U=double
+    // transform: T=float: U=double
     Spectra.transform(floats, doubles, n, (arg0) -> 0.0);
 
-    // transform: T=double, U=int
+    // transform: T=double: U=int
     Spectra.transform(doubles, ints, n, (arg0) -> 0);
 
-    // transform: T=double, U=long
+    // transform: T=double: U=long
     Spectra.transform(doubles, longs, n, (arg0) -> 0L);
 
-    // transform: T=double, U=float
+    // transform: T=double: U=float
     Spectra.transform(doubles, floats, n, (arg0) -> 0.0f);
 
-    // transform: T=double, U=double
+    // transform: T=double: U=double
     Spectra.transform(doubles, doubles, n, (arg0) -> 0.0);
 
-    // transform: T=Value, U=Value
+    // transform: T=Value: U=Value
     Spectra.transform(values, values, n, (arg0) -> null);
 
-    // transform_binary: T=int, U=int, V=int
+    // transform_binary: T=int: U=int: V=int
     Spectra.transform_binary(ints, ints, ints, n, (arg0, arg1) -> 0);
 
-    // transform_binary: T=int, U=int, V=long
+    // transform_binary: T=int: U=int: V=long
     Spectra.transform_binary(ints, ints, longs, n, (arg0, arg1) -> 0L);
 
-    // transform_binary: T=int, U=int, V=float
+    // transform_binary: T=int: U=int: V=float
     Spectra.transform_binary(ints, ints, floats, n, (arg0, arg1) -> 0.0f);
 
-    // transform_binary: T=int, U=int, V=double
+    // transform_binary: T=int: U=int: V=double
     Spectra.transform_binary(ints, ints, doubles, n, (arg0, arg1) -> 0.0);
 
-    // transform_binary: T=int, U=long, V=int
+    // transform_binary: T=int: U=long: V=int
     Spectra.transform_binary(ints, longs, ints, n, (arg0, arg1) -> 0);
 
-    // transform_binary: T=int, U=long, V=long
+    // transform_binary: T=int: U=long: V=long
     Spectra.transform_binary(ints, longs, longs, n, (arg0, arg1) -> 0L);
 
-    // transform_binary: T=int, U=long, V=float
+    // transform_binary: T=int: U=long: V=float
     Spectra.transform_binary(ints, longs, floats, n, (arg0, arg1) -> 0.0f);
 
-    // transform_binary: T=int, U=long, V=double
+    // transform_binary: T=int: U=long: V=double
     Spectra.transform_binary(ints, longs, doubles, n, (arg0, arg1) -> 0.0);
 
-    // transform_binary: T=int, U=float, V=int
+    // transform_binary: T=int: U=float: V=int
     Spectra.transform_binary(ints, floats, ints, n, (arg0, arg1) -> 0);
 
-    // transform_binary: T=int, U=float, V=long
+    // transform_binary: T=int: U=float: V=long
     Spectra.transform_binary(ints, floats, longs, n, (arg0, arg1) -> 0L);
 
-    // transform_binary: T=int, U=float, V=float
+    // transform_binary: T=int: U=float: V=float
     Spectra.transform_binary(ints, floats, floats, n, (arg0, arg1) -> 0.0f);
 
-    // transform_binary: T=int, U=float, V=double
+    // transform_binary: T=int: U=float: V=double
     Spectra.transform_binary(ints, floats, doubles, n, (arg0, arg1) -> 0.0);
 
-    // transform_binary: T=int, U=double, V=int
+    // transform_binary: T=int: U=double: V=int
     Spectra.transform_binary(ints, doubles, ints, n, (arg0, arg1) -> 0);
 
-    // transform_binary: T=int, U=double, V=long
+    // transform_binary: T=int: U=double: V=long
     Spectra.transform_binary(ints, doubles, longs, n, (arg0, arg1) -> 0L);
 
-    // transform_binary: T=int, U=double, V=float
+    // transform_binary: T=int: U=double: V=float
     Spectra.transform_binary(ints, doubles, floats, n, (arg0, arg1) -> 0.0f);
 
-    // transform_binary: T=int, U=double, V=double
+    // transform_binary: T=int: U=double: V=double
     Spectra.transform_binary(ints, doubles, doubles, n, (arg0, arg1) -> 0.0);
 
-    // transform_binary: T=long, U=int, V=int
+    // transform_binary: T=long: U=int: V=int
     Spectra.transform_binary(longs, ints, ints, n, (arg0, arg1) -> 0);
 
-    // transform_binary: T=long, U=int, V=long
+    // transform_binary: T=long: U=int: V=long
     Spectra.transform_binary(longs, ints, longs, n, (arg0, arg1) -> 0L);
 
-    // transform_binary: T=long, U=int, V=float
+    // transform_binary: T=long: U=int: V=float
     Spectra.transform_binary(longs, ints, floats, n, (arg0, arg1) -> 0.0f);
 
-    // transform_binary: T=long, U=int, V=double
+    // transform_binary: T=long: U=int: V=double
     Spectra.transform_binary(longs, ints, doubles, n, (arg0, arg1) -> 0.0);
 
-    // transform_binary: T=long, U=long, V=int
+    // transform_binary: T=long: U=long: V=int
     Spectra.transform_binary(longs, longs, ints, n, (arg0, arg1) -> 0);
 
-    // transform_binary: T=long, U=long, V=long
+    // transform_binary: T=long: U=long: V=long
     Spectra.transform_binary(longs, longs, longs, n, (arg0, arg1) -> 0L);
 
-    // transform_binary: T=long, U=long, V=float
+    // transform_binary: T=long: U=long: V=float
     Spectra.transform_binary(longs, longs, floats, n, (arg0, arg1) -> 0.0f);
 
-    // transform_binary: T=long, U=long, V=double
+    // transform_binary: T=long: U=long: V=double
     Spectra.transform_binary(longs, longs, doubles, n, (arg0, arg1) -> 0.0);
 
-    // transform_binary: T=long, U=float, V=int
+    // transform_binary: T=long: U=float: V=int
     Spectra.transform_binary(longs, floats, ints, n, (arg0, arg1) -> 0);
 
-    // transform_binary: T=long, U=float, V=long
+    // transform_binary: T=long: U=float: V=long
     Spectra.transform_binary(longs, floats, longs, n, (arg0, arg1) -> 0L);
 
-    // transform_binary: T=long, U=float, V=float
+    // transform_binary: T=long: U=float: V=float
     Spectra.transform_binary(longs, floats, floats, n, (arg0, arg1) -> 0.0f);
 
-    // transform_binary: T=long, U=float, V=double
+    // transform_binary: T=long: U=float: V=double
     Spectra.transform_binary(longs, floats, doubles, n, (arg0, arg1) -> 0.0);
 
-    // transform_binary: T=long, U=double, V=int
+    // transform_binary: T=long: U=double: V=int
     Spectra.transform_binary(longs, doubles, ints, n, (arg0, arg1) -> 0);
 
-    // transform_binary: T=long, U=double, V=long
+    // transform_binary: T=long: U=double: V=long
     Spectra.transform_binary(longs, doubles, longs, n, (arg0, arg1) -> 0L);
 
-    // transform_binary: T=long, U=double, V=float
+    // transform_binary: T=long: U=double: V=float
     Spectra.transform_binary(longs, doubles, floats, n, (arg0, arg1) -> 0.0f);
 
-    // transform_binary: T=long, U=double, V=double
+    // transform_binary: T=long: U=double: V=double
     Spectra.transform_binary(longs, doubles, doubles, n, (arg0, arg1) -> 0.0);
 
-    // transform_binary: T=float, U=int, V=int
+    // transform_binary: T=float: U=int: V=int
     Spectra.transform_binary(floats, ints, ints, n, (arg0, arg1) -> 0);
 
-    // transform_binary: T=float, U=int, V=long
+    // transform_binary: T=float: U=int: V=long
     Spectra.transform_binary(floats, ints, longs, n, (arg0, arg1) -> 0L);
 
-    // transform_binary: T=float, U=int, V=float
+    // transform_binary: T=float: U=int: V=float
     Spectra.transform_binary(floats, ints, floats, n, (arg0, arg1) -> 0.0f);
 
-    // transform_binary: T=float, U=int, V=double
+    // transform_binary: T=float: U=int: V=double
     Spectra.transform_binary(floats, ints, doubles, n, (arg0, arg1) -> 0.0);
 
-    // transform_binary: T=float, U=long, V=int
+    // transform_binary: T=float: U=long: V=int
     Spectra.transform_binary(floats, longs, ints, n, (arg0, arg1) -> 0);
 
-    // transform_binary: T=float, U=long, V=long
+    // transform_binary: T=float: U=long: V=long
     Spectra.transform_binary(floats, longs, longs, n, (arg0, arg1) -> 0L);
 
-    // transform_binary: T=float, U=long, V=float
+    // transform_binary: T=float: U=long: V=float
     Spectra.transform_binary(floats, longs, floats, n, (arg0, arg1) -> 0.0f);
 
-    // transform_binary: T=float, U=long, V=double
+    // transform_binary: T=float: U=long: V=double
     Spectra.transform_binary(floats, longs, doubles, n, (arg0, arg1) -> 0.0);
 
-    // transform_binary: T=float, U=float, V=int
+    // transform_binary: T=float: U=float: V=int
     Spectra.transform_binary(floats, floats, ints, n, (arg0, arg1) -> 0);
 
-    // transform_binary: T=float, U=float, V=long
+    // transform_binary: T=float: U=float: V=long
     Spectra.transform_binary(floats, floats, longs, n, (arg0, arg1) -> 0L);
 
-    // transform_binary: T=float, U=float, V=float
+    // transform_binary: T=float: U=float: V=float
     Spectra.transform_binary(floats, floats, floats, n, (arg0, arg1) -> 0.0f);
 
-    // transform_binary: T=float, U=float, V=double
+    // transform_binary: T=float: U=float: V=double
     Spectra.transform_binary(floats, floats, doubles, n, (arg0, arg1) -> 0.0);
 
-    // transform_binary: T=float, U=double, V=int
+    // transform_binary: T=float: U=double: V=int
     Spectra.transform_binary(floats, doubles, ints, n, (arg0, arg1) -> 0);
 
-    // transform_binary: T=float, U=double, V=long
+    // transform_binary: T=float: U=double: V=long
     Spectra.transform_binary(floats, doubles, longs, n, (arg0, arg1) -> 0L);
 
-    // transform_binary: T=float, U=double, V=float
+    // transform_binary: T=float: U=double: V=float
     Spectra.transform_binary(floats, doubles, floats, n, (arg0, arg1) -> 0.0f);
 
-    // transform_binary: T=float, U=double, V=double
+    // transform_binary: T=float: U=double: V=double
     Spectra.transform_binary(floats, doubles, doubles, n, (arg0, arg1) -> 0.0);
 
-    // transform_binary: T=double, U=int, V=int
+    // transform_binary: T=double: U=int: V=int
     Spectra.transform_binary(doubles, ints, ints, n, (arg0, arg1) -> 0);
 
-    // transform_binary: T=double, U=int, V=long
+    // transform_binary: T=double: U=int: V=long
     Spectra.transform_binary(doubles, ints, longs, n, (arg0, arg1) -> 0L);
 
-    // transform_binary: T=double, U=int, V=float
+    // transform_binary: T=double: U=int: V=float
     Spectra.transform_binary(doubles, ints, floats, n, (arg0, arg1) -> 0.0f);
 
-    // transform_binary: T=double, U=int, V=double
+    // transform_binary: T=double: U=int: V=double
     Spectra.transform_binary(doubles, ints, doubles, n, (arg0, arg1) -> 0.0);
 
-    // transform_binary: T=double, U=long, V=int
+    // transform_binary: T=double: U=long: V=int
     Spectra.transform_binary(doubles, longs, ints, n, (arg0, arg1) -> 0);
 
-    // transform_binary: T=double, U=long, V=long
+    // transform_binary: T=double: U=long: V=long
     Spectra.transform_binary(doubles, longs, longs, n, (arg0, arg1) -> 0L);
 
-    // transform_binary: T=double, U=long, V=float
+    // transform_binary: T=double: U=long: V=float
     Spectra.transform_binary(doubles, longs, floats, n, (arg0, arg1) -> 0.0f);
 
-    // transform_binary: T=double, U=long, V=double
+    // transform_binary: T=double: U=long: V=double
     Spectra.transform_binary(doubles, longs, doubles, n, (arg0, arg1) -> 0.0);
 
-    // transform_binary: T=double, U=float, V=int
+    // transform_binary: T=double: U=float: V=int
     Spectra.transform_binary(doubles, floats, ints, n, (arg0, arg1) -> 0);
 
-    // transform_binary: T=double, U=float, V=long
+    // transform_binary: T=double: U=float: V=long
     Spectra.transform_binary(doubles, floats, longs, n, (arg0, arg1) -> 0L);
 
-    // transform_binary: T=double, U=float, V=float
+    // transform_binary: T=double: U=float: V=float
     Spectra.transform_binary(doubles, floats, floats, n, (arg0, arg1) -> 0.0f);
 
-    // transform_binary: T=double, U=float, V=double
+    // transform_binary: T=double: U=float: V=double
     Spectra.transform_binary(doubles, floats, doubles, n, (arg0, arg1) -> 0.0);
 
-    // transform_binary: T=double, U=double, V=int
+    // transform_binary: T=double: U=double: V=int
     Spectra.transform_binary(doubles, doubles, ints, n, (arg0, arg1) -> 0);
 
-    // transform_binary: T=double, U=double, V=long
+    // transform_binary: T=double: U=double: V=long
     Spectra.transform_binary(doubles, doubles, longs, n, (arg0, arg1) -> 0L);
 
-    // transform_binary: T=double, U=double, V=float
+    // transform_binary: T=double: U=double: V=float
     Spectra.transform_binary(doubles, doubles, floats, n, (arg0, arg1) -> 0.0f);
 
-    // transform_binary: T=double, U=double, V=double
+    // transform_binary: T=double: U=double: V=double
     Spectra.transform_binary(doubles, doubles, doubles, n, (arg0, arg1) -> 0.0);
 
-    // transform_binary: T=Value, U=Value, V=Value
+    // transform_binary: T=Value: U=Value: V=Value
     Spectra.transform_binary(values, values, values, n, (arg0, arg1) -> null);
 
-    // transform_exclusive_scan: T=int, U=int
+    // transform_exclusive_scan: T=int: U=int
     Spectra.transform_exclusive_scan(ints, ints, n, 0, (arg0) -> 0, (arg0, arg1) -> 0);
 
-    // transform_exclusive_scan: T=int, U=long
+    // transform_exclusive_scan: T=int: U=long
     Spectra.transform_exclusive_scan(ints, longs, n, 0L, (arg0) -> 0L, (arg0, arg1) -> 0L);
 
-    // transform_exclusive_scan: T=int, U=float
+    // transform_exclusive_scan: T=int: U=float
     Spectra.transform_exclusive_scan(ints, floats, n, 0.0f, (arg0) -> 0.0f, (arg0, arg1) -> 0.0f);
 
-    // transform_exclusive_scan: T=int, U=double
+    // transform_exclusive_scan: T=int: U=double
     Spectra.transform_exclusive_scan(ints, doubles, n, 0.0, (arg0) -> 0.0, (arg0, arg1) -> 0.0);
 
-    // transform_exclusive_scan: T=long, U=int
+    // transform_exclusive_scan: T=long: U=int
     Spectra.transform_exclusive_scan(longs, ints, n, 0, (arg0) -> 0, (arg0, arg1) -> 0);
 
-    // transform_exclusive_scan: T=long, U=long
+    // transform_exclusive_scan: T=long: U=long
     Spectra.transform_exclusive_scan(longs, longs, n, 0L, (arg0) -> 0L, (arg0, arg1) -> 0L);
 
-    // transform_exclusive_scan: T=long, U=float
+    // transform_exclusive_scan: T=long: U=float
     Spectra.transform_exclusive_scan(longs, floats, n, 0.0f, (arg0) -> 0.0f, (arg0, arg1) -> 0.0f);
 
-    // transform_exclusive_scan: T=long, U=double
+    // transform_exclusive_scan: T=long: U=double
     Spectra.transform_exclusive_scan(longs, doubles, n, 0.0, (arg0) -> 0.0, (arg0, arg1) -> 0.0);
 
-    // transform_exclusive_scan: T=float, U=int
+    // transform_exclusive_scan: T=float: U=int
     Spectra.transform_exclusive_scan(floats, ints, n, 0, (arg0) -> 0, (arg0, arg1) -> 0);
 
-    // transform_exclusive_scan: T=float, U=long
+    // transform_exclusive_scan: T=float: U=long
     Spectra.transform_exclusive_scan(floats, longs, n, 0L, (arg0) -> 0L, (arg0, arg1) -> 0L);
 
-    // transform_exclusive_scan: T=float, U=float
+    // transform_exclusive_scan: T=float: U=float
     Spectra.transform_exclusive_scan(floats, floats, n, 0.0f, (arg0) -> 0.0f, (arg0, arg1) -> 0.0f);
 
-    // transform_exclusive_scan: T=float, U=double
+    // transform_exclusive_scan: T=float: U=double
     Spectra.transform_exclusive_scan(floats, doubles, n, 0.0, (arg0) -> 0.0, (arg0, arg1) -> 0.0);
 
-    // transform_exclusive_scan: T=double, U=int
+    // transform_exclusive_scan: T=double: U=int
     Spectra.transform_exclusive_scan(doubles, ints, n, 0, (arg0) -> 0, (arg0, arg1) -> 0);
 
-    // transform_exclusive_scan: T=double, U=long
+    // transform_exclusive_scan: T=double: U=long
     Spectra.transform_exclusive_scan(doubles, longs, n, 0L, (arg0) -> 0L, (arg0, arg1) -> 0L);
 
-    // transform_exclusive_scan: T=double, U=float
+    // transform_exclusive_scan: T=double: U=float
     Spectra.transform_exclusive_scan(
         doubles,
         floats,
@@ -1852,10 +1867,10 @@ public final class check_surface {
         (arg0) -> 0.0f,
         (arg0, arg1) -> 0.0f);
 
-    // transform_exclusive_scan: T=double, U=double
+    // transform_exclusive_scan: T=double: U=double
     Spectra.transform_exclusive_scan(doubles, doubles, n, 0.0, (arg0) -> 0.0, (arg0, arg1) -> 0.0);
 
-    // transform_exclusive_scan: T=Value, U=Value
+    // transform_exclusive_scan: T=Value: U=Value
     Spectra.transform_exclusive_scan(
         values,
         values,
@@ -1864,107 +1879,163 @@ public final class check_surface {
         (arg0) -> null,
         (arg0, arg1) -> null);
 
-    // transform_inclusive_scan: T=int, U=int
+    // transform_inclusive_scan: T=int: U=int
     Spectra.transform_inclusive_scan(ints, ints, n, (arg0) -> 0, (arg0, arg1) -> 0);
 
-    // transform_inclusive_scan: T=int, U=long
+    // transform_inclusive_scan: T=int: U=long
     Spectra.transform_inclusive_scan(ints, longs, n, (arg0) -> 0L, (arg0, arg1) -> 0L);
 
-    // transform_inclusive_scan: T=int, U=float
+    // transform_inclusive_scan: T=int: U=float
     Spectra.transform_inclusive_scan(ints, floats, n, (arg0) -> 0.0f, (arg0, arg1) -> 0.0f);
 
-    // transform_inclusive_scan: T=int, U=double
+    // transform_inclusive_scan: T=int: U=double
     Spectra.transform_inclusive_scan(ints, doubles, n, (arg0) -> 0.0, (arg0, arg1) -> 0.0);
 
-    // transform_inclusive_scan: T=long, U=int
+    // transform_inclusive_scan: T=long: U=int
     Spectra.transform_inclusive_scan(longs, ints, n, (arg0) -> 0, (arg0, arg1) -> 0);
 
-    // transform_inclusive_scan: T=long, U=long
+    // transform_inclusive_scan: T=long: U=long
     Spectra.transform_inclusive_scan(longs, longs, n, (arg0) -> 0L, (arg0, arg1) -> 0L);
 
-    // transform_inclusive_scan: T=long, U=float
+    // transform_inclusive_scan: T=long: U=float
     Spectra.transform_inclusive_scan(longs, floats, n, (arg0) -> 0.0f, (arg0, arg1) -> 0.0f);
 
-    // transform_inclusive_scan: T=long, U=double
+    // transform_inclusive_scan: T=long: U=double
     Spectra.transform_inclusive_scan(longs, doubles, n, (arg0) -> 0.0, (arg0, arg1) -> 0.0);
 
-    // transform_inclusive_scan: T=float, U=int
+    // transform_inclusive_scan: T=float: U=int
     Spectra.transform_inclusive_scan(floats, ints, n, (arg0) -> 0, (arg0, arg1) -> 0);
 
-    // transform_inclusive_scan: T=float, U=long
+    // transform_inclusive_scan: T=float: U=long
     Spectra.transform_inclusive_scan(floats, longs, n, (arg0) -> 0L, (arg0, arg1) -> 0L);
 
-    // transform_inclusive_scan: T=float, U=float
+    // transform_inclusive_scan: T=float: U=float
     Spectra.transform_inclusive_scan(floats, floats, n, (arg0) -> 0.0f, (arg0, arg1) -> 0.0f);
 
-    // transform_inclusive_scan: T=float, U=double
+    // transform_inclusive_scan: T=float: U=double
     Spectra.transform_inclusive_scan(floats, doubles, n, (arg0) -> 0.0, (arg0, arg1) -> 0.0);
 
-    // transform_inclusive_scan: T=double, U=int
+    // transform_inclusive_scan: T=double: U=int
     Spectra.transform_inclusive_scan(doubles, ints, n, (arg0) -> 0, (arg0, arg1) -> 0);
 
-    // transform_inclusive_scan: T=double, U=long
+    // transform_inclusive_scan: T=double: U=long
     Spectra.transform_inclusive_scan(doubles, longs, n, (arg0) -> 0L, (arg0, arg1) -> 0L);
 
-    // transform_inclusive_scan: T=double, U=float
+    // transform_inclusive_scan: T=double: U=float
     Spectra.transform_inclusive_scan(doubles, floats, n, (arg0) -> 0.0f, (arg0, arg1) -> 0.0f);
 
-    // transform_inclusive_scan: T=double, U=double
+    // transform_inclusive_scan: T=double: U=double
     Spectra.transform_inclusive_scan(doubles, doubles, n, (arg0) -> 0.0, (arg0, arg1) -> 0.0);
 
-    // transform_inclusive_scan: T=Value, U=Value
+    // transform_inclusive_scan: T=Value: U=Value
     Spectra.transform_inclusive_scan(values, values, n, (arg0) -> null, (arg0, arg1) -> null);
 
-    // transform_reduce: T=int, U=int
+    // transform_reduce: T=int: U=int
     Spectra.transform_reduce(ints, n, 0, (arg0) -> 0, (arg0, arg1) -> 0);
 
-    // transform_reduce: T=int, U=long
+    // transform_reduce: T=int: U=long
     Spectra.transform_reduce(ints, n, 0L, (arg0) -> 0L, (arg0, arg1) -> 0L);
 
-    // transform_reduce: T=int, U=float
+    // transform_reduce: T=int: U=float
     Spectra.transform_reduce(ints, n, 0.0f, (arg0) -> 0.0f, (arg0, arg1) -> 0.0f);
 
-    // transform_reduce: T=int, U=double
+    // transform_reduce: T=int: U=double
     Spectra.transform_reduce(ints, n, 0.0, (arg0) -> 0.0, (arg0, arg1) -> 0.0);
 
-    // transform_reduce: T=long, U=int
+    // transform_reduce: T=long: U=int
     Spectra.transform_reduce(longs, n, 0, (arg0) -> 0, (arg0, arg1) -> 0);
 
-    // transform_reduce: T=long, U=long
+    // transform_reduce: T=long: U=long
     Spectra.transform_reduce(longs, n, 0L, (arg0) -> 0L, (arg0, arg1) -> 0L);
 
-    // transform_reduce: T=long, U=float
+    // transform_reduce: T=long: U=float
     Spectra.transform_reduce(longs, n, 0.0f, (arg0) -> 0.0f, (arg0, arg1) -> 0.0f);
 
-    // transform_reduce: T=long, U=double
+    // transform_reduce: T=long: U=double
     Spectra.transform_reduce(longs, n, 0.0, (arg0) -> 0.0, (arg0, arg1) -> 0.0);
 
-    // transform_reduce: T=float, U=int
+    // transform_reduce: T=float: U=int
     Spectra.transform_reduce(floats, n, 0, (arg0) -> 0, (arg0, arg1) -> 0);
 
-    // transform_reduce: T=float, U=long
+    // transform_reduce: T=float: U=long
     Spectra.transform_reduce(floats, n, 0L, (arg0) -> 0L, (arg0, arg1) -> 0L);
 
-    // transform_reduce: T=float, U=float
+    // transform_reduce: T=float: U=float
     Spectra.transform_reduce(floats, n, 0.0f, (arg0) -> 0.0f, (arg0, arg1) -> 0.0f);
 
-    // transform_reduce: T=float, U=double
+    // transform_reduce: T=float: U=double
     Spectra.transform_reduce(floats, n, 0.0, (arg0) -> 0.0, (arg0, arg1) -> 0.0);
 
-    // transform_reduce: T=double, U=int
+    // transform_reduce: T=double: U=int
     Spectra.transform_reduce(doubles, n, 0, (arg0) -> 0, (arg0, arg1) -> 0);
 
-    // transform_reduce: T=double, U=long
+    // transform_reduce: T=double: U=long
     Spectra.transform_reduce(doubles, n, 0L, (arg0) -> 0L, (arg0, arg1) -> 0L);
 
-    // transform_reduce: T=double, U=float
+    // transform_reduce: T=double: U=float
     Spectra.transform_reduce(doubles, n, 0.0f, (arg0) -> 0.0f, (arg0, arg1) -> 0.0f);
 
-    // transform_reduce: T=double, U=double
+    // transform_reduce: T=double: U=double
     Spectra.transform_reduce(doubles, n, 0.0, (arg0) -> 0.0, (arg0, arg1) -> 0.0);
 
-    // transform_reduce: T=Value, U=Value
+    // transform_reduce: T=Value: U=Value
     Spectra.transform_reduce(values, n, new Value(), (arg0) -> null, (arg0, arg1) -> null);
+
+    // transform_reduce_unordered: T=int: U=int
+    Spectra.transform_reduce_unordered(ints, n, 0, (arg0) -> 0, (arg0, arg1) -> 0);
+
+    // transform_reduce_unordered: T=int: U=long
+    Spectra.transform_reduce_unordered(ints, n, 0L, (arg0) -> 0L, (arg0, arg1) -> 0L);
+
+    // transform_reduce_unordered: T=int: U=float
+    Spectra.transform_reduce_unordered(ints, n, 0.0f, (arg0) -> 0.0f, (arg0, arg1) -> 0.0f);
+
+    // transform_reduce_unordered: T=int: U=double
+    Spectra.transform_reduce_unordered(ints, n, 0.0, (arg0) -> 0.0, (arg0, arg1) -> 0.0);
+
+    // transform_reduce_unordered: T=long: U=int
+    Spectra.transform_reduce_unordered(longs, n, 0, (arg0) -> 0, (arg0, arg1) -> 0);
+
+    // transform_reduce_unordered: T=long: U=long
+    Spectra.transform_reduce_unordered(longs, n, 0L, (arg0) -> 0L, (arg0, arg1) -> 0L);
+
+    // transform_reduce_unordered: T=long: U=float
+    Spectra.transform_reduce_unordered(longs, n, 0.0f, (arg0) -> 0.0f, (arg0, arg1) -> 0.0f);
+
+    // transform_reduce_unordered: T=long: U=double
+    Spectra.transform_reduce_unordered(longs, n, 0.0, (arg0) -> 0.0, (arg0, arg1) -> 0.0);
+
+    // transform_reduce_unordered: T=float: U=int
+    Spectra.transform_reduce_unordered(floats, n, 0, (arg0) -> 0, (arg0, arg1) -> 0);
+
+    // transform_reduce_unordered: T=float: U=long
+    Spectra.transform_reduce_unordered(floats, n, 0L, (arg0) -> 0L, (arg0, arg1) -> 0L);
+
+    // transform_reduce_unordered: T=float: U=float
+    Spectra.transform_reduce_unordered(floats, n, 0.0f, (arg0) -> 0.0f, (arg0, arg1) -> 0.0f);
+
+    // transform_reduce_unordered: T=float: U=double
+    Spectra.transform_reduce_unordered(floats, n, 0.0, (arg0) -> 0.0, (arg0, arg1) -> 0.0);
+
+    // transform_reduce_unordered: T=double: U=int
+    Spectra.transform_reduce_unordered(doubles, n, 0, (arg0) -> 0, (arg0, arg1) -> 0);
+
+    // transform_reduce_unordered: T=double: U=long
+    Spectra.transform_reduce_unordered(doubles, n, 0L, (arg0) -> 0L, (arg0, arg1) -> 0L);
+
+    // transform_reduce_unordered: T=double: U=float
+    Spectra.transform_reduce_unordered(doubles, n, 0.0f, (arg0) -> 0.0f, (arg0, arg1) -> 0.0f);
+
+    // transform_reduce_unordered: T=double: U=double
+    Spectra.transform_reduce_unordered(doubles, n, 0.0, (arg0) -> 0.0, (arg0, arg1) -> 0.0);
+
+    // transform_reduce_unordered: T=Value: U=Value
+    Spectra.transform_reduce_unordered(
+        values,
+        n,
+        new Value(),
+        (arg0) -> null,
+        (arg0, arg1) -> null);
 
     // unique: T=int
     Spectra.unique(ints, n, (arg0, arg1) -> false);

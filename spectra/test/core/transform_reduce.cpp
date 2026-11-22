@@ -2,14 +2,14 @@
 #pragma region using: opt=O0,O3
 #pragma region offload-only
 #pragma region do: polycpp {spectra_stdpar} -{opt} -fstdpar-library-path={spectra_packages} -fstdpar-library-capabilities={spectra_capability} -o {output} {input}
-#pragma region stderr-count: 9 polyregion.core.transform_reduce bound to polyregion.core (spectra.implementation.
-#pragma region stderr-count: 3 .core_transform_reduce_w4)
-#pragma region stderr-count: 2 .core_transform_reduce_w8)
-#pragma region stderr-count: 1 .core_transform_reduce_w12)
-#pragma region stderr-count: 1 .core_transform_reduce_w32)
-#pragma region stderr-count: 1 .core_transform_reduce_w40)
-#pragma region stderr-count: 1 .core_transform_reduce_w64)
-#pragma region stderr-count: 1 polyregion.core.transform_reduce uses the inline body: no implementation fits
+#pragma region stderr-count: 9 polyregion.core.transform_reduce_unordered bound to polyregion.core (spectra.implementation.
+#pragma region stderr-count: 3 .core_transform_reduce_unordered_w4)
+#pragma region stderr-count: 2 .core_transform_reduce_unordered_w8)
+#pragma region stderr-count: 1 .core_transform_reduce_unordered_w12)
+#pragma region stderr-count: 1 .core_transform_reduce_unordered_w32)
+#pragma region stderr-count: 1 .core_transform_reduce_unordered_w40)
+#pragma region stderr-count: 1 .core_transform_reduce_unordered_w64)
+#pragma region stderr-count: 1 polyregion.core.transform_reduce_unordered uses the inline body: no implementation fits
 #pragma region stderr-count: 1 of 72 bytes
 #pragma region stderr-count: 1 uses the inline body
 #pragma region do: {output}

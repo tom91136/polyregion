@@ -17,12 +17,12 @@
 template <class T> static bool run(const char *scenario, int n) {
   spectra_test_vector<T> in(n);
   for (int i = 0; i < n; ++i)
-    in[i] = T(i % 7);
+    in[i] = T(i + 1);
   const T init = T(3);
   T ref = init;
   for (int i = 0; i < n; ++i)
-    ref = T(ref + in[i]);
-  const auto op = [] SPECTRA_TEST_FN(T a, T b) { return T(a + b); };
+    ref = in[i];
+  const auto op = [] SPECTRA_TEST_FN(T a, T b) { return T(b); };
   const T __r = spectra::reduce<T>(in.data(), n, init, op);
   const bool ok = near_(__r, ref);
   std::fprintf(stderr, "  %-24s<%-18s> %s\n", "reduce", scenario, ok ? "OK" : "MISMATCH");
@@ -32,13 +32,13 @@ template <class T> static bool run(const char *scenario, int n) {
 template <class T> static bool run_captured(const char *scenario, int n) {
   spectra_test_vector<T> in(n);
   for (int i = 0; i < n; ++i)
-    in[i] = T(i % 7);
+    in[i] = T(i + 1);
   const T init = T(3);
   T ref = init;
   for (int i = 0; i < n; ++i)
-    ref = T(ref + in[i]);
+    ref = in[i];
   const bool live = n >= 0;
-  const auto op = [live] SPECTRA_TEST_FN(T a, T b) { return live ? T(a + b) : T(a + b); };
+  const auto op = [live] SPECTRA_TEST_FN(T a, T b) { return live ? T(b) : T(b); };
   const T __r = spectra::reduce<T>(in.data(), n, init, op);
   const bool ok = near_(__r, ref);
   std::fprintf(stderr, "  %-24s<%-18s> %s\n", "reduce", scenario, ok ? "OK" : "MISMATCH");
@@ -56,8 +56,9 @@ int main() {
   ok &= run<spectra_test_value4>("w4/n255", 255);
   ok &= run<spectra_test_value4>("w4/n257", 257);
   ok &= run<spectra_test_value4>("w4/n777", 777);
+  ok &= run<spectra_test_value4>("w4/n262144", 262144);
   ok &= run_captured<spectra_test_value4>("w4/n256/captured", 256);
-  ok &= run_captured<spectra_test_value4>("w4/n777/captured", 777);
+  ok &= run_captured<spectra_test_value4>("w4/n262144/captured", 262144);
   std::printf("%s", ok ? "pass" : "fail");
   return ok ? 0 : 1;
 }

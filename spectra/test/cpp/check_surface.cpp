@@ -26,6 +26,15 @@ void check_surface() {
       [](std::int64_t, std::int64_t) -> std::int64_t { return std::int64_t{}; }
   );
 
+  // reduce_unordered: T=w12
+  SpectraSurfaceValue12 reduce_unordered_in[2 * n]{};
+  spectra::host::reduce_unordered<SpectraSurfaceValue12>(
+      reduce_unordered_in,
+      n,
+      value12,
+      [](SpectraSurfaceValue12, SpectraSurfaceValue12) -> SpectraSurfaceValue12 { return SpectraSurfaceValue12{}; }
+  );
+
   // transform: T=w12, U=w4
   SpectraSurfaceValue12 transform_in[2 * n]{};
   std::int32_t transform_out[2 * n]{};
@@ -240,6 +249,16 @@ void check_surface() {
       value8,
       [](std::int32_t) -> std::int64_t { return std::int64_t{}; },
       [](std::int64_t, std::int64_t) -> std::int64_t { return std::int64_t{}; }
+  );
+
+  // transform_reduce_unordered: T=w8, U=w12
+  std::int64_t transform_reduce_unordered_in[2 * n]{};
+  spectra::host::transform_reduce_unordered<std::int64_t, SpectraSurfaceValue12>(
+      transform_reduce_unordered_in,
+      n,
+      value12,
+      [](std::int64_t) -> SpectraSurfaceValue12 { return SpectraSurfaceValue12{}; },
+      [](SpectraSurfaceValue12, SpectraSurfaceValue12) -> SpectraSurfaceValue12 { return SpectraSurfaceValue12{}; }
   );
 
   // transform_inclusive_scan: T=w4, U=w8

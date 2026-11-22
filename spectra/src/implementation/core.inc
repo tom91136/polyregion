@@ -1,6 +1,6 @@
-#define SPECTRA_CORE_VALUE(W, A)                                                                                     \
-  struct [[clang::annotate("polyregion_type_variable:T" #W ":size=" #W)]] alignas(A) T##W {                          \
-    char _[W];                                                                                                       \
+#define SPECTRA_CORE_VALUE(W, A)                                                                                                           \
+  struct [[clang::annotate("polyregion_type_variable:T" #W ":size=" #W)]] alignas(A) T##W {                                                \
+    char _[W];                                                                                                                             \
   };
 
 namespace polyregion::spectra {
@@ -20,16 +20,18 @@ SPECTRA_CORE_VALUE(64, 8)
 } // namespace polyregion::spectra
 
 [[clang::annotate("polyregion_export:spectra.implementation." SPECTRA_VARIANT ".core_for_each"),
-  clang::annotate("polyregion_implements:polyregion.core.for_each"),
-  clang::annotate("polyregion_requires:spectra." SPECTRA_VARIANT)]] void
+  clang::annotate("polyregion_implements:polyregion.core.for_each"), clang::annotate("polyregion_requires:spectra." SPECTRA_VARIANT)]] void
 spectra_core_for_each(std::int64_t n, fn<void, std::int64_t> body) {
   ::spectra::implementation::core_for_each(n, body);
 }
 
-#define SPECTRA_CORE_W(W)                                                                                            \
-  (void)&::spectra::implementation::core_transform_reduce<polyregion::spectra::T##W, fn<polyregion::spectra::T##W, std::int64_t>, \
-                                                          fn2<polyregion::spectra::T##W, polyregion::spectra::T##W,              \
-                                                              polyregion::spectra::T##W>>;
+#define SPECTRA_CORE_W(W)                                                                                                                  \
+  (void)&::spectra::implementation::core_transform_reduce<                                                                                 \
+      polyregion::spectra::T##W, fn<polyregion::spectra::T##W, std::int64_t>,                                                              \
+      fn2<polyregion::spectra::T##W, polyregion::spectra::T##W, polyregion::spectra::T##W>>;                                               \
+  (void)&::spectra::implementation::core_transform_reduce_unordered<                                                                       \
+      polyregion::spectra::T##W, fn<polyregion::spectra::T##W, std::int64_t>,                                                              \
+      fn2<polyregion::spectra::T##W, polyregion::spectra::T##W, polyregion::spectra::T##W>>;
 
 static void instantiate_core() {
   SPECTRA_CORE_W(4)

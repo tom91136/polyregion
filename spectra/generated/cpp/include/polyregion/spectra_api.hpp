@@ -302,6 +302,13 @@ inline std::int32_t reduce_by_key(const K *keys, const V *vals, K *kout, V *vout
   POLYREGION_SPECTRA_IMPLEMENT(reduce_by_key, keys, vals, kout, vout, n, eq, op);
 }
 
+template <class T, class Op> //
+POLYREGION_SPECTRA_ANNOTATE("polyregion_interface:spectra:spectra.reduce_unordered") POLYREGION_SPECTRA_FALLBACK //
+inline T reduce_unordered(const T *in, std::int32_t n, T init, Op op) {
+  static_assert(std::is_same_v<std::invoke_result_t<Op &, const T &, const T &>, T>, "callable signature mismatch");
+  POLYREGION_SPECTRA_IMPLEMENT(reduce_unordered, in, n, init, op);
+}
+
 template <class T, class Eq> //
 POLYREGION_SPECTRA_ANNOTATE("polyregion_interface:spectra:spectra.remove") POLYREGION_SPECTRA_FALLBACK //
 inline std::int32_t remove(T *data, std::int32_t n, T value, Eq eq) {
@@ -495,6 +502,14 @@ inline U transform_reduce(const T *in, std::int32_t n, U init, Map map, Op op) {
   static_assert(std::is_same_v<std::invoke_result_t<Map &, const T &>, U>, "callable signature mismatch");
   static_assert(std::is_same_v<std::invoke_result_t<Op &, const U &, const U &>, U>, "callable signature mismatch");
   POLYREGION_SPECTRA_IMPLEMENT(transform_reduce, in, n, init, map, op);
+}
+
+template <class T, class U, class Map, class Op> //
+POLYREGION_SPECTRA_ANNOTATE("polyregion_interface:spectra:spectra.transform_reduce_unordered") POLYREGION_SPECTRA_FALLBACK //
+inline U transform_reduce_unordered(const T *in, std::int32_t n, U init, Map map, Op op) {
+  static_assert(std::is_same_v<std::invoke_result_t<Map &, const T &>, U>, "callable signature mismatch");
+  static_assert(std::is_same_v<std::invoke_result_t<Op &, const U &, const U &>, U>, "callable signature mismatch");
+  POLYREGION_SPECTRA_IMPLEMENT(transform_reduce_unordered, in, n, init, map, op);
 }
 
 template <class T, class Eq> //

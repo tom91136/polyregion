@@ -29,6 +29,7 @@
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/reverse_iterator.h>
 #include <thrust/logical.h>
+#include <thrust/memory.h>
 #include <thrust/merge.h>
 #include <thrust/mismatch.h>
 #include <thrust/partition.h>
@@ -59,6 +60,69 @@ template <class T, class Map> struct element_map {
   __host__ __device__ T operator()(std::int64_t i) const { return element(map, i); }
 };
 
+template <class T, class Source, class Map> struct source_map {
+  Source in;
+  Map map;
+  __host__ __device__ T operator()(std::int64_t i) const { return map(in[i]); }
+};
+
+template <class T, class Source> struct source_element {
+  Source in;
+  __host__ __device__ T operator()(std::int64_t i) const { return in[i]; }
+};
+
+constexpr std::int64_t ordered_chunk = 256;
+
+template <class T, class Element, class Op> struct chunk_fold {
+  Element element_at;
+  std::int64_t n;
+  Op op;
+  __host__ __device__ T operator()(std::int64_t chunk) const {
+    const std::int64_t begin = chunk * ordered_chunk;
+    const std::int64_t end = begin + ordered_chunk < n ? begin + ordered_chunk : n;
+    T acc = element_at(begin);
+    for (std::int64_t i = begin + 1; i < end; ++i)
+      acc = op(acc, element_at(i));
+    return acc;
+  }
+};
+
+template <class T, class Element, class Op> struct leading_fold {
+  T init;
+  Element element_at;
+  std::int64_t n;
+  Op op;
+  __host__ __device__ T operator()(std::int64_t) const {
+    T acc = init;
+    for (std::int64_t i = 0; i < n; ++i)
+      acc = op(acc, element_at(i));
+    return acc;
+  }
+};
+
+template <class T> T *device_buffer(std::int64_t count) {
+  return static_cast<T *>(thrust::raw_pointer_cast(thrust::malloc(thrust::device, static_cast<std::size_t>(count) * sizeof(T))));
+}
+
+template <class T, class Element, class Op> T ordered_reduce(std::int64_t n, T init, Element element_at, Op op) {
+  if (n <= 0) return init;
+  if (n > ordered_chunk) {
+    const std::int64_t chunks = (n + ordered_chunk - 1) / ordered_chunk;
+    T *partial = device_buffer<T>(chunks);
+    thrust::transform(thrust::device, thrust::counting_iterator<std::int64_t>(0), thrust::counting_iterator<std::int64_t>(chunks), partial,
+                      chunk_fold<T, Element, Op>{element_at, n, op});
+    const T result = ordered_reduce(chunks, init, source_element<T, const T *>{partial}, op);
+    thrust::free(thrust::device, partial);
+    return result;
+  }
+  T *slot = device_buffer<T>(1);
+  thrust::transform(thrust::device, thrust::counting_iterator<std::int64_t>(0), thrust::counting_iterator<std::int64_t>(1), slot,
+                    leading_fold<T, Element, Op>{init, element_at, n, op});
+  const T result = *thrust::device_ptr<T>(slot);
+  thrust::free(thrust::device, slot);
+  return result;
+}
+
 template <class Body> void core_for_each(std::int64_t n, Body body) {
   thrust::for_each_n(thrust::device, thrust::counting_iterator<std::int64_t>(0), n,
                      [=] __host__ __device__(std::int64_t i) { element(body, i); });
@@ -67,6 +131,12 @@ template <class Body> void core_for_each(std::int64_t n, Body body) {
 template <class T, class Map, class Combine>     //
 POLYREGION_SPECTRA_CORE_EXPORT(transform_reduce) //
     T core_transform_reduce(std::int64_t n, T init, Map map, Combine combine) {
+  return ordered_reduce(n, init, element_map<T, Map>{map}, combine);
+}
+
+template <class T, class Map, class Combine>               //
+POLYREGION_SPECTRA_CORE_EXPORT(transform_reduce_unordered) //
+    T core_transform_reduce_unordered(std::int64_t n, T init, Map map, Combine combine) {
   return thrust::transform_reduce(thrust::device, thrust::counting_iterator<std::int64_t>(0), thrust::counting_iterator<std::int64_t>(n),
                                   element_map<T, Map>{map}, init, combine);
 }
@@ -330,6 +400,12 @@ POLYREGION_SPECTRA_EXPORT(partition_point) //
 template <class T, class Op>      //
 POLYREGION_SPECTRA_EXPORT(reduce) //
     T reduce(const T *in, std::int32_t n, T init, Op op) {
+  return ordered_reduce(n, init, source_element<T, const T *>{in}, op);
+}
+
+template <class T, class Op>                //
+POLYREGION_SPECTRA_EXPORT(reduce_unordered) //
+    T reduce_unordered(const T *in, std::int32_t n, T init, Op op) {
   return thrust::reduce(thrust::device, in, in + n, init, op);
 }
 
@@ -532,6 +608,12 @@ POLYREGION_SPECTRA_EXPORT(transform_inclusive_scan) //
 template <class T, class U, class Map, class Op> //
 POLYREGION_SPECTRA_EXPORT(transform_reduce)      //
     U transform_reduce(const T *in, std::int32_t n, U init, Map map, Op op) {
+  return ordered_reduce(n, init, source_map<U, const T *, Map>{in, map}, op);
+}
+
+template <class T, class U, class Map, class Op>      //
+POLYREGION_SPECTRA_EXPORT(transform_reduce_unordered) //
+    U transform_reduce_unordered(const T *in, std::int32_t n, U init, Map map, Op op) {
   return thrust::transform_reduce(thrust::device, in, in + n, map, init, op);
 }
 

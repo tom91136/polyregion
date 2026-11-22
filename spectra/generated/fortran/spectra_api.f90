@@ -43,6 +43,7 @@ module spectra_api
   public :: polyregion_partition_point
   public :: polyregion_reduce
   public :: polyregion_reduce_by_key
+  public :: polyregion_reduce_unordered
   public :: polyregion_remove
   public :: polyregion_remove_copy
   public :: polyregion_remove_copy_if
@@ -71,6 +72,7 @@ module spectra_api
   public :: polyregion_transform_exclusive_scan
   public :: polyregion_transform_inclusive_scan
   public :: polyregion_transform_reduce
+  public :: polyregion_transform_reduce_unordered
   public :: polyregion_unique
   public :: polyregion_unique_copy
   public :: polyregion_upper_bound
@@ -484,6 +486,16 @@ contains
     error stop 'compiler did not replace'
   end function polyregion_reduce_by_key
 
+  subroutine polyregion_reduce_unordered(in, n, init, op, polyregion_result)
+    type(*), dimension(*), intent(in) :: in
+    integer(c_int32_t), intent(in), value :: n
+    type(*), intent(in) :: init
+    procedure() :: op
+    type(*), intent(inout) :: polyregion_result
+    call polyregion_interface("polyregion_interface:spectra:spectra.reduce_unordered")
+    error stop 'compiler did not replace'
+  end subroutine polyregion_reduce_unordered
+
   function polyregion_remove(data, n, value, eq) result(r)
     type(*), dimension(*), intent(inout) :: data
     integer(c_int32_t), intent(in), value :: n
@@ -767,6 +779,17 @@ contains
     call polyregion_interface("polyregion_interface:spectra:spectra.transform_reduce")
     error stop 'compiler did not replace'
   end subroutine polyregion_transform_reduce
+
+  subroutine polyregion_transform_reduce_unordered(in, n, init, map, op, polyregion_result)
+    type(*), dimension(*), intent(in) :: in
+    integer(c_int32_t), intent(in), value :: n
+    type(*), intent(in) :: init
+    procedure() :: map
+    procedure() :: op
+    type(*), intent(inout) :: polyregion_result
+    call polyregion_interface("polyregion_interface:spectra:spectra.transform_reduce_unordered")
+    error stop 'compiler did not replace'
+  end subroutine polyregion_transform_reduce_unordered
 
   function polyregion_unique(data, n, eq) result(r)
     type(*), dimension(*), intent(inout) :: data

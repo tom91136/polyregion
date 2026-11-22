@@ -2,7 +2,7 @@
 #pragma region using: opt=O0,O3
 #pragma region offload-only
 #pragma region do: polycpp {spectra_stdpar} -{opt} -fstdpar-library-path={spectra_packages} -fstdpar-library-capabilities={spectra_capability} -o {output} {input}
-#pragma region stderr-count: 1 polyregion.core.transform_reduce bound to polyregion.core (spectra.implementation.
+#pragma region stderr-count: 1 polyregion.core.transform_reduce_unordered bound to polyregion.core (spectra.implementation.
 #pragma region stderr-count: 0 uses the inline body
 #pragma region do: {output}
 #pragma region requires: 0/257 0/1031

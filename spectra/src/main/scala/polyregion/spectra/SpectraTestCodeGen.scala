@@ -35,10 +35,12 @@ private[spectra] object SpectraTestCodeGen {
   private val boundarySizeProfile = List(SizeExpr.Around(32), SizeExpr.Around(256), SizeExpr.Fixed(777))
   private val sizeSweptAlgorithms = Set(
     "reduce",
+    "reduce_unordered",
     "transform",
     "inclusive_scan",
     "exclusive_scan",
     "transform_reduce",
+    "transform_reduce_unordered",
     "transform_inclusive_scan",
     "transform_exclusive_scan",
     "transform_binary",
@@ -60,7 +62,15 @@ private[spectra] object SpectraTestCodeGen {
     "set_union"
   )
   private val multiGroupAlgorithms =
-    Set("find", "inclusive_scan", "exclusive_scan", "transform_inclusive_scan", "transform_exclusive_scan")
+    Set(
+      "find",
+      "reduce",
+      "transform_reduce",
+      "inclusive_scan",
+      "exclusive_scan",
+      "transform_inclusive_scan",
+      "transform_exclusive_scan"
+    )
 
   private case class WidthCase(types: List[String], label: String)
 
@@ -689,6 +699,20 @@ private[spectra] object SpectraTestCodeGen {
       CppBlock(
         """spectra_test_vector<T> in(n);
           |for (int i = 0; i < n; ++i)
+          |  in[i] = T(i + 1);
+          |const T init = T(3);
+          |T ref = init;
+          |for (int i = 0; i < n; ++i)
+          |  ref = in[i];""".stripMargin
+      ),
+      Map("op" -> "b"),
+      CppBlock("const bool ok = near_(__r, ref);")
+    ),
+    "reduce_unordered" -> SemanticCase(
+      256,
+      CppBlock(
+        """spectra_test_vector<T> in(n);
+          |for (int i = 0; i < n; ++i)
           |  in[i] = T(i % 7);
           |const T init = T(3);
           |T ref = init;
@@ -748,6 +772,20 @@ private[spectra] object SpectraTestCodeGen {
       CppBlock("const bool ok = vecNear(out, ref, n);")
     ),
     "transform_reduce" -> SemanticCase(
+      256,
+      CppBlock(
+        """spectra_test_vector<T> in(n);
+          |for (int i = 0; i < n; ++i)
+          |  in[i] = T(i + 1);
+          |const U init = U(1);
+          |U ref = init;
+          |for (int i = 0; i < n; ++i)
+          |  ref = U(in[i] + T(1));""".stripMargin
+      ),
+      Map("map" -> "x + 1", "op" -> "b"),
+      CppBlock("const bool ok = near_(__r, ref);")
+    ),
+    "transform_reduce_unordered" -> SemanticCase(
       256,
       CppBlock(
         """spectra_test_vector<T> in(n);

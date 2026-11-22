@@ -38,6 +38,70 @@ template <class F, class... Args> [[clang::annotate("__polyregion_element")]] de
   return f(args...);
 }
 
+template <class T, class Map> struct element_map {
+  Map map;
+  T operator()(std::int64_t i) const { return element(map, i); }
+};
+
+template <class T, class Source, class Map> struct source_map {
+  Source in;
+  Map map;
+  T operator()(std::int64_t i) const { return map(in[i]); }
+};
+
+template <class T, class Source> struct source_element {
+  Source in;
+  T operator()(std::int64_t i) const { return in[i]; }
+};
+
+constexpr std::int64_t ordered_chunk = 256;
+
+template <class T, class Element, class Op> struct chunk_fold {
+  Element element_at;
+  std::int64_t n;
+  Op op;
+  T operator()(std::int64_t chunk) const {
+    const std::int64_t begin = chunk * ordered_chunk;
+    const std::int64_t end = begin + ordered_chunk < n ? begin + ordered_chunk : n;
+    T acc = element_at(begin);
+    for (std::int64_t i = begin + 1; i < end; ++i)
+      acc = op(acc, element_at(i));
+    return acc;
+  }
+};
+
+template <class T, class Element, class Op> struct leading_fold {
+  T init;
+  Element element_at;
+  std::int64_t n;
+  Op op;
+  T operator()(std::int64_t) const {
+    T acc = init;
+    for (std::int64_t i = 0; i < n; ++i)
+      acc = op(acc, element_at(i));
+    return acc;
+  }
+};
+
+template <class T, class Element, class Op> T ordered_reduce(std::int64_t n, T init, Element element_at, Op op) {
+  if (n <= 0) return init;
+  auto policy = oneapi::dpl::execution::device_policy<>{};
+  auto queue = policy.queue();
+  const std::int64_t outputs = n > ordered_chunk ? (n + ordered_chunk - 1) / ordered_chunk : 1;
+  auto *output = sycl::malloc_device<T>(static_cast<std::size_t>(outputs), queue);
+  detail::device_allocation<T> outputAllocation(output, queue);
+  if (n > ordered_chunk) {
+    oneapi::dpl::transform(policy, oneapi::dpl::counting_iterator<std::int64_t>(0), oneapi::dpl::counting_iterator<std::int64_t>(outputs),
+                           output, chunk_fold<T, Element, Op>{element_at, n, op});
+    return ordered_reduce(outputs, init, source_element<T, const T *>{output}, op);
+  }
+  oneapi::dpl::transform(policy, oneapi::dpl::counting_iterator<std::int64_t>(0), oneapi::dpl::counting_iterator<std::int64_t>(1), output,
+                         leading_fold<T, Element, Op>{init, element_at, n, op});
+  T result{};
+  queue.memcpy(&result, output, sizeof(T)).wait();
+  return result;
+}
+
 template <class Body> void core_for_each(std::int64_t n, Body body) {
   if (n <= 0) return;
   oneapi::dpl::execution::device_policy<>{}
@@ -52,6 +116,12 @@ template <class Body> void core_for_each(std::int64_t n, Body body) {
 template <class T, class Map, class Combine>     //
 POLYREGION_SPECTRA_CORE_EXPORT(transform_reduce) //
     T core_transform_reduce(std::int64_t n, T init, Map map, Combine combine) {
+  return ordered_reduce(n, init, element_map<T, Map>{map}, combine);
+}
+
+template <class T, class Map, class Combine>               //
+POLYREGION_SPECTRA_CORE_EXPORT(transform_reduce_unordered) //
+    T core_transform_reduce_unordered(std::int64_t n, T init, Map map, Combine combine) {
   return oneapi::dpl::transform_reduce(oneapi::dpl::execution::device_policy<>{}, oneapi::dpl::counting_iterator<std::int64_t>(0),
                                        oneapi::dpl::counting_iterator<std::int64_t>(n), init, combine,
                                        [=](std::int64_t i) -> T { return element(map, i); });
@@ -328,6 +398,12 @@ POLYREGION_SPECTRA_EXPORT(partition_point) //
 template <class T, class Op>      //
 POLYREGION_SPECTRA_EXPORT(reduce) //
     T reduce(const T *in, std::int32_t n, T init, Op op) {
+  return ordered_reduce(n, init, source_element<T, const T *>{in}, op);
+}
+
+template <class T, class Op>                //
+POLYREGION_SPECTRA_EXPORT(reduce_unordered) //
+    T reduce_unordered(const T *in, std::int32_t n, T init, Op op) {
   return oneapi::dpl::reduce(oneapi::dpl::execution::device_policy<>{}, in, in + n, init, op);
 }
 
@@ -524,6 +600,12 @@ POLYREGION_SPECTRA_EXPORT(transform_inclusive_scan) //
 template <class T, class U, class Map, class Op> //
 POLYREGION_SPECTRA_EXPORT(transform_reduce)      //
     U transform_reduce(const T *in, std::int32_t n, U init, Map map, Op op) {
+  return ordered_reduce(n, init, source_map<U, const T *, Map>{in, map}, op);
+}
+
+template <class T, class U, class Map, class Op>      //
+POLYREGION_SPECTRA_EXPORT(transform_reduce_unordered) //
+    U transform_reduce_unordered(const T *in, std::int32_t n, U init, Map map, Op op) {
   return oneapi::dpl::transform_reduce(oneapi::dpl::execution::device_policy<>{}, in, in + n, init, op, map);
 }
 

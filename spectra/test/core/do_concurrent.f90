@@ -3,10 +3,10 @@
 !CHECK offload-only
 !CHECK do: polyfc {spectra_stdpar} -{opt} -fstdpar-library-path={spectra_packages} -fstdpar-library-capabilities={spectra_capability} -o {output} {input}
 !CHECK stderr-count: 2 polyregion.core.for_each bound to polyregion.core (spectra.implementation.
-!CHECK stderr-count: 3 .core_transform_reduce_w4)
-!CHECK stderr-count: 1 .core_transform_reduce_w8)
-!CHECK stderr-count: 1 .core_transform_reduce_w16)
-!CHECK stderr-count: 1 polyregion.core.transform_reduce uses the inline body: no implementation fits
+!CHECK stderr-count: 3 .core_transform_reduce_unordered_w4)
+!CHECK stderr-count: 1 .core_transform_reduce_unordered_w8)
+!CHECK stderr-count: 1 .core_transform_reduce_unordered_w16)
+!CHECK stderr-count: 1 polyregion.core.transform_reduce_unordered uses the inline body: no implementation fits
 !CHECK stderr-count: 1 of 72 bytes
 !CHECK stderr-count: 1 uses the inline body
 !CHECK do: {output}

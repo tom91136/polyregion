@@ -222,6 +222,11 @@ POLYREGION_SPECTRA_HOST_FALLBACK inline T reduce(const T *in, std::int32_t n, T 
   return std::accumulate(in, in + n, init, op);
 }
 
+template <class T, class Op>
+POLYREGION_SPECTRA_HOST_FALLBACK inline T reduce_unordered(const T *in, std::int32_t n, T init, Op op) {
+  return std::reduce(in, in + n, init, op);
+}
+
 template <class K, class V, class Eq, class Op>
 POLYREGION_SPECTRA_HOST_FALLBACK inline std::int32_t reduce_by_key(
     const K *keys, const V *vals, K *kout, V *vout, std::int32_t n, Eq eq, Op op) {
@@ -391,6 +396,13 @@ POLYREGION_SPECTRA_HOST_FALLBACK inline void transform_inclusive_scan(const T *i
 
 template <class T, class U, class Map, class Op>
 POLYREGION_SPECTRA_HOST_FALLBACK inline U transform_reduce(const T *in, std::int32_t n, U init, Map map, Op op) {
+  for (std::int32_t i = 0; i < n; ++i)
+    init = op(init, map(in[i]));
+  return init;
+}
+
+template <class T, class U, class Map, class Op>
+POLYREGION_SPECTRA_HOST_FALLBACK inline U transform_reduce_unordered(const T *in, std::int32_t n, U init, Map map, Op op) {
   return std::transform_reduce(in, in + n, init, op, map);
 }
 

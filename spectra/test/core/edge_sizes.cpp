@@ -3,8 +3,8 @@
 #pragma region offload-only
 #pragma region do: polycpp {spectra_stdpar} -{opt} -fstdpar-library-path={spectra_packages} -fstdpar-library-capabilities={spectra_capability} -o {output} {input}
 #pragma region stderr-count: 1 polyregion.core.for_each bound to polyregion.core (spectra.implementation.
-#pragma region stderr-count: 1 .core_transform_reduce_w8)
-#pragma region stderr-count: 1 .core_transform_reduce_w16)
+#pragma region stderr-count: 1 .core_transform_reduce_unordered_w8)
+#pragma region stderr-count: 1 .core_transform_reduce_unordered_w16)
 #pragma region stderr-count: 0 uses the inline body
 #pragma region do: {output}
 #pragma region requires: 0:0,-1/-1 1:1,0/0 1031:1062961,0/1030 1048576:1099511627776,0/1048575

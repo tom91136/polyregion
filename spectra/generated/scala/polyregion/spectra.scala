@@ -818,6 +818,27 @@ object spectra {
   ): Int =
     polyregion.scalalang.launch.call[Int]("spectra:spectra.reduce_by_key", context, keys, vals, kout, vout, n, eq, op)
 
+  @compileTimeOnly("polyregion_interface:spectra:spectra.reduce_unordered")
+  inline def reduce_unordered[T](in: Array[T], n: Int, init: T, inline op: (T, T) => T): T =
+    polyregion.scalalang.launch.call[T](
+      "spectra:spectra.reduce_unordered",
+      polyregion.jvm.runtime.Context.current(),
+      in,
+      n,
+      init,
+      op
+    )
+
+  @compileTimeOnly("polyregion_interface:spectra:spectra.reduce_unordered")
+  inline def reduce_unordered[T](
+      context: polyregion.jvm.runtime.Context,
+      in: Array[T],
+      n: Int,
+      init: T,
+      inline op: (T, T) => T
+  ): T =
+    polyregion.scalalang.launch.call[T]("spectra:spectra.reduce_unordered", context, in, n, init, op)
+
   @compileTimeOnly("polyregion_interface:spectra:spectra.remove")
   inline def remove[T](data: Array[T], n: Int, value: T, inline eq: (T, T) => Boolean): Int =
     polyregion.scalalang.launch.call[Int](
@@ -1453,6 +1474,35 @@ object spectra {
       inline op: (U, U) => U
   ): U =
     polyregion.scalalang.launch.call[U]("spectra:spectra.transform_reduce", context, in, n, init, map, op)
+
+  @compileTimeOnly("polyregion_interface:spectra:spectra.transform_reduce_unordered")
+  inline def transform_reduce_unordered[T, U](
+      in: Array[T],
+      n: Int,
+      init: U,
+      inline map: T => U,
+      inline op: (U, U) => U
+  ): U =
+    polyregion.scalalang.launch.call[U](
+      "spectra:spectra.transform_reduce_unordered",
+      polyregion.jvm.runtime.Context.current(),
+      in,
+      n,
+      init,
+      map,
+      op
+    )
+
+  @compileTimeOnly("polyregion_interface:spectra:spectra.transform_reduce_unordered")
+  inline def transform_reduce_unordered[T, U](
+      context: polyregion.jvm.runtime.Context,
+      in: Array[T],
+      n: Int,
+      init: U,
+      inline map: T => U,
+      inline op: (U, U) => U
+  ): U =
+    polyregion.scalalang.launch.call[U]("spectra:spectra.transform_reduce_unordered", context, in, n, init, map, op)
 
   @compileTimeOnly("polyregion_interface:spectra:spectra.unique")
   inline def unique[T](data: Array[T], n: Int, inline eq: (T, T) => Boolean): Int =
