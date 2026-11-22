@@ -262,13 +262,7 @@ public final class Marshal implements AutoCloseable {
    * identity of its own, so it may be written once per marshal, through one path.
    */
   public void inline(Object child, Twin twin, ByteBuffer dst, int at, String where) {
-    if (pointers.containsKey(child) || inlined.put(child, Boolean.TRUE) != null)
-      throw new TwinException(
-          "Object "
-              + child.getClass().getName()
-              + " is reached more than once ("
-              + where
-              + "); a nested object travels by value and has one copy");
+    claimInline(child, where);
     enter(child, where);
     try {
       twin.write(this, child, dst, at);
@@ -277,14 +271,30 @@ public final class Marshal implements AutoCloseable {
     }
   }
 
+  /** Records that {@code child} is written by value inside its parent, once per marshal. */
+  public void claimInline(Object child, String where) {
+    if (pointers.containsKey(child) || inlined.put(child, Boolean.TRUE) != null)
+      throw new TwinException(
+          "Object "
+              + child.getClass().getName()
+              + " is reached more than once ("
+              + where
+              + "); a nested object travels by value and has one copy");
+  }
+
+  /** Fails when {@code root} was already written by value inside another object. */
+  public void requireNotInlined(Object root) {
+    if (inlined.containsKey(root))
+      throw new TwinException(
+          "Object " + root.getClass().getName() + " is staged on its own and also nested by value");
+  }
+
   /** Stages the image of a captured object as a buffer of its own. */
   public long instance(Object root) {
     requireOpen();
     Long known = pointers.get(root);
     if (known != null) return known;
-    if (inlined.containsKey(root))
-      throw new TwinException(
-          "Object " + root.getClass().getName() + " is staged on its own and also nested by value");
+    requireNotInlined(root);
     final Twin twin = twins().of(root.getClass());
     final ByteBuffer buffer = allocate(twin.layout().size);
     enter(root, "the capture of " + root.getClass().getName());

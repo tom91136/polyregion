@@ -542,6 +542,7 @@ lazy val cudaSuites =
     "RangeQuerySuite.scala",
     "RangeStepSuite.scala",
     "RangeSumSuite.scala",
+    "ReceiverSuite.scala",
     "RecursionSuite.scala",
     "SpectraLaunchSuite.scala",
     "TwinSuite.scala"

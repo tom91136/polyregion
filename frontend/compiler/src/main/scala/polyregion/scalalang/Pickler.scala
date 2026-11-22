@@ -278,6 +278,9 @@ object Pickler {
         case _                                                                                       => None
       }
 
+    def hasMutableField(tpe: q.TypeRepr): Boolean =
+      tpe.baseClasses.exists(_.declaredFields.exists(_.flags.is(q.Flags.Mutable)))
+
     def readField(recv: q.Term, m: StructMapping.Member[q.Term]): q.Term =
       reachable(recv, m.name).getOrElse {
         recv.tpe.widenTermRefByName.memberType(fieldSymbol(recv, m.name)).widenTermRefByName.asType match {
@@ -450,7 +453,16 @@ object Pickler {
             '{ () }
           case (_, p.Type.Struct(name, _)) if lut.contains(name) =>
             // laid out inline in the parent, as the kernel reads it
-            callFill(name, readField(rootAfterPrism.asTerm, member).asExpr, m, buffer, memberOffset)
+            val child = readField(rootAfterPrism.asTerm, member)
+            val fill  = callFill(name, child.asExpr, m, buffer, memberOffset)
+            if (hasMutableField(child.tpe.widenTermRefByName)) {
+              val where = Expr(s"member `${member.name}` of ${mapping.source.name.fqcn}")
+              '{
+                val nested = ${ child.asExprOf[AnyRef] }
+                if (nested != null) $m.claimInline(nested, $where)
+                $fill
+              }
+            } else fill
           case (_, p.Type.Struct(_, _)) =>
             // opaque to the kernel, no slot
             '{ () }
@@ -695,37 +707,43 @@ object Pickler {
                 case _                    => Nil
               }
 
-              if (typeDefs.size != args.size) {
-                ???
-              }
-              if (valDefs.size != mapping.members.size) {
-                ???
-              }
-
-              val terms = mapping.members.map { member =>
-                val memberOffset = Expr(member.offsetInBytes.toInt)
-                member.tpe match {
-                  case p.Type.Ptr(comp, _) =>
-                    '{ ??? }.asTerm
-                  case p.Type.Struct(name, _) if lut.contains(name) =>
-                    // Nested struct field laid out inline — pass `parentPtr + memberOffset` as
-                    // the struct pointer so callRead wraps the inline slice and reconstructs.
-                    val nestedPtr = '{ $ptr + ${ memberOffset }.toLong }
-                    callRead(name, '{ null }, nestedPtr, m).asTerm
-                  case p.Type.Struct(_, _) =>
-                    // Opaque struct field — synthesise null since we can't reconstruct it from kernel side.
-                    '{ null }.asTerm
-                  case _ => readPrim('buffer, memberOffset, member.tpe).asTerm
+              def unconstructible(why: String): Expr[t] =
+                '{
+                  throw TwinException(
+                    ${ Expr(s"Cannot rebuild an instance of ${tSym.fullName}, $why") }
+                  )
                 }
+
+              if (typeDefs.size != args.size) unconstructible("its type parameters do not match the captured type")
+              else if (valDefs.size != mapping.members.size)
+                unconstructible("its fields are not all constructor parameters")
+              else {
+
+                val terms = mapping.members.map { member =>
+                  val memberOffset = Expr(member.offsetInBytes.toInt)
+                  member.tpe match {
+                    case p.Type.Ptr(comp, _) =>
+                      '{ ??? }.asTerm
+                    case p.Type.Struct(name, _) if lut.contains(name) =>
+                      // Nested struct field laid out inline — pass `parentPtr + memberOffset` as
+                      // the struct pointer so callRead wraps the inline slice and reconstructs.
+                      val nestedPtr = '{ $ptr + ${ memberOffset }.toLong }
+                      callRead(name, '{ null }, nestedPtr, m).asTerm
+                    case p.Type.Struct(_, _) =>
+                      // Opaque struct field — synthesise null since we can't reconstruct it from kernel side.
+                      '{ null }.asTerm
+                    case _ => readPrim('buffer, memberOffset, member.tpe).asTerm
+                  }
+                }
+                // Use asInstanceOf[t] (not asExprOf[t]) so we don't fail when `t` is a singleton type
+                // (e.g. captured `Foo.FooConst.type`); the constructed `new Foo(...)` is structurally compatible.
+                val ctorCall = q.Select
+                  .unique(q.New(q.TypeIdent(q.TypeRepr.of[t].typeSymbol)), "<init>")
+                  .appliedToTypes(args)
+                  .appliedToArgs(terms)
+                '{ ${ ctorCall.asExpr }.asInstanceOf[t] }
               }
-              // Use asInstanceOf[t] (not asExprOf[t]) so we don't fail when `t` is a singleton type
-              // (e.g. captured `Foo.FooConst.type`); the constructed `new Foo(...)` is structurally compatible.
-              val ctorCall = q.Select
-                .unique(q.New(q.TypeIdent(q.TypeRepr.of[t].typeSymbol)), "<init>")
-                .appliedToTypes(args)
-                .appliedToArgs(terms)
-              '{ ${ ctorCall.asExpr }.asInstanceOf[t] }
-            case _ => ???
+            case _ => '{ throw TwinException(${ Expr(s"Cannot rebuild an instance of ${tSym.fullName}") }) }
           }
       }
     }
@@ -739,6 +757,7 @@ object Pickler {
               if (known != -1L) known
               else if ($root == null) { $m.bind($root, 0L); 0L }
               else {
+                $m.requireNotInlined($root)
                 val buffer = ${ allocateBuffer(Expr(mapping.sizeInBytes.toInt)) }
                 ${ callFill(mapping.source.name, root, m, 'buffer, '{ 0 }) }
                 ${ dumpTarget("???", 'buffer) }
