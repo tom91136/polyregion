@@ -3,6 +3,7 @@ package polyregion.javalang;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Base64;
 import java.util.List;
 
 public abstract class LaunchSite {
@@ -12,6 +13,12 @@ public abstract class LaunchSite {
   public abstract String descriptor();
 
   public abstract byte[] binary();
+
+  public static byte[] decodeBinary(String[] chunks) {
+    StringBuilder sb = new StringBuilder();
+    for (String chunk : chunks) sb.append(chunk);
+    return Base64.getDecoder().decode(sb.toString());
+  }
 
   public static String nameOf(String identity, List<String> parts) {
     String raw = identity + "|" + String.join(",", parts);

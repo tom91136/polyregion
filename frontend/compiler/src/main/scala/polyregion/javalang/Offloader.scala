@@ -1,7 +1,6 @@
 package polyregion.javalang
 
 import cats.syntax.all.*
-import com.sun.source.tree.MethodTree
 import net.bytebuddy.description.method.MethodDescription
 import net.bytebuddy.{ByteBuddy, ClassFileVersion}
 import net.bytebuddy.description.modifier.{FieldManifestation, Ownership, TypeManifestation, Visibility}
@@ -12,14 +11,12 @@ import net.bytebuddy.matcher.ElementMatchers
 import polyregion.ast.pass.*
 import polyregion.ast.{CodeGen, MsgPack, PolyAST as p, *}
 import polyregion.jvm.twin.Layout
-import polyregion.jvm.{compiler as ct, runtime as rt}
-import polyregion.scalalang.Pickler
+import polyregion.jvm.compiler as ct
 import polyregion.twin.StructLayouts
 
 import javax.lang.model.`type`.{ArrayType, DeclaredType, TypeKind, TypeMirror}
 import javax.annotation.processing.ProcessingEnvironment
 import javax.lang.model.element.{Modifier, TypeElement}
-import scala.jdk.CollectionConverters.*
 
 object Offloader {
 
@@ -30,9 +27,6 @@ object Offloader {
   private val HostArch   = "native"
 
   case class Executable(fqcn: String, bytes: Array[Byte], twins: List[TwinEmitter.Emitted] = Nil)
-
-  // the backend normalises non-alphanumerics in symbols, so pre-normalise to keep the runtime's name identical
-  private def normalise(s: String): String = s.map(c => if (c.isLetterOrDigit || c == '_') c else '_')
 
   // MonoStruct renames structs, and layouts are reported under the new names
   private def runPasses(prog: p.Program, log: Log): (Map[p.Sym, p.Sym], p.Program) = {
@@ -71,7 +65,6 @@ object Offloader {
   }
 
   val ResultCapture: String = "#result"
-  private val ErrorCapture  = p.Conventions.ErrorArg
 
   // the JNI layer copies arguments in but never out, so the result goes through a one-element output buffer
   def routeReturnThroughCapture(entry: p.Function): p.Function =
@@ -115,63 +108,6 @@ object Offloader {
         body = rewrite(entry.body, 0)._1 :+ p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       )
     }
-
-  // what the launch fills a kernel parameter from; plan: a<i> captured value, l<i> its length, L<i> per-row lengths,
-  // s<owner>#<field> static, t receiver, r result
-  case class Slot(name: String, source: String, tpe: p.Type)
-
-  def slotsOf(
-      entry: p.Function,
-      captures: List[TreeRemapper.Captured],
-      hasResult: Boolean
-  ): Result[List[Slot]] = {
-    val sources = captures.map { c =>
-      c.name -> (c.capture match {
-        case TreeRemapper.Capture.Arg(i)               => s"a$i"
-        case TreeRemapper.Capture.Length(i)            => s"l$i"
-        case TreeRemapper.Capture.RowLengths(i)        => s"L$i"
-        case TreeRemapper.Capture.StaticField(o, name) => s"s$o#$name"
-        case TreeRemapper.Capture.Receiver             => "t"
-      })
-    }.toMap ++ Option.when(hasResult)(ResultCapture -> "r")
-    entry.decl.invokeParams.traverse { a =>
-      sources
-        .get(a.named.symbol)
-        .map(Slot(a.named.symbol, _, a.named.tpe))
-        .failIfEmpty(s"Entry `${entry.name.repr}` takes `${a.named.symbol}`, which no launch source supplies")
-    }
-  }
-
-  // the format is parsed by BinaryOffloadExecutable.invoke
-  private def descriptorOf(
-      entryArgs: List[String],
-      slots: List[Slot],
-      resultTpe: p.Type,
-      layouts: String,
-      twins: List[String],
-      features: List[String],
-      moduleName: String,
-      symbol: String
-  ): Result[String] = {
-    val (error, launched) = entryArgs.partition(_ == ErrorCapture)
-    for {
-      _ <-
-        if (error.size > 1 || (error.nonEmpty && !entryArgs.headOption.contains(ErrorCapture)))
-          s"Entry `$symbol` has the error block in the wrong place: ${entryArgs.mkString(", ")}".fail
-        else ().success
-      chosen <- launched.traverse(name =>
-        slots.find(_.name == name).failIfEmpty(s"Entry `$symbol` takes `$name`, which no launch source supplies")
-      )
-      descriptor <- Either
-        .catchNonFatal {
-          val ordinals =
-            (rt.Type.LONG +: chosen.map(s => Pickler.tpeAsRuntimeTpe(s.tpe)) :+ rt.Type.VOID).map(_.value)
-          s"$moduleName|$symbol|${ordinals.mkString(",")}|${Pickler.tpeAsRuntimeTpe(resultTpe).value}|" +
-            s"${chosen.map(_.source).mkString(",")}|$layouts|${twins.mkString(",")}|${features.mkString(",")}"
-        }
-        .leftMap(e => RuntimeException(s"Cannot derive a launch descriptor for `$symbol`", e))
-    } yield descriptor
-  }
 
   private def descriptorOfType(env: ProcessingEnvironment, t: TypeMirror): String = t.getKind match {
     case TypeKind.BOOLEAN => "Z"
@@ -247,20 +183,6 @@ object Offloader {
         }
       }
 
-  private def compileToObject(prog: p.Program): Result[(Array[Byte], List[String], List[String])] = for {
-    ast <- Either.catchNonFatal {
-      MsgPack.encode(CodeGen.programVersioned(prog))
-    }
-    compilation <- Either.catchNonFatal {
-      val compiler = ct.Compiler.create()
-      try compiler.compile(ast, emitAssembly = false, ct.Options.of(HostTarget, HostArch), ct.Opt.O2.value)
-      finally compiler.close()
-    }
-    image <- Option(compilation.program)
-      .filter(_.nonEmpty)
-      .failIfEmpty(s"Native compilation produced no object:\n${compilation.messages}")
-  } yield (image, compilation.features.toList, compilation.entryArgs.toList)
-
   // an array is no constant, so chunks go in as strings and join at class load
   private class BinaryInitialiser(fqcn: String, chunks: List[String]) extends ByteCodeAppender {
     override def apply(
@@ -279,7 +201,7 @@ object Offloader {
       val isInterface = false
       mv.visitMethodInsn(
         Opcodes.INVOKESTATIC,
-        "polyregion/javalang/BinaryOffloadExecutable",
+        "polyregion/javalang/LaunchSite",
         "decodeBinary",
         "([Ljava/lang/String;)[B",
         isInterface
@@ -293,7 +215,7 @@ object Offloader {
       fqcn: String,
       image: Array[Byte],
       descriptor: String,
-      parent: Class[? <: AnyRef] = classOf[BinaryOffloadExecutable]
+      parent: Class[? <: AnyRef] = classOf[LaunchSite]
   ): Result[Array[Byte]] =
     Either.catchNonFatal {
       val chunks = java.util.Base64.getEncoder.encodeToString(image).grouped(ChunkSize).toList
@@ -319,7 +241,7 @@ object Offloader {
   def unsupported(
       fqcn: String,
       reason: String,
-      parent: Class[? <: AnyRef] = classOf[BinaryOffloadExecutable]
+      parent: Class[? <: AnyRef] = classOf[LaunchSite]
   ): Result[Executable] =
     emitClass(fqcn, Array.emptyByteArray, UnsupportedMarker + reason.take(ReasonLimit), parent)
       .map(Executable(fqcn, _))
@@ -369,37 +291,5 @@ object Offloader {
       }
       (layouts, twins)
     }
-  }
-
-  def compile(sources: TreeRemapper.Sources, entry: MethodTree, fqcn: String): Result[Executable] = {
-    import sources.{classTable, env}
-    val log    = PluginEntry.defaultLog
-    val symbol = normalise(fqcn)
-    for {
-      region   <- TreeRemapper.compileRegion(sources, entry)
-      raw      <- withFieldStructs(region.program, classTable, region.outerRefs)
-      rawEntry <- raw.entry.failIfEmpty(s"Region `$symbol` has no entry")
-      resultTpe = rawEntry.rtn
-      routed    = routeReturnThroughCapture(rawEntry.copy(decl = rawEntry.decl.copy(name = p.Sym(symbol))))
-      slots  <- slotsOf(routed, region.captures, resultTpe != p.Type.Unit0)
-      passed <- optimise(region, raw, routed, symbol, log)
-      (monoToPoly, prog) = passed
-      twinned  <- twinsOf(sources, prog, monoToPoly, region.tags, fqcn.substring(fqcn.lastIndexOf('.') + 1))
-      _        <- prog.entry.failIfEmpty(s"Region `$symbol` lost its entry")
-      compiled <- compileToObject(prog)
-      (image, features, entryArgs) = compiled
-      (layouts, twins)             = twinned
-      descriptor <- descriptorOf(
-        entryArgs,
-        slots,
-        resultTpe,
-        Layout.encodeAll(layouts.asJava),
-        twins.map(_.fqcn),
-        features,
-        fqcn,
-        symbol
-      )
-      bytes <- emitClass(fqcn, image, descriptor)
-    } yield Executable(fqcn, bytes, twins)
   }
 }

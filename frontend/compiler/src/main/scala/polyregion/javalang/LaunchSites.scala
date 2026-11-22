@@ -252,9 +252,10 @@ object LaunchSites {
       }
       def choose(name: p.Sym, args: List[p.Type], rtn: p.Type): p.Sym = {
         val candidates = overloaded(name).distinctBy(_.decl)
+        val arity      = args.size
         val found = candidates
           .find(fn => fn.args.map(_.named.tpe) == args && fn.rtn == rtn)
-          .orElse(candidates.find(fn => fn.args.sizeIs == args.size && fn.rtn == rtn))
+          .orElse(candidates.find(fn => fn.args.sizeIs == arity && fn.rtn == rtn))
           .getOrElse(candidates.head)
         renamed(name).find(_._1 == found.decl).get._2
       }

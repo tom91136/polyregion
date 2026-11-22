@@ -194,7 +194,7 @@ class Processor(scan: Tree => LaunchSites.Collected) extends AbstractProcessor {
         fqcn: String,
         label: String,
         compiled: Result[Offloader.Executable],
-        parent: Class[? <: AnyRef] = classOf[BinaryOffloadExecutable]
+        parent: Class[? <: AnyRef]
     ): Unit = {
       val at  = fqcn.lastIndexOf('.')
       val pkg = fqcn.take(at)
