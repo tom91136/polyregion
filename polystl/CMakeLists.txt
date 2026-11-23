@@ -25,6 +25,7 @@ foreach (TARGET polystl polystl-static)
     target_link_libraries(${TARGET} PRIVATE polyinvoke-obj polyrt-obj polyreflect-rt)
     polyregion_apply_common_options(${TARGET} DYNAMIC_CXX_RUNTIME)
     if (APPLE)
+        target_compile_options(${TARGET} PRIVATE -frtti)
         target_link_options(${TARGET} PRIVATE LINKER:-undefined,dynamic_lookup)
     elseif (UNIX)
         # LLVM's static libs drag a copy of libstdc++ ABI symbols (e.g. _ZSt21ios_base_library_initv,

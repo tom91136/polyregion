@@ -93,6 +93,10 @@ set(POLYINVOKE_SRC
         ${POLYINVOKE_WRANGLER_SRCS}
         device_lock.cpp
         ${RUNTIME_SRC_FILES})
+if (APPLE)
+    # XXX a -fno-rtti TU's weak std typeinfo copies capture the -frtti TUs' references within the image, so it must not throw
+    set_source_files_properties(coff_plugin.cpp PROPERTIES COMPILE_OPTIONS "-fno-rtti;-fno-exceptions")
+endif ()
 
 set(POLYINVOKE_PUBLIC_LIBS
         Aspartame::Aspartame
@@ -146,6 +150,9 @@ foreach (TARGET polyinvoke polyinvoke-obj polyinvoke-static)
         target_compile_definitions(${TARGET} PUBLIC VULKAN_HPP_NO_SPACESHIP_OPERATOR)
     endif ()
     target_compile_options(${TARGET} PRIVATE ${COMPILE_OPTIONS})
+    if (APPLE)
+        target_compile_options(${TARGET} PRIVATE -frtti)
+    endif ()
     target_compile_options(${TARGET} PUBLIC ${RUNTIME_COMPILE_OPTIONS})
     target_link_libraries(${TARGET} PUBLIC polycommon ${POLYINVOKE_LIBS} ${RUNTIME_LINK_LIBS})
     target_link_options(${TARGET} PRIVATE ${LINK_OPTIONS})

@@ -13,6 +13,7 @@ target_link_libraries(polyrt-obj PUBLIC polyinvoke-obj polyreflect-rt Aspartame:
 polyregion_apply_common_options(polyrt-obj)
 target_include_directories(polyrt-obj PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 if (APPLE)
+    target_compile_options(polyrt-obj PRIVATE -frtti)
     target_link_options(polyrt-obj PRIVATE LINKER:-undefined,dynamic_lookup,-flat_namespace)
 endif ()
 
