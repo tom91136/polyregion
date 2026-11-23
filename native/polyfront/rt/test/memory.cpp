@@ -38,6 +38,7 @@
 
 #include "jit_policy.hpp"
 #include "reflect-rt/rt_reflect.hpp"
+#include "skip_reasons.hpp"
 
 using namespace polyregion::invoke;
 using namespace polyregion::runtime;
@@ -3605,6 +3606,59 @@ TEST_CASE("polydco managed launches leave no device allocations behind") {
 }
 
 #endif
+
+TEST_CASE("skip reasons stay scoped to the device that lacked a feature") {
+  using polyregion::polyrt::SkipReasons;
+  const SkipReasons::Device lacking{"platform-a", "gpu-a", "Cuda", "Object"};
+  const SkipReasons::Device capable{"platform-b", "gpu-b", "Managed", "Object"};
+  const SkipReasons::Device other{"platform-a", "gpu-c", "Cuda", "Object"};
+  const SkipReasons::Device jit{"platform-c", "gpu-jit", "Cuda", "Object"};
+  const SkipReasons::Device noImage{"platform-d", "gpu-image", "Cuda", "Object"};
+  SkipReasons reasons;
+  reasons.attempt(lacking, {.device = lacking,
+                            .module = "a",
+                            .kind = "Cuda",
+                            .format = "Object",
+                            .features = {"int64"},
+                            .outcome = std::string(polyregion::polyrt::outcomeName(polyregion::runtime::LoadOutcome::Lacks)),
+                            .detail = {"int64"}});
+  CHECK(reasons.cannotRunAnyImageOn(lacking));
+  CHECK_FALSE(reasons.cannotRunAnyImageOn(capable));
+  reasons.attempt(capable, {.device = capable,
+                            .module = "b",
+                            .kind = "Managed",
+                            .format = "Object",
+                            .features = {},
+                            .outcome = std::string(polyregion::polyrt::outcomeName(polyregion::runtime::LoadOutcome::Loaded)),
+                            .detail = {}});
+  CHECK_FALSE(reasons.cannotRunAnyImageOn(capable));
+  CHECK(reasons.cannotRunAnyImageOn(lacking));
+  CHECK_FALSE(reasons.cannotRunAnyImageOn(other));
+  for (const auto *on : {&jit, &noImage})
+    reasons.attempt(*on, {.device = *on,
+                          .module = "c",
+                          .kind = "Cuda",
+                          .format = "Object",
+                          .features = {"int64"},
+                          .outcome = std::string(polyregion::polyrt::outcomeName(polyregion::runtime::LoadOutcome::Lacks)),
+                          .detail = {"int64"}});
+  reasons.attempt(jit, {.device = jit,
+                        .module = "d",
+                        .kind = "Cuda",
+                        .format = "Object",
+                        .features = {},
+                        .outcome = std::string(polyregion::polyrt::outcomeName(polyregion::runtime::LoadOutcome::Unprepared)),
+                        .detail = {"jit"}});
+  reasons.attempt(noImage, {.device = noImage,
+                            .module = "e",
+                            .kind = "Cuda",
+                            .format = "Object",
+                            .features = {},
+                            .outcome = std::string(polyregion::polyrt::outcomeName(polyregion::runtime::LoadOutcome::Unprepared)),
+                            .detail = {"image"}});
+  CHECK_FALSE(reasons.cannotRunAnyImageOn(jit));
+  CHECK(reasons.cannotRunAnyImageOn(noImage));
+}
 
 TEST_CASE("skip probe: device lacks required features", "[.probe]") {
   WithStubDevice device(false);

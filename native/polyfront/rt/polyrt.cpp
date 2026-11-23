@@ -906,7 +906,12 @@ POLYREGION_EXPORT void polyrt_context_fallback(void *context, const char *site) 
     log(DebugLevel::Debug, "<%s> Explicit host context, running the interface fallback", site);
     return;
   }
-  if (skipReasons().lacksCapability()) polyregion::polyrt::noCompatibleKernelExit(site);
+  const auto device =
+      polyregion::polyrt::SkipReasons::Device{.platform = execution.platform->name(),
+                                              .name = execution.device->name(),
+                                              .kind = std::string(magic_enum::enum_name(execution.platform->kind())),
+                                              .format = std::string(magic_enum::enum_name(execution.device->moduleFormat()))};
+  if (skipReasons().cannotRunAnyImageOn(device)) polyregion::polyrt::noCompatibleKernelExit(site);
   std::fprintf(stderr,
                "[PolyRT] %s: no kernel image matches device `%s` of platform `%s`; an explicit context never runs the host fallback\n",
                site, execution.device->name().c_str(), execution.platform->name().c_str());

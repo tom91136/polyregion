@@ -33,6 +33,7 @@ public:
   };
 
   struct Attempt {
+    std::optional<Device> device;
     std::string module, kind, format;
     std::vector<std::string> features;
     std::string outcome;
@@ -71,12 +72,19 @@ public:
   void attempt(const std::optional<Device> &on, Attempt a) {
     const std::scoped_lock lock(mutex);
     if (on) device = on;
+    a.device = on;
     attempts.push_back(std::move(a));
   }
 
-  bool lacksCapability() const {
+  bool cannotRunAnyImageOn(const Device &on) const {
     const std::scoped_lock lock(mutex);
-    return attempts ^ exists([](const auto &a) { return a.outcome == outcomeName(runtime::LoadOutcome::Lacks); });
+    const auto same = [&](const auto &a) { return a.device && a.device->name == on.name && a.device->platform == on.platform; };
+    return attempts ^ exists([&](const auto &a) { return same(a) && a.outcome == outcomeName(runtime::LoadOutcome::Lacks); })
+           && !(attempts ^ exists([&](const auto &a) { return same(a) && a.outcome == outcomeName(runtime::LoadOutcome::Loaded); }))
+           && !(attempts ^ exists([&](const auto &a) {
+                  return same(a) && a.outcome == outcomeName(runtime::LoadOutcome::Unprepared)
+                         && (a.detail ^ exists([](const auto &d) { return d == "jit"; }));
+                }));
   }
 
   std::string line() const {
