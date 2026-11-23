@@ -544,6 +544,10 @@ struct LogicalPointerModel final : VulkanLowering {
   using VulkanLowering::VulkanLowering;
   ValPtr selectPtr(CodeGen &gen, const Term::Select &select) override { return selectPtrImpl(gen, select, /*oneGep*/ true); }
   void copyAggregate(CodeGen &gen, ValPtr dst, ValPtr src, const AnyType &tpe) override {
+    if (!src->getType()->isPointerTy()) {
+      gen.B.CreateStore(src, dst);
+      return;
+    }
     structFieldCopy(dst, src, gen.resolveType(tpe), tpe, {llvm::ConstantInt::get(gen.C.i32Ty(), 0)});
   }
   void zeroAggregate(CodeGen &gen, ValPtr dst, const AnyType &tpe) override {
