@@ -256,18 +256,15 @@ object StreamSites {
           synth.tpe(ret)
         ) { (msym, sn, g, args) =>
           val i = args.head
+          def load(kind: Char, op: String): Result[(Option[JCTree.JCStatement], JCTree.JCExpression)] =
+            frame.ops(op).map { found =>
+              val x = JSymbol.VarSymbol(0L, synth.names.fromString("x"), synth.tpe(kind), msym)
+              (Some(make.VarDef(x, synth.call(found, List(sn.head, i)))), make.Ident(x))
+            }
           val entry: Result[(Option[JCTree.JCStatement], JCTree.JCExpression)] = origin match {
-            case Origin.Iota => (None, i).success
-            case Origin.Held(kind) =>
-              frame.ops(s"get${suffix(kind)}").map { get =>
-                val x = JSymbol.VarSymbol(0L, synth.names.fromString("x"), synth.tpe(kind), msym)
-                (Some(make.VarDef(x, synth.call(get, List(sn.head, i)))), make.Ident(x))
-              }
-            case Origin.Counted(kind) =>
-              frame.ops(s"at${suffix(kind)}${suffix(index)}").map { at =>
-                val x = JSymbol.VarSymbol(0L, synth.names.fromString("x"), synth.tpe(kind), msym)
-                (Some(make.VarDef(x, synth.call(at, List(sn.head, i)))), make.Ident(x))
-              }
+            case Origin.Iota          => (None, i).success
+            case Origin.Held(kind)    => load(kind, s"get${suffix(kind)}")
+            case Origin.Counted(kind) => load(kind, s"at${suffix(kind)}${suffix(index)}")
           }
           entry.flatMap((decl, x) => body(frame, msym, sn, g, x, stages, leaf).map(decl.toList ::: _))
         }

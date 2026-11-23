@@ -4,7 +4,7 @@ import cats.syntax.all.*
 import polyregion.ast.pass.*
 import polyregion.ast.{PolyAST as p, *}
 import polyregion.javalang.BytecodeRemapper.symbolOf
-import polyregion.javalang.LaunchCore.{EnvField, Identity, Mode, PrimOfType, Split, Twinned}
+import polyregion.javalang.LaunchCore.{EnvField, Identity, Mode, PrimOfType, Split, Twinned, returnTypeError}
 import polyregion.jvm.runtime.PolyregionRuntimeException
 import polyregion.scalalang.LaunchConfig
 
@@ -70,12 +70,7 @@ object RuntimeJit {
           PrimOfType
             .get(other)
             .map(_.code)
-            .failIfEmpty(
-              other match {
-                case p.Type.Ptr(_, _) => s"result of type `${other.repr}` escapes the region"
-                case _                => s"result of type `${other.repr}` cannot be returned from the region"
-              }
-            )
+            .failIfEmpty(returnTypeError(other))
       }
       origins = entryFn.args.zipWithIndex.map((arg, i) => arg.named.symbol -> i).toMap
       depFns  = resolved.functions.filterNot(_.decl == entryFn.decl)
@@ -128,16 +123,18 @@ object RuntimeJit {
       )
       identity <- Identity.parse(CoreIdentity)
       assembled <- LaunchCore.assembleParts(
-        hostOnly,
-        fqcn,
-        identity,
-        p.Type.Unit0,
-        'V',
-        List(p.Type.IntS64, LaunchCore.callableType(callable)),
-        List(p.Program.TypeSize(p.Type.IntS64, 8)),
-        List("LJ1", LaunchCore.specOf(callable.environment)),
-        List(callable),
-        callable.result
+        LaunchCore.Assembly(
+          hostOnly,
+          fqcn,
+          identity,
+          p.Type.Unit0,
+          'V',
+          List(p.Type.IntS64, LaunchCore.callableType(callable)),
+          List(p.Program.TypeSize(p.Type.IntS64, 8)),
+          List("LJ1", LaunchCore.specOf(callable.environment)),
+          List(callable),
+          callable.result
+        )
       )
     } yield (assembled.descriptor, assembled.binary)
   }

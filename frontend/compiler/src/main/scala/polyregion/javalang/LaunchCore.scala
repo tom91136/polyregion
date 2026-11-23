@@ -39,6 +39,11 @@ object LaunchCore {
 
   def inexpressible(message: String): Result[Nothing] = Left(Inexpressible(message))
 
+  def returnTypeError(tpe: p.Type): String = tpe match {
+    case p.Type.Ptr(_, _) => s"result of type `${tpe.repr}` escapes the region"
+    case _                => s"result of type `${tpe.repr}` cannot be returned from the region"
+  }
+
   enum Mode {
     case Site
     case Region
@@ -308,27 +313,7 @@ object LaunchCore {
     case Some(environment) => p.Type.Struct(environment.definition.name, Nil)
   }
 
-  def assemble(
-      config: LaunchConfig,
-      fqcn: String,
-      identity: Identity,
-      rtn: p.Type,
-      rtnCode: Char,
-      argumentTypes: List[p.Type],
-      argumentSizes: List[p.Program.TypeSize],
-      specs: List[String],
-      callables: List[Callable],
-      regionResult: Char,
-      parent: Class[?]
-  ): Result[Offloader.Executable] =
-    assembleParts(config, fqcn, identity, rtn, rtnCode, argumentTypes, argumentSizes, specs, callables, regionResult)
-      .flatMap(assembled =>
-        Offloader
-          .emitClass(fqcn, assembled.binary, assembled.descriptor, parent)
-          .map(Offloader.Executable(fqcn, _, assembled.twins))
-      )
-
-  def assembleParts(
+  case class Assembly(
       config: LaunchConfig,
       fqcn: String,
       identity: Identity,
@@ -339,25 +324,34 @@ object LaunchCore {
       specs: List[String],
       callables: List[Callable],
       regionResult: Char
-  ): Result[Assembled] = {
-    val entryName    = normalise(fqcn.substring(fqcn.lastIndexOf('.') + 1))
-    val environments = callables.flatMap(_.environment)
+  )
+
+  def assemble(a: Assembly, parent: Class[?]): Result[Offloader.Executable] =
+    assembleParts(a).flatMap(assembled =>
+      Offloader
+        .emitClass(a.fqcn, assembled.binary, assembled.descriptor, parent)
+        .map(Offloader.Executable(a.fqcn, _, assembled.twins))
+    )
+
+  def assembleParts(a: Assembly): Result[Assembled] = {
+    val entryName    = normalise(a.fqcn.substring(a.fqcn.lastIndexOf('.') + 1))
+    val environments = a.callables.flatMap(_.environment)
     val typeSizes = environments.map(e => p.Program.TypeSize(p.Type.Struct(e.definition.name, Nil), e.size)) ++
-      argumentSizes ++ PrimOfType.get(rtn).map(prim => p.Program.TypeSize(prim.tpe, prim.size))
+      a.argumentSizes ++ PrimOfType.get(a.rtn).map(prim => p.Program.TypeSize(prim.tpe, prim.size))
     val functions = IntrinsicTable.dedupe(
-      importRoot(entryName, p.Sym(identity.declaration), argumentTypes, rtn) :: callables.flatMap(c =>
+      importRoot(entryName, p.Sym(a.identity.declaration), a.argumentTypes, a.rtn) :: a.callables.flatMap(c =>
         c.function :: c.dependencies
       )
     )
-    val defs    = (environments.map(_.definition) ++ callables.flatMap(_.defs)).distinct
+    val defs    = (environments.map(_.definition) ++ a.callables.flatMap(_.defs)).distinct
     val request = p.Program.LinkRequest(Nil, p.Program(None, functions, defs), Nil, typeSizes.distinct)
     for {
       encoded <- Either.catchNonFatal(MsgPack.encode(MsgPack.Versioned(PolyPackageWireSchema.Hash, request)))
-      groups  <- compileBundles(identity, entryName, encoded, config)
-      twins   = callables.flatMap(_.twins)
-      layouts = Layout.encodeAll(callables.flatMap(_.layouts).asJava)
+      groups  <- compileBundles(a.identity, entryName, encoded, a.config)
+      twins   = a.callables.flatMap(_.twins)
+      layouts = Layout.encodeAll(a.callables.flatMap(_.layouts).asJava)
       descriptor =
-        s"$entryName|$rtnCode|${specs.mkString(";")}|$regionResult|$layouts|${twins.map(_.fqcn).mkString(",")}"
+        s"$entryName|${a.rtnCode}|${a.specs.mkString(";")}|${a.regionResult}|$layouts|${twins.map(_.fqcn).mkString(",")}"
     } yield Assembled(descriptor, encodeGroups(groups), twins)
   }
 }

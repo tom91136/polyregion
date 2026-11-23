@@ -204,14 +204,7 @@ object LaunchSites {
           PrimOfType
             .get(other)
             .map(_.code)
-            .toRight(
-              Inexpressible(
-                other match {
-                  case p.Type.Ptr(_, _) => s"result of type `${other.repr}` escapes the region"
-                  case _                => s"result of type `${other.repr}` cannot be returned from the region"
-                }
-              )
-            )
+            .toRight(Inexpressible(returnTypeError(other)))
       }
       entry <- program.entry.failIfEmpty(s"launch callable `$symbol` lost its entry")
       twinned <-
@@ -306,16 +299,7 @@ object LaunchSites {
         case Argument(_, Kind.Array(prim))  => p.Program.TypeSize(prim.tpe, prim.size)
       }
       executable <- assemble(
-        config,
-        fqcn,
-        identity,
-        rtn,
-        rtnCode,
-        argumentTypes,
-        sizes,
-        specs,
-        lowered.map(_._2),
-        'V',
+        Assembly(config, fqcn, identity, rtn, rtnCode, argumentTypes, sizes, specs, lowered.map(_._2), 'V'),
         classOf[LaunchSite]
       )
     } yield executable
@@ -352,16 +336,18 @@ object LaunchSites {
         case StepArg.Array(prim)  => p.Program.TypeSize(prim.tpe, prim.size)
       }
       executable <- assemble(
-        config,
-        fqcn,
-        parsed,
-        rtn,
-        rtnCode,
-        argumentTypes,
-        sizes,
-        specs,
-        args.collect { case StepArg.Fn(callable) => callable },
-        'V',
+        Assembly(
+          config,
+          fqcn,
+          parsed,
+          rtn,
+          rtnCode,
+          argumentTypes,
+          sizes,
+          specs,
+          args.collect { case StepArg.Fn(callable) => callable },
+          'V'
+        ),
         classOf[LaunchSite]
       )
     } yield executable
@@ -411,16 +397,18 @@ object LaunchSites {
           core     <- Identity.parse(CoreIdentity)
           callable <- lowerCallable(sources, config, entryName, 0, entry, impl, impl.params.size, Mode.Region)
           executable <- assemble(
-            config,
-            fqcn,
-            core,
-            p.Type.Unit0,
-            'V',
-            List(p.Type.IntS64, callableType(callable)),
-            List(p.Program.TypeSize(p.Type.IntS64, 8)),
-            List("LJ1", specOf(callable.environment)),
-            List(callable),
-            callable.result,
+            Assembly(
+              config,
+              fqcn,
+              core,
+              p.Type.Unit0,
+              'V',
+              List(p.Type.IntS64, callableType(callable)),
+              List(p.Program.TypeSize(p.Type.IntS64, 8)),
+              List("LJ1", specOf(callable.environment)),
+              List(callable),
+              callable.result
+            ),
             classOf[LaunchRegion]
           )
         } yield executable
