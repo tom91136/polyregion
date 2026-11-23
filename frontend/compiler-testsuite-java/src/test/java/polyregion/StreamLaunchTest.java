@@ -349,6 +349,98 @@ public class StreamLaunchTest {
   }
 
   @Test
+  public void filtersDoubleExtremesFollowTheJdk() {
+    double[] mixed = {1.0, Double.NaN, 2.0, Double.POSITIVE_INFINITY, -0.0, 0.0};
+    assertEquals(
+        Arrays.stream(mixed).filter(x -> x != x || x > 0).min(),
+        Arrays.stream(mixed).parallel().filter(x -> x != x || x > 0).min());
+    assertEquals(
+        Arrays.stream(mixed).filter(x -> x != x || x > 0).max(),
+        Arrays.stream(mixed).parallel().filter(x -> x != x || x > 0).max());
+
+    double[] zeros = {-0.0, 0.0};
+    assertEquals(
+        Double.doubleToLongBits(Arrays.stream(zeros).filter(x -> true).min().getAsDouble()),
+        Double.doubleToLongBits(Arrays.stream(zeros).parallel().filter(x -> true).min().getAsDouble()));
+    assertEquals(
+        Double.doubleToLongBits(Arrays.stream(zeros).filter(x -> true).max().getAsDouble()),
+        Double.doubleToLongBits(Arrays.stream(zeros).parallel().filter(x -> true).max().getAsDouble()));
+
+    double[] infinities = {Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY};
+    assertEquals(
+        Double.POSITIVE_INFINITY,
+        Arrays.stream(infinities).parallel().filter(x -> x > 0).min().getAsDouble(),
+        0.0);
+    assertEquals(
+        Double.POSITIVE_INFINITY,
+        Arrays.stream(infinities).parallel().filter(x -> x > 0).max().getAsDouble(),
+        0.0);
+
+    double[] blocks = new double[3 * 1024];
+    Arrays.fill(blocks, -1.0);
+    blocks[1024] = Double.NaN;
+    blocks[2048] = 5.0;
+    assertEquals(
+        Arrays.stream(blocks).filter(x -> x != x || x >= 0).min(),
+        Arrays.stream(blocks).parallel().filter(x -> x != x || x >= 0).min());
+
+    assertEquals(OptionalDouble.empty(), Arrays.stream(mixed).parallel().filter(x -> x == 42.0).min());
+    assertEquals(OptionalDouble.empty(), Arrays.stream(mixed).parallel().filter(x -> x == 42.0).max());
+    assertEquals(OptionalDouble.empty(), Arrays.stream(new double[0]).parallel().filter(x -> true).min());
+    assertEquals(OptionalDouble.empty(), Arrays.stream(new double[0]).parallel().filter(x -> true).max());
+  }
+
+  @Test
+  public void filtersIntegralExtremesKeepNeutralSurvivors() {
+    long[] longs = {Long.MAX_VALUE, Long.MIN_VALUE, 5L};
+    assertEquals(
+        OptionalLong.of(Long.MAX_VALUE),
+        Arrays.stream(longs).parallel().filter(x -> x == Long.MAX_VALUE).min());
+    assertEquals(
+        OptionalLong.of(Long.MIN_VALUE),
+        Arrays.stream(longs).parallel().filter(x -> x == Long.MIN_VALUE).max());
+    assertEquals(
+        Arrays.stream(longs).filter(x -> x > 0).min(),
+        Arrays.stream(longs).parallel().filter(x -> x > 0).min());
+
+    int[] ints = {Integer.MIN_VALUE, Integer.MIN_VALUE, 5};
+    assertEquals(OptionalInt.of(Integer.MIN_VALUE), Arrays.stream(ints).parallel().filter(x -> x < 0).max());
+    assertEquals(
+        Arrays.stream(ints).filter(x -> x >= 0).max(), Arrays.stream(ints).parallel().filter(x -> x >= 0).max());
+
+    long[] small = {1L, 2L, 3L};
+    assertEquals(OptionalLong.empty(), Arrays.stream(small).parallel().filter(x -> x > 100).min());
+    assertEquals(OptionalLong.empty(), Arrays.stream(small).parallel().filter(x -> x > 100).max());
+    assertEquals(OptionalLong.empty(), Arrays.stream(new long[0]).parallel().filter(x -> true).min());
+    assertEquals(OptionalLong.empty(), Arrays.stream(new long[0]).parallel().filter(x -> true).max());
+  }
+
+  @Test
+  public void filtersIntegralAndDoubleExtremesOncePerElement() {
+    long[] longs = {1L, 2L, 3L, 4L};
+    int[] longHits = new int[longs.length];
+    assertEquals(
+        Arrays.stream(longs).filter(x -> x % 2 == 0).min(),
+        Arrays.stream(longs)
+            .parallel()
+            .map(x -> { longHits[(int) x - 1]++; return x; })
+            .filter(x -> x % 2 == 0)
+            .min());
+    for (int hit : longHits) assertEquals(1, hit);
+
+    double[] doubles = {1.0, 2.0, 3.0, 4.0};
+    int[] doubleHits = new int[doubles.length];
+    assertEquals(
+        Arrays.stream(doubles).filter(x -> x > 2).max(),
+        Arrays.stream(doubles)
+            .parallel()
+            .map(x -> { doubleHits[(int) x - 1]++; return x; })
+            .filter(x -> x > 2)
+            .max());
+    for (int hit : doubleHits) assertEquals(1, hit);
+  }
+
+  @Test
   public void leavesSequentialStreamsToTheJdk() {
     int[] xs = ints(25);
     assertEquals(Arrays.stream(xs).map(x -> x + 1).sum(), Arrays.stream(xs).map(x -> x + 1).sum());

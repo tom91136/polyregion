@@ -84,6 +84,7 @@ public final class Streams {
   public static final String TAIL = "tail";
   public static final String EACH = "each";
   public static final String SUMS = "sums";
+  public static final String EXT = "ext";
 
   public static final char FILTER_STAGE = 'F';
   public static final char NO_NEUTRAL = 'I';
@@ -482,6 +483,32 @@ public final class Streams {
       return total;
     }
 
+    Object extremumPartials(How how, long[] count) {
+      Object best = null;
+      long total = 0;
+      long step = step(indexChunk);
+      int maxBlocks = (int) ((step + Ops.BLOCK - 1) / Ops.BLOCK);
+      Object values = newArray(out, 2 * maxBlocks);
+      long[] counts = new long[2 * maxBlocks];
+      for (long offset = 0; offset < n; offset += step) {
+        long length = length(offset, step);
+        int blocks = (int) ((length + Ops.BLOCK - 1) / Ops.BLOCK);
+        Object[] all = Arrays.copyOf(flat(base(offset), length), captured.length + 4);
+        all[captured.length + 2] = values;
+        all[captured.length + 3] = counts;
+        Launch.step(home, site(EXT), context, new Object[] {(long) blocks, null}, all);
+        for (int b = 0; b < blocks; b++) {
+          long kept = counts[2 * b + 1];
+          if (kept == 0) continue;
+          total += kept;
+          Object value = Array.get(values, 2 * b);
+          best = best == null ? value : combine(how, out, best, value);
+        }
+      }
+      count[0] = total;
+      return best;
+    }
+
     Object launch(String role, Object base, Object neutral, Object... args) {
       return Launch.step(home, site(role), context, args, flat(base, neutral));
     }
@@ -612,12 +639,11 @@ public final class Streams {
             boolean min = op == Op.MIN;
             How how = min ? How.MIN : How.MAX;
             if (n == 0) return empty(out);
-            Object neutral = extremum(out, min);
-            if (!filtered) return present(out, total(out, neutral, how));
+            if (!filtered) return present(out, total(out, extremum(out, min), how));
             long[] count = {0};
-            List<Object> parts = survivorPartials(neutral, count);
-            if (parts.isEmpty()) return empty(out);
-            return present(out, merge(parts, how, out, neutral));
+            Object value = extremumPartials(how, count);
+            if (count[0] == 0) return empty(out);
+            return present(out, value);
           }
       }
     }

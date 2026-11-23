@@ -77,6 +77,7 @@ object StreamSites {
         simple: JSymbol.VarSymbol,
         kept: JSymbol.VarSymbol
     )
+    case Extreme(ext: JSymbol.VarSymbol, count: JSymbol.VarSymbol, min: Boolean, kind: Char)
   }
 
   private enum Order {
@@ -94,6 +95,7 @@ object StreamSites {
     case Index(index: Char, origin: Origin, stages: List[Stage], leaf: Leaf, ret: Char, neutral: Option[Char] = None)
     case Binary(lam: Lam, kind: Char, ret: Char, neutral: Option[Char] = None)
     case Blocks(kind: Char, held: Boolean, stages: List[Stage])
+    case Extrema(kind: Char, held: Boolean, stages: List[Stage], min: Boolean)
   }
 
   private enum Arg {
@@ -151,6 +153,12 @@ object StreamSites {
       case 'J' => make.Literal(Long.box(value))
       case 'D' => make.Literal(Double.box(value.toDouble))
       case 'Z' => make.Literal(TypeTag.BOOLEAN, Int.box(value.toInt))
+    }
+
+    def extremum(kind: Char, min: Boolean): JCTree.JCExpression = kind match {
+      case 'I' => make.Literal(Int.box(if (min) Int.MaxValue else Int.MinValue))
+      case 'J' => make.Literal(Long.box(if (min) Long.MaxValue else Long.MinValue))
+      case 'D' => make.Literal(Double.box(if (min) Double.PositiveInfinity else Double.NegativeInfinity))
     }
   }
 
@@ -298,7 +306,14 @@ object StreamSites {
             def ident(v: JSymbol.VarSymbol) = make.Ident(v)
             def store(k: Int, v: JSymbol.VarSymbol): JCTree.JCStatement =
               make.Exec(
-                synth.call(put, List(out, synth.call(slot, List(args.head, make.Literal(Int.box(k)))), ident(v)))
+                synth.call(
+                  put,
+                  List(
+                    out,
+                    synth.call(slot, List(args.head, make.Literal(Int.box(4)), make.Literal(Int.box(k)))),
+                    ident(v)
+                  )
+                )
               )
             val advance = make.Assign(ident(j), synth.call(add, List(ident(j), make.Literal(Long.box(1L)))))
             advance.setType(synth.tpe('J'))
@@ -328,6 +343,75 @@ object StreamSites {
             )
           }
         }
+      case Program.Extrema(kind, held, stages, min) =>
+        build(
+          frame,
+          name,
+          frame.originType,
+          synth.tpe('J'),
+          List(synth.tpe('J')),
+          synth.tpe('V'),
+          List(synth.array(kind), synth.array('J'))
+        ) { (msym, sn, gOut, args) =>
+          val captures         = frame.gTypes.size
+          val (g, ext, counts) = (gOut.take(captures), gOut(captures), gOut(captures + 1))
+          def local(symbol: String, kind: Char) =
+            JSymbol.VarSymbol(0L, synth.names.fromString(symbol), synth.tpe(kind), msym)
+          val (j, from, to) = (local("j", 'J'), local("from", 'J'), local("to", 'J'))
+          val (best, seen)  = (local("best", kind), local("seen", 'J'))
+          val x             = local("x", kind)
+          for {
+            blockFrom <- frame.ops("blockFrom")
+            blockTo   <- frame.ops("blockTo")
+            below     <- frame.ops("ltJ")
+            add       <- frame.ops("sumJ")
+            putExt    <- frame.ops(s"put${suffix(kind)}")
+            putCount  <- frame.ops("putJ")
+            slot      <- frame.ops("slot")
+            read      <- frame.ops(if (held) s"get${suffix(kind)}" else s"at${suffix(kind)}J")
+            inner     <- body(frame, msym, sn, g, make.Ident(x), stages, Leaf.Extreme(best, seen, min, kind))
+          } yield {
+            def ident(v: JSymbol.VarSymbol) = make.Ident(v)
+            def store(
+                array: JCTree.JCExpression,
+                put: JSymbol.MethodSymbol,
+                field: Int,
+                v: JSymbol.VarSymbol
+            ): JCTree.JCStatement =
+              make.Exec(
+                synth.call(
+                  put,
+                  List(
+                    array,
+                    synth.call(slot, List(args.head, make.Literal(Int.box(2)), make.Literal(Int.box(field)))),
+                    ident(v)
+                  )
+                )
+              )
+            val advance = make.Assign(ident(j), synth.call(add, List(ident(j), make.Literal(Long.box(1L)))))
+            advance.setType(synth.tpe('J'))
+            val loop = make.ForLoop(
+              JList.of[JCTree.JCStatement](make.VarDef(j, ident(from))),
+              synth.call(below, List(ident(j), ident(to))),
+              JList.of(make.Exec(advance)),
+              make.Block(
+                0,
+                JList.from(
+                  ((make.VarDef(x, synth.call(read, List(sn.head, ident(j)))): JCTree.JCStatement) :: inner).asJava
+                )
+              )
+            )
+            List[JCTree.JCStatement](
+              make.VarDef(from, synth.call(blockFrom, List(args.head))),
+              make.VarDef(to, synth.call(blockTo, List(sn(1), args.head))),
+              make.VarDef(best, synth.extremum(kind, min)),
+              make.VarDef(seen, make.Literal(Long.box(0L))),
+              loop,
+              store(ext, putExt, 0, best),
+              store(counts, putCount, 1, seen)
+            )
+          }
+        }
     }
   }
 
@@ -344,9 +428,9 @@ object StreamSites {
     import synth.make
     val neutral = sn(1)
     val fallback: Option[JCTree.JCStatement] = leaf match {
-      case Leaf.Consume(_) | Leaf.Accumulate(_, _, _, _) => None
-      case Leaf.True                                     => Some(make.Return(synth.literal('Z', 0)))
-      case _                                             => Some(make.Return(neutral))
+      case Leaf.Consume(_) | Leaf.Accumulate(_, _, _, _) | Leaf.Extreme(_, _, _, _) => None
+      case Leaf.True => Some(make.Return(synth.literal('Z', 0)))
+      case _         => Some(make.Return(neutral))
     }
     def finish(cur: JCTree.JCExpression): Result[List[JCTree.JCStatement]] = leaf match {
       case Leaf.Identity => List(make.Return(cur): JCTree.JCStatement).success
@@ -377,6 +461,19 @@ object StreamSites {
             make.Assignment(compensation, ident(delta)),
             make.Assignment(simple, synth.call(add, List(ident(simple), cur))),
             make.Assignment(kept, synth.call(add, List(ident(kept), make.Literal(Double.box(1.0)))))
+          )
+        }
+      case Leaf.Extreme(best, seen, min, kind) =>
+        for {
+          cmp <- frame.ops(s"${if (min) "min" else "max"}${suffix(kind)}")
+          add <- frame.ops("sumJ")
+        } yield {
+          def ident(v: JSymbol.VarSymbol) = make.Ident(v)
+          val one                         = make.Literal(Long.box(1L))
+          one.setType(synth.tpe('J'))
+          List[JCTree.JCStatement](
+            make.Assignment(best, synth.call(cmp, List(ident(best), cur))),
+            make.Assignment(seen, synth.call(add, List(ident(seen), one)))
           )
         }
     }
@@ -556,9 +653,22 @@ object StreamSites {
       case Terminal.Count =>
         if (filtered) List(counting(chain, Streams.MAIN)).success else Nil.success
       case Terminal.Min | Terminal.Max =>
-        val combiner = combine(if (chain.terminal == Terminal.Min) "min" else "max", out)
-        if (filtered) (materialise(chain) :+ survivorStep(chain, out, Leaf.Identity, combiner)).success
-        else List(reduceStep(chain, Streams.MAIN, out, Leaf.Identity, combiner)).success
+        val min      = chain.terminal == Terminal.Min
+        val combiner = combine(if (min) "min" else "max", out)
+        if (filtered) {
+          val (kind, held) = chain.source match {
+            case Source.Array(_, k)     => (k, true)
+            case Source.Range(elem = k) => (k, false)
+          }
+          List(
+            Step(
+              Streams.EXT,
+              s"${Core}for_each",
+              List(Arg.Scalar('J'), Arg.Fn(Program.Extrema(kind, held, chain.stages, min))),
+              None
+            )
+          ).success
+        } else List(reduceStep(chain, Streams.MAIN, out, Leaf.Identity, combiner)).success
       case Terminal.Average =>
         val wide     = if (out == 'D') 'D' else 'J'
         val leaf     = if (out == 'I') Leaf.Widen else Leaf.Identity

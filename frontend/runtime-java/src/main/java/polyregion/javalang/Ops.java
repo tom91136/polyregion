@@ -40,11 +40,19 @@ public final class Ops {
     return Math.min(n, (block + 1) * BLOCK);
   }
 
-  public static int slot(long block, int field) {
-    return (int) (4 * block + field);
+  public static int slot(long block, int stride, int field) {
+    return (int) (stride * block + field);
   }
 
   public static void putD(double[] a, int i, double v) {
+    a[i] = v;
+  }
+
+  public static void putI(int[] a, int i, int v) {
+    a[i] = v;
+  }
+
+  public static void putJ(long[] a, int i, long v) {
     a[i] = v;
   }
 

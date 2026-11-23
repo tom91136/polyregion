@@ -27,7 +27,7 @@ public class StreamEdgeTest {
 
   private static final int N = 5000;
 
-  private static final long SPAN = 4_294_967_306L;
+  private static final long SPAN = Long.getLong("polyregion.stream.span", 4_294_967_306L);
 
   @Rule
   public final TestRule kernels =
