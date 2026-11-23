@@ -888,12 +888,18 @@ POLYREGION_EXPORT void polyrt_context_release_or_throw(void *context) {
   if (!polyrt_context_release(context)) throw std::runtime_error(polyrt_error_message());
 }
 
+static polyregion::polyrt::SkipReasons &skipReasons() {
+  static auto *reasons = new polyregion::polyrt::SkipReasons();
+  return *reasons;
+}
+
 POLYREGION_EXPORT void polyrt_context_fallback(void *context, const char *site) {
   auto &execution = requireContext(context, __func__);
   if (execution.device->physicalDevice().scheme == PhysicalDevice::Scheme::Host) {
     log(DebugLevel::Debug, "<%s> Explicit host context, running the interface fallback", site);
     return;
   }
+  if (skipReasons().lacksCapability()) polyregion::polyrt::noCompatibleKernelExit(site);
   std::fprintf(stderr,
                "[PolyRT] %s: no kernel image matches device `%s` of platform `%s`; an explicit context never runs the host fallback\n",
                site, execution.device->name().c_str(), execution.platform->name().c_str());
@@ -1495,11 +1501,6 @@ POLYREGION_EXPORT extern "C" bool polyrt_remote_launch_marshalled(void *context,
     remoteLaunchMarshalled(context, moduleName, kernelName, gridX, gridY, gridZ, blockX, blockY, blockZ, localMemBytes, argCount, argTypes,
                            argPtrs, mirrorSizes, mirrorKinds, layouts);
   });
-}
-
-static polyregion::polyrt::SkipReasons &skipReasons() {
-  static auto *reasons = new polyregion::polyrt::SkipReasons();
-  return *reasons;
 }
 
 void polyregion::polyrt::noCompatibleKernelExit(const char *site) {

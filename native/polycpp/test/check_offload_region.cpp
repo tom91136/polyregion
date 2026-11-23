@@ -47,6 +47,14 @@
 #pragma region do: POLYRT_HOST_FALLBACK=1 {output}
 #pragma region fails-with: no kernel image matches device
 
+#pragma region case: offload-region-context-paging-refused
+#pragma region offload-only
+#pragma region targets: spirv_glcompute
+#pragma region do: {package_fixture} --device-core {output}.packages
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DEXPLICIT -fstdpar-library-path={output}.packages -o {output} {input}
+#pragma region do: POLYRT_MIRROR=off {output}
+#pragma region fails-with: polyrt: no compatible target
+
 #pragma region case: offload-region-ordered-fallback
 #pragma region offload-only
 #pragma region do: POLYFRONT_LIBRARY_PATH= polycpp {polycpp_defaults} {polycpp_stdpar} -DORDERED -o {output} {input}

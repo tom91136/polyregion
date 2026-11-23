@@ -74,6 +74,11 @@ public:
     attempts.push_back(std::move(a));
   }
 
+  bool lacksCapability() const {
+    const std::scoped_lock lock(mutex);
+    return attempts ^ exists([](const auto &a) { return a.outcome == outcomeName(runtime::LoadOutcome::Lacks); });
+  }
+
   std::string line() const {
     const std::scoped_lock lock(mutex);
     constexpr std::string_view prefix = "polyrt: no compatible target: ";
