@@ -3,6 +3,8 @@ package polyregion.javalang;
 import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.SerializedLambda;
@@ -10,11 +12,20 @@ import java.lang.reflect.Array;
 import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.ServiceConfigurationError;
+import java.util.ServiceLoader;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
 import polyregion.jvm.compiler.Target;
 import polyregion.jvm.runtime.CapabilityGapException;
@@ -461,7 +472,143 @@ public final class Launch {
   }
 
   static Object region(LaunchSite site, Object[] captured) {
-    Plan plan = PLANS.get(site.getClass());
+    return region(PLANS.get(site.getClass()), captured);
+  }
+
+  private static final class Lowerings {
+    static final RuntimeLowering INSTANCE;
+    static final Throwable FAILURE;
+
+    static {
+      RuntimeLowering found = null;
+      Throwable failure = null;
+      try {
+        for (ClassLoader loader :
+            new ClassLoader[] {Launch.class.getClassLoader(), defaultLoader()}) {
+          for (RuntimeLowering lowering : ServiceLoader.load(RuntimeLowering.class, loader)) {
+            found = lowering;
+            break;
+          }
+          if (found != null) break;
+        }
+      } catch (ServiceConfigurationError e) {
+        failure = e;
+      }
+      INSTANCE = found;
+      FAILURE = failure;
+    }
+  }
+
+  private static final ConcurrentHashMap<String, Object> LOWERED = new ConcurrentHashMap<>();
+
+  static final AtomicLong LOWERINGS = new AtomicLong();
+
+  private static String digestOf(
+      RuntimeLowering lowering, SerializedLambda lambda, byte[] implClass) {
+    try {
+      MessageDigest digest = MessageDigest.getInstance("SHA-256");
+      for (String part :
+          new String[] {
+            lowering.configuration(),
+            lambda.getImplClass(),
+            lambda.getImplMethodName(),
+            lambda.getImplMethodSignature(),
+            Integer.toString(lambda.getImplMethodKind())
+          }) {
+        digest.update(part.getBytes(StandardCharsets.UTF_8));
+        digest.update((byte) 0);
+      }
+      digest.update(implClass);
+      StringBuilder hex = new StringBuilder();
+      for (byte b : digest.digest()) hex.append(String.format("%02x", b));
+      return hex.toString();
+    } catch (NoSuchAlgorithmException e) {
+      throw new AssertionError(e);
+    }
+  }
+
+  private static byte[] classBytes(ClassLoader loader, String internalName) {
+    String resource = internalName + ".class";
+    try (InputStream in = loader.getResourceAsStream(resource)) {
+      if (in == null)
+        throw new PolyregionRuntimeException(
+            "Cannot read the class file of `"
+                + internalName.replace('/', '.')
+                + "` from its class loader");
+      java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+      byte[] buffer = new byte[8192];
+      for (int n = in.read(buffer); n >= 0; n = in.read(buffer)) out.write(buffer, 0, n);
+      return out.toByteArray();
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+  }
+
+  private static void trace(SerializedLambda lambda) {
+    String file = System.getenv("POLYREGION_RUNTIME_TRACE");
+    if (file == null || file.isEmpty()) return;
+    try {
+      Files.write(
+          Paths.get(file),
+          (lambda.getImplClass() + "." + lambda.getImplMethodName() + "\n")
+              .getBytes(StandardCharsets.UTF_8),
+          StandardOpenOption.CREATE,
+          StandardOpenOption.APPEND);
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+  }
+
+  static Object runtime(SerializedLambda lambda, ClassLoader loader, Object[] captured) {
+    RuntimeLowering lowering = Lowerings.INSTANCE;
+    if (lowering == null) {
+      String what =
+          "`"
+              + lambda.getImplClass().replace('/', '.')
+              + "."
+              + lambda.getImplMethodName()
+              + "` has no launch site";
+      if (Lowerings.FAILURE != null)
+        throw new PolyregionRuntimeException(
+            what
+                + " and the runtime-java-jit artefact could not be loaded: "
+                + Lowerings.FAILURE.getMessage());
+      throw new PolyregionRuntimeException(
+          what
+              + " generated at compile time; add the runtime-java-jit artefact to the class path to"
+              + " lower it at run time");
+    }
+    ClassLoader scope = loader != null ? loader : defaultLoader();
+    String key = digestOf(lowering, lambda, classBytes(scope, lambda.getImplClass()));
+    Object entry =
+        LOWERED.computeIfAbsent(
+            key,
+            k -> {
+              LOWERINGS.incrementAndGet();
+              trace(lambda);
+              try {
+                RuntimeLowering.Compiled compiled = lowering.lower(lambda, scope);
+                return decode(
+                    new LaunchSite() {
+                      @Override
+                      public String descriptor() {
+                        return compiled.descriptor;
+                      }
+
+                      @Override
+                      public byte[] binary() {
+                        return compiled.binary;
+                      }
+                    });
+              } catch (PolyregionRuntimeException e) {
+                return e.getMessage();
+              }
+            });
+    if (entry instanceof String) throw new PolyregionRuntimeException((String) entry);
+    return region((Plan) entry, captured);
+  }
+
+  private static Object region(Plan plan, Object[] captured) {
     if (plan.unsupported != null) throw new UnsupportedOperationException(plan.unsupported);
     Object[][] each = new Object[plan.specs.length][];
     each[plan.specs.length - 1] = captured;

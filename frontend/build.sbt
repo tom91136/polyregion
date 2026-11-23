@@ -581,6 +581,55 @@ lazy val compiler = project
   )
   .dependsOn(ast.jvm(scala3Version), pass.jvm(scala3Version), `binding-jvm`, codegen, `runtime-java`)
 
+lazy val jitShaded = "polyregion.shaded"
+
+lazy val `runtime-java-jit` = project
+  .settings(
+    commonSettings,
+    sdkPublishSettings,
+    name                                   := "runtime-java-jit",
+    autoScalaLibrary                       := false,
+    Compile / packageSrc / publishArtifact := false,
+    exportJars                             := false,
+    assembly / fullClasspath               := (compiler / Runtime / fullClasspath).value,
+    assembly / assemblyExcludedJars := (assembly / fullClasspath).value.filter { entry =>
+      val jar = entry.data.name
+      jar.startsWith("runtime-java_") || jar.startsWith("binding-jvm_")
+    },
+    assembly / assemblyJarName := s"${name.value}_3-${version.value}.jar",
+    assembly / assemblyShadeRules :=
+      Seq(
+        "scala",
+        "cats",
+        "pprint",
+        "fansi",
+        "sourcecode",
+        "geny",
+        "org.jetbrains",
+        "net.bytebuddy",
+        "net.fabricmc",
+        "org.vineflower"
+      ).map(pkg => ShadeRule.rename(s"$pkg.**" -> s"$jitShaded.$pkg.@1").inAll),
+    assembly / assemblyMergeStrategy := {
+      case PathList("META-INF", "services", _*)       => MergeStrategy.concat
+      case PathList("META-INF", _*)                   => MergeStrategy.discard
+      case path if path.endsWith("module-info.class") => MergeStrategy.discard
+      case _                                          => MergeStrategy.first
+    },
+    Compile / packageBin := assembly.value,
+    pomPostProcess := { node =>
+      import scala.xml.*
+      import scala.xml.transform.*
+      new RuleTransformer(new RewriteRule {
+        override def transform(n: Node): Seq[Node] = n match {
+          case e: Elem if e.label == "dependency" && (e \ "artifactId").text.startsWith("compiler") => Seq.empty
+          case other                                                                                => other
+        }
+      }).transform(node).head
+    }
+  )
+  .dependsOn(`runtime-java`, compiler)
+
 lazy val cudaSuites =
   Set(
     "ArrayMemberSuite.scala",
@@ -846,6 +895,7 @@ lazy val root = project
           compiler / publish,
           `runtime-java` / publish,
           `runtime-scala` / publish,
+          `runtime-java-jit` / publish,
           Def.task(mavenDir)
         )
       }.value
@@ -858,6 +908,7 @@ lazy val root = project
     ewgen,
     `runtime-scala`,
     `runtime-java`,
+    `runtime-java-jit`,
     compiler,
     `compiler-testsuite-helpers`,
     `compiler-testsuite-scala`,

@@ -84,11 +84,26 @@ public final class Runtime {
               + OffloadExecutable.class,
           e);
     } catch (ClassNotFoundException e) {
-      throw new RuntimeException(
-          "Cannot find OffloadExecutable for class "
-              + name
-              + "; is the polyregion annotation processor on the compiler's processor path?",
-          e);
+      final ClassLoader loader = region.getClass().getClassLoader();
+      final SerializedLambda shape =
+          new SerializedLambda(
+              region.getClass(),
+              lambda.getFunctionalInterfaceClass(),
+              lambda.getFunctionalInterfaceMethodName(),
+              lambda.getFunctionalInterfaceMethodSignature(),
+              lambda.getImplMethodKind(),
+              lambda.getImplClass(),
+              lambda.getImplMethodName(),
+              lambda.getImplMethodSignature(),
+              lambda.getInstantiatedMethodType(),
+              new Object[lambda.getCapturedArgCount()]);
+      exe =
+          new OffloadExecutable() {
+            @Override
+            public Object invoke(Object[] captured) {
+              return Launch.runtime(shape, loader, captured);
+            }
+          };
     }
     regionExecutableMap.put(key, exe);
     return exe;
