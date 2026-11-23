@@ -54,52 +54,102 @@ template <class T, class Source> struct source_element {
   T operator()(std::int64_t i) const { return in[i]; }
 };
 
-constexpr std::int64_t ordered_chunk = 256;
+constexpr std::int64_t ordered_block = 256;
+constexpr std::int64_t ordered_tile_bytes = 262144;
+constexpr std::int64_t ordered_target_blocks = 1024;
 
-template <class T, class Element, class Op> struct chunk_fold {
-  Element element_at;
-  std::int64_t n;
-  Op op;
-  T operator()(std::int64_t chunk) const {
-    const std::int64_t begin = chunk * ordered_chunk;
-    const std::int64_t end = begin + ordered_chunk < n ? begin + ordered_chunk : n;
-    T acc = element_at(begin);
-    for (std::int64_t i = begin + 1; i < end; ++i)
-      acc = op(acc, element_at(i));
-    return acc;
-  }
-};
+template <class T> std::int64_t ordered_rows(std::int64_t n) {
+  constexpr std::int64_t max_rows = sizeof(T) * ordered_block < ordered_tile_bytes ? ordered_tile_bytes / (sizeof(T) * ordered_block) : 1;
+  const std::int64_t single = (n + ordered_block - 1) / ordered_block;
+  if (single <= max_rows) return single;
+  const std::int64_t spread = (n + ordered_block * ordered_target_blocks - 1) / (ordered_block * ordered_target_blocks);
+  return spread < max_rows ? spread : max_rows;
+}
 
-template <class T, class Element, class Op> struct leading_fold {
-  T init;
-  Element element_at;
-  std::int64_t n;
-  Op op;
-  T operator()(std::int64_t) const {
-    T acc = init;
-    for (std::int64_t i = 0; i < n; ++i)
-      acc = op(acc, element_at(i));
-    return acc;
+template <class T, class Element>
+T ordered_load(const Element &element_at, std::int64_t begin, std::int64_t remaining, std::int64_t row, std::int64_t lane,
+               std::int64_t width) {
+  const std::int64_t left = remaining - row * width;
+  const std::int64_t count = left < width ? left : width;
+  return element_at(begin + row * width + (lane < count ? lane : count - 1));
+}
+
+template <class T, class Element, class Op, bool Final>
+void ordered_body(sycl::nd_item<1> item, const sycl::local_accessor<T, 1> &totals, const Element &element_at, std::int64_t n,
+                  std::int64_t rows, const Op &op, const T &init, T *out) {
+  const auto subgroup = item.get_sub_group();
+  const std::int64_t lane = static_cast<std::int64_t>(subgroup.get_local_id());
+  const std::int64_t width = static_cast<std::int64_t>(subgroup.get_local_linear_range());
+  const std::int64_t index = static_cast<std::int64_t>(subgroup.get_group_id());
+  const std::int64_t span = width * rows;
+  const std::int64_t tile = ordered_block * rows;
+  const std::int64_t group = static_cast<std::int64_t>(item.get_group(0));
+  const std::int64_t begin = group * tile + index * span;
+  const std::int64_t remaining = n - begin;
+  const std::int64_t row_count = remaining <= 0 ? 0 : remaining >= span ? rows : (remaining + width - 1) / width;
+  T acc{};
+  if (row_count > 0) {
+    T current = ordered_load<T>(element_at, begin, remaining, 0, lane, width);
+    for (std::int64_t row = 0; row < row_count; ++row) {
+      const std::int64_t left = remaining - row * width;
+      const std::int64_t count = left < width ? left : width;
+      T next = current;
+      if (row + 1 < row_count) next = ordered_load<T>(element_at, begin, remaining, row + 1, lane, width);
+      T folded = current;
+      for (std::int64_t offset = 1; offset < width; offset <<= 1) {
+        const T other = sycl::shift_group_right(subgroup, folded, static_cast<std::size_t>(offset));
+        if (lane >= offset) folded = op(other, folded);
+      }
+      const T total = count == width ? folded : sycl::group_broadcast(subgroup, folded, static_cast<std::size_t>(count - 1));
+      if (lane == width - 1) {
+        if (row == 0) acc = total;
+        else acc = op(acc, total);
+      }
+      current = next;
+    }
   }
-};
+  if (lane == width - 1) totals[static_cast<std::size_t>(index)] = acc;
+  sycl::group_barrier(item.get_group());
+  if (item.get_local_id(0) == 0) {
+    const std::int64_t left = n - group * tile;
+    const std::int64_t groups = left >= tile ? ordered_block / width : (left + span - 1) / span;
+    T total = totals[0];
+    for (std::int64_t i = 1; i < groups; ++i)
+      total = op(total, totals[static_cast<std::size_t>(i)]);
+    if (Final) total = op(init, total);
+    out[group] = total;
+  }
+}
+
+template <class T, class Element, class Op, bool Final>
+void ordered_launch(sycl::queue &queue, std::int64_t blocks, std::int64_t rows, Element element_at, std::int64_t n, Op op, T init, T *out) {
+  queue
+      .submit([=](sycl::handler &handler) {
+        sycl::local_accessor<T, 1> totals(sycl::range<1>(static_cast<std::size_t>(ordered_block)), handler);
+        handler.parallel_for(
+            sycl::nd_range<1>(sycl::range<1>(static_cast<std::size_t>(blocks * ordered_block)),
+                              sycl::range<1>(static_cast<std::size_t>(ordered_block))),
+            [=](sycl::nd_item<1> item) { ordered_body<T, Element, Op, Final>(item, totals, element_at, n, rows, op, init, out); });
+      })
+      .wait();
+}
 
 template <class T, class Element, class Op> T ordered_reduce(std::int64_t n, T init, Element element_at, Op op) {
   if (n <= 0) return init;
   auto policy = oneapi::dpl::execution::device_policy<>{};
   auto queue = policy.queue();
-  const std::int64_t outputs = n > ordered_chunk ? (n + ordered_chunk - 1) / ordered_chunk : 1;
-  auto *output = sycl::malloc_device<T>(static_cast<std::size_t>(outputs), queue);
-  detail::device_allocation<T> outputAllocation(output, queue);
-  if (n > ordered_chunk) {
-    oneapi::dpl::transform(policy, oneapi::dpl::counting_iterator<std::int64_t>(0), oneapi::dpl::counting_iterator<std::int64_t>(outputs),
-                           output, chunk_fold<T, Element, Op>{element_at, n, op});
-    return ordered_reduce(outputs, init, source_element<T, const T *>{output}, op);
+  const std::int64_t rows = ordered_rows<T>(n);
+  const std::int64_t blocks = (n + ordered_block * rows - 1) / (ordered_block * rows);
+  auto *partial = sycl::malloc_device<T>(static_cast<std::size_t>(blocks), queue);
+  detail::device_allocation<T> partialAllocation(partial, queue);
+  if (blocks == 1) {
+    ordered_launch<T, Element, Op, true>(queue, blocks, rows, element_at, n, op, init, partial);
+    T result{};
+    queue.memcpy(&result, partial, sizeof(T)).wait();
+    return result;
   }
-  oneapi::dpl::transform(policy, oneapi::dpl::counting_iterator<std::int64_t>(0), oneapi::dpl::counting_iterator<std::int64_t>(1), output,
-                         leading_fold<T, Element, Op>{init, element_at, n, op});
-  T result{};
-  queue.memcpy(&result, output, sizeof(T)).wait();
-  return result;
+  ordered_launch<T, Element, Op, false>(queue, blocks, rows, element_at, n, op, init, partial);
+  return ordered_reduce(blocks, init, source_element<T, const T *>{partial}, op);
 }
 
 template <class Body> void core_for_each(std::int64_t n, Body body) {

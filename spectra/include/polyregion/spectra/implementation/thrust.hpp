@@ -48,6 +48,12 @@
 #include <thrust/transform_scan.h>
 #include <thrust/unique.h>
 
+#if defined(__HIP__)
+  #include <rocprim/rocprim.hpp>
+#else
+  #include <cub/util_ptx.cuh>
+#endif
+
 namespace spectra::implementation {
 
 template <class F, class... Args>
@@ -71,34 +77,85 @@ template <class T, class Source> struct source_element {
   __host__ __device__ T operator()(std::int64_t i) const { return in[i]; }
 };
 
-constexpr std::int64_t ordered_chunk = 256;
+constexpr std::int32_t ordered_block = 256;
+constexpr std::int32_t ordered_warp = 32;
+constexpr std::int32_t ordered_warps = ordered_block / ordered_warp;
+constexpr std::int64_t ordered_tile_bytes = 65536;
+constexpr std::int64_t ordered_target_blocks = 1024;
 
-template <class T, class Element, class Op> struct chunk_fold {
-  Element element_at;
-  std::int64_t n;
-  Op op;
-  __host__ __device__ T operator()(std::int64_t chunk) const {
-    const std::int64_t begin = chunk * ordered_chunk;
-    const std::int64_t end = begin + ordered_chunk < n ? begin + ordered_chunk : n;
-    T acc = element_at(begin);
-    for (std::int64_t i = begin + 1; i < end; ++i)
-      acc = op(acc, element_at(i));
-    return acc;
-  }
-};
+inline void synchronise_device() {
+#if defined(__HIP__)
+  hipDeviceSynchronize();
+#else
+  cudaDeviceSynchronize();
+#endif
+}
 
-template <class T, class Element, class Op> struct leading_fold {
-  T init;
-  Element element_at;
-  std::int64_t n;
-  Op op;
-  __host__ __device__ T operator()(std::int64_t) const {
-    T acc = init;
-    for (std::int64_t i = 0; i < n; ++i)
-      acc = op(acc, element_at(i));
-    return acc;
+template <class T> std::int32_t ordered_rows(std::int64_t n) {
+  constexpr std::int64_t max_rows = sizeof(T) * ordered_block < ordered_tile_bytes ? ordered_tile_bytes / (sizeof(T) * ordered_block) : 1;
+  const std::int64_t single = (n + ordered_block - 1) / ordered_block;
+  if (single <= max_rows) return static_cast<std::int32_t>(single);
+  const std::int64_t spread = (n + ordered_block * ordered_target_blocks - 1) / (ordered_block * ordered_target_blocks);
+  return static_cast<std::int32_t>(spread < max_rows ? spread : max_rows);
+}
+
+template <class T> __device__ T shuffle_down(T value, std::int32_t offset) {
+#if defined(__HIP__)
+  return rocprim::warp_shuffle_down(value, offset, ordered_warp);
+#else
+  return cub::ShuffleDown<ordered_warp>(value, offset, ordered_warp - 1, 0xffffffffu);
+#endif
+}
+
+template <class T, class Element, class Op, bool Final>
+__global__ void ordered_reduce_kernel(Element element_at, std::int64_t n, std::int32_t rows, Op op, T init, T *out) {
+  __shared__ T totals[ordered_warps];
+  const std::int32_t lane = threadIdx.x % ordered_warp;
+  const std::int32_t warp = threadIdx.x / ordered_warp;
+  const std::int64_t span = std::int64_t(ordered_warp) * rows;
+  const std::int64_t tile = std::int64_t(ordered_warps) * span;
+  const std::int64_t begin = std::int64_t(blockIdx.x) * tile + std::int64_t(warp) * span;
+  const std::int64_t remaining = n - begin;
+  const std::int32_t row_count = remaining <= 0      ? 0
+                                 : remaining >= span ? rows
+                                                     : std::int32_t((remaining + ordered_warp - 1) / ordered_warp);
+  T acc{};
+  if (row_count > 0) {
+    const auto load = [&](std::int32_t row) {
+      const std::int64_t left = remaining - std::int64_t(row) * ordered_warp;
+      const std::int32_t count = left < ordered_warp ? std::int32_t(left) : ordered_warp;
+      return element_at(begin + std::int64_t(row) * ordered_warp + (lane < count ? lane : count - 1));
+    };
+    T current = load(0);
+    for (std::int32_t row = 0; row < row_count; ++row) {
+      const std::int64_t left = remaining - std::int64_t(row) * ordered_warp;
+      const std::int32_t count = left < ordered_warp ? std::int32_t(left) : ordered_warp;
+      T next = current;
+      if (row + 1 < row_count) next = load(row + 1);
+      T folded = current;
+      for (std::int32_t offset = 1; offset < ordered_warp; offset <<= 1) {
+        const T other = shuffle_down(folded, offset);
+        if (lane + offset < count) folded = op(folded, other);
+      }
+      if (lane == 0) {
+        if (row == 0) acc = folded;
+        else acc = op(acc, folded);
+      }
+      current = next;
+    }
   }
-};
+  if (lane == 0) totals[warp] = acc;
+  __syncthreads();
+  if (threadIdx.x == 0) {
+    const std::int64_t left = n - std::int64_t(blockIdx.x) * tile;
+    const std::int32_t warps = left >= tile ? ordered_warps : std::int32_t((left + span - 1) / span);
+    T total = totals[0];
+    for (std::int32_t i = 1; i < warps; ++i)
+      total = op(total, totals[i]);
+    if (Final) total = op(init, total);
+    out[blockIdx.x] = total;
+  }
+}
 
 template <class T> T *device_buffer(std::int64_t count) {
   return static_cast<T *>(thrust::raw_pointer_cast(thrust::malloc(thrust::device, static_cast<std::size_t>(count) * sizeof(T))));
@@ -106,20 +163,20 @@ template <class T> T *device_buffer(std::int64_t count) {
 
 template <class T, class Element, class Op> T ordered_reduce(std::int64_t n, T init, Element element_at, Op op) {
   if (n <= 0) return init;
-  if (n > ordered_chunk) {
-    const std::int64_t chunks = (n + ordered_chunk - 1) / ordered_chunk;
-    T *partial = device_buffer<T>(chunks);
-    thrust::transform(thrust::device, thrust::counting_iterator<std::int64_t>(0), thrust::counting_iterator<std::int64_t>(chunks), partial,
-                      chunk_fold<T, Element, Op>{element_at, n, op});
-    const T result = ordered_reduce(chunks, init, source_element<T, const T *>{partial}, op);
+  const std::int32_t rows = ordered_rows<T>(n);
+  const std::int64_t tile = std::int64_t(ordered_block) * rows;
+  const std::int64_t blocks = (n + tile - 1) / tile;
+  T *partial = device_buffer<T>(blocks);
+  if (blocks == 1) {
+    ordered_reduce_kernel<T, Element, Op, true><<<1, ordered_block>>>(element_at, n, rows, op, init, partial);
+    synchronise_device();
+    const T result = *thrust::device_ptr<T>(partial);
     thrust::free(thrust::device, partial);
     return result;
   }
-  T *slot = device_buffer<T>(1);
-  thrust::transform(thrust::device, thrust::counting_iterator<std::int64_t>(0), thrust::counting_iterator<std::int64_t>(1), slot,
-                    leading_fold<T, Element, Op>{init, element_at, n, op});
-  const T result = *thrust::device_ptr<T>(slot);
-  thrust::free(thrust::device, slot);
+  ordered_reduce_kernel<T, Element, Op, false><<<static_cast<unsigned>(blocks), ordered_block>>>(element_at, n, rows, op, init, partial);
+  const T result = ordered_reduce(blocks, init, source_element<T, const T *>{partial}, op);
+  thrust::free(thrust::device, partial);
   return result;
 }
 
@@ -258,13 +315,13 @@ POLYREGION_SPECTRA_EXPORT(find_if_not) //
 template <class T, class Op>        //
 POLYREGION_SPECTRA_EXPORT(for_each) //
     void for_each(T *data, std::int32_t n, Op op) {
-  thrust::for_each(thrust::device, data, data + n, [=] __host__ __device__(T & x) { x = op(x); });
+  thrust::for_each(thrust::device, data, data + n, [=] __host__ __device__(T &x) { x = op(x); });
 }
 
 template <class T, class Op>          //
 POLYREGION_SPECTRA_EXPORT(for_each_n) //
     void for_each_n(T *data, std::int32_t n, Op op) {
-  thrust::for_each_n(thrust::device, data, n, [=] __host__ __device__(T & x) { x = op(x); });
+  thrust::for_each_n(thrust::device, data, n, [=] __host__ __device__(T &x) { x = op(x); });
 }
 
 template <class T>                //
