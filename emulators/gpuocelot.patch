@@ -263,12 +263,13 @@ diff --git a/ocelot/src/cuda/CudaDriverApi.cpp b/ocelot/src/cuda/CudaDriverApi.c
 index 925572c9..99662dc9 100644
 --- a/ocelot/src/cuda/CudaDriverApi.cpp
 +++ b/ocelot/src/cuda/CudaDriverApi.cpp
-@@ -9,11 +9,14 @@
+@@ -9,11 +9,15 @@
  */
  
  // C++ includes
 +#include <cctype>
 +#include <cstring>
++#include <mutex>
  #include <string>
  
  // Ocelot includes
@@ -278,7 +279,7 @@ index 925572c9..99662dc9 100644
  
  // Hydrazine includes
  #include <hydrazine/debug.h>
-@@ -32,8 +35,8 @@
+@@ -32,8 +36,8 @@
  // whether verbose error messages are printed
  #define CUDA_VERBOSE 1
  
@@ -289,7 +290,7 @@ index 925572c9..99662dc9 100644
  
  //////////////////////////////////////////////////////////////////////////////////////////////////
  //
-@@ -68,6 +71,47 @@
+@@ -68,6 +72,47 @@
  // shared object or to invoke Ocelot's Driver API frontend
  typedef cuda::CudaDriverInterface CudaApi;
  
@@ -337,7 +338,7 @@ index 925572c9..99662dc9 100644
  extern "C" {
  
  /*********************************
-@@ -214,17 +250,19 @@ CUresult Function(cuModuleLoad)(CUmodule *module, const char *fname) {
+@@ -214,17 +259,19 @@ CUresult Function(cuModuleLoad)(CUmodule *module, const char *fname) {
  	RETURN( CudaApi::get()->cuModuleLoad(module, fname) );
  }
  
@@ -364,7 +365,7 @@ index 925572c9..99662dc9 100644
  }
  
  CUresult Function(cuModuleLoadFatBinary)(CUmodule *module, 
-@@ -911,6 +949,85 @@ CUresult Function(cuGLSetBufferObjectMapFlags)(GLuint buffer, unsigned int flags
+@@ -911,6 +958,87 @@ CUresult Function(cuGLSetBufferObjectMapFlags)(GLuint buffer, unsigned int flags
  	RETURN ( CudaApi::get()->cuGLSetBufferObjectMapFlags(buffer, flags) );
  }
  
@@ -375,6 +376,8 @@ index 925572c9..99662dc9 100644
 +	unsigned int sharedMemBytes, CUstream hStream,
 +	void **kernelParams, void **extra) {
 +	trace();
++	static std::mutex launchMutex;
++	std::lock_guard<std::mutex> lock(launchMutex);
 +	ir::PTXKernel *kernel = reinterpret_cast<ir::PTXKernel *>(f);
 +	if (!kernel) return CUDA_ERROR_INVALID_HANDLE;
 +	CudaApi *api = CudaApi::get();
