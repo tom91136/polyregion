@@ -427,6 +427,26 @@ public final class Launch {
     return context != null ? context : Launch.class.getClassLoader();
   }
 
+  private static final class Frames extends SecurityManager {
+    Class<?>[] classes() {
+      return getClassContext();
+    }
+  }
+
+  private static Class<?> siteOfCaller(String name) {
+    Class<?>[] frames = new Frames().classes();
+    int at = 0;
+    while (at < frames.length && (frames[at] == Frames.class || frames[at] == Launch.class)) at++;
+    Class<?> stub = at < frames.length ? frames[at] : null;
+    while (at < frames.length && (frames[at] == stub || frames[at].getClassLoader() == null)) at++;
+    if (at < frames.length)
+      try {
+        return Class.forName(name, true, frames[at].getClassLoader());
+      } catch (ClassNotFoundException ignored) {
+      }
+    return siteClass(name, defaultLoader());
+  }
+
   public static Object call(String identity, Context context, Object[] args) {
     SerializedLambda[] lambdas = new SerializedLambda[args.length];
     List<String> parts = new ArrayList<>();
@@ -444,7 +464,7 @@ public final class Launch {
       }
     }
     String name = LaunchSite.nameOf(identity, parts);
-    Plan plan = PLANS.get(siteClass(name, loader != null ? loader : defaultLoader()));
+    Plan plan = PLANS.get(loader != null ? siteClass(name, loader) : siteOfCaller(name));
     if (plan.unsupported != null) throw new UnsupportedOperationException(plan.unsupported);
     if (plan.specs.length != args.length)
       throw new IllegalStateException(
