@@ -1,7 +1,9 @@
 #include "llvm_spirv_cl.h"
 
+#include <array>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -670,11 +672,131 @@ ValPtr SPIRVVulkanTargetSpecificHandler::isNaN(CodeGen &cg, llvm::Value *from) {
   return cg.B.CreateIntrinsic(llvm::Intrinsic::is_fpclass, {from->getType()}, {from, cg.B.getInt32(llvm::fcNan)});
 }
 
+namespace {
+
+struct VulkanF32Math {
+  CodeGen &cg;
+  llvm::IRBuilder<> &B = cg.B;
+  llvm::Type *f32 = B.getFloatTy();
+  llvm::Type *i32 = B.getInt32Ty();
+
+  [[nodiscard]] llvm::Value *k(const float v) const { return llvm::ConstantFP::get(f32, v); }
+  [[nodiscard]] llvm::Value *u32(const uint32_t v) const { return B.getInt32(v); }
+  [[nodiscard]] llvm::Value *call(const llvm::Intrinsic::ID id, const llvm::ArrayRef<llvm::Value *> args) const {
+    return B.CreateIntrinsic(id, {f32}, args);
+  }
+  [[nodiscard]] llvm::Value *fma(llvm::Value *a, llvm::Value *b, llvm::Value *c) const { return call(llvm::Intrinsic::fma, {a, b, c}); }
+  [[nodiscard]] llvm::Value *fabs(llvm::Value *a) const { return call(llvm::Intrinsic::fabs, {a}); }
+  [[nodiscard]] llvm::Value *bits(llvm::Value *a) const { return B.CreateBitCast(a, i32); }
+  [[nodiscard]] llvm::Value *real(llvm::Value *a) const { return B.CreateBitCast(a, f32); }
+
+  [[nodiscard]] llvm::Value *isNaN(llvm::Value *a) const {
+    return B.CreateIntrinsic(llvm::Intrinsic::is_fpclass, {f32}, {a, B.getInt32(llvm::fcNan)});
+  }
+
+  [[nodiscard]] llvm::Value *cbrt(llvm::Value *x) const {
+    auto *a = fabs(x);
+    auto *subnormal = B.CreateFCmpOLT(a, k(0x1p-126f));
+    auto *scaled = B.CreateSelect(subnormal, B.CreateFMul(a, k(0x1p24f)), a);
+    auto *y = real(B.CreateAdd(B.CreateUDiv(bits(scaled), u32(3)), u32(709958130)));
+    for (int i = 0; i < 3; ++i)
+      y = fma(B.CreateFSub(B.CreateFDiv(scaled, B.CreateFMul(y, y)), y), k(1.f / 3.f), y);
+    y = B.CreateSelect(subnormal, B.CreateFMul(y, k(0x1p-8f)), y);
+    auto *signedY = real(B.CreateOr(bits(y), B.CreateAnd(bits(x), u32(0x80000000u))));
+    auto *finite = B.CreateAnd(B.CreateFCmpOGT(a, k(0.f)), B.CreateFCmpOLT(a, k(std::numeric_limits<float>::infinity())));
+    return B.CreateSelect(finite, signedY, x);
+  }
+
+  [[nodiscard]] llvm::Value *expm1(llvm::Value *x) const {
+    constexpr int terms = 12;
+    double factorial = 1;
+    std::array<float, terms> coefficient{};
+    for (int i = 0; i < terms; ++i)
+      coefficient[i] = static_cast<float>(1.0 / (factorial *= i + 2));
+    const auto series = [&](llvm::Value *v) {
+      llvm::Value *q = k(coefficient[terms - 1]);
+      for (int i = terms - 2; i >= 0; --i)
+        q = fma(q, v, k(coefficient[i]));
+      return B.CreateFMul(fma(q, v, k(1.f)), v);
+    };
+    auto *steps = call(llvm::Intrinsic::rint, {B.CreateFMul(x, k(1.44269504f))});
+    auto *reduced = fma(steps, k(-1.42860677e-6f), fma(steps, k(-0.693145751953125f), x));
+    auto *low = B.CreateSelect(B.CreateFCmpOLT(steps, k(-150.f)), k(-150.f), steps);
+    auto *n = B.CreateFPToSI(B.CreateSelect(B.CreateFCmpOGT(low, k(150.f)), k(150.f), low), i32);
+    auto *half = B.CreateAShr(n, u32(1));
+    const auto pow2 = [&](llvm::Value *e) { return real(B.CreateShl(B.CreateAdd(e, u32(127)), u32(23))); };
+    auto *scaled = B.CreateFMul(B.CreateFMul(B.CreateFAdd(series(reduced), k(1.f)), pow2(half)), pow2(B.CreateSub(n, half)));
+    llvm::Value *out = B.CreateFSub(scaled, k(1.f));
+    out = B.CreateSelect(B.CreateFCmpOLT(x, k(-17.5f)), k(-1.f), out);
+    out = B.CreateSelect(B.CreateFCmpOGT(x, k(89.f)), k(std::numeric_limits<float>::infinity()), out);
+    out = B.CreateSelect(B.CreateFCmpOLE(fabs(x), k(1.f)), series(x), out);
+    return B.CreateSelect(isNaN(x), x, out);
+  }
+
+  [[nodiscard]] llvm::Value *log1p(llvm::Value *x) const {
+    const auto inf = std::numeric_limits<float>::infinity();
+    auto *u = B.CreateFAdd(x, k(1.f));
+    auto *lo = B.CreateSelect(B.CreateFCmpOGT(fabs(x), k(1.f)), B.CreateFSub(k(1.f), B.CreateFSub(u, x)),
+                              B.CreateFSub(x, B.CreateFSub(u, k(1.f))));
+    auto *t = B.CreateAdd(bits(u), u32(0x3f800000u - 0x3f3504f3u));
+    auto *exponent = B.CreateSub(B.CreateLShr(t, u32(23)), u32(127));
+    auto *mantissa = real(B.CreateAdd(B.CreateAnd(t, u32(0x007fffffu)), u32(0x3f3504f3u)));
+    auto *direct = B.CreateAnd(B.CreateFCmpOGT(x, k(-0.29289322f)), B.CreateFCmpOLT(x, k(0.41421356f)));
+    auto *f = B.CreateSelect(direct, x, B.CreateFSub(mantissa, k(1.f)));
+    auto *n = B.CreateSIToFP(B.CreateSelect(direct, u32(0), exponent), f32);
+    auto *c = B.CreateSelect(direct, k(0.f), B.CreateFDiv(lo, u));
+    auto *s = B.CreateFDiv(f, B.CreateFAdd(f, k(2.f)));
+    auto *z = B.CreateFMul(s, s);
+    llvm::Value *r = k(0.24279078841f);
+    for (const float coefficient : {0.28498786688f, 0.40000972152f, 0.66666662693f})
+      r = fma(r, z, k(coefficient));
+    r = B.CreateFMul(r, z);
+    auto *hfsq = B.CreateFMul(B.CreateFMul(f, f), k(0.5f));
+    auto *tail = B.CreateFAdd(B.CreateFMul(s, B.CreateFAdd(hfsq, r)), fma(n, k(9.0580006145e-06f), c));
+    llvm::Value *out = B.CreateFSub(B.CreateFMul(n, k(6.9313812256e-01f)), B.CreateFSub(B.CreateFSub(hfsq, tail), f));
+    out = B.CreateSelect(B.CreateFCmpOEQ(x, k(0.f)), x, out);
+    out = B.CreateSelect(B.CreateFCmpOLT(x, k(-1.f)), k(std::numeric_limits<float>::quiet_NaN()), out);
+    out = B.CreateSelect(B.CreateFCmpOEQ(x, k(-1.f)), k(-inf), out);
+    out = B.CreateSelect(B.CreateFCmpOEQ(x, k(inf)), x, out);
+    return B.CreateSelect(isNaN(x), x, out);
+  }
+
+  [[nodiscard]] llvm::Value *atan2(llvm::Value *y, llvm::Value *x) const {
+    auto *sign = u32(0x80000000u);
+    auto *pi = real(B.CreateOr(u32(0x40490fdbu), B.CreateAnd(bits(y), sign)));
+    auto *bothZero = B.CreateAnd(B.CreateFCmpOEQ(x, k(0.f)), B.CreateFCmpOEQ(y, k(0.f)));
+    auto *xNegative = B.CreateICmpNE(B.CreateAnd(bits(x), sign), u32(0));
+    return B.CreateSelect(bothZero, B.CreateSelect(xNegative, pi, y), call(llvm::Intrinsic::atan2, {y, x}));
+  }
+
+  [[nodiscard]] llvm::Value *hypot(llvm::Value *x, llvm::Value *y) const {
+    const auto inf = std::numeric_limits<float>::infinity();
+    auto *ax = fabs(x), *ay = fabs(y);
+    auto *xBigger = B.CreateFCmpOGE(ax, ay);
+    auto *hi = B.CreateSelect(xBigger, ax, ay), *lo = B.CreateSelect(xBigger, ay, ax);
+    auto *large = B.CreateFCmpOGT(hi, k(0x1p60f)), *tiny = B.CreateFCmpOLT(hi, k(0x1p-60f));
+    auto *down = B.CreateSelect(large, k(0x1p-64f), B.CreateSelect(tiny, k(0x1p64f), k(1.f)));
+    auto *up = B.CreateSelect(large, k(0x1p64f), B.CreateSelect(tiny, k(0x1p-64f), k(1.f)));
+    auto *scaledHi = B.CreateFMul(hi, down);
+    auto *ratio = B.CreateFDiv(B.CreateFMul(lo, down), scaledHi);
+    llvm::Value *out = B.CreateFMul(B.CreateFMul(scaledHi, call(llvm::Intrinsic::sqrt, {fma(ratio, ratio, k(1.f))})), up);
+    out = B.CreateSelect(B.CreateFCmpOEQ(hi, k(0.f)), k(0.f), out);
+    return B.CreateSelect(B.CreateOr(B.CreateFCmpOEQ(ax, k(inf)), B.CreateFCmpOEQ(ay, k(inf))), k(inf), out);
+  }
+};
+
+} // namespace
+
 ValPtr SPIRVVulkanTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::MathOp &expr) {
-  OclMangledMath m{cg};
-  const auto unary = [&](const char *name, const AnyType &rtn, const AnyTerm &arg) { return m.unary(name, rtn, arg); };
-  const auto binary = [&](const char *name, const AnyType &rtn, const AnyTerm &lhs, const AnyTerm &rhs) {
-    return m.binary(name, rtn, lhs, rhs);
+  using Unary = llvm::Value *(VulkanF32Math::*)(llvm::Value *) const;
+  using Binary = llvm::Value *(VulkanF32Math::*)(llvm::Value *, llvm::Value *) const;
+  static const std::unordered_map<std::string_view, Unary> uCompose = {
+      {"cbrt", &VulkanF32Math::cbrt}, {"expm1", &VulkanF32Math::expm1}, {"log1p", &VulkanF32Math::log1p}};
+  static const std::unordered_map<std::string_view, Binary> bCompose = {{"hypot", &VulkanF32Math::hypot}, {"atan2", &VulkanF32Math::atan2}};
+  const auto requireF32 = [](const char *name, const AnyType &rtn) {
+    if (!rtn.is<polyregion::polyast::Type::Float32>())
+      throw BackendException(std::string("Vulkan has no ") + (rtn.is<polyregion::polyast::Type::Float64>() ? "64" : "16")
+                             + "-bit float form of " + name);
   };
   static const std::unordered_map<std::string_view, llvm::Intrinsic::ID> uIntr = {
       {"sin", llvm::Intrinsic::sin},     {"cos", llvm::Intrinsic::cos},   {"tan", llvm::Intrinsic::tan},
@@ -687,11 +809,19 @@ ValPtr SPIRVVulkanTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::Math
   static const std::unordered_map<std::string_view, llvm::Intrinsic::ID> bIntr = {{"pow", llvm::Intrinsic::pow}};
   const auto vkUnary = [&](const char *name, const AnyType &rtn, const AnyTerm &arg) -> ValPtr {
     if (const auto id = uIntr ^ get_maybe(std::string_view(name))) return cg.intr1(*id, rtn, arg);
-    return unary(name, rtn, arg);
+    if (const auto fn = uCompose ^ get_maybe(std::string_view(name))) {
+      requireF32(name, rtn);
+      return (VulkanF32Math{cg}.*(*fn))(cg.mkTermVal(arg));
+    }
+    throw BackendException(std::string("Vulkan has no lowering for math function ") + name);
   };
   const auto vkBinary = [&](const char *name, const AnyType &rtn, const AnyTerm &lhs, const AnyTerm &rhs) -> ValPtr {
     if (const auto id = bIntr ^ get_maybe(std::string_view(name))) return cg.intr2(*id, rtn, lhs, rhs);
-    return binary(name, rtn, lhs, rhs);
+    if (const auto fn = bCompose ^ get_maybe(std::string_view(name))) {
+      requireF32(name, rtn);
+      return (VulkanF32Math{cg}.*(*fn))(cg.mkTermVal(lhs), cg.mkTermVal(rhs));
+    }
+    throw BackendException(std::string("Vulkan has no lowering for math function ") + name);
   };
   return mkExternMathVal(cg, expr, vkUnary, vkBinary, [&](const AnyType &tpe, const AnyTerm &x) { return vkUnary("fabs", tpe, x); });
 }
