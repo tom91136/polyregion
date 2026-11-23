@@ -44,6 +44,14 @@ const void *_Unwind_Find_FDE(void *pc, dwarf_eh_bases *bases);
 
 namespace {
 
+  #if defined(__SANITIZE_ADDRESS__)
+constexpr bool UnderAsan = true;
+  #elif defined(__has_feature)
+constexpr bool UnderAsan = __has_feature(address_sanitizer);
+  #else
+constexpr bool UnderAsan = false;
+  #endif
+
 constexpr uint64_t HoleSpacing = 3ull << 30;
 constexpr uint64_t FragmentedSpan = 64ull << 30;
   #ifdef _WIN32
@@ -480,6 +488,8 @@ std::array<uint64_t, 2> loadAndRun(Context &ctx, Platform &platform, Device &dev
     std::optional<FragmentedAddressSpace> fragmented;
     if (fragment) {
       fragmented.emplace();
+      if (UnderAsan && fragmented->holeCount < 3)
+        ctx.skip(fmt::format("the sanitizer reserves the address space around the mappings: {} holes available", fragmented->holeCount));
       POLYTEST_REQUIRE_S(ctx, !fragmented->fillers.empty() && fragmented->holeCount >= 3,
                          "address space fragmentation did not take effect: {} fillers, {} holes", fragmented->fillers.size(),
                          fragmented->holeCount);

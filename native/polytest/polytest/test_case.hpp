@@ -49,6 +49,10 @@ struct RequireFailed : std::runtime_error {
   using std::runtime_error::runtime_error;
 };
 
+struct SkipRequested : std::runtime_error {
+  using std::runtime_error::runtime_error;
+};
+
 class Context {
 public:
   bool failed = false;
@@ -69,6 +73,7 @@ public:
     fmt::print(stderr, "[FAIL] {}:{}: {}\n", loc.file_name(), loc.line(), reason);
     throw RequireFailed{std::string{reason}};
   }
+  [[noreturn]] void skip(const std::string &reason) const { throw SkipRequested{reason}; }
   void warn(std::string_view msg, std::source_location loc = std::source_location::current()) {
     fmt::print(stderr, "[WARN] {}:{}: {}\n", loc.file_name(), loc.line(), msg);
   }

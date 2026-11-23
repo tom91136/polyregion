@@ -202,6 +202,9 @@ int runOnTarget(invoke::Backend backend, std::string_view arch, const std::vecto
     runner(ctx, backend, *platform, *device, imageGroup);
   } catch (const RequireFailed &) {
     return 1;
+  } catch (const polytest::cases::SkipRequested &e) {
+    polytest::reportSkip("polyinvoke", e.what());
+    return 77;
   }
   return ctx.failed ? 1 : 0;
 }
