@@ -101,20 +101,24 @@ public class Jdk8RuntimeTest {
     String hostClasspath = System.getProperty("polyregion.hostClasspath");
     Path javac = Paths.get(System.getProperty("java.home"), "bin", "javac");
     assertTrue("No javac at " + javac, Files.isExecutable(javac));
-    run(
-        Arrays.asList(
-            javac.toString(),
-            "--release",
-            "8",
-            "-proc:full",
-            "-nowarn",
-            "-cp",
-            hostClasspath,
-            "-processorpath",
-            hostClasspath,
-            "-d",
-            classes.toString(),
-            source.toString()));
+    List<String> compile =
+        new ArrayList<>(
+            Arrays.asList(
+                javac.toString(),
+                "--release",
+                "8",
+                "-proc:full",
+                "-nowarn",
+                "-cp",
+                hostClasspath,
+                "-processorpath",
+                hostClasspath,
+                "-d",
+                classes.toString()));
+    String processorOptions = System.getProperty("polyregion.processorOptions", "");
+    if (!processorOptions.isEmpty()) compile.addAll(Arrays.asList(processorOptions.split(" ")));
+    compile.add(source.toString());
+    run(compile);
 
     List<String> command =
         new ArrayList<>(

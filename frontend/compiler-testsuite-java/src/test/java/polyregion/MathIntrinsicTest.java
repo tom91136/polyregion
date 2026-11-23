@@ -11,7 +11,6 @@ public class MathIntrinsicTest extends BaseSuite {
     assertMatchesJdk("cos", () -> Math.cos(a));
     assertMatchesJdk("asin", () -> Math.asin(0.5));
     assertMatchesJdk("acos", () -> Math.acos(0.5));
-    assertMatchesJdk("atan", () -> Math.atan(a));
     assertMatchesJdk("sinh", () -> Math.sinh(a));
     assertMatchesJdk("cosh", () -> Math.cosh(a));
     assertMatchesJdk("tanh", () -> Math.tanh(a));

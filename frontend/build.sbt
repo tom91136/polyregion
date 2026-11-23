@@ -78,18 +78,18 @@ lazy val polyregionLibrarySettings = Seq(
   )
 )
 
+lazy val polyregionEntries = Def.setting {
+  polyregionTargets.value.map(target => s"polyregion.targets=$target") ++
+    Seq(s"polyregion.opt=${polyregionOpt.value}", s"polyregion.jit=${polyregionJit.value}") ++
+    Some(polyregionLibraryPath.value).filter(_.nonEmpty).map(path => s"polyregion.library.path=$path") ++
+    polyregionCapabilities.value.map(capability => s"polyregion.library.capabilities=$capability")
+}
+
 def polyregionSettings(defaultTargets: Seq[String] = Seq("host@native")) = polyregionLibrarySettings ++ Seq(
   polyregionTargets := envList("POLYREGION_TARGETS").getOrElse(defaultTargets),
   polyregionOpt     := envValue("POLYREGION_OPT").getOrElse("O2"),
   polyregionJit     := envValue("POLYREGION_JIT").exists(_.toBooleanOption.contains(true)),
-  scalacOptions += {
-    val settings =
-      polyregionTargets.value.map(target => s"polyregion.targets=$target") ++
-        Seq(s"polyregion.opt=${polyregionOpt.value}", s"polyregion.jit=${polyregionJit.value}") ++
-        Some(polyregionLibraryPath.value).filter(_.nonEmpty).map(path => s"polyregion.library.path=$path") ++
-        polyregionCapabilities.value.map(capability => s"polyregion.library.capabilities=$capability")
-    s"-Xmacro-settings:${settings.mkString(",")}"
-  }
+  scalacOptions += s"-Xmacro-settings:${polyregionEntries.value.mkString(",")}"
 )
 
 def findBdwgcPrefix: File = {
@@ -772,20 +772,26 @@ lazy val `compiler-testsuite-hip` =
     hipSuites ++ spectraSuiteBase
   )
 
-lazy val javaSuiteSettings = processorTracking ++ polyregionLibrarySettings ++ Seq(
-  autoScalaLibrary  := false,
-  polyregionTargets := envList("POLYREGION_TARGETS").getOrElse(Seq("host@native", "cuda@sm_80")),
+def processorOptions(entries: Seq[String]): Seq[String] =
+  entries
+    .filterNot(_.startsWith("polyregion.jit="))
+    .map(entry => entry.takeWhile(_ != '=') -> entry.dropWhile(_ != '=').drop(1))
+    .foldLeft(Vector.empty[(String, Vector[String])]) { case (acc, (key, value)) =>
+      val at = acc.indexWhere(_._1 == key)
+      if (at < 0) acc :+ (key -> Vector(value)) else acc.updated(at, key -> (acc(at)._2 :+ value))
+    }
+    .map { case (key, values) => s"-A$key=${values.mkString(",")}" }
+
+lazy val javaSuiteSettings = processorTracking ++ polyregionSettings() ++ Seq(
+  autoScalaLibrary := false,
   javacOptions ++= (if (buildJdk >= 21) Seq("-proc:full") else Nil),
   javacOptions += "-Apolyregion.deferErrors=true",
-  javacOptions += s"-Apolyregion.targets=${polyregionTargets.value.mkString(",")}",
-  javacOptions ++= Some(polyregionLibraryPath.value).filter(_.nonEmpty).map(path => s"-Apolyregion.library.path=$path"),
-  javacOptions ++= Some(polyregionCapabilities.value)
-    .filter(_.nonEmpty)
-    .map(capabilities => s"-Apolyregion.library.capabilities=${capabilities.mkString(",")}"),
+  javacOptions ++= processorOptions(polyregionEntries.value),
   (Test / javaHome)                      := Some(file(sys.props("java.home"))),
   libraryDependencies += "com.github.sbt" % "junit-interface" % "0.13.3" % Test,
   fork                                   := true,
   Test / javaOptions += "-ea",
+  Test / javaOptions += s"-Dpolyregion.processorOptions=${processorOptions(polyregionEntries.value).mkString(" ")}",
   Test / javaOptions += s"-Dpolyregion.platform=${envValue("POLYRT_PLATFORM").getOrElse("")}",
   Test / parallelExecution := false
 )

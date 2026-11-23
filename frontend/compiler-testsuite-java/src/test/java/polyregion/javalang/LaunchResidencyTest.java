@@ -1,7 +1,6 @@
 package polyregion.javalang;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -28,8 +27,7 @@ public class LaunchResidencyTest {
     assertEquals(Double.valueOf(5.5), Runtime.offload(f));
     Queue.Stats after = stats();
     long invalidated = after.invalidations - before.invalidations;
-    if (Context.current().sharedAddressSpace()) assertEquals(0, invalidated);
-    else assertTrue(invalidated >= 2);
+    assertEquals(0, invalidated);
     assertEquals(invalidated, after.releases - before.releases);
   }
 

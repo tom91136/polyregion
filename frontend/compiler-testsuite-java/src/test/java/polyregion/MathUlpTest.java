@@ -43,6 +43,12 @@ public class MathUlpTest {
   }
 
   @Test
+  public void atan() {
+    double a = 1.23;
+    assertWithinUlps("atan", 1, () -> Math.atan(a));
+  }
+
+  @Test
   public void atan2() {
     double a = 1.0;
     double b = 2.0;

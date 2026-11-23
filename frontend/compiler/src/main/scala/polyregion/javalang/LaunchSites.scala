@@ -403,16 +403,15 @@ object LaunchSites {
       fqcn: String
   ): Result[Offloader.Executable] = {
     val entryName = normalise(fqcn.substring(fqcn.lastIndexOf('.') + 1))
-    val hostOnly  = config.copy(targets = LaunchConfig.Default.targets)
     entry match {
       case decl: JCTree.JCMethodDecl =>
         val impl = decl.sym
         for {
           _        <- if (config.roots.nonEmpty) ().success else "polyregion.library.path is not set".fail
           core     <- Identity.parse(CoreIdentity)
-          callable <- lowerCallable(sources, hostOnly, entryName, 0, entry, impl, impl.params.size, Mode.Region)
+          callable <- lowerCallable(sources, config, entryName, 0, entry, impl, impl.params.size, Mode.Region)
           executable <- assemble(
-            hostOnly,
+            config,
             fqcn,
             core,
             p.Type.Unit0,
