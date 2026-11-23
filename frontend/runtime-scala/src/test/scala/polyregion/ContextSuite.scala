@@ -702,11 +702,11 @@ class ContextSuite extends munit.FunSuite {
 
   test("a host program marshalling a host pointer through a created managed context raises and leaves it usable") {
     assume(
-      rt.Context.platforms().flatMap(_.devices).exists(_.platformKind == ManagedKind),
-      "no managed device in the catalogue"
+      rt.Context.platforms().flatMap(_.devices).exists(d => d.platformKind == ManagedKind && !d.systemPaging),
+      "no managed device without system paging in the catalogue"
     )
     val output = refusal(hostPointerLaunch)
-    assert(output.contains("raised: ") && output.contains("created context cannot marshal"), output)
+    assert(output.contains("raised: ") && output.contains("host pointers cannot reach this device"), output)
     assert(output.contains("usable: remoteMallocs=1"), output)
     assert(output.contains("owned: remoteAllocations=0"), output)
   }

@@ -1084,6 +1084,12 @@ public:
     return r ? r->first + r->second : 0;
   }
 
+  bool mirrorReaches(const void *local) {
+    const auto table = exclusive();
+    const PtrQuery meta = localReflect(local);
+    return meta.deviceAccessible || meta.sizeInBytes != 0;
+  }
+
   size_t mirrorPointeeSize(const void *local) {
     const auto table = exclusive();
     if (!local) return 0;

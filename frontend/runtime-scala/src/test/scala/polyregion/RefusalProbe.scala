@@ -11,7 +11,7 @@ object RefusalProbe {
   def main(args: Array[String]): Unit = {
     rt.Context.loadHostProgram("refuse@host", Files.readAllBytes(Path.of(sys.env("REFUSAL_REFUSE"))))
     rt.Context.loadHostProgram("usable@host", Files.readAllBytes(Path.of(sys.env("REFUSAL_USABLE"))))
-    val device = rt.Context.platforms().flatMap(_.devices).find(_.platformKind == 2).get
+    val device = rt.Context.platforms().flatMap(_.devices).find(d => d.platformKind == 2 && !d.systemPaging).get
     val ctx    = rt.Context.create(device)
     try {
       val host = ByteBuffer.allocateDirect(8)

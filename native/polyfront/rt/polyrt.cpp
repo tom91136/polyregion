@@ -470,7 +470,7 @@ thread_local bool captureRefused = false;
 thread_local char refusalMessage[256]{};
 
 constexpr auto unmirroredPointersMessage =
-    "host pointers cannot reach this device: no capture marshal is registered and the device cannot page host memory";
+    "host pointers cannot reach this device: no capture marshal can mirror them and the device cannot page host memory";
 
 bool refuseInTransaction(const char *site, const char *message) noexcept {
   if (activeTransactions.empty()) return false;
@@ -1388,8 +1388,16 @@ static void remoteLaunchMarshalled(void *context, const char *moduleName, const 
                  || (mirrorKinds[i] == 3 && *static_cast<const uintptr_t *>(argPtrs[i]) != 0
                      && !remoteAllocation(execution, *static_cast<const uintptr_t *>(argPtrs[i])));
         });
-    if (hostPointers && !marshal && !hostThreaded && mode != sma::MirrorMode::Off
-        && !hasFeature(*execution.device, polyregion::runtime::SystemPagingFeature)) {
+    const auto unreachablePointers = [&] {
+      return iota(size_t{0}, argCount) | exists([&](const size_t i) {
+               if (mirrorKinds[i] != 3) return false;
+               const auto pointer = *static_cast<const uintptr_t *>(argPtrs[i]);
+               return pointer != 0 && !remoteAllocation(execution, pointer) && declaredExtent(execution, pointer) == 0
+                      && !marshal->reaches(reinterpret_cast<const void *>(pointer));
+             });
+    };
+    if (hostPointers && !hostThreaded && mode != sma::MirrorMode::Off
+        && !hasFeature(*execution.device, polyregion::runtime::SystemPagingFeature) && (!marshal || unreachablePointers())) {
       if (!refuseInTransaction(__func__, unmirroredPointersMessage)) throw std::runtime_error(unmirroredPointersMessage);
       return;
     }

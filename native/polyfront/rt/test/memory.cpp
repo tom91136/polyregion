@@ -531,6 +531,66 @@ TEST_CASE("a launch with host pointers is refused when no capture marshal can mi
   }
 }
 
+static const void *reflectedBlock = nullptr;
+
+TEST_CASE("a launch with a host pointer the registered marshal cannot mirror is refused when the device cannot page host memory") {
+  WithStubDevice device(false, false);
+  WithStubManagedPlatform platform;
+  StubQueue queue(std::chrono::seconds(1));
+  polyregion::polyrt::ExecutionContext context{polyregion::polyrt::currentPlatform.get(), device.stub, &queue};
+  struct Registered {
+    polyregion::polyrt::sma::CaptureMarshalFactory previous = polyregion::polyrt::sma::captureMarshalFactory();
+    Registered() {
+      polyregion::polyrt::sma::registerCaptureMarshalFactory(+[](polyregion::polyrt::ExecutionContext &context) {
+        return polyregion::polyrt::sma::makeStdMarshal(context, [](const void *pointer) {
+          return pointer == reflectedBlock ? polyregion::polyrt::PtrQuery{8, 0} : polyregion::polyrt::PtrQuery{0, 0};
+        });
+      });
+    }
+    ~Registered() {
+      polyregion::polyrt::sma::registerCaptureMarshalFactory(previous);
+      reflectedBlock = nullptr;
+    }
+  } registered;
+  std::array<uint8_t, 8> local{};
+  auto hostPointer = reinterpret_cast<uintptr_t>(local.data());
+  const std::array<uint8_t, 1> types{static_cast<uint8_t>(Type::Ptr)};
+  const std::array<void *, 1> arguments{&hostPointer};
+  const std::array<size_t, 1> mirrorSizes{local.size()};
+  const std::array<uint8_t, 1> mirrorKinds{3};
+  device.stub->advertised = std::vector<std::string>{"paging:Managed"};
+
+  SECTION("an unreflected pointer is refused") {
+    CHECK_FALSE(polyrt_remote_launch_marshalled(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
+                                                arguments.data(), mirrorSizes.data(), mirrorKinds.data(), nullptr));
+    CHECK(std::string(polyrt_error_message()).find("no capture marshal can mirror") != std::string::npos);
+    CHECK(queue.invokedTypes.empty());
+  }
+
+  SECTION("a reflected pointer is mirrored") {
+    reflectedBlock = local.data();
+    REQUIRE(polyrt_remote_launch_marshalled(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
+                                            arguments.data(), mirrorSizes.data(), mirrorKinds.data(), nullptr));
+    CHECK(queue.invokedTypes == std::vector{Type::Ptr, Type::Void});
+  }
+
+  SECTION("an unreflected pointer with a declared extent is mirrored") {
+    REQUIRE(polyrt_context_acquire(&context));
+    REQUIRE(polyrt_remote_extent(&context, hostPointer, local.size()));
+    REQUIRE(polyrt_remote_launch_marshalled(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
+                                            arguments.data(), mirrorSizes.data(), mirrorKinds.data(), nullptr));
+    CHECK(queue.invokedTypes == std::vector{Type::Ptr, Type::Void});
+    CHECK(polyrt_context_release(&context));
+  }
+
+  SECTION("a device that pages system memory reads an unreflected pointer in place") {
+    device.stub->advertised = std::vector<std::string>{"paging:System"};
+    REQUIRE(polyrt_remote_launch_marshalled(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
+                                            arguments.data(), mirrorSizes.data(), mirrorKinds.data(), nullptr));
+    CHECK(queue.invokedTypes == std::vector{Type::Ptr, Type::Void});
+  }
+}
+
 TEST_CASE("a by-value aggregate is refused only for the host pointers it holds") {
   WithStubDevice device(false, false);
   WithStubManagedPlatform platform;
@@ -1134,6 +1194,7 @@ public:
   uintptr_t ensure(const void *local, const size_t minSize, const bool declaredExtent) override {
     return sma.mirrorEnsure(local, minSize, minSize != 0, declaredExtent);
   }
+  bool reaches(const void *local) override { return sma.mirrorReaches(local); }
   void readAlloc(const void *local) override { sma.unmirrorReadAlloc(local); }
   uintptr_t mirror(const void *capture, const TypeLayout &layout) override { return sma.syncLocalToRemote(capture, layout); }
   void readMirror(void *capture) override {
@@ -2831,6 +2892,7 @@ struct RootedMarshal final : polyregion::polyrt::sma::CaptureMarshal {
   uintptr_t ensure(const void *local, const size_t minSize, const bool declaredExtent) override {
     return inner->ensure(local, minSize, declaredExtent);
   }
+  bool reaches(const void *local) override { return inner->reaches(local); }
   void readAlloc(const void *local) override { inner->readAlloc(local); }
   uintptr_t mirror(const void *capture, const TypeLayout &layout) override { return inner->mirror(capture, layout); }
   void readMirror(void *capture) override { inner->readMirror(capture); }

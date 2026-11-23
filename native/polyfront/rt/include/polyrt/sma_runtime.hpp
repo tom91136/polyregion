@@ -196,6 +196,7 @@ struct CaptureMarshal {
   virtual ~CaptureMarshal() = default;
   virtual void visitClear() = 0;
   virtual uintptr_t ensure(const void *local, size_t minSize, bool declaredExtent) = 0;
+  virtual bool reaches(const void *local) = 0;
   virtual void readAlloc(const void *local) = 0;
   virtual uintptr_t mirror(const void *capture, const runtime::TypeLayout &layout) = 0;
   virtual void readMirror(void *capture) = 0;
@@ -220,6 +221,7 @@ public:
   uintptr_t ensure(const void *local, const size_t minSize, const bool declaredExtent) override {
     return sma.mirrorEnsure(local, minSize, minSize != 0, declaredExtent);
   }
+  bool reaches(const void *local) override { return sma.mirrorReaches(local); }
   void readAlloc(const void *local) override { sma.unmirrorReadAlloc(local); }
   uintptr_t mirror(const void *capture, const runtime::TypeLayout &layout) override { return sma.syncLocalToRemote(capture, layout); }
   void readMirror(void *capture) override {
