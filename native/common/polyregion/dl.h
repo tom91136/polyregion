@@ -43,8 +43,6 @@ inline const char *polyregion_dl_error_() {
   #define polyregion_dl_find(lib, symbol) dlsym(lib, symbol)
   #define polyregion_dl_handle void *
 
-#endif
-
 inline std::string polyregion_dl_realpath(const char *path) {
   auto *const resolved = realpath(path, nullptr);
   if (!resolved) return {};
@@ -52,6 +50,8 @@ inline std::string polyregion_dl_realpath(const char *path) {
   free(resolved);
   return result;
 }
+
+#endif
 
 inline std::string polyregion_dl_module_path([[maybe_unused]] const void *address) {
 #ifdef _WIN32
