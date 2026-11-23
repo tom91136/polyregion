@@ -44,6 +44,6 @@ public class SealedHierarchyTest extends BaseSuite {
   @Test
   public void virtualCallThroughTheSealedInterface() {
     Shape shape = new Circle(2.0);
-    assertRejected("Shape", () -> shape.toString().length());
+    assertRejected("Circle.toString", () -> shape.toString().length());
   }
 }

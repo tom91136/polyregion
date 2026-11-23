@@ -246,6 +246,10 @@ object Offloader {
     emitClass(fqcn, Array.emptyByteArray, UnsupportedMarker + reason.take(ReasonLimit), parent)
       .map(Executable(fqcn, _))
 
+  private def refusal[A](f: => A): Result[A] =
+    try Right(f)
+    catch { case e @ (_: IllegalStateException | _: IllegalArgumentException) => Left(e) }
+
   def optimise(
       tags: Map[String, Int],
       dispatch: Map[p.Sym, List[Devirtualise.Candidate]],
@@ -258,7 +262,7 @@ object Offloader {
     val tagged    = tags.map((fqn, tag) => p.Sym(fqn) -> tag)
     val decorated = raw.copy(defs = Devirtualise.decorate(raw.defs, owners, tagged), entry = Some(entry))
     for {
-      named <- Either.catchNonFatal(Devirtualise(dispatch)(decorated, log))
+      named <- refusal(Devirtualise(dispatch)(decorated, log))
       (monoToPoly, prog) = runPasses(named, log)
       failures           = Verify(prog, log, verifyFunction = false).filter(_._2.nonEmpty)
       _ <-

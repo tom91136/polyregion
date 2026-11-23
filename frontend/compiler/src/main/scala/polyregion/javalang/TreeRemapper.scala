@@ -745,7 +745,7 @@ object TreeRemapper {
     sym.flatMap(scope.locals.get) match {
       case Some(named) => selectExpr(Nil, named).success
       case None =>
-        if (id.getName.toString == "this")
+        if (id.getName.contentEquals("this") || id.getName.contentEquals("super"))
           scope.thisOpt.map(selectExpr(Nil, _)).failIfEmpty("`this` referenced outside an instance method")
         else
           (sym, scope.thisOpt) match {
@@ -1280,10 +1280,29 @@ object TreeRemapper {
       buf: mutable.ListBuffer[p.Stmt],
       d: Dispatch,
       cls: JSymbol.ClassSymbol
+  ): Result[p.Expr] =
+    inlineAt(
+      scope,
+      buf,
+      d,
+      overrideIn(scope, cls, d.sym).getOrElse(d.sym),
+      cls.flatName.toString,
+      "allocated in the region"
+    )
+
+  private def superCall(scope: Scope, buf: mutable.ListBuffer[p.Stmt], d: Dispatch): Result[p.Expr] =
+    inlineAt(scope, buf, d, d.sym, ownerName(d.sym), "reached through `super`")
+
+  private def inlineAt(
+      scope: Scope,
+      buf: mutable.ListBuffer[p.Stmt],
+      d: Dispatch,
+      target: JSymbol.MethodSymbol,
+      receiver: String,
+      how: String
   ): Result[p.Expr] = {
     import d.*
-    val target  = overrideIn(scope, cls, sym).getOrElse(sym)
-    val refused = s"Cannot call `${fullName(sym)}` on `${cls.flatName}` allocated in the region"
+    val refused = s"Cannot call `${fullName(sym)}` on `$receiver` $how"
     (recv, scope.deps.treeOf(target)) match {
       case (p.Term.Select(root, Nil, _), Some(tree)) =>
         inlineInherited(scope, buf, target, tree, root, args, rtn).leftMap(e =>
@@ -1426,6 +1445,51 @@ object TreeRemapper {
       case None    => samCall(scope, buf, mi).getOrElse(plainInvoke(scope, buf, mi))
     }
 
+  private def candidateClasses(deps: DepCollector, owner: TypeElement): List[TypeElement] = {
+    val ownerTpe = deps.types.erasure(owner.asType)
+    (deps.classTable.values.toList ++ deps.witnessed.toList)
+      .filter(c => !c.getModifiers.contains(Modifier.ABSTRACT))
+      .filter(c => c.getKind == ElementKind.CLASS || c.getKind == ElementKind.ENUM || c.getKind == ElementKind.RECORD)
+      .filter(c => deps.types.isSubtype(deps.types.erasure(c.asType), ownerTpe))
+      .distinctBy(JavaTyper.structName(_))
+      .sortBy(JavaTyper.structName(_))
+  }
+
+  private def declaredImplementation(
+      deps: DepCollector,
+      c: TypeElement,
+      sym: JSymbol.MethodSymbol
+  ): Option[JSymbol.MethodSymbol] =
+    c.getEnclosedElements.asScala.collectFirst {
+      case m: JSymbol.MethodSymbol
+          if !m.getModifiers.contains(Modifier.ABSTRACT) && (m == sym || deps.elements.overrides(m, sym, c)) =>
+        m
+    }
+
+  // a concrete method not redeclared by a class runs as declared in the owner, which is viewed through
+  private def implementationIn(
+      deps: DepCollector,
+      c: TypeElement,
+      sym: JSymbol.MethodSymbol
+  ): Option[JSymbol.MethodSymbol] =
+    declaredImplementation(deps, c, sym).orElse {
+      Option
+        .when(!sym.getModifiers.contains(Modifier.ABSTRACT))(
+          LazyList
+            .unfold(superclassOf(deps, c).toOption.flatten)(_.map(t => t -> superclassOf(deps, t).toOption.flatten))
+            .flatMap(t => declaredImplementation(deps, t, sym).map(t -> _))
+            .headOption
+        )
+        .flatten
+        .collect { case (t, m) if t == sym.owner => m }
+    }
+
+  private def isOverridden(deps: DepCollector, sym: JSymbol.MethodSymbol): Boolean = sym.owner match {
+    case owner: JSymbol.ClassSymbol =>
+      candidateClasses(deps, owner).exists(c => c != owner && declaredImplementation(deps, c, sym).exists(_ != sym))
+    case _ => false
+  }
+
   // the candidate set is a lower bound: a class outside this compilation can implement the method, hence the host-written tag
   private def implementationsOf(
       deps: DepCollector,
@@ -1433,34 +1497,21 @@ object TreeRemapper {
       within: Option[JSymbol.ClassSymbol] = None
   ): Result[List[(TypeElement, JSymbol.MethodSymbol)]] = sym.owner match {
     case declaring: JSymbol.ClassSymbol =>
-      val owner    = within.getOrElse(declaring)
-      val ownerTpe = deps.types.erasure(owner.asType)
-      (deps.classTable.values.toList ++ deps.witnessed.toList)
-        .filter(c => !c.getModifiers.contains(Modifier.ABSTRACT))
-        .filter(c => c.getKind == ElementKind.CLASS || c.getKind == ElementKind.ENUM || c.getKind == ElementKind.RECORD)
-        .filter(c => deps.types.isSubtype(deps.types.erasure(c.asType), ownerTpe))
-        .distinctBy(JavaTyper.structName(_))
-        .sortBy(JavaTyper.structName(_))
-        .traverse { c =>
-          for {
-            above <- stateAbove(deps, c)
-            _ <- above.fold(().success)(s =>
-              (s"`${c.getQualifiedName}` is a candidate receiver of `${fullName(sym)}` but its superclass " +
-                s"`${s.getQualifiedName}` carries instance state (${stateNames(s)}), which its layout has no room for").fail
+      candidateClasses(deps, within.getOrElse(declaring)).traverse { c =>
+        for {
+          above <- stateAbove(deps, c)
+          _ <- above.fold(().success)(s =>
+            (s"`${c.getQualifiedName}` is a candidate receiver of `${fullName(sym)}` but its superclass " +
+              s"`${s.getQualifiedName}` carries instance state (${stateNames(s)}), which its layout has no room for").fail
+          )
+          impl <- implementationIn(deps, c, sym)
+            .map(c -> _)
+            .failIfEmpty(
+              s"`${c.getQualifiedName}` is a candidate receiver of `${fullName(sym)}` but inherits its " +
+                "implementation rather than declaring one, which this lowering cannot dispatch to"
             )
-            impl <- c.getEnclosedElements.asScala.toList
-              .collectFirst {
-                case m: JSymbol.MethodSymbol
-                    if !m.getModifiers
-                      .contains(Modifier.ABSTRACT) && (m == sym || deps.elements.overrides(m, sym, c)) =>
-                  (c, m)
-              }
-              .failIfEmpty(
-                s"`${c.getQualifiedName}` is a candidate receiver of `${fullName(sym)}` but inherits its " +
-                  "implementation rather than declaring one, which this lowering cannot dispatch to"
-              )
-          } yield impl
-        }
+        } yield impl
+      }
     case _ => s"Cannot resolve implementations of `${fullName(sym)}`: it is not owned by a class".fail
   }
 
@@ -1500,7 +1551,12 @@ object TreeRemapper {
         scope.deps.fnSyms += impl
         scope.calls += impl
         (lengthArgsFor(scope, impl, argLengths), staticArgsFor(scope, impl)).mapN((ls, ss) =>
-          (p.Sym(JavaTyper.structName(cls)), p.Sym(fullName(impl)), ls ++ ss)
+          (
+            p.Sym(JavaTyper.structName(cls)),
+            p.Sym(fullName(impl)),
+            ls ++ ss,
+            Option(impl.owner).collect { case o: JSymbol.ClassSymbol if o != cls => p.Sym(JavaTyper.structName(o)) }
+          )
         )
       }
       // implementations differ in the lengths and statics they take, so the call passes their union and each arm picks
@@ -1509,7 +1565,7 @@ object TreeRemapper {
       prefix   = refArgs.indices.toList
       refCount = refArgs.size
       slot     = extras.zipWithIndex.map((t, i) => t -> (refCount + i)).toMap
-      armOf    = arms.map((cls, impl, own) => Arm(cls, impl, prefix ::: own.map(slot)))
+      armOf    = arms.map((cls, impl, own, implReceiver) => Arm(cls, impl, prefix ::: own.map(slot), implReceiver))
       _ <- scope.deps.dispatch.get(callee) match {
         case Some(known) if known != armOf =>
           s"Call sites of `${fullName(sym)}` disagree on the arguments its implementations take".fail
@@ -1645,8 +1701,27 @@ object TreeRemapper {
       argLengths  = lowered.map(_._2)
       viaBytecode = recv.isEmpty && isBytecodeCallee(scope.deps, sym)
       args = if (paramTpes.size == raw.size) raw.zip(paramTpes).map(coerceArg(scope, buf, _, _, viaBytecode)) else raw
-      e <- intrinsicOf(scope.deps, sym, args).fold(invokeOf(scope, buf, sym, recv, args, argLengths, rtn))(_.success)
+      e <- intrinsicOf(scope.deps, sym, args).fold(
+        invokeOf(scope, buf, sym, recv, args, argLengths, rtn, !isSuperCall(mi))
+      )(
+        _.success
+      )
     } yield e
+
+  private def isSuperCall(mi: MethodInvocationTree): Boolean = mi.getMethodSelect match {
+    case fa: MemberSelectTree =>
+      fa.getExpression match {
+        case id: IdentifierTree      => id.getName.contentEquals("super")
+        case outer: MemberSelectTree => outer.getIdentifier.contentEquals("super")
+        case _                       => false
+      }
+    case _ => false
+  }
+
+  private def overridable(sym: JSymbol.MethodSymbol): Boolean =
+    isUserMethod(sym) && !sym.isStatic && !sym.isConstructor &&
+      (sym.getModifiers.asScala.toSet & Set(Modifier.PRIVATE, Modifier.FINAL)).isEmpty &&
+      !sym.owner.getModifiers.contains(Modifier.FINAL)
 
   private def invokeOf(
       scope: Scope,
@@ -1655,7 +1730,8 @@ object TreeRemapper {
       recv: Option[p.Term],
       args: List[p.Term],
       argLengths: List[Option[p.Term]],
-      rtn: p.Type
+      rtn: p.Type,
+      virtual: Boolean
   ): Result[p.Expr] =
     if (recv.isEmpty && isBytecodeCallee(scope.deps, sym))
       bytecodeCall(scope.deps, sym, args.map(byReference(scope, buf, _)), rtn).success
@@ -1689,8 +1765,12 @@ object TreeRemapper {
         case None => emitDispatch(scope, buf, Dispatch(sym, recv.get, args, rtn), argLengths)
       }
     else
-      recv.flatMap(r => regionAllocated(scope, r.tpe)).filter(_ != sym.owner) match {
+      recv.filter(_ => virtual).flatMap(r => regionAllocated(scope, r.tpe)).filter(_ != sym.owner) match {
         case Some(cls) => inheritedCall(scope, buf, Dispatch(sym, recv.get, args, rtn), cls)
+        case None if recv.isDefined && !virtual && isUserMethod(sym) =>
+          superCall(scope, buf, Dispatch(sym, recv.get, args, rtn))
+        case None if recv.isDefined && virtual && overridable(sym) && isOverridden(scope.deps, sym) =>
+          emitDispatch(scope, buf, Dispatch(sym, recv.get, args, rtn), argLengths)
         case None =>
           val receiverTpeArgs =
             recv.map(r => referent(r.tpe)).collect { case p.Type.Struct(_, ts) => ts }.getOrElse(Nil)
@@ -2372,7 +2452,15 @@ object TreeRemapper {
       structs <- ClassLayouts.merge((signatureStructs ++ allocatedStructs).distinct, bytecode.structs)
       tags = Devirtualise.tagsOf(deps.dispatch.values.flatten.map(_.cls))
       candidates = deps.dispatch.view.mapValues { arms =>
-        arms.map(a => Devirtualise.Candidate(p.Type.Struct(a.cls, Nil), a.impl, tags(a.cls), Some(a.args)))
+        arms.map(a =>
+          Devirtualise.Candidate(
+            p.Type.Struct(a.cls, Nil),
+            a.impl,
+            tags(a.cls),
+            Some(a.args),
+            a.implReceiver.map(p.Type.Struct(_, Nil))
+          )
+        )
       }.toMap
     } yield Region(
       p.Program(Some(entryFn), depFns, structs.distinct),
