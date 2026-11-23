@@ -6,6 +6,7 @@
 #endif
 
 #include <cstdlib>
+#include <cstring>
 #include <string>
 
 #include "compat.h"
@@ -44,6 +45,14 @@ inline const char *polyregion_dl_error_() {
 
 #endif
 
+inline std::string polyregion_dl_realpath(const char *path) {
+  auto *const resolved = realpath(path, nullptr);
+  if (!resolved) return {};
+  std::string result(resolved);
+  free(resolved);
+  return result;
+}
+
 inline std::string polyregion_dl_module_path([[maybe_unused]] const void *address) {
 #ifdef _WIN32
   HMODULE module = nullptr;
@@ -57,14 +66,14 @@ inline std::string polyregion_dl_module_path([[maybe_unused]] const void *addres
   std::string narrow(static_cast<size_t>(narrowSize), '\0');
   WideCharToMultiByte(CP_UTF8, 0, wide.data(), static_cast<int>(length), narrow.data(), narrowSize, nullptr, nullptr);
   return narrow;
-#elif defined(__linux__) || defined(__APPLE__)
+#elif defined(__linux__)
+  Dl_info info;
+  if (dladdr(address, &info) && info.dli_fname && std::strchr(info.dli_fname, '/')) return polyregion_dl_realpath(info.dli_fname);
+  return polyregion_dl_realpath("/proc/self/exe");
+#elif defined(__APPLE__)
   Dl_info info;
   if (!dladdr(address, &info) || !info.dli_fname) return {};
-  auto *const resolved = realpath(info.dli_fname, nullptr);
-  if (!resolved) return {};
-  std::string path(resolved);
-  free(resolved);
-  return path;
+  return polyregion_dl_realpath(info.dli_fname);
 #else
   return {};
 #endif

@@ -161,7 +161,7 @@ endforeach ()
 add_subdirectory(test/kernels)
 add_executable(polyinvoke-tests test/main.cpp test/test_utils.cpp test/fma.cpp test/args.cpp test/stream.cpp test/queue_lifetime.cpp
         test/foreign_thread.cpp test/module_cache.cpp test/mem_objects.cpp test/cl_queue.cpp test/hip_queue.cpp test/spirv.cpp test/groups.cpp
-        test/growable.cpp test/reloc_placement.cpp)
+        test/growable.cpp test/reloc_placement.cpp test/dl_module_path.cpp)
 polyregion_test_profile_dir(polyinvoke-tests)
 add_executable(polyinvoke-exec driver.cpp)
 
