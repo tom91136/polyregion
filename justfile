@@ -444,6 +444,7 @@ test-native-dist profile='' junit='native-test-results' *args='':
     fi
     export POLYTEST_CLANG_DRIVER="$DIST/bin/clang++${exe}"
     export POLYTEST_FLANG_DRIVER="$DIST/bin/flang-new${exe}"
+    export POLYTEST_POLYINFO="$DIST/bin/polyinfo${exe}"
     libpath="$DIST/lib"
     if [ "{{ profile }}" = asan ]; then
       case "{{ os() }}" in

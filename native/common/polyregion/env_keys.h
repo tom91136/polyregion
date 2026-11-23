@@ -72,6 +72,7 @@ inline constexpr auto PolytestWorkDir = "POLYTEST_WORK_DIR";
 inline constexpr auto PolytestBinaryDir = "POLYTEST_BINARY_DIR";
 inline constexpr auto PolytestFilesDir = "POLYTEST_FILES_DIR";
 inline constexpr auto PolytestDriver = "POLYTEST_DRIVER";
+inline constexpr auto PolytestPolyinfo = "POLYTEST_POLYINFO";
 inline constexpr auto PolytestLib = "POLYTEST_LIB";
 inline constexpr auto PolytestLibraryPath = "POLYTEST_LIBRARY_PATH";
 inline constexpr auto PolytestInclude = "POLYTEST_INCLUDE";
