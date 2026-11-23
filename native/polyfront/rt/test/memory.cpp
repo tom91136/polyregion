@@ -1131,7 +1131,9 @@ template <typename SMA> class SmaView final : public polyregion::polyrt::sma::Ca
 public:
   explicit SmaView(SMA &sma) : sma(sma) {}
   void visitClear() override { sma.unmirrorVisitClear(); }
-  uintptr_t ensure(const void *local, const size_t minSize) override { return sma.mirrorEnsure(local, minSize, minSize != 0); }
+  uintptr_t ensure(const void *local, const size_t minSize, const bool declaredExtent) override {
+    return sma.mirrorEnsure(local, minSize, minSize != 0, declaredExtent);
+  }
   void readAlloc(const void *local) override { sma.unmirrorReadAlloc(local); }
   uintptr_t mirror(const void *capture, const TypeLayout &layout) override { return sma.syncLocalToRemote(capture, layout); }
   void readMirror(void *capture) override {
@@ -2826,7 +2828,9 @@ struct RootedMarshal final : polyregion::polyrt::sma::CaptureMarshal {
   int64_t root;
   RootedMarshal(std::unique_ptr<polyregion::polyrt::sma::CaptureMarshal> inner, const int64_t root) : inner(std::move(inner)), root(root) {}
   void visitClear() override { inner->visitClear(); }
-  uintptr_t ensure(const void *local, const size_t minSize) override { return inner->ensure(local, minSize); }
+  uintptr_t ensure(const void *local, const size_t minSize, const bool declaredExtent) override {
+    return inner->ensure(local, minSize, declaredExtent);
+  }
   void readAlloc(const void *local) override { inner->readAlloc(local); }
   uintptr_t mirror(const void *capture, const TypeLayout &layout) override { return inner->mirror(capture, layout); }
   void readMirror(void *capture) override { inner->readMirror(capture); }

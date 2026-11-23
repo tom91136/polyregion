@@ -517,7 +517,9 @@ PolyrtStats snapshotStats(polyregion::polyrt::ExecutionContext &execution) {
           .heapBytesLive = heap.live.load(),
           .heapBytesCommitted = heap.committed.load(),
           .heapGrowths = heap.growths.load(),
-          .remoteAllocationsLive = execution.remoteAllocations.size()};
+          .remoteAllocationsLive = execution.remoteAllocations.size(),
+          .h2dBytes = counters.h2dBytes.load(),
+          .d2hBytes = counters.d2hBytes.load()};
 }
 } // namespace
 
@@ -776,6 +778,7 @@ POLYREGION_EXPORT extern "C" bool polyrt_context_destroy(void *context) noexcept
       execution->remoteAllocations.clear();
       execution->errorBlocks.clear();
       execution->temporaryAllocationScopes.clear();
+      execution->extentScopes.clear();
     }
     owned.context.reset();
     owned.queue.reset();
@@ -793,12 +796,15 @@ POLYREGION_EXPORT extern "C" bool polyrt_context_acquire(void *context) noexcept
       retryPendingCleanups(execution);
       execution.temporaryAllocationScopes.emplace_back();
       execution.ownedAllocationScopes.emplace_back();
+      execution.extentScopes.emplace_back();
       activeTransactions.emplace_back(&execution);
     } catch (...) {
       while (execution.temporaryAllocationScopes.size() > depth)
         execution.temporaryAllocationScopes.pop_back();
       while (execution.ownedAllocationScopes.size() > depth)
         execution.ownedAllocationScopes.pop_back();
+      while (execution.extentScopes.size() > depth)
+        execution.extentScopes.pop_back();
       execution.transaction.unlock();
       throw;
     }
@@ -817,6 +823,7 @@ static bool releaseTransaction(void *context, const bool failed, const char *ope
     execution.temporaryAllocationScopes.pop_back();
     auto owned = std::move(execution.ownedAllocationScopes.back());
     execution.ownedAllocationScopes.pop_back();
+    execution.extentScopes.pop_back();
     if (failed) released.insert(released.end(), owned.begin(), owned.end());
     else if (!execution.ownedAllocationScopes.empty()) {
       auto &parent = execution.ownedAllocationScopes.back();
@@ -997,6 +1004,20 @@ static uintptr_t remoteTempMalloc(void *context, const size_t bytes) {
   for (auto &scope : execution.temporaryAllocationScopes)
     scope.emplace_back(pointer);
   return pointer;
+}
+
+static void remoteExtent(void *context, const uintptr_t ptr, const size_t bytes) {
+  auto &execution = requireContext(context, __func__);
+  const std::scoped_lock lock(execution.transaction);
+  if (execution.extentScopes.empty()) throw std::logic_error("polyrt_remote_extent: no active context transaction");
+  auto &extent = execution.extentScopes.back()[ptr];
+  extent = std::max(extent, bytes);
+}
+
+static size_t declaredExtent(const polyregion::polyrt::ExecutionContext &execution, const uintptr_t ptr) {
+  for (auto scope = execution.extentScopes.rbegin(); scope != execution.extentScopes.rend(); ++scope)
+    if (const auto found = scope->find(ptr); found != scope->end()) return found->second;
+  return 0;
 }
 
 static void remoteFree(void *context, const uintptr_t ptr) {
@@ -1393,7 +1414,9 @@ static void remoteLaunchMarshalled(void *context, const char *moduleName, const 
       if (mirrorKinds[i] == 3) {
         const auto pointer = *static_cast<const uintptr_t *>(argPtrs[i]);
         if (!marshal || pointer == 0 || remoteAllocation(execution, pointer)) continue;
-        if (const auto remote = marshal->ensure(reinterpret_cast<const void *>(pointer), mirrorSizes[i])) {
+        const auto declared = declaredExtent(execution, pointer);
+        if (const auto remote =
+                marshal->ensure(reinterpret_cast<const void *>(pointer), std::max(mirrorSizes[i], declared), declared != 0)) {
           marshalled[i] = remote;
           launchArgPtrs[i] = &marshalled[i];
           ensuredPointers.emplace_back(i);
@@ -1457,6 +1480,10 @@ POLYREGION_EXPORT extern "C" bool polyrt_remote_temp_malloc(void *context, const
     if (!result) throw std::invalid_argument("null result pointer");
     *result = remoteTempMalloc(context, bytes);
   });
+}
+
+POLYREGION_EXPORT extern "C" bool polyrt_remote_extent(void *context, const uintptr_t ptr, const size_t bytes) noexcept {
+  return runtimeStatus(__func__, [&] { remoteExtent(context, ptr, bytes); });
 }
 
 POLYREGION_EXPORT extern "C" bool polyrt_remote_free(void *context, const uintptr_t ptr) noexcept {

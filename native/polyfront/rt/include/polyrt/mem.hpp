@@ -1044,13 +1044,14 @@ public:
 
   static size_t staleFloor(size_t reflectedSize, size_t minBytes) { return std::max(reflectedSize, minBytes); }
 
-  std::optional<std::pair<uintptr_t, size_t>> ensureMirroredBase(const void *local, size_t minSize, const bool scalarPointee) {
+  std::optional<std::pair<uintptr_t, size_t>> ensureMirroredBase(const void *local, size_t minSize, const bool scalarPointee,
+                                                                 const bool declaredExtent = false) {
     const PtrQuery meta = localReflect(local);
     if (meta.deviceAccessible) return std::nullopt;
     const auto query = queryLocal(local, /*allowPastEnd*/ true);
     const bool cacheHit = query && !pastEndAliasOfDistinct(local, query);
     std::optional<RangedAllocation> superseded;
-    const size_t sz = meta.sizeInBytes == 0 ? 0 : staleFloor(meta.sizeInBytes, minSize);
+    const size_t sz = meta.sizeInBytes == 0 && !declaredExtent ? 0 : staleFloor(meta.sizeInBytes, minSize);
     if (cacheHit) {
       if (sz <= query->first->remote.sizeInBytes) {
         auto *alloc = query->first;
@@ -1077,9 +1078,9 @@ public:
     return std::pair{baseRemote, off};
   }
 
-  uintptr_t mirrorEnsure(const void *local, size_t minSize = 0, const bool scalarPointee = false) {
+  uintptr_t mirrorEnsure(const void *local, size_t minSize = 0, const bool scalarPointee = false, const bool declaredExtent = false) {
     const auto table = exclusive();
-    const auto r = ensureMirroredBase(local, minSize, scalarPointee);
+    const auto r = ensureMirroredBase(local, minSize, scalarPointee, declaredExtent);
     return r ? r->first + r->second : 0;
   }
 

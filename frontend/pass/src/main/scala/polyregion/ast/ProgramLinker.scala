@@ -825,8 +825,6 @@ private[polyregion] object ProgramLinker {
     val omitted                               = resolution.call.callables.keySet -- resolution.call.environments.keySet
     val entryArgs                             = mutable.ListBuffer.empty[p.Arg]
     val body                                  = mutable.ListBuffer.empty[p.Stmt]
-    val downloads                             = mutable.ListBuffer.empty[p.Stmt]
-    val allocations                           = mutable.ListBuffer.empty[(p.Stmt, List[p.Stmt], p.Stmt)]
     val invokeArgs                            = mutable.ListBuffer.empty[p.Term]
     val sourceArgs                            = mutable.Map.empty[Int, p.Named]
     val scalarValues                          = mutable.Map.empty[Int, p.Named]
@@ -899,7 +897,6 @@ private[polyregion] object ProgramLinker {
       case p.Arg.SizeExpr.Result(bound) => extent(bound)
     }
 
-    val remoteTpe = p.Type.Ptr(p.Type.IntU8, p.Type.Space.Global)
     publicDecl.args.indices.foreach { index =>
       if (!omitted.contains(index)) {
         concreteTypes(index) match {
@@ -936,74 +933,12 @@ private[polyregion] object ProgramLinker {
                 }
                 val bound = extent(size)
                 val count = scaled(s"bytes$index", bound, body += _)
-                val downloadCount = size match {
-                  case _: p.Arg.SizeExpr.Result =>
-                    val returned = p.Named(s"returned$index", concreteResult)
-                    val widened  = p.Named(s"returnedExtent$index", p.Type.IntU64)
-                    val clamped  = p.Named(s"returnedBound$index", p.Type.IntU64)
-                    downloads += p.Stmt.Var(
-                      returned,
-                      Some(p.Expr.Index(select(result.get), p.Term.IntS32Const(0), concreteResult)),
-                      isMutable = false
-                    )
-                    downloads += p.Stmt.Var(
-                      widened,
-                      Some(p.Expr.Cast(select(returned), p.Type.IntU64)),
-                      isMutable = false
-                    )
-                    downloads += p.Stmt.Var(
-                      clamped,
-                      Some(intr(p.Intr.Min(select(widened), bound, p.Type.IntU64))),
-                      isMutable = false
-                    )
-                    scaled(s"downloadBytes$index", select(clamped), downloads += _)
-                  case _ => count
-                }
-                val remote = p.Named(s"remote$index", remoteTpe)
-                val typed  = p.Named(s"p$index", pointer)
-                val acquire =
-                  p.Stmt.Var(remote, Some(spec(p.Spec.RemoteTempAlloc(select(context), count))), isMutable = true)
-                val setup = List.newBuilder[p.Stmt]
-                setup += p.Stmt.Var(typed, Some(p.Expr.Cast(select(remote), pointer)))
-                invokeArgs += select(typed)
-                if (boundary.access == p.Arg.Access.Read || boundary.access == p.Arg.Access.ReadWrite)
-                  setup += p.Stmt.Var(
-                    p.Named(s"upload$index", p.Type.Unit0),
-                    Some(
-                      spec(
-                        p.Spec.RemoteMemcpy(
-                          select(context),
-                          select(remote),
-                          select(sourceArgs(index)),
-                          count,
-                          p.Direction.LocalToRemote
-                        )
-                      )
-                    ),
-                    isMutable = true
-                  )
-                if (boundary.access == p.Arg.Access.Write || boundary.access == p.Arg.Access.ReadWrite)
-                  downloads += p.Stmt.Var(
-                    p.Named(s"download$index", p.Type.Unit0),
-                    Some(
-                      spec(
-                        p.Spec.RemoteMemcpy(
-                          select(context),
-                          select(sourceArgs(index)),
-                          select(remote),
-                          downloadCount,
-                          p.Direction.RemoteToLocal
-                        )
-                      )
-                    ),
-                    isMutable = true
-                  )
-                val cleanup = p.Stmt.Var(
-                  p.Named(s"free$index", p.Type.Unit0),
-                  Some(spec(p.Spec.RemoteFree(select(context), select(remote)))),
+                invokeArgs += select(sourceArgs(index))
+                body += p.Stmt.Var(
+                  p.Named(s"extent$index", p.Type.Unit0),
+                  Some(spec(p.Spec.RemoteExtent(select(context), select(sourceArgs(index)), count))),
                   isMutable = true
                 )
-                allocations += ((acquire, setup.result(), cleanup))
             }
           case _ => invokeArgs += select(scalarValues(index))
         }
@@ -1056,11 +991,7 @@ private[polyregion] object ProgramLinker {
         invokeBody += p.Stmt.Update(select(result.get), p.Term.IntS32Const(0), select(callResult))
       case _ => invokeBody += p.Stmt.Var(p.Named("invoke", invokeResult), Some(invoke), isMutable = true)
     }
-    val guarded = allocations.foldRight(invokeBody.result() ::: downloads.toList) {
-      case ((acquire, setup, cleanup), nested) =>
-        List(acquire, p.Stmt.Try(setup ::: nested, Nil, List(cleanup)))
-    }
-    body ++= guarded
+    body ++= invokeBody.result()
     body += p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
 
     val distinct = errors.result().distinct

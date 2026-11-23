@@ -485,6 +485,7 @@ ValPtr SPIRVOpenCLTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
       [&](const Spec::RemoteFree &) -> ValPtr { throw BackendException("Spec::RemoteFree is a host-only operation"); },
       [&](const Spec::RemoteMemcpy &) -> ValPtr { throw BackendException("Spec::RemoteMemcpy is a host-only operation"); },
       [&](const Spec::RemoteSync &) -> ValPtr { throw BackendException("Spec::RemoteSync is a host-only operation"); },
+      [&](const Spec::RemoteExtent &) -> ValPtr { throw BackendException("Spec::RemoteExtent is a host-only operation"); },
       [&](const Spec::GpuVolatileLoad &v) -> ValPtr { return cg.mkVolatileLoad(v); },
       [&](const Spec::GpuVolatileStore &v) -> ValPtr { return cg.mkVolatileStore(v); });
 }
@@ -659,6 +660,7 @@ ValPtr SPIRVVulkanTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
       [&](const Spec::RemoteFree &) -> ValPtr { throw BackendException("Spec::RemoteFree is a host-only operation"); },
       [&](const Spec::RemoteMemcpy &) -> ValPtr { throw BackendException("Spec::RemoteMemcpy is a host-only operation"); },
       [&](const Spec::RemoteSync &) -> ValPtr { throw BackendException("Spec::RemoteSync is a host-only operation"); },
+      [&](const Spec::RemoteExtent &) -> ValPtr { throw BackendException("Spec::RemoteExtent is a host-only operation"); },
       [&](const Spec::GpuVolatileLoad &v) -> ValPtr { return cg.mkVolatileLoad(v); },
       [&](const Spec::GpuVolatileStore &v) -> ValPtr { return cg.mkVolatileStore(v); });
 }

@@ -399,6 +399,10 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
         runtimeCall(external(host_abi::RemoteSync, i1, {ptr}), {cg.mkTermVal(v.context)});
         return noop();
       },
+      [&](const Spec::RemoteExtent &v) -> ValPtr {
+        runtimeCall(external(host_abi::RemoteExtent, i1, {ptr, sizeTy, sizeTy}), {cg.mkTermVal(v.context), asSize(v.ptr), asSize(v.bytes)});
+        return noop();
+      },
       [&](const Spec::GpuVolatileLoad &v) -> ValPtr { return cg.mkVolatileLoad(v); },
       [&](const Spec::GpuVolatileStore &v) -> ValPtr { return cg.mkVolatileStore(v); } //
   );

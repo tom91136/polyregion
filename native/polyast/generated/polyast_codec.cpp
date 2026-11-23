@@ -3,10 +3,10 @@
 #include "msgpack.hpp"
 
 namespace polyregion::polyast {
-constexpr auto AdtHash = "bde697216b0469088a0973b24e56be37";
-constexpr auto ProgramHash = "def84d8dfca6e629d2fd0de306edc2cb";
-constexpr auto PackageHash = "89832af0cf2fd030a67a26c457f0335d";
-constexpr auto PackageWireHash = "d760f1e3d90f339aa92183e7341d7345";
+constexpr auto AdtHash = "1eda36cb808abe03493ee7a26be56fe0";
+constexpr auto ProgramHash = "2d77bbba04c694d9d67350e0af26ee1c";
+constexpr auto PackageHash = "fe984fe0dcbc2c832946d63f369a0803";
+constexpr auto PackageWireHash = "4c498c0239d03750f9ba5ff28a6f2620";
 constexpr auto CompileWireHash = "f1300ddff6331e8ab1eec99ac66daa04";
 using msgpack::decodeMaybeInterned;
 using msgpack::encodeInterned;
@@ -1509,6 +1509,20 @@ json Spec::remotesync_to_json(const Spec::RemoteSync &x_) {
   return json::array({context});
 }
 
+Spec::RemoteExtent Spec::remoteextent_from_json(const json &j_) {
+  auto context = Term::any_from_json(j_.at(0));
+  auto ptr = Term::any_from_json(j_.at(1));
+  auto bytes = Term::any_from_json(j_.at(2));
+  return {std::move(context), std::move(ptr), std::move(bytes)};
+}
+
+json Spec::remoteextent_to_json(const Spec::RemoteExtent &x_) {
+  const auto context = Term::any_to_json(x_.context);
+  const auto ptr = Term::any_to_json(x_.ptr);
+  const auto bytes = Term::any_to_json(x_.bytes);
+  return json::array({context, ptr, bytes});
+}
+
 Spec::Any Spec::any_from_json(const json &j_) {
   const auto ord_ = j_.at(0).get<size_t>();
   const auto &t_ = j_.at(1);
@@ -1549,6 +1563,7 @@ Spec::Any Spec::any_from_json(const json &j_) {
     case 33: return Spec::remotefree_from_json(t_);
     case 34: return Spec::remotememcpy_from_json(t_);
     case 35: return Spec::remotesync_from_json(t_);
+    case 36: return Spec::remoteextent_from_json(t_);
     default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
@@ -1589,7 +1604,8 @@ json Spec::any_to_json(const Spec::Any &x_) {
                         [](const Spec::RemoteTempAlloc &y_) -> json { return {32, Spec::remotetempalloc_to_json(y_)}; },
                         [](const Spec::RemoteFree &y_) -> json { return {33, Spec::remotefree_to_json(y_)}; },
                         [](const Spec::RemoteMemcpy &y_) -> json { return {34, Spec::remotememcpy_to_json(y_)}; },
-                        [](const Spec::RemoteSync &y_) -> json { return {35, Spec::remotesync_to_json(y_)}; });
+                        [](const Spec::RemoteSync &y_) -> json { return {35, Spec::remotesync_to_json(y_)}; },
+                        [](const Spec::RemoteExtent &y_) -> json { return {36, Spec::remoteextent_to_json(y_)}; });
 }
 
 Intr::BNot Intr::bnot_from_json(const json &j_) {
@@ -3831,6 +3847,8 @@ Spec::RemoteMemcpy remotememcpy_fields_from_msgpack(MsgpackReader &, size_t);
 void remotememcpy_fields_to_msgpack(MsgpackWriter &, const Spec::RemoteMemcpy &);
 Spec::RemoteSync remotesync_fields_from_msgpack(MsgpackReader &, size_t);
 void remotesync_fields_to_msgpack(MsgpackWriter &, const Spec::RemoteSync &);
+Spec::RemoteExtent remoteextent_fields_from_msgpack(MsgpackReader &, size_t);
+void remoteextent_fields_to_msgpack(MsgpackWriter &, const Spec::RemoteExtent &);
 Spec::Any any_from_msgpack(MsgpackReader &);
 void any_to_msgpack(MsgpackWriter &, const Spec::Any &);
 }} // namespace Spec
@@ -5625,6 +5643,20 @@ Spec::RemoteSync remotesync_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
 
 void remotesync_fields_to_msgpack(MsgpackWriter &w_, const Spec::RemoteSync &x_) { Term::any_to_msgpack(w_, x_.context); }
 
+Spec::RemoteExtent remoteextent_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 3) throw std::runtime_error("Expected Spec::RemoteExtent with 3 field(s)");
+  auto context = Term::any_from_msgpack(r_);
+  auto ptr = Term::any_from_msgpack(r_);
+  auto bytes = Term::any_from_msgpack(r_);
+  return {std::move(context), std::move(ptr), std::move(bytes)};
+}
+
+void remoteextent_fields_to_msgpack(MsgpackWriter &w_, const Spec::RemoteExtent &x_) {
+  Term::any_to_msgpack(w_, x_.context);
+  Term::any_to_msgpack(w_, x_.ptr);
+  Term::any_to_msgpack(w_, x_.bytes);
+}
+
 Spec::Any any_from_msgpack(MsgpackReader &r_) {
   if (r_.nextIsArray()) {
     const auto n_ = r_.readArrayHeader();
@@ -5667,6 +5699,7 @@ Spec::Any any_from_msgpack(MsgpackReader &r_) {
       case 33: return Spec::remotefree_fields_from_msgpack(r_, n_ - 1);
       case 34: return Spec::remotememcpy_fields_from_msgpack(r_, n_ - 1);
       case 35: return Spec::remotesync_fields_from_msgpack(r_, n_ - 1);
+      case 36: return Spec::remoteextent_fields_from_msgpack(r_, n_ - 1);
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   } else {
@@ -5699,7 +5732,8 @@ Spec::Any any_from_msgpack(MsgpackReader &r_) {
       case 32:
       case 33:
       case 34:
-      case 35: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 35:
+      case 36: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       case 1: return Spec::gpubarrierglobal_fields_from_msgpack(r_, 0);
       case 2: return Spec::gpubarrierlocal_fields_from_msgpack(r_, 0);
       case 3: return Spec::gpubarrierall_fields_from_msgpack(r_, 0);
@@ -5859,6 +5893,11 @@ void any_to_msgpack(MsgpackWriter &w_, const Spec::Any &x_) {
         w_.writeArrayHeader(2);
         w_.writeInt32(35);
         Spec::remotesync_fields_to_msgpack(w_, y_);
+      },
+      [&](const Spec::RemoteExtent &y_) -> void {
+        w_.writeArrayHeader(4);
+        w_.writeInt32(36);
+        Spec::remoteextent_fields_to_msgpack(w_, y_);
       });
 }
 }} // namespace Spec

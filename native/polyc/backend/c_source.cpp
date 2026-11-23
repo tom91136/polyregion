@@ -727,6 +727,7 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
             [&](const Spec::RemoteFree &) -> std::string { throw BackendException("Spec::RemoteFree is a host-only operation"); },
             [&](const Spec::RemoteMemcpy &) -> std::string { throw BackendException("Spec::RemoteMemcpy is a host-only operation"); },
             [&](const Spec::RemoteSync &) -> std::string { throw BackendException("Spec::RemoteSync is a host-only operation"); },
+            [&](const Spec::RemoteExtent &) -> std::string { throw BackendException("Spec::RemoteExtent is a host-only operation"); },
             [&](const Spec::GpuVolatileLoad &v) -> std::string {
               const auto ptr = mkTerm(v.ptr), type = mkTpe(v.rtn);
               if (dialect == Dialect::MSL1_0) {

@@ -336,6 +336,9 @@ std::string repr(const Expr::Any &e) {
         if (auto _z = _x->op.get<Spec::RemoteSync>()) {
           return fmt::format("'remoteSync({})", repr(_z->context));
         }
+        if (auto _z = _x->op.get<Spec::RemoteExtent>()) {
+          return fmt::format("'remoteExtent({}, {}, {})", repr(_z->context), repr(_z->ptr), repr(_z->bytes));
+        }
         if (auto _z = _x->op.get<Spec::GpuVolatileLoad>()) {
           return fmt::format("'gpuVolatileLoad({})", repr(_z->ptr));
         }

@@ -706,7 +706,7 @@ class PackageServiceSuite extends munit.FunSuite {
     assertEquals(entry.rtn, p.Type.Unit0)
   }
 
-  test("materialized consumer entries use transaction-scoped boundary allocations") {
+  test("materialized consumer entries declare boundary extents instead of copying") {
     val name    = p.Sym("library.copy")
     val pointer = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global)
     val public = p.FunctionDecl(
@@ -751,30 +751,25 @@ class PackageServiceSuite extends munit.FunSuite {
     )
 
     assert(linked.isRight, linked)
-    val entry = (linked.toOption.get.entry.toList ::: linked.toOption.get.functions).find(_.name == root.name).get
-    val allocations = entry.body.flatMap(_.collectAll[p.Expr]).collect {
-      case p.Expr.SpecOp(p.Spec.RemoteTempAlloc(_, _)) => ()
-    }
-    assertEquals(allocations.size, 2)
+    val entry   = (linked.toOption.get.entry.toList ::: linked.toOption.get.functions).find(_.name == root.name).get
+    val specs   = entry.body.flatMap(_.collectAll[p.Expr]).collect { case p.Expr.SpecOp(value) => value }
+    val extents = specs.collect { case value: p.Spec.RemoteExtent => value }
+    assertEquals(extents.size, 2)
     assertEquals(
-      entry.body.flatMap(_.collectAll[p.Expr]).count {
-        case p.Expr.SpecOp(p.Spec.RemoteAlloc(_, _)) => true
-        case _                                       => false
+      extents.collect { case p.Spec.RemoteExtent(_, p.Term.Select(named, Nil, _), _) => named.symbol },
+      List("a0", "a1")
+    )
+    assertEquals(
+      specs.count {
+        case _: (p.Spec.RemoteAlloc | p.Spec.RemoteTempAlloc | p.Spec.RemoteMemcpy | p.Spec.RemoteFree) => true
+        case _                                                                                          => false
       },
       0
     )
-    val outer =
-      entry.body.collectFirst { case value: p.Stmt.Try => value }.getOrElse(fail("missing outer allocation guard"))
-    val inner =
-      outer.body.collectFirst { case value: p.Stmt.Try => value }.getOrElse(fail("missing inner allocation guard"))
-    def freedBy(value: p.Stmt.Try) = value.fin.flatMap(_.collectAll[p.Expr]).collect {
-      case p.Expr.SpecOp(p.Spec.RemoteFree(_, p.Term.Select(named, Nil, _))) => named.symbol
-    }
-    assertEquals(freedBy(outer), List("remote0"))
-    assertEquals(freedBy(inner), List("remote1"))
+    assert(!entry.body.exists(_.isInstanceOf[p.Stmt.Try]))
   }
 
-  test("result-bounded outputs download exactly the returned count and upload nothing") {
+  test("result-bounded outputs declare their full capacity as the extent") {
     val name    = p.Sym("library.filter")
     val pointer = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global)
     val public = p.FunctionDecl(
@@ -834,45 +829,25 @@ class PackageServiceSuite extends munit.FunSuite {
 
     assert(linked.isRight, linked)
     val entry = (linked.toOption.get.entry.toList ::: linked.toOption.get.functions).find(_.name == root.name).get
-    val copies = entry.body.flatMap(_.collectAll[p.Expr]).collect {
-      case p.Expr.SpecOp(p.Spec.RemoteMemcpy(_, _, _, count, direction)) => (direction, count)
-    }
-    val uploads   = copies.collect { case (p.Direction.LocalToRemote, count) => count }
-    val downloads = copies.collect { case (p.Direction.RemoteToLocal, count) => count }
-    assertEquals(uploads.size, 1)
-    assertEquals(downloads.size, 1)
+    val specs = entry.body.flatMap(_.collectAll[p.Expr]).collect { case p.Expr.SpecOp(value) => value }
+    assertEquals(specs.count(_.isInstanceOf[p.Spec.RemoteMemcpy]), 0)
+    val extents = specs.collect { case value: p.Spec.RemoteExtent => value }
+    assertEquals(extents.size, 2)
     val definitions = entry.body
       .flatMap(_.collectAll[p.Stmt])
       .collect { case p.Stmt.Var(named, Some(expr), _) =>
         named.symbol -> expr
       }
       .toMap
-    val downloadCount = downloads.head match {
-      case p.Term.Select(named, Nil, _) => named.symbol
-      case other                        => fail(s"unexpected download count $other")
+    assert(!definitions.keys.exists(_.startsWith("returned")))
+    val outBytes = extents.last.bytes match {
+      case p.Term.Select(named, Nil, _) => definitions(named.symbol)
+      case other                        => fail(s"unexpected extent $other")
     }
-    assert(downloadCount.startsWith("downloadBytes"), downloadCount)
-    val clamped = definitions(downloadCount) match {
-      case p.Expr.IntrOp(p.Intr.Mul(p.Term.Select(named, Nil, _), p.Term.IntU64Const(4), _)) => named.symbol
-      case other => fail(s"unexpected download scaling $other")
-    }
-    assert(clamped.startsWith("returnedBound"), clamped)
-    assert(definitions(clamped) match {
-      case p.Expr.IntrOp(p.Intr.Min(_, _, p.Type.IntU64)) => true
-      case _                                              => false
+    assert(outBytes match {
+      case p.Expr.IntrOp(p.Intr.Mul(_, p.Term.IntU64Const(4), _)) => true
+      case _                                                      => false
     })
-    assert(definitions.exists { (symbol, expr) =>
-      symbol.startsWith("returned") && (expr match {
-        case p.Expr.Index(p.Term.Select(p.Named("result", _, _), Nil, _), _, _) => true
-        case _                                                                  => false
-      })
-    })
-    assertNotEquals(uploads.head, downloads.head)
-    val allocationCounts = entry.body.flatMap(_.collectAll[p.Expr]).collect {
-      case p.Expr.SpecOp(p.Spec.RemoteTempAlloc(_, count)) => count
-    }
-    assertEquals(allocationCounts.size, 2)
-    assert(!allocationCounts.contains(downloads.head))
   }
 
   test("program linking uses the canonical result-address ABI for an erased frontend result") {

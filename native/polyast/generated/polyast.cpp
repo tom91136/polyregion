@@ -2342,6 +2342,29 @@ POLYREGION_EXPORT bool Spec::RemoteSync::operator==(const Base &rhs_) const {
 Spec::RemoteSync::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<RemoteSync>(*this)); }
 Spec::Any Spec::RemoteSync::widen() const { return Any(*this); };
 
+Spec::RemoteExtent::RemoteExtent(Term::Any context, Term::Any ptr, Term::Any bytes) noexcept
+    : Spec::Base({}, {context, ptr, bytes}, Type::Unit0()), context(std::move(context)), ptr(std::move(ptr)), bytes(std::move(bytes)) {}
+uint32_t Spec::RemoteExtent::id() const { return variant_id; };
+size_t Spec::RemoteExtent::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(context)>()(context) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(ptr)>()(ptr) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<decltype(bytes)>()(bytes) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  return seed;
+}
+Spec::RemoteExtent Spec::RemoteExtent::withContext(const Term::Any &v_) const { return Spec::RemoteExtent(v_, ptr, bytes); }
+Spec::RemoteExtent Spec::RemoteExtent::withPtr(const Term::Any &v_) const { return Spec::RemoteExtent(context, v_, bytes); }
+Spec::RemoteExtent Spec::RemoteExtent::withBytes(const Term::Any &v_) const { return Spec::RemoteExtent(context, ptr, v_); }
+POLYREGION_EXPORT bool Spec::RemoteExtent::operator==(const Spec::RemoteExtent &rhs) const {
+  return (this->context == rhs.context) && (this->ptr == rhs.ptr) && (this->bytes == rhs.bytes);
+}
+POLYREGION_EXPORT bool Spec::RemoteExtent::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const Spec::RemoteExtent &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+Spec::RemoteExtent::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<RemoteExtent>(*this)); }
+Spec::Any Spec::RemoteExtent::widen() const { return Any(*this); };
+
 Intr::Base::Base(std::vector<Overload> overloads, std::vector<Term::Any> terms, Type::Any tpe) noexcept
     : overloads(std::move(overloads)), terms(std::move(terms)), tpe(std::move(tpe)) {}
 uint32_t Intr::Any::id() const { return _v->id(); }
@@ -5539,6 +5562,10 @@ std::hash<polyregion::polyast::Spec::RemoteMemcpy>::operator()(const polyregion:
   return x.hash_code();
 }
 std::size_t std::hash<polyregion::polyast::Spec::RemoteSync>::operator()(const polyregion::polyast::Spec::RemoteSync &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t
+std::hash<polyregion::polyast::Spec::RemoteExtent>::operator()(const polyregion::polyast::Spec::RemoteExtent &x) const noexcept {
   return x.hash_code();
 }
 std::size_t std::hash<polyregion::polyast::Intr::Any>::operator()(const polyregion::polyast::Intr::Any &x) const noexcept {

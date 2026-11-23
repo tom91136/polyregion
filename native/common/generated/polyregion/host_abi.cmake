@@ -7,6 +7,7 @@ set(POLYREGION_HOST_ABI_SYMBOLS
   polyrt_remote_free
   polyrt_remote_memcpy
   polyrt_remote_sync
+  polyrt_remote_extent
   polyrt_remote_failed
   polyrt_error_message
 )

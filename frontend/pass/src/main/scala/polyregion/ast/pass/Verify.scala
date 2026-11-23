@@ -212,6 +212,10 @@ object Verify {
           requireTpe(srcChecked, x.bytes, u64, "copy byte count must be U64")
         case x: p.Spec.RemoteSync =>
           context(c0, x.context)
+        case x: p.Spec.RemoteExtent =>
+          val ptrChecked =
+            requireTpe(context(c0, x.context), x.ptr, _.isInstanceOf[p.Type.Ptr], "extent operand must be a pointer")
+          requireTpe(ptrChecked, x.bytes, u64, "extent byte count must be U64")
         case _ => c0
       }
     }

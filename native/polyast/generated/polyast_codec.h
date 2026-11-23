@@ -203,6 +203,8 @@ namespace Spec {
 [[nodiscard]] POLYREGION_EXPORT json remotememcpy_to_json(const Spec::RemoteMemcpy &);
 [[nodiscard]] POLYREGION_EXPORT Spec::RemoteSync remotesync_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json remotesync_to_json(const Spec::RemoteSync &);
+[[nodiscard]] POLYREGION_EXPORT Spec::RemoteExtent remoteextent_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json remoteextent_to_json(const Spec::RemoteExtent &);
 [[nodiscard]] POLYREGION_EXPORT Spec::Any any_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json any_to_json(const Spec::Any &);
 } // namespace Spec

@@ -78,7 +78,7 @@ object GroupFission extends ProgramPass {
           case p.Spec.Assert(_, _) | p.Spec.GpuGroupReduce(_, _, _) | p.Spec.GpuGroupInclusiveScan(_, _, _) |
               p.Spec.GpuGroupExclusiveScan(_, _, _) | p.Spec.RemoteLaunch(_, _, _, _, _, _, _, _, _, _, _) |
               p.Spec.RemoteAlloc(_, _) | p.Spec.RemoteTempAlloc(_, _) | p.Spec.RemoteFree(_, _) |
-              p.Spec.RemoteMemcpy(_, _, _, _, _) | p.Spec.RemoteSync(_) =>
+              p.Spec.RemoteMemcpy(_, _, _, _, _) | p.Spec.RemoteSync(_) | p.Spec.RemoteExtent(_, _, _) =>
             fail(s"Spec.${constructName(op)}")
           case _ => ()
         }

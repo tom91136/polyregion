@@ -9,6 +9,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #ifndef _WIN32
@@ -57,6 +58,7 @@ struct ExecutionContext {
   std::map<uintptr_t, RemoteAllocation> remoteAllocations;
   std::vector<std::vector<uintptr_t>> temporaryAllocationScopes;
   std::vector<std::vector<uintptr_t>> ownedAllocationScopes;
+  std::vector<std::unordered_map<uintptr_t, size_t>> extentScopes;
   std::vector<uintptr_t> errorBlocks;
   std::mutex marshalMutex;
   std::unique_ptr<sma::CaptureMarshal> marshal;
@@ -64,7 +66,8 @@ struct ExecutionContext {
 
   struct Counters {
     // NOLINTNEXTLINE(readability-redundant-member-init)
-    std::atomic<uint64_t> launches{}, arenaLaunches{}, arenaWindowMoves{}, d2dCopies{}, h2dCopies{}, d2hCopies{}, waits{}, remoteMallocs{};
+    std::atomic<uint64_t> launches{}, arenaLaunches{}, arenaWindowMoves{}, d2dCopies{}, h2dCopies{}, d2hCopies{}, waits{}, remoteMallocs{},
+        h2dBytes{}, d2hBytes{};
   } counters;
   HeapCounters heapCounters;
   std::unique_ptr<DeviceHeap> heap;
@@ -85,10 +88,12 @@ struct ExecutionContext {
   }
   void copyHostToDevice(const void *src, uintptr_t dst, size_t dstOffset, size_t bytes, const invoke::MaybeCallback &cb = {}) {
     counters.h2dCopies.fetch_add(1, std::memory_order_relaxed);
+    counters.h2dBytes.fetch_add(bytes, std::memory_order_relaxed);
     queue->enqueueHostToDeviceAsync(src, dst, dstOffset, bytes, cb);
   }
   void copyDeviceToHost(uintptr_t src, size_t srcOffset, void *dst, size_t bytes, const invoke::MaybeCallback &cb = {}) {
     counters.d2hCopies.fetch_add(1, std::memory_order_relaxed);
+    counters.d2hBytes.fetch_add(bytes, std::memory_order_relaxed);
     queue->enqueueDeviceToHostAsync(src, srcOffset, dst, bytes, cb);
   }
 };
@@ -150,6 +155,7 @@ struct PolyrtStats {
   uint64_t launches, arenaLaunches, arenaWindowMoves, d2dCopies, h2dCopies, d2hCopies, waits, remoteMallocs;
   uint64_t heapBytesLive, heapBytesCommitted, heapGrowths;
   uint64_t remoteAllocationsLive;
+  uint64_t h2dBytes, d2hBytes;
 };
 
 // names are truncated to the array size
@@ -212,6 +218,8 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_host_free(void *pointer);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_remote_malloc(void *context, size_t bytes, uintptr_t *result) noexcept;
 POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_remote_temp_malloc(void *context, size_t bytes, uintptr_t *result) noexcept;
 POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_remote_free(void *context, uintptr_t ptr) noexcept;
+// declares that the host pointer spans bytes for launches until the active context transaction ends
+POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_remote_extent(void *context, uintptr_t ptr, size_t bytes) noexcept;
 POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_remote_memcpy(void *context, uintptr_t dst, uintptr_t src, size_t bytes,
                                                                   int32_t direction) noexcept;
 // completion is called once from an unspecified thread after the copy settles, or inline for an empty copy; it is not

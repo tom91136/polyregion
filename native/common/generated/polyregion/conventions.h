@@ -30,6 +30,7 @@
   X(RemoteFree, polyrt_remote_free)                                                                                                        \
   X(RemoteMemcpy, polyrt_remote_memcpy)                                                                                                    \
   X(RemoteSync, polyrt_remote_sync)                                                                                                        \
+  X(RemoteExtent, polyrt_remote_extent)                                                                                                    \
   X(RemoteFailed, polyrt_remote_failed)                                                                                                    \
   X(ErrorMessage, polyrt_error_message)
 

@@ -208,7 +208,7 @@ object StructuredExit extends ProgramPass {
 
   private def isRemote(spec: p.Spec): Boolean = spec match {
     case _: (p.Spec.RemoteLaunch | p.Spec.RemoteAlloc | p.Spec.RemoteTempAlloc | p.Spec.RemoteFree |
-          p.Spec.RemoteMemcpy | p.Spec.RemoteSync) =>
+          p.Spec.RemoteMemcpy | p.Spec.RemoteSync | p.Spec.RemoteExtent) =>
       true
     case _ => false
   }

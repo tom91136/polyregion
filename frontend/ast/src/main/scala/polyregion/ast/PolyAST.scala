@@ -298,6 +298,8 @@ object PolyAST {
     case RemoteMemcpy(context: Term, dst: Term, src: Term, bytes: Term, direction: Direction)
         extends Spec(Spec.Unchecked, List(context, dst, src, bytes), Type.Unit0)
     case RemoteSync(context: Term) extends Spec(Spec.Unchecked, List(context), Type.Unit0)
+    case RemoteExtent(context: Term, ptr: Term, bytes: Term)
+        extends Spec(Spec.Unchecked, List(context, ptr, bytes), Type.Unit0)
   }
 
   object Intr {
@@ -855,6 +857,7 @@ object PolyAST {
       inline val RemoteFree             = "polyrt_remote_free"
       inline val RemoteMemcpy           = "polyrt_remote_memcpy"
       inline val RemoteSync             = "polyrt_remote_sync"
+      inline val RemoteExtent           = "polyrt_remote_extent"
       inline val RemoteFailed           = "polyrt_remote_failed"
       inline val ErrorMessage           = "polyrt_error_message"
     }
@@ -1182,6 +1185,7 @@ object PolyAST {
           case Spec.RemoteMemcpy(c, d, s, b, k) =>
             s"'remoteMemcpy(${c.repr}, ${d.repr}, ${s.repr}, ${b.repr}, ${k.repr})"
           case Spec.RemoteSync(c)          => s"'remoteSync(${c.repr})"
+          case Spec.RemoteExtent(c, p, b)  => s"'remoteExtent(${c.repr}, ${p.repr}, ${b.repr})"
           case Spec.GpuVolatileLoad(p, _)  => s"'gpuVolatileLoad(${p.repr})"
           case Spec.GpuVolatileStore(p, v) => s"'gpuVolatileStore(${p.repr}, ${v.repr})"
         }
