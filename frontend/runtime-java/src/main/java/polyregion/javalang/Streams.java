@@ -463,7 +463,7 @@ public final class Streams {
 
     Ops.Sum compensated(long[] kept) {
       Ops.Sum total = null;
-      long step = step(INDEX_CHUNK);
+      long step = step(indexChunk);
       for (long offset = 0; offset < n; offset += step) {
         long length = length(offset, step);
         int blocks = (int) ((length + Ops.BLOCK - 1) / Ops.BLOCK);
