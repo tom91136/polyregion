@@ -820,6 +820,8 @@ static void verifyKernelSymbols(const llvm::Module &M, const llvm::Triple &tripl
     // NVPTX dynamic shared memory: postProcessModule emits an `extern addrspace(3) global` whose
     // storage is supplied by `cuLaunchKernel`'s sharedMemBytes at runtime, so the decl is correct.
     if ((triple.isNVPTX() || triple.isAMDGPU()) && name == polyregion::backend::details::PolycDynSharedGlobal) return true;
+    // malloc/free are PTX system calls: the driver resolves them at module load from the device heap.
+    if (triple.isNVPTX() && (name == "malloc" || name == "free")) return true;
     return false;
   };
   llvm::SmallVector<std::string> missing;

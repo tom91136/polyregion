@@ -93,6 +93,18 @@ public class AllocationTest extends BaseSuite {
   }
 
   @Test
+  public void allocatesZeroLengthFromCapturedLength() {
+    int n = 0;
+    assertMatchesJdk(
+        () -> {
+          int[] scratch = new int[n];
+          int acc = scratch.length;
+          for (int i = 0; i < n; i++) acc += scratch[i];
+          return acc;
+        });
+  }
+
+  @Test
   public void copiesIntoCapturedArray() {
     int[] out = new int[3];
     OffloadRunnable r =

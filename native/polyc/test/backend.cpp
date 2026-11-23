@@ -3815,6 +3815,41 @@ TEST_CASE("LLVM internal functions do not shadow foreign symbols", "[backend]") 
   CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("call ptr @malloc"));
 }
 
+TEST_CASE("NVPTX accepts device malloc and free while other targets refuse them", "[backend][nvptx]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Named bytes("bytes", Type::IntU64());
+  const auto ptrTpe = Type::Ptr(Type::IntS8(), TypeSpace::Global());
+  const Named ptr("ptr", ptrTpe);
+  const Function kernel =
+      mkFn("kernel", {Arg(bytes, {})}, Type::Unit0(),
+           {Var(ptr, Expr::Alloc(Type::IntS8(), selectNamed(bytes).widen(), TypeSpace::Global(), Region::Opaque()).widen(), false).widen(),
+            ret(Expr::ForeignCall("free", {selectNamed(ptr).widen()}, Type::Unit0()).widen())},
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const Program p(kernel, {}, {}, PassPhase::Initial(), {});
+
+  const auto nvptx = polyregion::compiler::compile(p, {Target::Object_LLVM_NVPTX64, "sm_89"}, OptLevel::O0);
+  INFO(repr(nvptx));
+  REQUIRE(nvptx.binary);
+  const auto &ptx = eventDataOf(nvptx, "llvm_to_ptx");
+  CHECK_THAT(ptx, Catch::Matchers::ContainsSubstring(".extern .func  (.param .b64 func_retval0) malloc"));
+  CHECK_THAT(ptx, Catch::Matchers::ContainsSubstring(".extern .func free"));
+  CHECK_THAT(ptx, Catch::Matchers::ContainsSubstring("trap;"));
+
+  CHECK_THROWS_WITH(polyregion::compiler::compile(p, {Target::Object_LLVM_AMDGCN, "gfx1036"}, OptLevel::O0),
+                    Catch::Matchers::ContainsSubstring("unresolved kernel-side symbols for amdgpu-amd-amdhsa")
+                        && Catch::Matchers::ContainsSubstring("malloc") && Catch::Matchers::ContainsSubstring("free"));
+  const Function foreign = mkFn("foreign", {Arg(bytes, {})}, Type::Unit0(),
+                                {Var(ptr, Expr::ForeignCall("malloc", {selectNamed(bytes).widen()}, ptrTpe).widen(), false).widen(),
+                                 ret(Expr::ForeignCall("free", {selectNamed(ptr).widen()}, Type::Unit0()).widen())},
+                                FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  CHECK_THROWS_WITH(polyregion::compiler::compile(Program(foreign, {}, {}, PassPhase::Initial(), {}),
+                                                  {Target::Object_LLVM_SPIRV64_Kernel, ""}, OptLevel::O0),
+                    Catch::Matchers::ContainsSubstring("unresolved kernel-side symbols") && Catch::Matchers::ContainsSubstring("malloc")
+                        && Catch::Matchers::ContainsSubstring("free"));
+}
+
 TEST_CASE("LLVM gives stored callable references addressable bytes", "[backend][callable]") {
   polyregion::compiler::initialise();
   const auto callableType = Type::FnRef(Sym({"predicate"})).widen();

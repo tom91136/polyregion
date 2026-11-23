@@ -637,7 +637,20 @@ llvm::Function *CodeGen::resolveExtFn(const Type::Any &rtn, const std::string &n
 }
 
 ValPtr CodeGen::invokeMalloc(ValPtr size) {
-  return B.CreateCall(resolveExtFn(Type::Ptr(Type::IntS8(), TypeSpace::Global()), "malloc", {Type::IntS64()}), size);
+  auto *call = B.CreateCall(resolveExtFn(Type::Ptr(Type::IntS8(), TypeSpace::Global()), "malloc", {Type::IntS64()}), size);
+  if (C.isNVPTX()) {
+    auto *fn = B.GetInsertBlock()->getParent();
+    auto *cont = llvm::BasicBlock::Create(M.getContext(), "malloc.cont", fn);
+    auto *fail = llvm::BasicBlock::Create(M.getContext(), "malloc.fail", fn);
+    auto *null = llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(call->getType()));
+    auto *zero = llvm::ConstantInt::get(size->getType(), 0);
+    B.CreateCondBr(B.CreateOr(B.CreateICmpNE(call, null), B.CreateICmpEQ(size, zero)), cont, fail);
+    B.SetInsertPoint(fail);
+    B.CreateCall(llvm::Intrinsic::getOrInsertDeclaration(&M, llvm::Intrinsic::trap));
+    B.CreateUnreachable();
+    B.SetInsertPoint(cont);
+  }
+  return call;
 }
 
 ValPtr CodeGen::extFn1(const std::string &name, const AnyType &rtn, const AnyTerm &arg) { //
