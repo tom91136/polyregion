@@ -1,3 +1,10 @@
+#include <cstdlib>
+
+#include "llvm/ADT/SmallString.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/raw_ostream.h"
+
 #include "aspartame/all.hpp"
 #include "catch2/catch_all.hpp"
 
@@ -959,9 +966,10 @@ TEST_CASE("while false", "[compiler]") {
   assertCompile(program({}, {fn}));
 }
 
-static Function mkMathKernel(const Type::Any &tpe) {
+static Function mkMathKernel(const Type::Any &tpe, const bool withSignum = true) {
   auto outPtr = "out"_(Ptr(tpe));
   const Term::Select inSel = "in"_(tpe);
+  const auto signum = withSignum ? call(Signum(inSel, tpe)) : call(Fma(inSel, inSel, inSel, tpe));
   return function("k", {"out"_(Ptr(tpe))(), "in"_(tpe)()}, Unit, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(),
                   CallConvention::OffloadEntry())({
       let("rsin") = call(Sin(inSel, tpe)),               //
@@ -987,7 +995,7 @@ static Function mkMathKernel(const Type::Any &tpe) {
       let("ratan2") = call(Atan2(inSel, inSel, tpe)),    //
       let("rhypot") = call(Hypot(inSel, inSel, tpe)),    //
       let("rfma") = call(Fma(inSel, inSel, inSel, tpe)), //
-      let("rsignum") = call(Signum(inSel, tpe)),         //
+      let("rsignum") = signum,                           //
       outPtr[0_(SInt)] = "rsin"_(tpe),                   //
       outPtr[1_(SInt)] = "rcos"_(tpe),                   //
       outPtr[2_(SInt)] = "rtan"_(tpe),                   //
@@ -1030,6 +1038,7 @@ TEST_CASE("math ops compile across targets", "[compiler][math]") {
   compiler::initialise();
   const auto tpe = GENERATE(values<Type::Any>({Float, Double}));
   auto p = program({}, {mkMathKernel(tpe)});
+  auto vulkan = program({}, {mkMathKernel(tpe, false)});
   DYNAMIC_SECTION(repr(tpe)) {
     SECTION("CPU host") { assertCompileTarget(p, {Target::Object_LLVM_HOST, "native"}); }
     SECTION("NVPTX64") {
@@ -1045,5 +1054,75 @@ TEST_CASE("math ops compile across targets", "[compiler][math]") {
     }
     SECTION("SPIRV64 Kernel 1_1") { assertCompileTarget(p, {Target::Object_LLVM_SPIRV64_Kernel, "1_1"}); }
     SECTION("SPIRV64 Kernel 2_0") { assertCompileTarget(p, {Target::Object_LLVM_SPIRV64_Kernel, "2_0"}); }
+    if (tpe.is<Type::Float32>()) {
+      SECTION("SPIRV Vulkan") { assertCompileTarget(vulkan, {Target::Object_LLVM_SPIRV_GLCompute, ""}); }
+    }
   }
+}
+
+TEST_CASE("Vulkan f32 maths passes spirv-val", "[compiler][math][vulkan]") {
+  compiler::initialise();
+  if (std::system("spirv-val --version > /dev/null 2>&1") != 0) SKIP("spirv-val is not installed");
+  const auto c = compiler::compile(program({}, {mkMathKernel(Float, false)}), {Target::Object_LLVM_SPIRV_GLCompute, ""}, OptLevel::O3);
+  REQUIRE(c.binary.has_value());
+  llvm::SmallString<128> module, report;
+  REQUIRE_FALSE(llvm::sys::fs::createTemporaryFile("polyc_vulkan_math", "spv", module));
+  REQUIRE_FALSE(llvm::sys::fs::createTemporaryFile("polyc_vulkan_math", "txt", report));
+  {
+    std::error_code ec;
+    llvm::raw_fd_ostream out(module, ec, llvm::sys::fs::OF_None);
+    REQUIRE_FALSE(ec);
+    out.write(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
+  }
+  const int status =
+      std::system(("spirv-val --target-env vulkan1.3 " + std::string(module) + " > " + std::string(report) + " 2>&1").c_str());
+  const auto text = llvm::MemoryBuffer::getFile(report);
+  CAPTURE(text ? (*text)->getBuffer().str() : std::string());
+  CHECK(status == 0);
+  llvm::sys::fs::remove(module);
+  llvm::sys::fs::remove(report);
+}
+
+TEST_CASE("Vulkan refuses 64-bit maths that has no 64-bit form", "[compiler][math][vulkan]") {
+  compiler::initialise();
+  using MathFn = std::function<Expr::Any(const Term::Select &, const Type::Any &)>;
+  const auto [name, mk] = GENERATE(table<std::string, MathFn>({
+      {"sin", [](const auto &x, const auto &t) { return call(Sin(x, t)); }},
+      {"cos", [](const auto &x, const auto &t) { return call(Cos(x, t)); }},
+      {"tan", [](const auto &x, const auto &t) { return call(Tan(x, t)); }},
+      {"asin", [](const auto &x, const auto &t) { return call(Asin(x, t)); }},
+      {"acos", [](const auto &x, const auto &t) { return call(Acos(x, t)); }},
+      {"atan", [](const auto &x, const auto &t) { return call(Atan(x, t)); }},
+      {"sinh", [](const auto &x, const auto &t) { return call(Sinh(x, t)); }},
+      {"cosh", [](const auto &x, const auto &t) { return call(Cosh(x, t)); }},
+      {"tanh", [](const auto &x, const auto &t) { return call(Tanh(x, t)); }},
+      {"exp", [](const auto &x, const auto &t) { return call(Exp(x, t)); }},
+      {"log", [](const auto &x, const auto &t) { return call(Log(x, t)); }},
+      {"log10", [](const auto &x, const auto &t) { return call(Log10(x, t)); }},
+      {"pow", [](const auto &x, const auto &t) { return call(Pow(x, x, t)); }},
+      {"atan2", [](const auto &x, const auto &t) { return call(Atan2(x, x, t)); }},
+      {"cbrt", [](const auto &x, const auto &t) { return call(Cbrt(x, t)); }},
+      {"expm1", [](const auto &x, const auto &t) { return call(Expm1(x, t)); }},
+      {"log1p", [](const auto &x, const auto &t) { return call(Log1p(x, t)); }},
+      {"hypot", [](const auto &x, const auto &t) { return call(Hypot(x, x, t)); }},
+  }));
+  const Type::Any tpe = Double;
+  const Term::Select in = "in"_(tpe);
+  const auto fn = function("k", {"out"_(Ptr(tpe))(), "in"_(tpe)()}, Unit, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(),
+                           CallConvention::OffloadEntry())({let("r") = mk(in, tpe), "out"_(Ptr(tpe))[0_(SInt)] = "r"_(tpe), ret()});
+  DYNAMIC_SECTION(name) {
+    CHECK_THROWS_WITH(compiler::compile(program({}, {fn}), {Target::Object_LLVM_SPIRV_GLCompute, ""}, OptLevel::O3),
+                      ContainsSubstring("Vulkan has no 64-bit float form of"));
+  }
+}
+
+TEST_CASE("Vulkan keeps 64-bit maths that has a 64-bit form", "[compiler][math][vulkan]") {
+  compiler::initialise();
+  const Type::Any tpe = Double;
+  const Term::Select in = "in"_(tpe);
+  const auto fn = function("k", {"out"_(Ptr(tpe))(), "in"_(tpe)()}, Unit, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(),
+                           CallConvention::OffloadEntry())(
+      {let("a") = call(Sqrt(in, tpe)), let("b") = call(Floor(in, tpe)), let("c") = call(Fma(in, in, in, tpe)),
+       "out"_(Ptr(tpe))[0_(SInt)] = "a"_(tpe), "out"_(Ptr(tpe))[1_(SInt)] = "b"_(tpe), "out"_(Ptr(tpe))[2_(SInt)] = "c"_(tpe), ret()});
+  assertCompileTarget(program({}, {fn}), {Target::Object_LLVM_SPIRV_GLCompute, ""});
 }

@@ -25,6 +25,7 @@
 #include "llvm/Analysis/ValueTracking.h"
 
 #define SPV_ENABLE_UTILITY_CODE
+#include "spirv/unified1/GLSL.std.450.h"
 #include "spirv/unified1/spirv.hpp"
 #undef SPV_ENABLE_UTILITY_CODE
 
@@ -798,6 +799,15 @@ static void linkVendorDeviceLibs(llvm::Module &M, const llvm::Triple &triple, ll
   }
 }
 
+[[noreturn]] static void throwUnresolvedSymbols(const llvm::Triple &triple, const llvm::ArrayRef<std::string> missing) {
+  std::string msg = "unresolved kernel-side symbols for " + triple.str() + " (stage vendor bitcode via POLYREGION_BITCODE_DIR):";
+  for (const auto &s : missing) {
+    msg += ' ';
+    msg += s;
+  }
+  throw std::logic_error(msg);
+}
+
 // XXX Device kernels are loaded as-is (cuModuleLoad / hipModuleLoad / OpenCL); the runtime
 // does no dynamic linking, so anything still undefined here would crash at module-load.
 static void verifyKernelSymbols(const llvm::Module &M, const llvm::Triple &triple) {
@@ -819,13 +829,43 @@ static void verifyKernelSymbols(const llvm::Module &M, const llvm::Triple &tripl
   M.globals()                                                                                 //
       | filter([&](const auto &G) { return G.isDeclaration() && !isLegitDecl(G.getName()); }) //
       | for_each([&](const auto &G) { missing.emplace_back(G.getName().str()); });
-  if (missing.empty()) return;
-  std::string msg = "unresolved kernel-side symbols for " + triple.str() + " (stage vendor bitcode via POLYREGION_BITCODE_DIR):";
-  for (const auto &s : missing) {
-    msg += ' ';
-    msg += s;
+  if (!missing.empty()) throwUnresolvedSymbols(triple, missing);
+}
+
+// XXX the module is what a Vulkan driver sees: an Import-linkage function has no body to resolve against, and a
+// GLSL.std.450 instruction without a 64-bit form is invalid on an f64 operand (llvmpipe runs it and returns garbage)
+static void verifyVulkanModule(const std::string &spv, const llvm::Triple &triple) {
+  if (spv.size() < 5 * sizeof(uint32_t)) return;
+  const auto *w = reinterpret_cast<const uint32_t *>(spv.data());
+  const size_t n = spv.size() / sizeof(uint32_t);
+  static const std::unordered_map<uint32_t, std::string_view> narrowOnly = {
+      {GLSLstd450Radians, "Radians"}, {GLSLstd450Degrees, "Degrees"}, {GLSLstd450Sin, "Sin"},     {GLSLstd450Cos, "Cos"},
+      {GLSLstd450Tan, "Tan"},         {GLSLstd450Asin, "Asin"},       {GLSLstd450Acos, "Acos"},   {GLSLstd450Atan, "Atan"},
+      {GLSLstd450Sinh, "Sinh"},       {GLSLstd450Cosh, "Cosh"},       {GLSLstd450Tanh, "Tanh"},   {GLSLstd450Asinh, "Asinh"},
+      {GLSLstd450Acosh, "Acosh"},     {GLSLstd450Atanh, "Atanh"},     {GLSLstd450Atan2, "Atan2"}, {GLSLstd450Pow, "Pow"},
+      {GLSLstd450Exp, "Exp"},         {GLSLstd450Log, "Log"},         {GLSLstd450Exp2, "Exp2"},   {GLSLstd450Log2, "Log2"}};
+  std::unordered_set<uint32_t> wideFloats;
+  std::unordered_set<uint32_t> imported;
+  std::vector<std::string> unresolved;
+  uint32_t glsl = 0;
+  for (size_t i = 5; i < n;) {
+    const uint32_t op = w[i] & 0xFFFFu, wc = w[i] >> 16;
+    if (wc == 0 || i + wc > n) return;
+    if (op == spv::OpExtInstImport && wc >= 3) {
+      const auto *name = reinterpret_cast<const char *>(&w[i + 2]);
+      if (std::string_view(name, strnlen(name, (wc - 2) * sizeof(uint32_t))) == "GLSL.std.450") glsl = w[i + 1];
+    } else if (op == spv::OpTypeFloat && wc >= 3 && w[i + 2] == 64) wideFloats.insert(w[i + 1]);
+    else if (op == spv::OpTypeVector && wc == 4 && wideFloats.contains(w[i + 2])) wideFloats.insert(w[i + 1]);
+    else if (op == spv::OpDecorate && wc >= 5 && w[i + 2] == spv::DecorationLinkageAttributes && w[i + wc - 1] == spv::LinkageTypeImport) {
+      const auto *name = reinterpret_cast<const char *>(&w[i + 3]);
+      unresolved.emplace_back(name, strnlen(name, (wc - 4) * sizeof(uint32_t)));
+    } else if (op == spv::OpExtInst && wc >= 5 && glsl != 0 && w[i + 3] == glsl && wideFloats.contains(w[i + 1])) {
+      if (const auto it = narrowOnly.find(w[i + 4]); it != narrowOnly.end())
+        throw std::logic_error("Vulkan has no 64-bit float form of GLSL.std.450 " + std::string(it->second));
+    }
+    i += wc;
   }
-  throw std::logic_error(msg);
+  if (!unresolved.empty()) throwUnresolvedSymbols(triple, unresolved);
 }
 
 // SROA + mem2reg scalarise locals to SSA, dissolving the alloca round-trips SPIRVLegalizePointerCast aborts on;
@@ -1560,6 +1600,7 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
           spvBlob = declareSpirvNarrowAccess(std::move(spvBlob));
           spvBlob = patchSpirvAliased(std::move(spvBlob));
           spvBlob = llvmc::patchSpirvWorkgroupSpecConstant(std::move(spvBlob));
+          verifyVulkanModule(spvBlob, TM.getTargetTriple());
         }
         if (arenaViewStart)
           spvBlob = appendSpirvModuleProcessed(std::move(spvBlob), "polyregion.arena-view-start=" + std::to_string(*arenaViewStart));
