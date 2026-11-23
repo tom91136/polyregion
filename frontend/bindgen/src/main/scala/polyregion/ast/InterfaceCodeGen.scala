@@ -22,6 +22,9 @@ object InterfaceCodeGen {
   def scalaSurface(interfaceDef: p.Interface, config: ScalaConfig, objectName: String): String =
     ScalaInterfaceCodeGen.surface(interfaceDef, config, objectName)
 
+  def scalaSignatures(interfaceDef: p.Interface, objectName: String): String =
+    ScalaInterfaceCodeGen.signatures(interfaceDef, objectName)
+
   def javaClass(interfaceDef: p.Interface, config: JavaConfig): String =
     JavaInterfaceCodeGen(interfaceDef, config)
 

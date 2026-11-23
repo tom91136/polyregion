@@ -113,7 +113,7 @@ class SpectraSuite extends munit.FunSuite {
 
     Spectra.interfaceDef.declarations.foreach { decl =>
       val name = decl.name.last
-      assertEquals(raw"spectra\.$name\(".r.findAllIn(scalaSurface).size, 1, s"Scala: $name")
+      assertEquals(raw"spectraSignatures\.$name\(".r.findAllIn(scalaSurface).size, 1, s"Scala: $name")
       assertEquals(raw"polyregion_$name\(".r.findAllIn(fortranSurface).size, 1, s"Fortran: $name")
     }
     List("w4", "w8", "w12").foreach { width =>

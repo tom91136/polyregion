@@ -191,6 +191,7 @@ lazy val `runtime-java` = project
 lazy val `runtime-scala` = project
   .settings(
     commonSettings,
+    sdkPublishSettings,
     polyregionSettings(),
     name := "runtime-scala",
     Test / unmanagedSources / excludeFilter := {
@@ -262,6 +263,7 @@ lazy val codegen = project
   .in(file("codegen"))
   .settings(
     commonSettings,
+    sdkPublishSettings,
     name                := "codegen",
     assembly / artifact := (assembly / artifact).value.withClassifier(Some("assembly")),
     scalacOptions ++=
@@ -281,6 +283,7 @@ lazy val codegen = project
 lazy val pass = (projectMatrix in file("pass"))
   .settings(
     commonSettings,
+    sdkPublishSettings,
     name := "pass",
     scalacOptions ++=
       Seq("-Yretain-trees") ++
@@ -506,6 +509,7 @@ lazy val pass = (projectMatrix in file("pass"))
 lazy val compiler = project
   .settings(
     commonSettings,
+    sdkPublishSettings,
     polyregionLibrarySettings,
     name        := "compiler",
     Test / fork := true,
@@ -727,9 +731,13 @@ lazy val root = project
         IO.delete(mavenDir)
         Def.sequential(
           ast.jvm(scala3Version) / publish,
+          pass.jvm(scala3Version) / publish,
           bindgen / publish,
           `binding-jvm` / publish,
+          codegen / publish,
+          compiler / publish,
           `runtime-java` / publish,
+          `runtime-scala` / publish,
           Def.task(mavenDir)
         )
       }.value

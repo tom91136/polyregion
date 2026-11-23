@@ -93,19 +93,23 @@ private[ast] object ScalaInterfaceCodeGen {
 
   private val CurrentContext = "polyregion.jvm.runtime.Context.current()"
 
-  private def declaration(interfaceDef: p.Interface, decl: p.FunctionDecl, context: Option[String]): String = {
+  private def signature(decl: p.FunctionDecl, context: Option[String], mirror: Boolean): String = {
     val tpeVars = if (decl.tpeVars.nonEmpty) decl.tpeVars.map(_.name).mkString("[", ", ", "]") else ""
     val parameters = context.map(tpe => s"$ContextParameter: $tpe").toList ++ decl.args.map { arg =>
       val modifier = arg.named.tpe match {
-        case p.Type.Exec(_, _, _) => "inline "
-        case _                    => ""
+        case p.Type.Exec(_, _, _) if !mirror => "inline "
+        case _                               => ""
       }
       s"$modifier${arg.named.symbol}: ${tpe(arg.named.tpe)}"
     }
-    val signature = render(s"  inline def ${decl.name.last}$tpeVars(", parameters, s"): ${tpe(decl.rtn)} =")
+    val keyword = if (mirror) "def" else "inline def"
+    render(s"  $keyword ${decl.name.last}$tpeVars(", parameters, s"): ${tpe(decl.rtn)} =")
+  }
+
+  private def declaration(interfaceDef: p.Interface, decl: p.FunctionDecl, context: Option[String]): String = {
     val arguments = (if (context.isDefined) ContextParameter else CurrentContext) :: decl.args.map(_.named.symbol)
     s"""  @compileTimeOnly("${marker(interfaceDef, decl)}")
-       |$signature
+       |${signature(decl, context, mirror = false)}
        |${launchCall(interfaceDef, decl, arguments)}""".stripMargin
   }
 
@@ -159,13 +163,10 @@ private[ast] object ScalaInterfaceCodeGen {
        |    ${decl.name.last}(${arguments.mkString(", ")})""".stripMargin
   }
 
-  def apply(interfaceDef: p.Interface, config: ScalaConfig): String = {
-    if (config.packageName.isEmpty) fail("Scala package name is empty")
-    config.packageName.split('.').foreach(identifier(_, "package"))
-    identifier(config.objectName, "object")
+  private def validated(interfaceDef: p.Interface, region: Boolean): List[p.FunctionDecl] = {
     val decls = declarations(interfaceDef)
     validatePortableOverloads(decls, "Scala")
-    if (config.region.nonEmpty) validateRegionNames(decls)
+    if (region) validateRegionNames(decls)
     decls.foreach { decl =>
       identifier(decl.name.last, "method")
       decl.tpeVars.foreach { variable =>
@@ -176,6 +177,26 @@ private[ast] object ScalaInterfaceCodeGen {
       }
       decl.args.foreach(arg => identifier(arg.named.symbol, "parameter"))
     }
+    decls
+  }
+
+  def signatures(interfaceDef: p.Interface, objectName: String): String = {
+    identifier(objectName, "object")
+    val body = validated(interfaceDef, region = true)
+      .map(decl => s"${signature(decl, None, mirror = true)}\n    ???")
+      .mkString("\n\n")
+    s"""object $objectName {
+       |
+       |$body
+       |}
+       |""".stripMargin
+  }
+
+  def apply(interfaceDef: p.Interface, config: ScalaConfig): String = {
+    if (config.packageName.isEmpty) fail("Scala package name is empty")
+    config.packageName.split('.').foreach(identifier(_, "package"))
+    identifier(config.objectName, "object")
+    val decls    = validated(interfaceDef, region = config.region.nonEmpty)
     val contexts = None :: config.region.map(region => Some(region.contextType)).toList
     val stubs    = decls.flatMap(decl => contexts.map(declaration(interfaceDef, decl, _)))
     val sugars = config.region.toList.flatMap { _ =>

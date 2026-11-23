@@ -49,7 +49,9 @@ lazy val sdkSettings = Seq(
 lazy val api = Project("spectraApi", file("test/scala"))
   .settings(
     commonSettings,
-    name := "spectra-api",
+    sdkSettings,
+    name                                           := "spectra-api",
+    libraryDependencies += "uk.ac.bristol.uob-hpc" %% "runtime-scala" % polyregionVersion,
     Compile / unmanagedSources ++= Seq(
       file("generated/scala/polyregion/spectra.scala"),
       file("test/scala/polyregion/InterfaceSurfaceCheck.scala"),

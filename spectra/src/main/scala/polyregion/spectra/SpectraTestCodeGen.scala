@@ -2,7 +2,7 @@ package polyregion.spectra
 
 import java.nio.file.Path
 
-import polyregion.ast.PolyAST as p
+import polyregion.ast.{InterfaceCodeGen, PolyAST as p}
 
 private[spectra] object SpectraTestCodeGen {
 
@@ -507,18 +507,20 @@ private[spectra] object SpectraTestCodeGen {
       val profile = surfaceProfile(decl, mapping)
       val comment = Option.when(profile.nonEmpty)(s"    // ${decl.name.last}: $profile\n").getOrElse("")
       val args    = decl.args.map(scalaSurfaceArg(_, mapping))
-      val inline  = s"    spectra.${decl.name.last}(${args.mkString(", ")})"
+      val inline  = s"    spectraSignatures.${decl.name.last}(${args.mkString(", ")})"
       val call =
         if (inline.length <= 120) inline
-        else s"    spectra.${decl.name.last}(\n${args.map("      " + _).mkString(",\n")}\n    )"
+        else s"    spectraSignatures.${decl.name.last}(\n${args.map("      " + _).mkString(",\n")}\n    )"
       comment + call
     }
+    val signatures = InterfaceCodeGen.scalaSignatures(Spectra.interfaceDef, "spectraSignatures")
     s"""package polyregion
        |
        |// $Banner
        |// Compile-only instantiations of every generated Scala declaration; runtime package coverage is separate.
        |final case class SpectraSurfaceValue12(x: Int, y: Int, z: Int)
        |
+       |$signatures
        |object check_surface {
        |  def compile(): Unit = InterfaceSurfaceCheck.erase {
        |    val n        = 4
