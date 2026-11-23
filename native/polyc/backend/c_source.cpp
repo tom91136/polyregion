@@ -829,7 +829,12 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
             [&](const Math::Sinh &v) { return fmt::format("{}({})", mathFn("sinh"), mkTerm(v.x)); },
             [&](const Math::Cosh &v) { return fmt::format("{}({})", mathFn("cosh"), mkTerm(v.x)); },
             [&](const Math::Tanh &v) { return fmt::format("{}({})", mathFn("tanh"), mkTerm(v.x)); },
-            [&](const Math::Signum &v) { return fmt::format("{}({})", mathFn("signum"), mkTerm(v.x)); },
+            [&](const Math::Signum &v) -> std::string {
+              if (dialect == Dialect::MSL1_0) return fmt::format("{}({})", mathFn("signum"), mkTerm(v.x));
+              const auto x = mkTerm(v.x);
+              return fmt::format("(({0}) > 0 ? 1 : (({0}) < 0 ? -1 : {1}))", x, fp(v.tpe) ? x : "0"s);
+            },
+
             [&](const Math::Round &v) { return fmt::format("{}({})", mathFn("round"), mkTerm(v.x)); },
             [&](const Math::Ceil &v) { return fmt::format("{}({})", mathFn("ceil"), mkTerm(v.x)); },
             [&](const Math::Floor &v) { return fmt::format("{}({})", mathFn("floor"), mkTerm(v.x)); },

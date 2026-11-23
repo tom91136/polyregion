@@ -966,10 +966,10 @@ TEST_CASE("while false", "[compiler]") {
   assertCompile(program({}, {fn}));
 }
 
-static Function mkMathKernel(const Type::Any &tpe, const bool withSignum = true) {
+static Function mkMathKernel(const Type::Any &tpe) {
   auto outPtr = "out"_(Ptr(tpe));
   const Term::Select inSel = "in"_(tpe);
-  const auto signum = withSignum ? call(Signum(inSel, tpe)) : call(Fma(inSel, inSel, inSel, tpe));
+  const auto signum = call(Signum(inSel, tpe));
   return function("k", {"out"_(Ptr(tpe))(), "in"_(tpe)()}, Unit, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(),
                   CallConvention::OffloadEntry())({
       let("rsin") = call(Sin(inSel, tpe)),               //
@@ -1038,7 +1038,7 @@ TEST_CASE("math ops compile across targets", "[compiler][math]") {
   compiler::initialise();
   const auto tpe = GENERATE(values<Type::Any>({Float, Double}));
   auto p = program({}, {mkMathKernel(tpe)});
-  auto vulkan = program({}, {mkMathKernel(tpe, false)});
+  auto vulkan = program({}, {mkMathKernel(tpe)});
   DYNAMIC_SECTION(repr(tpe)) {
     SECTION("CPU host") { assertCompileTarget(p, {Target::Object_LLVM_HOST, "native"}); }
     SECTION("NVPTX64") {
@@ -1063,7 +1063,7 @@ TEST_CASE("math ops compile across targets", "[compiler][math]") {
 TEST_CASE("Vulkan f32 maths passes spirv-val", "[compiler][math][vulkan]") {
   compiler::initialise();
   if (std::system("spirv-val --version > /dev/null 2>&1") != 0) SKIP("spirv-val is not installed");
-  const auto c = compiler::compile(program({}, {mkMathKernel(Float, false)}), {Target::Object_LLVM_SPIRV_GLCompute, ""}, OptLevel::O3);
+  const auto c = compiler::compile(program({}, {mkMathKernel(Float)}), {Target::Object_LLVM_SPIRV_GLCompute, ""}, OptLevel::O3);
   REQUIRE(c.binary.has_value());
   llvm::SmallString<128> module, report;
   REQUIRE_FALSE(llvm::sys::fs::createTemporaryFile("polyc_vulkan_math", "spv", module));
@@ -1125,4 +1125,32 @@ TEST_CASE("Vulkan keeps 64-bit maths that has a 64-bit form", "[compiler][math][
       {let("a") = call(Sqrt(in, tpe)), let("b") = call(Floor(in, tpe)), let("c") = call(Fma(in, in, in, tpe)),
        "out"_(Ptr(tpe))[0_(SInt)] = "a"_(tpe), "out"_(Ptr(tpe))[1_(SInt)] = "b"_(tpe), "out"_(Ptr(tpe))[2_(SInt)] = "c"_(tpe), ret()});
   assertCompileTarget(program({}, {fn}), {Target::Object_LLVM_SPIRV_GLCompute, ""});
+}
+
+TEST_CASE("Vulkan 64-bit signum passes spirv-val", "[compiler][math][vulkan]") {
+  compiler::initialise();
+  if (std::system("spirv-val --version > /dev/null 2>&1") != 0) SKIP("spirv-val is not installed");
+  const Type::Any tpe = Double;
+  const Term::Select in = "in"_(tpe);
+  const auto fn =
+      function("k", {"out"_(Ptr(tpe))(), "in"_(tpe)()}, Unit, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(),
+               CallConvention::OffloadEntry())({let("r") = call(Signum(in, tpe)), "out"_(Ptr(tpe))[0_(SInt)] = "r"_(tpe), ret()});
+  const auto c = compiler::compile(program({}, {fn}), {Target::Object_LLVM_SPIRV_GLCompute, ""}, OptLevel::O3);
+  REQUIRE(c.binary.has_value());
+  llvm::SmallString<128> module, report;
+  REQUIRE_FALSE(llvm::sys::fs::createTemporaryFile("polyc_vulkan_f64_signum", "spv", module));
+  REQUIRE_FALSE(llvm::sys::fs::createTemporaryFile("polyc_vulkan_f64_signum", "txt", report));
+  {
+    std::error_code ec;
+    llvm::raw_fd_ostream out(module, ec, llvm::sys::fs::OF_None);
+    REQUIRE_FALSE(ec);
+    out.write(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
+  }
+  const int status =
+      std::system(("spirv-val --target-env vulkan1.3 " + std::string(module) + " > " + std::string(report) + " 2>&1").c_str());
+  const auto text = llvm::MemoryBuffer::getFile(report);
+  CAPTURE(text ? (*text)->getBuffer().str() : std::string());
+  CHECK(status == 0);
+  llvm::sys::fs::remove(module);
+  llvm::sys::fs::remove(report);
 }

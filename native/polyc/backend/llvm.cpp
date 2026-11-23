@@ -1969,9 +1969,11 @@ ValPtr CodeGen::mkSignumVal(const AnyExpr &expr, const AnyTerm &x, const AnyType
         return B.CreateOr(B.CreateAShr(v, msb), B.CreateLShr(B.CreateNeg(v), msb));
       },
       [&](const auto &v) -> ValPtr {
-        auto isNaN = B.CreateFCmpUNO(v, v);
-        auto isZero = B.CreateFCmpOEQ(v, llvm::ConstantFP::get(v->getType(), 0.0));
-        return B.CreateSelect(B.CreateLogicalOr(isNaN, isZero), v, intr2(llvm::Intrinsic::copysign, tpe, dsl::fractional(tpe, 1.0L), x));
+        auto *zero = llvm::ConstantFP::get(v->getType(), 0.0);
+        auto *positive = B.CreateFCmpOGT(v, zero);
+        auto *negative = B.CreateFCmpOLT(v, zero);
+        return B.CreateSelect(positive, llvm::ConstantFP::get(v->getType(), 1.0),
+                              B.CreateSelect(negative, llvm::ConstantFP::get(v->getType(), -1.0), v));
       });
 }
 

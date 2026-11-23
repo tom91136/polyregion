@@ -42,6 +42,8 @@ static Opt<MatchedCall> polyregionIntrinsic(const clang::CallExpr &call, const c
                        if (builtinName == "gpu_fence_all") return spec(0, [&] { return Spec::GpuFenceAll(); });
                        if (builtinName == "gpu_lane_idx") return spec(0, [&] { return Spec::GpuLaneIdx(); });
                        if (builtinName == "gpu_subgroup_size") return spec(0, [&] { return Spec::GpuSubgroupSize(); });
+                       if (builtinName == "gpu_signum")
+                         return args.size() == 1 ? Expr::MathOp(Math::Signum(args[0], resultType())) : poison();
                        if (builtinName == "gpu_shuffle_down_u32")
                          return spec(4, [&] { return Spec::GpuShuffleDown(args[0], args[1], args[2], args[3], resultType()); });
                        if (builtinName == "gpu_shuffle_up_u32")

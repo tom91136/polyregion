@@ -1,5 +1,5 @@
 #pragma region case: glcompute-math-f32
-#pragma region using: fn=cbrt,expm1,log1p,hypot,atan2,transcendental
+#pragma region using: fn=cbrt,expm1,log1p,hypot,atan2,transcendental,signum
 #pragma region offload-only
 #pragma region targets: spirv_glcompute
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DFN={fn} -o {output} {input}
@@ -14,6 +14,8 @@
 #include <execution>
 #include <limits>
 #include <vector>
+
+#include "polystl/intrinsics.h"
 
 static int64_t ordered(float x) {
   int32_t i;
@@ -125,6 +127,12 @@ int main() {
     c.binary(
         "pow", pos, std::vector<float>(pos.size(), 1.5f), 64, 0, [](float x, float y) { return std::pow(x, y); },
         [](float x, float y) { return std::pow(x, y); });
+  }
+
+  if (selected("signum")) {
+    const std::vector<float> xs{-inf, -1e30f, -1.f, -1e-20f, -0.f, 0.f, 1e-20f, 1.f, 1e30f, inf, qnan};
+    const auto host = [](float x) { return std::isnan(x) || x == 0.f ? x : std::copysign(1.f, x); };
+    c.unary("signum", xs, 0, 0, [](float x) { return __polyregion_gpu_signum(x); }, host);
   }
 
   if (c.failures == 0) printf("math f32 ok");

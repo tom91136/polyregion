@@ -2,7 +2,15 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdint>
+
+[[nodiscard]] inline float __polyregion_gpu_signum(float x) { // NOLINT(*-reserved-identifier)
+  return std::isnan(x) || x == 0.f ? x : std::copysign(1.f, x);
+}
+[[nodiscard]] inline double __polyregion_gpu_signum(double x) { // NOLINT(*-reserved-identifier)
+  return std::isnan(x) || x == 0.0 ? x : std::copysign(1.0, x);
+}
 
 // C-linkage remapper hooks. Their inline bodies define the single-work-item host fallback;
 // PolyCPP replaces calls inside an offloaded region with the corresponding target SpecOp.
