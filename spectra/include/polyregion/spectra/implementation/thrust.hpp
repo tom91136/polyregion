@@ -323,13 +323,13 @@ POLYREGION_SPECTRA_EXPORT(find_if_not) //
 template <class T, class Op>        //
 POLYREGION_SPECTRA_EXPORT(for_each) //
     void for_each(T *data, std::int32_t n, Op op) {
-  thrust::for_each(thrust::device, data, data + n, [=] __host__ __device__(T &x) { x = op(x); });
+  thrust::for_each(thrust::device, data, data + n, [=] __host__ __device__(T & x) { x = op(x); });
 }
 
 template <class T, class Op>          //
 POLYREGION_SPECTRA_EXPORT(for_each_n) //
     void for_each_n(T *data, std::int32_t n, Op op) {
-  thrust::for_each_n(thrust::device, data, n, [=] __host__ __device__(T &x) { x = op(x); });
+  thrust::for_each_n(thrust::device, data, n, [=] __host__ __device__(T & x) { x = op(x); });
 }
 
 template <class T>                //

@@ -31,8 +31,8 @@ int main() {
   off::for_each(context, 1000, [p](std::int64_t i) { p[i] = static_cast<int>(2 * i); });
   std::vector<int> weights{0, 1, 2, 3, 4, 5, 6};
   const int *w = weights.data();
-  const int sum = off::transform_reduce_unordered(
-      context, 100000, 0, [w](std::int64_t i) { return w[i % 7]; }, [](int a, int b) { return a + b; });
+  const int sum =
+      off::transform_reduce_unordered(context, 100000, 0, [w](std::int64_t i) { return w[i % 7]; }, [](int a, int b) { return a + b; });
   std::printf("%d %d %d", p[7], p[999], sum);
   return 0;
 }

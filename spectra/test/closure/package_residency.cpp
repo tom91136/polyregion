@@ -8,9 +8,9 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include "polyrt/rt.h"
 #include <polyregion/spectra.hpp>
 
-#include "polyrt/rt.h"
 #include "support.hpp"
 
 namespace {
