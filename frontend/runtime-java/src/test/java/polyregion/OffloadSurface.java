@@ -66,5 +66,191 @@ public final class OffloadSurface {
 
     // transform_reduce_unordered: T=double: context
     Offload.transform_reduce_unordered(context, 0L, 0.0, (arg0) -> 0.0, (arg0, arg1) -> 0.0);
+
+    // for_each: rank 2
+    Offload.for_each(0L, 0L, (arg0, arg1) -> { });
+
+    // for_each: rank 3
+    Offload.for_each(0L, 0L, 0L, (arg0, arg1, arg2) -> { });
+
+    // for_each: context: rank 2
+    Offload.for_each(context, 0L, 0L, (arg0, arg1) -> { });
+
+    // for_each: context: rank 3
+    Offload.for_each(context, 0L, 0L, 0L, (arg0, arg1, arg2) -> { });
+
+    // transform_reduce: T=int: rank 2
+    Offload.transform_reduce(0L, 0L, 0, (arg0, arg1) -> 0, (arg0, arg1) -> 0);
+
+    // transform_reduce: T=int: rank 3
+    Offload.transform_reduce(0L, 0L, 0L, 0, (arg0, arg1, arg2) -> 0, (arg0, arg1) -> 0);
+
+    // transform_reduce: T=int: context: rank 2
+    Offload.transform_reduce(context, 0L, 0L, 0, (arg0, arg1) -> 0, (arg0, arg1) -> 0);
+
+    // transform_reduce: T=int: context: rank 3
+    Offload.transform_reduce(context, 0L, 0L, 0L, 0, (arg0, arg1, arg2) -> 0, (arg0, arg1) -> 0);
+
+    // transform_reduce: T=long: rank 2
+    Offload.transform_reduce(0L, 0L, 0L, (arg0, arg1) -> 0L, (arg0, arg1) -> 0L);
+
+    // transform_reduce: T=long: rank 3
+    Offload.transform_reduce(0L, 0L, 0L, 0L, (arg0, arg1, arg2) -> 0L, (arg0, arg1) -> 0L);
+
+    // transform_reduce: T=long: context: rank 2
+    Offload.transform_reduce(context, 0L, 0L, 0L, (arg0, arg1) -> 0L, (arg0, arg1) -> 0L);
+
+    // transform_reduce: T=long: context: rank 3
+    Offload.transform_reduce(context, 0L, 0L, 0L, 0L, (arg0, arg1, arg2) -> 0L, (arg0, arg1) -> 0L);
+
+    // transform_reduce: T=float: rank 2
+    Offload.transform_reduce(0L, 0L, 0.0f, (arg0, arg1) -> 0.0f, (arg0, arg1) -> 0.0f);
+
+    // transform_reduce: T=float: rank 3
+    Offload.transform_reduce(0L, 0L, 0L, 0.0f, (arg0, arg1, arg2) -> 0.0f, (arg0, arg1) -> 0.0f);
+
+    // transform_reduce: T=float: context: rank 2
+    Offload.transform_reduce(context, 0L, 0L, 0.0f, (arg0, arg1) -> 0.0f, (arg0, arg1) -> 0.0f);
+
+    // transform_reduce: T=float: context: rank 3
+    Offload.transform_reduce(
+        context,
+        0L,
+        0L,
+        0L,
+        0.0f,
+        (arg0, arg1, arg2) -> 0.0f,
+        (arg0, arg1) -> 0.0f);
+
+    // transform_reduce: T=double: rank 2
+    Offload.transform_reduce(0L, 0L, 0.0, (arg0, arg1) -> 0.0, (arg0, arg1) -> 0.0);
+
+    // transform_reduce: T=double: rank 3
+    Offload.transform_reduce(0L, 0L, 0L, 0.0, (arg0, arg1, arg2) -> 0.0, (arg0, arg1) -> 0.0);
+
+    // transform_reduce: T=double: context: rank 2
+    Offload.transform_reduce(context, 0L, 0L, 0.0, (arg0, arg1) -> 0.0, (arg0, arg1) -> 0.0);
+
+    // transform_reduce: T=double: context: rank 3
+    Offload.transform_reduce(
+        context,
+        0L,
+        0L,
+        0L,
+        0.0,
+        (arg0, arg1, arg2) -> 0.0,
+        (arg0, arg1) -> 0.0);
+
+    // transform_reduce_unordered: T=int: rank 2
+    Offload.transform_reduce_unordered(0L, 0L, 0, (arg0, arg1) -> 0, (arg0, arg1) -> 0);
+
+    // transform_reduce_unordered: T=int: rank 3
+    Offload.transform_reduce_unordered(0L, 0L, 0L, 0, (arg0, arg1, arg2) -> 0, (arg0, arg1) -> 0);
+
+    // transform_reduce_unordered: T=int: context: rank 2
+    Offload.transform_reduce_unordered(context, 0L, 0L, 0, (arg0, arg1) -> 0, (arg0, arg1) -> 0);
+
+    // transform_reduce_unordered: T=int: context: rank 3
+    Offload.transform_reduce_unordered(
+        context,
+        0L,
+        0L,
+        0L,
+        0,
+        (arg0, arg1, arg2) -> 0,
+        (arg0, arg1) -> 0);
+
+    // transform_reduce_unordered: T=long: rank 2
+    Offload.transform_reduce_unordered(0L, 0L, 0L, (arg0, arg1) -> 0L, (arg0, arg1) -> 0L);
+
+    // transform_reduce_unordered: T=long: rank 3
+    Offload.transform_reduce_unordered(
+        0L,
+        0L,
+        0L,
+        0L,
+        (arg0, arg1, arg2) -> 0L,
+        (arg0, arg1) -> 0L);
+
+    // transform_reduce_unordered: T=long: context: rank 2
+    Offload.transform_reduce_unordered(context, 0L, 0L, 0L, (arg0, arg1) -> 0L, (arg0, arg1) -> 0L);
+
+    // transform_reduce_unordered: T=long: context: rank 3
+    Offload.transform_reduce_unordered(
+        context,
+        0L,
+        0L,
+        0L,
+        0L,
+        (arg0, arg1, arg2) -> 0L,
+        (arg0, arg1) -> 0L);
+
+    // transform_reduce_unordered: T=float: rank 2
+    Offload.transform_reduce_unordered(0L, 0L, 0.0f, (arg0, arg1) -> 0.0f, (arg0, arg1) -> 0.0f);
+
+    // transform_reduce_unordered: T=float: rank 3
+    Offload.transform_reduce_unordered(
+        0L,
+        0L,
+        0L,
+        0.0f,
+        (arg0, arg1, arg2) -> 0.0f,
+        (arg0, arg1) -> 0.0f);
+
+    // transform_reduce_unordered: T=float: context: rank 2
+    Offload.transform_reduce_unordered(
+        context,
+        0L,
+        0L,
+        0.0f,
+        (arg0, arg1) -> 0.0f,
+        (arg0, arg1) -> 0.0f);
+
+    // transform_reduce_unordered: T=float: context: rank 3
+    Offload.transform_reduce_unordered(
+        context,
+        0L,
+        0L,
+        0L,
+        0.0f,
+        (arg0, arg1, arg2) -> 0.0f,
+        (arg0, arg1) -> 0.0f);
+
+    // transform_reduce_unordered: T=double: rank 2
+    Offload.transform_reduce_unordered(0L, 0L, 0.0, (arg0, arg1) -> 0.0, (arg0, arg1) -> 0.0);
+
+    // transform_reduce_unordered: T=double: rank 3
+    Offload.transform_reduce_unordered(
+        0L,
+        0L,
+        0L,
+        0.0,
+        (arg0, arg1, arg2) -> 0.0,
+        (arg0, arg1) -> 0.0);
+
+    // transform_reduce_unordered: T=double: context: rank 2
+    Offload.transform_reduce_unordered(
+        context,
+        0L,
+        0L,
+        0.0,
+        (arg0, arg1) -> 0.0,
+        (arg0, arg1) -> 0.0);
+
+    // transform_reduce_unordered: T=double: context: rank 3
+    Offload.transform_reduce_unordered(
+        context,
+        0L,
+        0L,
+        0L,
+        0.0,
+        (arg0, arg1, arg2) -> 0.0,
+        (arg0, arg1) -> 0.0);
+
+    // task
+    Offload.task(() -> { });
+
+    // task: context
+    Offload.task(context, () -> { });
   }
 }

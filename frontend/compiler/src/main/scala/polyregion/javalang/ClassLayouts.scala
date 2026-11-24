@@ -52,18 +52,25 @@ object ClassLayouts {
       member: Option[(String, String)],
       fields: List[(String, String)],
       methods: List[(String, String, Int)],
-      stubs: Map[(String, String), String]
+      stubs: Map[(String, String), String],
+      sugars: Map[(String, String), String]
   )
 
-  private class StubValueVisitor(key: (String, String), stubs: mutable.Map[(String, String), String])
+  private class ValueVisitor(key: (String, String), values: mutable.Map[(String, String), String])
       extends AnnotationVisitor(Opcodes.ASM9) {
-    override def visit(name: String, value: Object): Unit = if (name == "value") stubs(key) = value.toString
+    override def visit(name: String, value: Object): Unit = if (name == "value") values(key) = value.toString
   }
 
-  private class StubMethodVisitor(name: String, desc: String, stubs: mutable.Map[(String, String), String])
-      extends MethodVisitor(Opcodes.ASM9) {
+  private class StubMethodVisitor(
+      name: String,
+      desc: String,
+      stubs: mutable.Map[(String, String), String],
+      sugars: mutable.Map[(String, String), String]
+  ) extends MethodVisitor(Opcodes.ASM9) {
     override def visitAnnotation(annotation: String, visible: Boolean): AnnotationVisitor =
-      if (annotation == InterfaceStub.Descriptor) StubValueVisitor((name, desc), stubs) else absent
+      if (annotation == InterfaceStub.Descriptor) ValueVisitor((name, desc), stubs)
+      else if (annotation == InterfaceStub.SugarDescriptor) ValueVisitor((name, desc), sugars)
+      else absent
   }
 
   private class ShapeCollector extends ClassVisitor(Opcodes.ASM9) {
@@ -73,13 +80,14 @@ object ClassLayouts {
     val fields  = mutable.ListBuffer.empty[(String, String)]
     val held    = mutable.ListBuffer.empty[String]
     val stubs   = mutable.Map.empty[(String, String), String]
+    val sugars  = mutable.Map.empty[(String, String), String]
 
     override def visit(v: Int, a: Int, n: String, s: String, sup: String, itf: Array[String]): Unit =
       header += ((n, Option(sup), a, Option(itf).fold(List.empty[String])(_.toList)))
 
     override def visitMethod(a: Int, n: String, d: String, s: String, e: Array[String]): MethodVisitor = {
       methods += ((n, d, a))
-      StubMethodVisitor(n, d, stubs)
+      StubMethodVisitor(n, d, stubs, sugars)
     }
 
     override def visitInnerClass(n: String, outer: String, inner: String, a: Int): Unit =
@@ -108,7 +116,8 @@ object ClassLayouts {
       member,
       collector.fields.toList,
       collector.methods.toList,
-      collector.stubs.toMap
+      collector.stubs.toMap,
+      collector.sugars.toMap
     )
   }
 
@@ -161,6 +170,9 @@ object ClassLayouts {
 
   def stubOf(method: MethodRef, bytesOf: ClassBytes): Result[Option[String]] =
     shapeFor(method.owner, bytesOf).map(_.stubs.get((method.name, method.desc)))
+
+  def sugarOf(method: MethodRef, bytesOf: ClassBytes): Result[Option[String]] =
+    shapeFor(method.owner, bytesOf).map(_.sugars.get((method.name, method.desc)))
 
   def superOf(internal: String, bytesOf: ClassBytes): Result[Option[String]] =
     shapeFor(internal, bytesOf).map(_.superName)

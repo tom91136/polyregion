@@ -2,7 +2,7 @@ package polyregion.javalang
 
 import cats.syntax.all.*
 import com.sun.source.tree.{ExpressionTree, MethodInvocationTree, MethodTree, ParenthesizedTree, Tree, TypeCastTree}
-import com.sun.tools.javac.code.{Flags, Symbol as JSymbol}
+import com.sun.tools.javac.code.{Flags, Symbol as JSymbol, Type as JType}
 import com.sun.tools.javac.processing.JavacProcessingEnvironment
 import com.sun.tools.javac.util.{List as JList, Names, Position}
 import com.sun.tools.javac.tree.{JCTree, TreeInfo, TreeMaker, TreeScanner}
@@ -47,15 +47,28 @@ object LaunchSites {
       within: Option[JSymbol.MethodSymbol]
   )
 
+  case class SugarSite(
+      call: JCTree.JCMethodInvocation,
+      stub: JSymbol.MethodSymbol,
+      identity: String,
+      rank: Int,
+      map: Int,
+      within: Option[JSymbol.MethodSymbol]
+  )
+
   private class StubScanner(
       within: Option[JSymbol.MethodSymbol],
       sites: mutable.ListBuffer[Site],
-      references: mutable.ListBuffer[Site]
+      references: mutable.ListBuffer[Site],
+      sugars: mutable.ListBuffer[SugarSite]
   ) extends TreeScanner {
     override def visitApply(a: JCTree.JCMethodInvocation): Unit = {
       TreeInfo.symbol(a.meth) match {
         case stub: JSymbol.MethodSymbol =>
           InterfaceStub.identityOf(stub).foreach(id => sites += Site(a, stub, id, within))
+          InterfaceStub.sugarOf(stub).foreach { (id, rank, map) =>
+            sugars += SugarSite(a, stub, id, rank, map, within)
+          }
         case _ =>
       }
       TreeRemapper.dynamicSym(a).flatMap(TreeRemapper.metafactoryImpl(_)).foreach { impl =>
@@ -65,19 +78,20 @@ object LaunchSites {
     }
   }
 
-  case class Collected(sites: List[Site], references: List[Site])
+  case class Collected(sites: List[Site], references: List[Site], sugars: List[SugarSite])
 
   def collect(scope: Tree): Collected = scope match {
     case cls: JCTree.JCClassDecl =>
       val sites      = mutable.ListBuffer.empty[Site]
       val references = mutable.ListBuffer.empty[Site]
+      val sugars     = mutable.ListBuffer.empty[SugarSite]
       cls.defs.asScala.foreach {
-        case m: JCTree.JCMethodDecl => m.accept(StubScanner(Option(m.sym), sites, references))
+        case m: JCTree.JCMethodDecl => m.accept(StubScanner(Option(m.sym), sites, references, sugars))
         case _: JCTree.JCClassDecl  =>
-        case member                 => member.accept(StubScanner(None, sites, references))
+        case member                 => member.accept(StubScanner(None, sites, references, sugars))
       }
-      Collected(sites.toList, references.toList)
-    case _ => Collected(Nil, Nil)
+      Collected(sites.toList, references.toList, sugars.toList)
+    case _ => Collected(Nil, Nil, Nil)
   }
 
   @tailrec
@@ -94,8 +108,12 @@ object LaunchSites {
       case _ => None
     }
 
-  def callables(site: Site): List[JSymbol.MethodSymbol] =
-    site.call.getArguments.asScala.toList.flatMap(lambdaOf(_).map(_._2))
+  private def callablesIn(call: JCTree.JCMethodInvocation): List[JSymbol.MethodSymbol] =
+    call.getArguments.asScala.toList.flatMap(lambdaOf(_).map(_._2))
+
+  def callables(site: Site): List[JSymbol.MethodSymbol] = callablesIn(site.call)
+
+  def callables(site: SugarSite): List[JSymbol.MethodSymbol] = callablesIn(site.call)
 
   private def classify(tpe: TypeMirror): Result[Kind] = {
     val unsupported = CompilerException(s"launch argument of type `$tpe` is not supported")
@@ -303,6 +321,143 @@ object LaunchSites {
         classOf[LaunchSite]
       )
     } yield executable
+  }
+
+  private def wrapperOf(
+      sources: TreeRemapper.Sources,
+      callable: ExpressionTree,
+      rank: Int
+  ): Result[(MethodTree, JSymbol.MethodSymbol, Int)] =
+    sources.env match {
+      case javac: JavacProcessingEnvironment =>
+        Either.catchNonFatal {
+          val context      = javac.getContext
+          val make         = TreeMaker.instance(context).at(Position.NOPOS)
+          val names        = Names.instance(context)
+          val (site, impl) = lambdaOf(callable).get
+          if (!impl.isStatic) throw new IllegalArgumentException("a launch callable cannot use `this`")
+          val captured = site.getArguments.size
+          val longTpe  = javac.getTypeUtils.getPrimitiveType(TypeKind.LONG).asInstanceOf[JType]
+          val paramTypes = impl.`type`.getParameterTypes.asScala.toList.take(captured) ++
+            List.fill(rank)(longTpe) ++ List(longTpe)
+          val resultType = impl.getReturnType
+          val wrapperType = new JType.MethodType(
+            JList.from(paramTypes.asJava),
+            resultType,
+            JList.nil[JType](),
+            impl.owner.enclClass()
+          )
+          val wrapper = JSymbol.MethodSymbol(
+            Flags.STATIC | Flags.SYNTHETIC,
+            names.fromString(impl.name.toString),
+            wrapperType,
+            impl.owner
+          )
+          val params = paramTypes.zipWithIndex.map((tpe, i) => make.Param(names.fromString(s"p$i"), tpe, wrapper))
+          wrapper.params = JList.from(params.map(_.sym).asJava)
+          def ident(at: Int): JCTree.JCExpression = make.Ident(params(at).sym): JCTree.JCExpression
+          def binary(tag: JCTree.Tag, left: JCTree.JCExpression, right: JCTree.JCExpression): JCTree.JCExpression = {
+            val tree = make.Binary(tag, left, right)
+            tree.`type` = longTpe
+            tree
+          }
+          val index = ident(params.size - 1)
+          val indices = rank match {
+            case 0 => Nil
+            case 2 =>
+              val n1 = ident(captured + 1)
+              List(binary(JCTree.Tag.DIV, index, n1), binary(JCTree.Tag.MOD, index, n1))
+            case 3 =>
+              val n1 = ident(captured + 1)
+              val n2 = ident(captured + 2)
+              List(
+                binary(JCTree.Tag.DIV, index, binary(JCTree.Tag.MUL, n1, n2)),
+                binary(JCTree.Tag.MOD, binary(JCTree.Tag.DIV, index, n2), n1),
+                binary(JCTree.Tag.MOD, index, n2)
+              )
+            case other => throw IllegalArgumentException(s"unsupported sugar rank $other")
+          }
+          val arguments = params.indices.take(captured).map(ident).toList ++ indices
+          val call      = make.App(make.QualIdent(impl), JList.from(arguments.asJava))
+          val stmt =
+            if (resultType.getKind == TypeKind.VOID) make.Exec(call) else make.Return(call)
+          val tree = make.MethodDef(wrapper, make.Block(0, JList.of[JCTree.JCStatement](stmt))): MethodTree
+          (tree, wrapper, captured + rank)
+        }
+      case _ => "linearised region sugar needs the javac processing environment".fail
+    }
+
+  def compileSugar(
+      sources: TreeRemapper.Sources,
+      config: LaunchConfig,
+      site: SugarSite
+  ): Result[(String, Offloader.Executable)] = {
+    val parameters = site.stub.getParameters.asScala.toList
+    val contextFirst =
+      parameters.headOption.exists(param => classify(param.asType).toOption.contains(Kind.Context))
+    val offset  = site.rank + Option.when(contextFirst)(1).getOrElse(0)
+    val actuals = site.call.getArguments.asScala.toList
+    val rest    = actuals.drop(offset)
+    val kinds   = parameters.drop(offset).map(_.asType).traverse(classify(_))
+    for {
+      identity                        <- Identity.parse(site.identity)
+      (rtn, rtnCode)                  <- resultOf(site.stub.getReturnType)
+      ks                              <- kinds
+      (wrapper, wrapperSym, captured) <- wrapperOf(sources, rest(site.map), site.rank)
+      parts <- ks.zipWithIndex.traverse {
+        case (Kind.Scalar(prim), _) => prim.code.toString.success
+        case (Kind.Array(prim), _)  => s"[${prim.code}".success
+        case (Kind.Callable, i) if i == site.map =>
+          s"@${wrapperSym.owner.flatName.toString.replace('.', '/')}.${wrapperSym.name}".success
+        case (Kind.Callable, i) =>
+          lambdaOf(rest(i))
+            .map(_._2)
+            .map(impl => s"@${impl.owner.flatName.toString.replace('.', '/')}.${impl.name}".success)
+            .getOrElse("a launch callable must be a lambda expression".fail)
+        case (Kind.Context, _) => "".success
+      }
+      name      = LaunchSite.nameOf(site.identity, ("J" :: parts).asJava)
+      entryName = normalise(name.substring(name.lastIndexOf('.') + 1))
+      lowered <- rest.indices.toList
+        .filter { i =>
+          ks(i) == Kind.Callable
+        }
+        .traverse { i =>
+          val expanded = i + 1
+          if (i == site.map)
+            lowerCallable(sources, config, entryName, expanded, wrapper, wrapperSym, captured, Mode.Site)
+              .map(expanded -> _)
+          else
+            lambdaOf(rest(i))
+              .toRight(CompilerException("a launch callable must be a lambda expression or a static method reference"))
+              .flatMap { (call, impl) =>
+                treeOf(sources, impl).flatMap(tree =>
+                  lowerCallable(sources, config, entryName, expanded, tree, impl, call.getArguments.size, Mode.Site)
+                    .map(expanded -> _)
+                )
+              }
+        }
+      byIndex = lowered.toMap
+      argumentTypes = (p.Type.IntS64: p.Type) :: ks.zipWithIndex.map {
+        case (Kind.Scalar(prim), _) => prim.tpe: p.Type
+        case (Kind.Array(prim), _)  => p.Type.Ptr(prim.tpe, p.Type.Space.Global): p.Type
+        case (_, i)                 => callableType(byIndex(i + 1))
+      }
+      sizes = p.Program.TypeSize(p.Type.IntS64, 8) :: ks.collect {
+        case Kind.Scalar(prim) => p.Program.TypeSize(prim.tpe, prim.size)
+        case Kind.Array(prim)  => p.Program.TypeSize(prim.tpe, prim.size)
+      }
+      specs = "PJ" :: ks.zipWithIndex.map {
+        case (Kind.Scalar(prim), _) => s"P${prim.code}"
+        case (Kind.Array(prim), _)  => s"A${prim.code}"
+        case (Kind.Callable, i)     => specOf(byIndex(i + 1).environment)
+        case (Kind.Context, _)      => ""
+      }
+      executable <- assemble(
+        Assembly(config, name, identity, rtn, rtnCode, argumentTypes, sizes, specs, lowered.map(_._2), 'V'),
+        classOf[LaunchSite]
+      )
+    } yield (name, executable)
   }
 
   enum StepArg {

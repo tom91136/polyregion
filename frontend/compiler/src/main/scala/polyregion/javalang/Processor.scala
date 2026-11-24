@@ -281,13 +281,16 @@ class Processor(scan: Tree => LaunchSites.Collected) extends AbstractProcessor {
 
           val regionImpls = xs.flatMap { case (_, m: JCTree.JCMethodDecl) => Option(m.sym).toList; case _ => Nil }.toSet
           val scanned     = guard(Either.catchNonFatal(scan(scope)))
-          val nestedImpls = scanned.toOption.fold(Set.empty[MethodSymbol])(_.sites.flatMap(LaunchSites.callables).toSet)
+          val nestedImpls = scanned.toOption.fold(Set.empty[MethodSymbol]) { collected =>
+            (collected.sites.flatMap(LaunchSites.callables) ++ collected.sugars.flatMap(LaunchSites.callables)).toSet
+          }
           scanned match {
             case Left(failure) => report(s"find launch sites in ${e.getTypeElement}", failure)
             case Right(collected) =>
-              def hostSide(site: LaunchSites.Site): Boolean = !site.within.exists(w => regionImpls(w) || nestedImpls(w))
+              def hostSide(within: Option[MethodSymbol]): Boolean =
+                !within.exists(w => regionImpls(w) || nestedImpls(w))
 
-              collected.references.filter(hostSide(_)).foreach { reference =>
+              collected.references.filter(r => hostSide(r.within)).foreach { reference =>
                 report(
                   s"launch ${reference.stub.owner}.${reference.stub.name}",
                   CompilerException(
@@ -297,7 +300,7 @@ class Processor(scan: Tree => LaunchSites.Collected) extends AbstractProcessor {
                 )
               }
 
-              collected.sites.filter(hostSide(_)).foreach { site =>
+              collected.sites.filter(s => hostSide(s.within)).foreach { site =>
                 val label = s"launch ${site.stub.owner}.${site.stub.name}"
                 guard(LaunchSites.nameOf(site)) match {
                   case Left(failure)                           => report(label, failure)
@@ -310,6 +313,26 @@ class Processor(scan: Tree => LaunchSites.Collected) extends AbstractProcessor {
                       guard(
                         launchConfig.leftMap(CompilerException(_)).flatMap(LaunchSites.compile(sources, _, site, fqcn))
                       ),
+                      classOf[LaunchSite]
+                    )
+                }
+              }
+
+              collected.sugars.filter(s => hostSide(s.within)).foreach { site =>
+                val label = s"launch ${site.stub.owner}.${site.stub.name}"
+                guard(
+                  launchConfig
+                    .leftMap(CompilerException(_))
+                    .flatMap(LaunchSites.compileSugar(sources, _, site))
+                ) match {
+                  case Left(failure)                                => report(label, failure)
+                  case Right((fqcn, _)) if generated.contains(fqcn) => debug(s"Skip already generated $fqcn")
+                  case Right((fqcn, exe)) =>
+                    debug(s"Write $fqcn")
+                    emit(
+                      fqcn,
+                      label,
+                      Right(exe),
                       classOf[LaunchSite]
                     )
                 }

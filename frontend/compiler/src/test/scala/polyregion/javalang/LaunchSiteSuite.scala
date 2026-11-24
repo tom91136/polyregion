@@ -54,21 +54,28 @@ class LaunchSiteSuite extends munit.FunSuite {
   test("region sugar inside an offload region is a compile error naming the call") {
     val errors = diagnostics(s"""package diag;
                                 |
-                                |import polyregion.Offload;
+                                |import polyregion.javalang.LaunchSugar;
                                 |import polyregion.javalang.Runtime;
                                 |
                                 |public class Sites {
+                                |  public interface Fn extends java.io.Serializable {
+                                |    void apply(long i, long j);
+                                |  }
+                                |
+                                |  public static class Api {
+                                |    @LaunchSugar(value = "demo:demo.for_each", rank = 2, map = 0)
+                                |    public static void each(long n0, long n1, Fn body) {
+                                |      throw new UnsupportedOperationException();
+                                |    }
+                                |  }
+                                |
                                 |  public static void run() {
-                                |    int[] xs = new int[4];
-                                |    Runtime.offload(() -> Offload.for_each(2L, 2L, (i, j) -> xs[(int) (i * 2 + j)] = 0));
+                                |    Runtime.offload(() -> Api.each(2L, 2L, (i, j) -> { }));
                                 |  }
                                 |}
                                 |""".stripMargin)
     assert(errors.contains("error: [PolyRegion] Cannot offload"), errors)
-    assert(
-      errors.contains("`polyregion.Offload.for_each` launches `polyregion.core:polyregion.core.for_each`"),
-      errors
-    )
+    assert(errors.contains("`diag.Sites.Api.each` launches `demo:demo.for_each`"), errors)
   }
 
   test("a launch callable that is not a lambda expression is a compile error naming the call") {

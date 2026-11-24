@@ -63,6 +63,7 @@ private[ast] object JavaInterfaceCodeGen {
   )
 
   private val Annotation = "polyregion.javalang.Interface"
+  private val Sugar      = "polyregion.javalang.LaunchSugar"
 
   private final case class Prim(name: String, boxed: String, code: Char, bytes: Int, zero: String)
 
@@ -132,13 +133,15 @@ private[ast] object JavaInterfaceCodeGen {
     Callable(Shape(positions.init.map(_._1), positions.last._1), positions.flatMap(_._2))
   }
 
+  private def callableParameter(c: Callable): (String, Option[Callable]) = {
+    val typeArgs = if (c.refs.isEmpty) "" else c.refs.mkString("<", ", ", ">")
+    (s"${c.shape.name}$typeArgs", Some(c))
+  }
+
   private def parameter(assignment: Assignment, scalarOnly: Set[String], arg: p.Type): (String, Option[Callable]) =
     arg match {
-      case p.Type.Exec(Nil, args, rtn) =>
-        val c        = callable(assignment, args, rtn)
-        val typeArgs = if (c.refs.isEmpty) "" else c.refs.mkString("<", ", ", ">")
-        (s"${c.shape.name}$typeArgs", Some(c))
-      case p.Type.Exec(_, _, _) => fail("generic callable types are not supported by the Java projection yet")
+      case p.Type.Exec(Nil, args, rtn) => callableParameter(callable(assignment, args, rtn))
+      case p.Type.Exec(_, _, _)        => fail("generic callable types are not supported by the Java projection yet")
       case p.Type.Var(name, _) =>
         assignment(name) match {
           case Choice.Primitive(prim) => (if (scalarOnly(name)) prim.boxed else prim.name, None)
@@ -227,6 +230,56 @@ private[ast] object JavaInterfaceCodeGen {
     Stub(source, parameters.flatMap(_._1._2))
   }
 
+  private def sugar(
+      interfaceDef: p.Interface,
+      decl: p.FunctionDecl,
+      assignment: Assignment,
+      context: Option[String],
+      rank: Int,
+      name: String
+  ): Stub = {
+    val dims       = extents(rank)
+    val rest       = decl.args.tail
+    val mapped     = if (rank == 0) 0 else rest.indexWhere(arg => isIndexCallable(arg.named.tpe))
+    val scalarOnly = classify(decl)
+    val params = rest.zipWithIndex.map { (arg, i) =>
+      val (tpe, c) = arg.named.tpe match {
+        case p.Type.Exec(Nil, _, rtn) if i == mapped =>
+          callableParameter(callable(assignment, List.fill(rank)(p.Type.IntS64), rtn))
+        case other => parameter(assignment, scalarOnly, other)
+      }
+      (tpe, c, arg.named.symbol)
+    }
+    val typeParams = decl.tpeVars.map(_.name).filter(assignment(_) == Choice.Ref) match {
+      case Nil   => ""
+      case names => names.mkString("<", ", ", "> ")
+    }
+    val rendered = context.map(tpe => s"$tpe $ContextParameter").toList ++
+      dims.map(dim => s"long $dim") ++ params.map { case (tpe, _, symbol) => s"$tpe $symbol" }
+    val prefix = s"  public static $typeParams${result(assignment, decl.rtn)} $name("
+    val signature = {
+      val inline = s"$prefix${rendered.mkString(", ")}) {"
+      if (inline.length <= 100) inline
+      else s"$prefix\n${rendered.map("      " + _).mkString(",\n")}) {"
+    }
+    val identity  = interfaceIdentity(interfaceDef, decl)
+    val resultTpe = result(assignment, decl.rtn)
+    val values    = dims ++ params.map(_._3)
+    val call =
+      s"""Launch.callSugar("$identity", ${context.fold("null")(_ => ContextParameter)}, new Object[] {${values.mkString(
+          ", "
+        )}}, $rank, $mapped)"""
+    val statement =
+      if (resultTpe == "void") s"$call;"
+      else s"return (${Prims.values.find(_.name == resultTpe).fold(resultTpe)(_.boxed)}) $call;"
+    val unchecked = if (decl.tpeVars.exists(v => v.name == resultTpe)) "  @SuppressWarnings(\"unchecked\")\n" else ""
+    val source = s"""  @LaunchSugar(value = "$identity", rank = $rank, map = $mapped)
+                     |$unchecked$signature
+                     |    $statement
+                     |  }""".stripMargin
+    Stub(source, params.flatMap(_._2))
+  }
+
   private def functionalInterface(shape: Shape): String = {
     val typeNames = shape.args.zipWithIndex.collect { case ('L', i) => s"T$i" } ++ Option.when(shape.rtn == 'L')("R")
     val generics  = if (typeNames.isEmpty) "" else typeNames.mkString("<", ", ", ">")
@@ -248,7 +301,7 @@ private[ast] object JavaInterfaceCodeGen {
     identifier(config.className, "class")
     val decls = declarations(interfaceDef)
     validatePortableOverloads(decls, "Java")
-    if (config.region.nonEmpty) validateContextName(decls)
+    if (config.region.nonEmpty) validateRegionNames(decls)
     decls.foreach { decl =>
       identifier(decl.name.last, "method")
       decl.tpeVars.foreach(variable => identifier(variable.name, "type variable"))
@@ -264,17 +317,32 @@ private[ast] object JavaInterfaceCodeGen {
     None :: config.region.map(region => Some(region.contextType)).toList
 
   def apply(interfaceDef: p.Interface, config: JavaConfig): String = {
+    val decls = validated(interfaceDef, config)
     val stubs = for {
-      decl       <- validated(interfaceDef, config)
+      decl       <- decls
       assignment <- assignments(decl)
       context    <- contexts(config)
     } yield stub(interfaceDef, decl, assignment, context)
-    val shapes = stubs.flatMap(_.callables.map(_.shape)).distinct.sortBy(_.name).map(functionalInterface)
-    val body   = (shapes ++ stubs.map(_.source)).mkString("\n\n")
+    val sugars = config.region.toList.flatMap { _ =>
+      decls.filter(isIndexed).flatMap { decl =>
+        assignments(decl).flatMap { assignment =>
+          contexts(config)
+            .flatMap(context => Ranks.map(rank => sugar(interfaceDef, decl, assignment, context, rank, decl.name.last)))
+        }
+      } ++ decls.filter(isTask).flatMap { decl =>
+        assignments(decl).flatMap(assignment =>
+          contexts(config).map(context => sugar(interfaceDef, decl, assignment, context, 0, "task"))
+        )
+      }
+    }
+    val shapes = (stubs ++ sugars).flatMap(_.callables.map(_.shape)).distinct.sortBy(_.name).map(functionalInterface)
+    val body   = (shapes ++ stubs.map(_.source) ++ sugars.map(_.source)).mkString("\n\n")
+    val imports =
+      if (config.region.nonEmpty) s"import $Annotation;\nimport $Sugar;\nimport polyregion.javalang.Launch;"
+      else s"import $Annotation;\nimport polyregion.javalang.Launch;"
     s"""package ${config.packageName};
        |
-       |import $Annotation;
-       |import polyregion.javalang.Launch;
+       |$imports
        |
        |public final class ${config.className} {
        |
@@ -318,6 +386,57 @@ private[ast] object JavaInterfaceCodeGen {
       }
   }
 
+  private def surfaceCall(prefix: String, args: List[String]): String = {
+    val inline = s"$prefix${args.mkString(", ")});"
+    if (inline.length <= 100) inline else s"$prefix\n${args.map("        " + _).mkString(",\n")});"
+  }
+
+  private def sugarSurface(config: JavaConfig, decls: List[p.FunctionDecl]): List[String] =
+    config.region.toList.flatMap { _ =>
+      val indexed = for {
+        decl       <- decls.filter(isIndexed)
+        assignment <- assignments(decl)
+        context    <- contexts(config)
+        rank       <- Ranks
+      } yield {
+        val rest = decl.args.tail.zipWithIndex.map { (arg, i) =>
+          arg.named.tpe match {
+            case p.Type.Exec(Nil, _, rtn) if i == decl.args.tail.indexWhere(a => isIndexCallable(a.named.tpe)) =>
+              val returned = rtn match {
+                case p.Type.Unit0 => "{ }"
+                case p.Type.Var(name, _) =>
+                  assignment(name) match {
+                    case Choice.Primitive(prim) => prim.zero
+                    case Choice.Ref             => "null"
+                  }
+                case other => zero(other)
+              }
+              s"(${List.tabulate(rank)(i => s"arg$i").mkString(", ")}) -> $returned"
+            case other => surfaceArgument(assignment, other)
+          }
+        }
+        val args = context.map(_ => ContextParameter).toList ++ List.fill(rank)("0L") ++ rest
+        val profile = decl.tpeVars.map { variable =>
+          s"${variable.name}=${assignment(variable.name) match {
+              case Choice.Primitive(prim) => prim.name
+              case Choice.Ref             => "Value"
+            }}"
+        }
+        val label = (profile ++ context.map(_ => ContextParameter) :+ s"rank $rank").mkString(": ")
+        s"    // ${decl.name.last}: $label\n${surfaceCall(s"    ${config.className}.${decl.name.last}(", args)}"
+      }
+      val tasks = decls.filter(isTask).flatMap { decl =>
+        assignments(decl).flatMap { assignment =>
+          contexts(config).map { context =>
+            val args  = context.map(_ => ContextParameter).toList :+ "() -> { }"
+            val label = (assignment.keys ++ context.map(_ => ContextParameter)).mkString(": ")
+            s"    // task${if (label.isEmpty) "" else s": $label"}\n${surfaceCall(s"    ${config.className}.task(", args)}"
+          }
+        }
+      }
+      indexed ++ tasks
+    }
+
   def surface(interfaceDef: p.Interface, config: JavaConfig, className: String): String = {
     val decls = validated(interfaceDef, config)
     identifier(className, "class")
@@ -338,8 +457,7 @@ private[ast] object JavaInterfaceCodeGen {
       val args =
         context.map(_ => ContextParameter).toList ++ decl.args.map(arg => surfaceArgument(assignment, arg.named.tpe))
       val prefix = s"    ${config.className}.${decl.name.last}("
-      val inline = s"$prefix${args.mkString(", ")});"
-      comment + (if (inline.length <= 100) inline else s"$prefix\n${args.map("        " + _).mkString(",\n")});")
+      comment + surfaceCall(prefix, args)
     }
     val contextDeclaration =
       config.region.fold("")(region => s"    ${region.contextType} $ContextParameter = null;\n")
@@ -357,7 +475,7 @@ private[ast] object JavaInterfaceCodeGen {
        |    double[] doubles = new double[n];
        |    Value[] values = new Value[n];
        |$contextDeclaration
-       |${calls.mkString("\n\n")}
+       |${(calls ++ sugarSurface(config, decls)).mkString("\n\n")}
        |  }
        |}
        |""".stripMargin

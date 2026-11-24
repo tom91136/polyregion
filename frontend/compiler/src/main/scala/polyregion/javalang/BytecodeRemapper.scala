@@ -181,11 +181,16 @@ object BytecodeRemapper {
     def refuseStub(callee: MethodRef): Result[Unit] =
       if (ClassLayouts.isPlatform(callee.owner.replace('.', '/'))) ().success
       else
-        ClassLayouts.stubOf(callee, bytesOf).toOption.flatten.traverse_ { identity =>
-          ClassLayouts
-            .structName(callee.owner, bytesOf)
-            .flatMap(owner => InterfaceStub.refusal(s"$owner.${callee.name}", identity).fail)
-        }
+        ClassLayouts
+          .stubOf(callee, bytesOf)
+          .toOption
+          .flatten
+          .orElse(ClassLayouts.sugarOf(callee, bytesOf).toOption.flatten)
+          .traverse_ { identity =>
+            ClassLayouts
+              .structName(callee.owner, bytesOf)
+              .flatMap(owner => InterfaceStub.refusal(s"$owner.${callee.name}", identity).fail)
+          }
 
     def commonAncestor(a: String, b: String): Result[Option[String]] = ClassLayouts.commonAncestor(a, b, bytesOf)
 

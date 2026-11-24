@@ -990,8 +990,16 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
         "@FunctionalInterface\n  public interface FnJJJ_J extends java.io.Serializable {\n    long apply(long arg0, long arg1, long arg2);\n  }"
       )
     )
-    assert(source.contains("@LaunchSugar(\"polyregion.core:polyregion.core.for_each\", rank = 2, map = 0)"))
-    assert(source.contains("@LaunchSugar(\"polyregion.core:polyregion.core.transform_reduce\", rank = 3, map = 1)"))
+    assert(
+      source.contains(
+        "@LaunchSugar(value = \"polyregion.core:polyregion.core.for_each\", rank = 2, map = 0)"
+      )
+    )
+    assert(
+      source.contains(
+        "@LaunchSugar(value = \"polyregion.core:polyregion.core.transform_reduce\", rank = 3, map = 1)"
+      )
+    )
     assert(source.contains("public static void task(Fn_V body)"))
     assert(source.contains("public static void task(polyregion.jvm.runtime.Context context, Fn_V body)"))
     assert(

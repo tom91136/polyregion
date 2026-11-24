@@ -1668,9 +1668,12 @@ object TreeRemapper {
     }
 
   private def refuseStub(sym: JSymbol.MethodSymbol): Result[Unit] =
-    InterfaceStub.identityOf(sym).traverse_ { identity =>
-      InterfaceStub.refusal(s"${ownerName(sym)}.${sym.name}", identity).fail
-    }
+    InterfaceStub
+      .identityOf(sym)
+      .orElse(InterfaceStub.sugarOf(sym).map(_._1))
+      .traverse_ { identity =>
+        InterfaceStub.refusal(s"${ownerName(sym)}.${sym.name}", identity).fail
+      }
 
   private def plainInvoke(scope: Scope, buf: mutable.ListBuffer[p.Stmt], mi: MethodInvocationTree): Result[p.Expr] =
     boxIdentity(scope, buf, mi).getOrElse {

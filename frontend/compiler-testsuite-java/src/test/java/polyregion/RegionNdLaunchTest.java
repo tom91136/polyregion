@@ -42,13 +42,13 @@ public class RegionNdLaunchTest {
   @Test
   public void transformReducesRankThree() {
     double total = Offload.transform_reduce(2L, 3L, 4L, 0.0, (i, j, k) -> i + j + k, (l, r) -> l + r);
-    assertEquals(84.0, total, 0.0);
+    assertEquals(72.0, total, 0.0);
   }
 
   @Test
   public void transformReducesRankTwoUnordered() {
     int total = Offload.transform_reduce_unordered(3L, 4L, 0, (i, j) -> (int) (i + j), (l, r) -> l + r);
-    assertEquals(36, total);
+    assertEquals(30, total);
   }
 
   @Test

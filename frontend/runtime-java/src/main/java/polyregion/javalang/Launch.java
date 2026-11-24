@@ -19,6 +19,7 @@ import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.ServiceConfigurationError;
@@ -460,7 +461,7 @@ public final class Launch {
       else {
         lambdas[i] = serialised(arg);
         parts.add("@" + lambdas[i].getImplClass() + "." + lambdas[i].getImplMethodName());
-        if (loader == null) loader = arg.getClass().getClassLoader();
+        if (loader == null && !(arg instanceof SugarCallable)) loader = arg.getClass().getClassLoader();
       }
     }
     String name = LaunchSite.nameOf(identity, parts);
@@ -477,6 +478,21 @@ public final class Launch {
         for (int c = 0; c < captured[i].length; c++) captured[i][c] = lambdas[i].getCapturedArg(c);
       }
     return execute(plan, context, args, captured);
+  }
+
+  public static Object callSugar(String identity, Context context, Object[] args, int rank, int map) {
+    long total = 1;
+    Object[] extents = new Object[rank];
+    for (int i = 0; i < rank; i++) {
+      extents[i] = args[i];
+      total = Math.multiplyExact(total, ((Number) args[i]).longValue());
+    }
+    Object[] rest = Arrays.copyOfRange(args, rank, args.length);
+    rest[map] = new SugarCallable(serialised(rest[map]), rank, extents);
+    Object[] expanded = new Object[rest.length + 1];
+    expanded[0] = total;
+    System.arraycopy(rest, 0, expanded, 1, rest.length);
+    return call(identity, context, expanded);
   }
 
   static Object step(Class<?> home, String name, Context context, Object[] args, Object[] captured) {
