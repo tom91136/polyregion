@@ -330,7 +330,7 @@ object LaunchMacro {
     '{
       val ctx     = $context
       val site    = LaunchRuntime.site($entry, ${ Expr.ofList(groupExprs) }.toArray, ${ Expr(layouts) })
-      val marshal = LaunchRuntime.marshal(site)
+      val marshal = LaunchRuntime.marshal(site, ctx)
       try {
         val args = ${ Expr.ofList(staged('marshal)) }
         ${

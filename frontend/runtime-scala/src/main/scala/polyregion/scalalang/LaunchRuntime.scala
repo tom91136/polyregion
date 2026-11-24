@@ -94,7 +94,8 @@ object LaunchRuntime {
 
   private val sites = ConcurrentHashMap[String, Site]()
 
-  def marshal(site: Site): Marshal = Marshal.inPlace(site.twins, Platforms.directBufferFromPointer(_, _))
+  def marshal(site: Site, ctx: rt.Context): Marshal =
+    Marshal.inPlace(ctx, site.twins, Platforms.directBufferFromPointer(_, _))
 
   private def scalar(m: Marshal, bytes: Int)(write: ByteBuffer => Unit): Arg = {
     val buffer = Marshal.allocate(bytes)

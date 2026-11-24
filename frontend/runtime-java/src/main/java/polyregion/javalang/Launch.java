@@ -646,6 +646,7 @@ public final class Launch {
     ByteBuffer regionCell = null;
     try (Marshal m =
         Marshal.inPlace(
+            ctx,
             plan.twins,
             new Marshal.HostView() {
               @Override

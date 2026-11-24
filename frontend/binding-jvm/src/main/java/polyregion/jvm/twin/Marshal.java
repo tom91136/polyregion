@@ -47,6 +47,7 @@ public final class Marshal implements AutoCloseable {
   }
 
   private final Queue queue;
+  private final Context context;
   private Boolean shared;
   private boolean closed;
   private final Twins twins;
@@ -62,22 +63,27 @@ public final class Marshal implements AutoCloseable {
   private final IdentityHashMap<Object, Map<String, Object>> children = new IdentityHashMap<>();
 
   public Marshal(Queue queue) {
-    this(queue, null, null);
+    this(queue, queue.context(), null, null);
   }
 
   public Marshal(Queue queue, Twins twins) {
-    this(queue, twins, null);
+    this(queue, queue.context(), twins, null);
   }
 
   public Marshal(Queue queue, Twins twins, HostView foreign) {
+    this(queue, queue.context(), twins, foreign);
+  }
+
+  private Marshal(Queue queue, Context context, Twins twins, HostView foreign) {
     this.queue = queue;
+    this.context = context;
     this.twins = twins;
     this.foreign = foreign;
   }
 
   /** A marshal whose pointers are host addresses: nothing is uploaded and no queue is involved. */
-  public static Marshal inPlace(Twins twins, HostView foreign) {
-    Marshal m = new Marshal(null, twins, foreign);
+  public static Marshal inPlace(Context context, Twins twins, HostView foreign) {
+    Marshal m = new Marshal(null, context, twins, foreign);
     m.shared = Boolean.TRUE;
     return m;
   }
@@ -430,7 +436,7 @@ public final class Marshal implements AutoCloseable {
     if (!staged.isEmpty())
       for (Staged s : staged)
         try {
-          if (shared()) Context.current().releaseHost(s.buffer);
+          if (shared()) context.releaseHost(s.buffer);
           else queue.release(s.buffer);
         } catch (RuntimeException e) {
           if (failure == null) failure = e;

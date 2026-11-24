@@ -56,7 +56,15 @@ HostBlocks &hostBlocks() {
 }
 
 std::atomic<uint64_t> hostForgets{0};
-std::atomic<uint64_t> hostReleaseWaits{0};
+struct ReleaseWaits {
+  std::mutex mutex;
+  std::map<jlong, uint64_t> counts;
+};
+
+ReleaseWaits &releaseWaits() {
+  static auto *waits = new ReleaseWaits();
+  return *waits;
+}
 
 const auto localReflect = [](const void *ptr) -> polyrt::PtrQuery {
   auto &host = hostBlocks();
@@ -484,7 +492,11 @@ void Context::recordHost0(JNIEnv *env, jclass, jlong address, jlong bytes) {
 void Context::releaseHost0(JNIEnv *env, jclass, jlong context, jlong address) {
   wrapException(env, EX, [&] {
     check(polyrt_context_wait(toHandle(context)));
-    hostReleaseWaits.fetch_add(1, std::memory_order_relaxed);
+    {
+      auto &waits = releaseWaits();
+      const std::scoped_lock lock(waits.mutex);
+      waits.counts[context]++;
+    }
     size_t released = 0;
     {
       auto &host = hostBlocks();
@@ -525,7 +537,12 @@ jlongArray Context::stats0(JNIEnv *env, jclass, jlong context) {
                             static_cast<jlong>(stats.remoteMallocs),
                             static_cast<jlong>(stats.remoteAllocationsLive),
                             static_cast<jlong>(stats.mirrorAllocationsLive),
-                            static_cast<jlong>(hostReleaseWaits.load(std::memory_order_relaxed)),
+                            static_cast<jlong>([&] {
+                              auto &waits = releaseWaits();
+                              const std::scoped_lock lock(waits.mutex);
+                              const auto found = waits.counts.find(context);
+                              return found == waits.counts.end() ? uint64_t{0} : found->second;
+                            }()),
                             static_cast<jlong>(blocks),
                             static_cast<jlong>(records),
                             static_cast<jlong>(hostForgets.load(std::memory_order_relaxed))};

@@ -100,7 +100,7 @@ object SpectraRaw {
     val chunks                 = java.util.Base64.getEncoder.encodeToString(bytes).grouped(30000).toArray
     val group                  = LaunchRuntime.Group(s"$entry@g0", chunks, bundle.remoteModules.isEmpty)
     val site                   = LaunchRuntime.site(entry, Array(group), Layout.encodeAll(java.util.List.of()))
-    val marshal                = LaunchRuntime.marshal(site)
+    val marshal                = LaunchRuntime.marshal(site, ctx)
     try
       LaunchRuntime.invoke(
         ctx,

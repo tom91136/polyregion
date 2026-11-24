@@ -82,7 +82,8 @@ class LaunchRuntimeSuite extends munit.FunSuite {
 
   test("a launch keeps its scalar arguments reachable until the marshal closes") {
     val marshal = LaunchRuntime.marshal(
-      LaunchRuntime.Site("scalars", Array.empty, polyregion.jvm.twin.Layout.encodeAll(java.util.List.of()))
+      LaunchRuntime.Site("scalars", Array.empty, polyregion.jvm.twin.Layout.encodeAll(java.util.List.of())),
+      rt.Context.current()
     )
     try {
       LaunchRuntime.int(marshal, 7)

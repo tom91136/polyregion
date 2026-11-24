@@ -1,7 +1,9 @@
 package polyregion.javalang;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assume.assumeTrue;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -10,7 +12,9 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TestRule;
 import polyregion.LaunchRule;
+import polyregion.javalang.Par;
 import polyregion.jvm.runtime.Context;
+import polyregion.jvm.runtime.PlatformInfo;
 import polyregion.jvm.twin.Marshal;
 
 public class MirrorResidencyTest {
@@ -18,7 +22,9 @@ public class MirrorResidencyTest {
   private static final int ELEMENTS = 1 << 20;
   private static final int ITERATIONS = 16;
 
-  @Rule public final TestRule kernels = LaunchRule.requireLaunch(method -> false);
+  @Rule
+  public final TestRule kernels =
+      LaunchRule.requireLaunch(method -> method.equals("aCreatedContextWaitsBeforeItsMirrorsAreFreed"));
 
   @Test
   public void temporaryCapturesLeaveNoDeviceMirrors() {
@@ -49,9 +55,9 @@ public class MirrorResidencyTest {
     long blocks = context.stats().hostBlocks;
     long records = context.stats().hostRecords;
 
-    Marshal first = Marshal.inPlace(null, null);
+    Marshal first = Marshal.inPlace(context, null, null);
     first.stage(buffer);
-    Marshal second = Marshal.inPlace(null, null);
+    Marshal second = Marshal.inPlace(context, null, null);
     second.stage(buffer);
     assertEquals(blocks + 1, context.stats().hostBlocks);
     assertEquals(records + 2, context.stats().hostRecords);
@@ -65,5 +71,30 @@ public class MirrorResidencyTest {
     assertEquals(blocks, context.stats().hostBlocks);
     assertEquals(records, context.stats().hostRecords);
     assertEquals("the last close did not release the mirror", forgets + 1, context.stats().hostForgets);
+  }
+
+  @Test
+  public void aCreatedContextWaitsBeforeItsMirrorsAreFreed() {
+    assumeTrue(
+        "created CUDA contexts only", System.getProperty("polyregion.platform", "").equalsIgnoreCase("cuda"));
+    Context created = null;
+    for (PlatformInfo platform : Context.platforms())
+      if (platform.name.toLowerCase().contains("cuda") && platform.devices.length > 0) {
+        created = Context.create(platform.index, platform.devices[0].index);
+        break;
+      }
+    assertNotNull("a CUDA device", created);
+    try {
+      int[] xs = new int[ELEMENTS];
+      Arrays.fill(xs, 1);
+      Context defaultContext = Context.current();
+      long defaultWaits = defaultContext.stats().hostReleaseWaits;
+      long waits = created.stats().hostReleaseWaits;
+      assertEquals(ELEMENTS, Par.ints(xs).on(created).sum());
+      assertTrue("the created context did not wait", created.stats().hostReleaseWaits > waits);
+      assertEquals("the default context waited for another context", defaultWaits, defaultContext.stats().hostReleaseWaits);
+    } finally {
+      created.close();
+    }
   }
 }
