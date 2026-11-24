@@ -8,9 +8,11 @@ class LaunchSiteSuite extends munit.FunSuite {
   private val runtimeClasses =
     java.nio.file.Path.of(classOf[Interface].getProtectionDomain.getCodeSource.getLocation.toURI)
 
-  private val Options: List[String] =
-    List("-g", "-classpath", runtimeClasses.toString) ++
+  private def options(classpath: String): List[String] =
+    List("-g", "-classpath", classpath, "-Apolyregion.library.path=/nonexistent/polyregion") ++
       Option.when(java.lang.Runtime.version.feature >= 21)("-proc:full")
+
+  private val Options: List[String] = options(runtimeClasses.toString)
 
   private def diagnostics(code: String): String =
     try {
@@ -181,8 +183,7 @@ class LaunchSiteSuite extends munit.FunSuite {
           Files.createDirectories(file.getParent)
           Files.write(file, bytes)
         }
-      val withLibrary = List("-g", "-classpath", s"$runtimeClasses${java.io.File.pathSeparator}$dir") ++
-        Option.when(java.lang.Runtime.version.feature >= 21)("-proc:full")
+      val withLibrary = options(s"$runtimeClasses${java.io.File.pathSeparator}$dir")
       val errors =
         try {
           JavaInMemory.compile(
