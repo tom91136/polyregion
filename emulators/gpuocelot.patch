@@ -1252,6 +1252,24 @@ index 81acd6dd..1b15c3d2 100644
  /*!
  
  */
+@@ -4411,7 +4411,7 @@
+ 				b = ftz(instr.modifier, operandAsF32(tid, instr.b)),
+ 				c = ftz(instr.modifier, operandAsF32(tid, instr.c));
+ 
+-			d = ftz(instr.modifier, sat(instr.modifier, a * b + c));
++			d = ftz(instr.modifier, sat(instr.modifier, std::fma(a, b, c)));
+ 
+ 			setRegAsF32(tid, instr.d.reg, d);
+ 		}
+@@ -4422,7 +4422,7 @@
+ 
+ 			ir::PTXF64 d, a = operandAsF64(tid, instr.a),
+ 				b = operandAsF64(tid, instr.b), c = operandAsF64(tid, instr.c);
+-			d = a * b + c;
++			d = std::fma(a, b, c);
+ 			setRegAsF64(tid, instr.d.reg, d);
+ 		}
+ 	}
 diff --git a/ocelot/src/executive/EmulatorDevice.cpp b/ocelot/src/executive/EmulatorDevice.cpp
 index e61048bd..2c11bea1 100644
 --- a/ocelot/src/executive/EmulatorDevice.cpp
