@@ -387,11 +387,11 @@ object TreeRemapper {
   // objects are passed by reference so that a callee writing a field is seen by its caller
   private def byReference(scope: Scope, buf: mutable.ListBuffer[p.Stmt], t: p.Term): p.Term = t match {
     case sel @ p.Term.Select(_, _, p.Type.Struct(_, _)) =>
-      val space = sel.root.tpe match {
-        case p.Type.Ptr(_, s) => s
-        case _                => p.Type.Space.Private
-      }
-      bind(scope, buf, p.Expr.RefTo(sel, None, sel.tpe, space, p.Region.Rooted(sel.root)))
+      bind(
+        scope,
+        buf,
+        p.Expr.RefTo(sel, None, sel.tpe, p.Type.Space.Private, p.Region.Rooted(sel.root))
+      )
     case _ => t
   }
 
@@ -1720,6 +1720,18 @@ object TreeRemapper {
         "its body is not available to lower into the call site").fail
   }
 
+  // an object element must stay an lvalue path into its array: Index would copy it before the callee can take its address
+  private def callArg(scope: Scope, buf: mutable.ListBuffer[p.Stmt], a: ExpressionTree): Result[p.Expr] =
+    a match {
+      case par: ParenthesizedTree => callArg(scope, buf, par.getExpression)
+      case aa: ArrayAccessTree =>
+        JavaTyper.typer(jcType(aa)).flatMap {
+          case _: p.Type.Struct => selectPath(scope, buf, aa).map(p.Expr.Alias(_))
+          case _                => mapExpr(scope, buf, a)
+        }
+      case _ => mapExpr(scope, buf, a)
+    }
+
   private def directCall(
       scope: Scope,
       buf: mutable.ListBuffer[p.Stmt],
@@ -1732,7 +1744,7 @@ object TreeRemapper {
       paramTpes <- sym.asType.getParameterTypes.asScala.toList.traverse(JavaTyper.typer)
       argTrees = mi.getArguments.asScala.toList
       lowered <- argTrees.traverse { a =>
-        mapExpr(scope, buf, a).map { e =>
+        callArg(scope, buf, a).map { e =>
           val len = symOf(a)
             .flatMap(scope.arrayLengths.get)
             .orElse(a match { case _: NewArrayTree => scope.newArrayLengths.get(a); case _ => None })
