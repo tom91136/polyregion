@@ -242,6 +242,67 @@ public class StructTest extends BaseSuite {
   }
 
   @Test
+  public void helperWritesThroughArrayElement() {
+    Point[] ps = {new Point(1, 1), new Point(7, 7)};
+    OffloadRunnable r = () -> bump(ps[0]);
+    polyregion.javalang.Runtime.offload(r);
+    assertEquals(2, ps[0].x);
+    assertEquals(3, ps[0].y);
+    assertEquals(7, ps[1].x);
+    assertEquals(7, ps[1].y);
+  }
+
+  static void bumpTwice(Point p) {
+    bump(p);
+    bump(p);
+  }
+
+  @Test
+  public void nestedHelperWritesThroughArrayElement() {
+    Point[] ps = {new Point(1, 1)};
+    OffloadRunnable r = () -> bumpTwice(ps[0]);
+    polyregion.javalang.Runtime.offload(r);
+    assertEquals(3, ps[0].x);
+    assertEquals(5, ps[0].y);
+  }
+
+  static int readAndBump(Point p) {
+    int before = p.x;
+    p.x += 5;
+    return before * 10 + p.x;
+  }
+
+  @Test
+  public void helperReadsAndWritesThroughArrayElement() {
+    Point[] ps = {new Point(4, 0)};
+    int[] out = new int[1];
+    OffloadRunnable r =
+        () -> {
+          out[0] = readAndBump(ps[0]) * 100 + ps[0].x;
+        };
+    polyregion.javalang.Runtime.offload(r);
+    assertEquals(4909, out[0]);
+    assertEquals(9, ps[0].x);
+  }
+
+  static void overwritePrimitive(int x) {
+    x = 99;
+  }
+
+  @Test
+  public void helperKeepsPrimitiveArgumentByValue() {
+    int a = 3;
+    int[] out = new int[1];
+    OffloadRunnable r =
+        () -> {
+          overwritePrimitive(a);
+          out[0] = a;
+        };
+    polyregion.javalang.Runtime.offload(r);
+    assertEquals(3, out[0]);
+  }
+
+  @Test
   public void writesElementsOfObjectArray() {
     Point[] ps = {new Point(1, 1), new Point(2, 2)};
     OffloadRunnable r =
