@@ -5556,3 +5556,29 @@ attributes #0 = { "hlsl.shader"="compute" "hlsl.numthreads"="256,1,1" }
   CHECK(ir.find("getelementptr inbounds i8, ptr @t, i64 32") != std::string::npos);
   CHECK(ir.find("[4 x double], ptr @t, i32 0, i64 3") == std::string::npos);
 }
+
+TEST_CASE("Vulkan f64 modules preserve signed zero inf and nan", "[backend][spirv][vulkan][floatcontrols]") {
+  const auto compiled = compileRawVulkanModule(R"(
+@out = internal global double 0.0
+define void @k() #0 {
+entry:
+  %a = load double, ptr @out, align 8
+  %b = fadd double %a, 1.0
+  store double %b, ptr @out, align 8
+  ret void
+}
+attributes #0 = { "hlsl.shader"="compute" "hlsl.numthreads"="256,1,1" }
+)",
+                                               OptLevel::O0);
+  REQUIRE(compiled.binary.has_value());
+  const auto instructions = spirvInstructions(spirvWords(std::string(compiled.binary->begin(), compiled.binary->end())));
+  const auto has = [&](const auto &p) { return instructions ^ exists(p); };
+  CHECK(has([](const auto &x) { return (x[0] & 0xFFFFu) == spv::OpCapability && x[1] == spv::CapabilitySignedZeroInfNanPreserve; }));
+  CHECK(has([](const auto &x) {
+    return (x[0] & 0xFFFFu) == spv::OpExecutionMode && x[2] == spv::ExecutionModeSignedZeroInfNanPreserve && x[3] == 64;
+  }));
+  CHECK_FALSE(has([](const auto &x) {
+    return (x[0] & 0xFFFFu) == spv::OpExecutionMode && x[2] == spv::ExecutionModeSignedZeroInfNanPreserve && x[3] == 32;
+  }));
+  CHECK(validateSpirvBytes(compiled, "polyc_float_controls") == 0);
+}

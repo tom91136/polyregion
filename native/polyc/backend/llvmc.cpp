@@ -10,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -43,6 +44,7 @@ extern "C" bool SPIRVTranslate(Module *M, std::string &SpirvObj, std::string &Er
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/InstIterator.h"
@@ -50,6 +52,7 @@ extern "C" bool SPIRVTranslate(Module *M, std::string &SpirvObj, std::string &Er
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/LLVMRemarkStreamer.h"
 #include "llvm/IR/LegacyPassManager.h"
+#include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/IR/Verifier.h"
@@ -832,6 +835,48 @@ static void verifyKernelSymbols(const llvm::Module &M, const llvm::Triple &tripl
       | filter([&](const auto &G) { return G.isDeclaration() && !isLegitDecl(G.getName()); }) //
       | for_each([&](const auto &G) { missing.emplace_back(G.getName().str()); });
   if (!missing.empty()) throwUnresolvedSymbols(triple, missing);
+}
+
+static void collectFloatWidths(llvm::Type *t, std::set<unsigned> &widths) {
+  if (!t) return;
+  if (t->isHalfTy() || t->isFloatTy() || t->isDoubleTy()) {
+    widths.insert(t->getScalarSizeInBits());
+  } else if (auto *a = llvm::dyn_cast<llvm::ArrayType>(t)) {
+    collectFloatWidths(a->getElementType(), widths);
+  } else if (auto *v = llvm::dyn_cast<llvm::VectorType>(t)) {
+    collectFloatWidths(v->getElementType(), widths);
+  } else if (auto *s = llvm::dyn_cast<llvm::StructType>(t)) {
+    for (llvm::Type *e : s->elements())
+      collectFloatWidths(e, widths);
+  }
+}
+
+static void declareFloatControls(llvm::Module &M) {
+  std::set<unsigned> widths;
+  for (llvm::GlobalVariable &g : M.globals())
+    collectFloatWidths(g.getValueType(), widths);
+  for (llvm::Function &f : M) {
+    collectFloatWidths(f.getReturnType(), widths);
+    for (llvm::Argument &a : f.args())
+      collectFloatWidths(a.getType(), widths);
+    for (llvm::Instruction &i : llvm::instructions(f)) {
+      collectFloatWidths(i.getType(), widths);
+      for (llvm::Use &u : i.operands())
+        collectFloatWidths(u.get()->getType(), widths);
+    }
+  }
+  if (widths.empty()) return;
+  llvm::LLVMContext &ctx = M.getContext();
+  llvm::Type *i32 = llvm::Type::getInt32Ty(ctx);
+  llvm::NamedMDNode *node = M.getOrInsertNamedMetadata("spirv.ExecutionMode");
+  for (llvm::Function &f : M) {
+    if (f.isDeclaration() || !f.getFnAttribute("hlsl.shader").isValid()) continue;
+    for (unsigned width : widths) {
+      llvm::Metadata *ops[] = {llvm::ValueAsMetadata::get(&f), llvm::ConstantAsMetadata::get(llvm::ConstantInt::get(i32, 4461)),
+                               llvm::ConstantAsMetadata::get(llvm::ConstantInt::get(i32, width))};
+      node->addOperand(llvm::MDNode::get(ctx, ops));
+    }
+  }
 }
 
 // XXX the module is what a Vulkan driver sees: an Import-linkage function has no body to resolve against, and a
@@ -1966,6 +2011,8 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
         // device driver to optimise, but rusticl's Mesa nir_opt_cse runs away (20GB+) on the load/store-heavy
         // std::string-capture blob; SROA shrinks the kernel ~10x and sidesteps that
         scalariseForSpirv(TM, *m, TM.getTargetTriple().getOS() == llvm::Triple::Vulkan);
+        const bool isVulkanOS = TM.getTargetTriple().getOS() == llvm::Triple::Vulkan;
+        if (isVulkanOS) declareFloatControls(*m);
         if (emplaceEvent && captureModuleIr())
           events.emplace_back(compiler::nowMs(), 0, "llvm_to_spirv_ir", module2Ir(*m), std::vector<polyast::CompileEvent>{});
         // Vulkan forces CodeGenOptLevel::None: at O1+ LoopStrengthReduce rewrites the array GEP into a
@@ -1976,7 +2023,9 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
         if (const auto *views = m->getNamedMetadata(ArenaViewStartMetadata); views && views->getNumOperands() > 0)
           if (const auto *value = llvm::mdconst::dyn_extract<llvm::ConstantInt>(views->getOperand(0)->getOperand(0)))
             arenaViewStart = value->getZExtValue();
-        const bool ok = llvm::SPIRVTranslate(m.get(), spvBlob, errMsg, /*AllowExtNames*/ {}, spvOpt, TM.getTargetTriple());
+        const std::vector<std::string> allowExt =
+            isVulkanOS ? std::vector<std::string>{"SPV_KHR_float_controls"} : std::vector<std::string>{};
+        const bool ok = llvm::SPIRVTranslate(m.get(), spvBlob, errMsg, allowExt, spvOpt, TM.getTargetTriple());
         if (!ok) throw std::logic_error("SPIRVTranslate failed: " + errMsg);
         // XXX LLVM SPIRVTranslate emits OpConstantNull for u32 zero constants. SPIR-V's
         // OpInBoundsPtrAccessChain forbids that for the structure-member index (must be
