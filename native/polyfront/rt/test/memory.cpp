@@ -1212,6 +1212,7 @@ public:
   void reclaim(const void *host, const size_t sizeInBytes, const bool forWrite) override { sma.reclaimRange(host, sizeInBytes, forWrite); }
   void disassociate(const void *host, const bool releaseRemote) override { sma.disassociate(host, releaseRemote); }
   void releaseAll() override { sma.releaseAll(); }
+  uint64_t liveMirrors() const override { return sma.liveMirrors(); }
 };
 
 void installMarshal(polyregion::polyrt::ExecutionContext &context, std::unique_ptr<polyregion::polyrt::sma::CaptureMarshal> marshal) {
@@ -2909,6 +2910,7 @@ struct RootedMarshal final : polyregion::polyrt::sma::CaptureMarshal {
   void reclaim(const void *host, const size_t sizeInBytes, const bool forWrite) override { inner->reclaim(host, sizeInBytes, forWrite); }
   void disassociate(const void *host, const bool releaseRemote) override { inner->disassociate(host, releaseRemote); }
   void releaseAll() override { inner->releaseAll(); }
+  uint64_t liveMirrors() const override { return inner->liveMirrors(); }
 };
 
 struct RootLaunch {

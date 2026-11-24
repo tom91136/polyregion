@@ -207,6 +207,7 @@ struct CaptureMarshal {
   virtual void reclaim(const void *host, size_t sizeInBytes, bool forWrite) = 0;
   virtual void disassociate(const void *host, bool releaseRemote) = 0;
   virtual void releaseAll() = 0;
+  virtual uint64_t liveMirrors() const = 0;
 };
 
 template <typename SMA> class CaptureMarshalOf final : public CaptureMarshal {
@@ -237,6 +238,7 @@ public:
   void reclaim(const void *host, const size_t sizeInBytes, const bool forWrite) override { sma.reclaimRange(host, sizeInBytes, forWrite); }
   void disassociate(const void *host, const bool releaseRemote) override { sma.disassociate(host, releaseRemote); }
   void releaseAll() override { sma.releaseAll(); }
+  uint64_t liveMirrors() const override { return sma.liveMirrors(); }
 };
 
 using CaptureMarshalFactory = std::unique_ptr<CaptureMarshal> (*)(ExecutionContext &);

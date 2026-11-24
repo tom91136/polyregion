@@ -478,7 +478,7 @@ void Context::releaseHost0(JNIEnv *env, jclass, jlong address) {
       host.blocks.erase(static_cast<uintptr_t>(address));
     }
     polyrt::sma::forEachMarshal(
-        [&](auto &marshal) { marshal.disassociate(reinterpret_cast<const void *>(address), /*releaseRemote*/ false); });
+        [&](auto &marshal) { marshal.disassociate(reinterpret_cast<const void *>(address), /*releaseRemote*/ true); });
   });
 }
 
@@ -490,10 +490,14 @@ jlongArray Context::stats0(JNIEnv *env, jclass, jlong context) {
   return wrapException(env, EX, [&] {
     PolyrtStats stats{};
     check(polyrt_stats(toHandle(context), &stats));
-    const jlong values[] = {static_cast<jlong>(stats.launches), static_cast<jlong>(stats.h2dCopies), static_cast<jlong>(stats.d2hCopies),
-                            static_cast<jlong>(stats.remoteMallocs), static_cast<jlong>(stats.remoteAllocationsLive)};
-    auto *array = env->NewLongArray(5);
-    env->SetLongArrayRegion(array, 0, 5, values);
+    const jlong values[] = {static_cast<jlong>(stats.launches),
+                            static_cast<jlong>(stats.h2dCopies),
+                            static_cast<jlong>(stats.d2hCopies),
+                            static_cast<jlong>(stats.remoteMallocs),
+                            static_cast<jlong>(stats.remoteAllocationsLive),
+                            static_cast<jlong>(stats.mirrorAllocationsLive)};
+    auto *array = env->NewLongArray(6);
+    env->SetLongArrayRegion(array, 0, 6, values);
     return array;
   });
 }

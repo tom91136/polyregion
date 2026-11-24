@@ -107,14 +107,15 @@ public final class Context implements AutoCloseable {
   }
 
   public static final class Stats {
-    public final long launches, hostToDevice, deviceToHost, remoteMallocs, remoteAllocations;
+    public final long launches, hostToDevice, deviceToHost, remoteMallocs, remoteAllocations, mirrorAllocations;
 
-    Stats(long launches, long hostToDevice, long deviceToHost, long remoteMallocs, long remoteAllocations) {
+    Stats(long launches, long hostToDevice, long deviceToHost, long remoteMallocs, long remoteAllocations, long mirrorAllocations) {
       this.launches = launches;
       this.hostToDevice = hostToDevice;
       this.deviceToHost = deviceToHost;
       this.remoteMallocs = remoteMallocs;
       this.remoteAllocations = remoteAllocations;
+      this.mirrorAllocations = mirrorAllocations;
     }
   }
 
@@ -355,7 +356,7 @@ public final class Context implements AutoCloseable {
   public Stats stats() {
     requireOpen();
     long[] values = stats0(handle);
-    return new Stats(values[0], values[1], values[2], values[3], values[4]);
+    return new Stats(values[0], values[1], values[2], values[3], values[4], values[5]);
   }
 
   /**

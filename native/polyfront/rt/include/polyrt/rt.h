@@ -156,6 +156,7 @@ struct PolyrtStats {
   uint64_t heapBytesLive, heapBytesCommitted, heapGrowths;
   uint64_t remoteAllocationsLive;
   uint64_t h2dBytes, d2hBytes;
+  uint64_t mirrorAllocationsLive;
 };
 
 // names are truncated to the array size

@@ -62,10 +62,11 @@ template <typename LocalReflect,  //
 class SynchronisedMemAllocation {
 
   LocalReflect localReflect;
-  RemoteAlloc remoteAlloc;
-  RemoteRead remoteRead;
-  RemoteWrite remoteWrite;
-  RemoteRelease remoteRelease;
+  std::atomic<uint64_t> liveRemoteMirrors{0};
+  std::function<uintptr_t(size_t)> remoteAlloc;
+  std::function<void(void *, uintptr_t, size_t, size_t)> remoteRead;
+  std::function<void(const void *, uintptr_t, size_t, size_t)> remoteWrite;
+  std::function<void(uintptr_t)> remoteRelease;
   bool debug;
   static inline thread_local size_t tableMutations = 0;
 
@@ -791,11 +792,18 @@ public:
                             RemoteRead remoteRead,     //
                             RemoteWrite remoteWrite,   //
                             RemoteRelease remoteRelease, const bool debug = false)
-      : localReflect(localReflect),   //
-        remoteAlloc(remoteAlloc),     //
-        remoteRead(remoteRead),       //
-        remoteWrite(remoteWrite),     //
-        remoteRelease(remoteRelease), //
+      : localReflect(localReflect), //
+        remoteAlloc([this, alloc = std::move(remoteAlloc)](const size_t n) {
+          const auto p = alloc(n);
+          liveRemoteMirrors.fetch_add(1, std::memory_order_relaxed);
+          return p;
+        }),                                  //
+        remoteRead(std::move(remoteRead)),   //
+        remoteWrite(std::move(remoteWrite)), //
+        remoteRelease([this, release = std::move(remoteRelease)](const uintptr_t p) {
+          liveRemoteMirrors.fetch_sub(1, std::memory_order_relaxed);
+          release(p);
+        }), //
         debug(debug) {}
 
   [[nodiscard]] uintptr_t syncLocalToRemote(const void *p, const runtime::TypeLayout &s) {
@@ -957,6 +965,8 @@ public:
     ~TableLock() { --self.tableDepth; }
   };
   TableLock exclusive() { return TableLock(*this); }
+
+  uint64_t liveMirrors() const { return liveRemoteMirrors.load(std::memory_order_relaxed); }
 
   // the host block [p, p + sizeInBytes) is going away: drop whatever mirrors it, interior keys included.
   // XXX a free can arrive on any thread, so this never waits and never calls the device: the queue is a lock-free stack and

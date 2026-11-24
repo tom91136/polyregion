@@ -502,6 +502,12 @@ template <class Fn> bool runtimeStatus(const char *operation, Fn &&fn) noexcept 
 } // namespace
 
 namespace {
+uint64_t mirrorAllocationsLive() {
+  uint64_t total = 0;
+  polyregion::polyrt::sma::forEachMarshal([&](auto &marshal) { total += marshal.liveMirrors(); });
+  return total;
+}
+
 PolyrtStats snapshotStats(polyregion::polyrt::ExecutionContext &execution) {
   const std::scoped_lock lock(execution.transaction);
   const auto &counters = execution.counters;
@@ -519,7 +525,8 @@ PolyrtStats snapshotStats(polyregion::polyrt::ExecutionContext &execution) {
           .heapGrowths = heap.growths.load(),
           .remoteAllocationsLive = execution.remoteAllocations.size(),
           .h2dBytes = counters.h2dBytes.load(),
-          .d2hBytes = counters.d2hBytes.load()};
+          .d2hBytes = counters.d2hBytes.load(),
+          .mirrorAllocationsLive = mirrorAllocationsLive()};
 }
 } // namespace
 
