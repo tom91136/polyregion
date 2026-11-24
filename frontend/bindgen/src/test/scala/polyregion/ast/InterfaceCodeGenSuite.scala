@@ -411,6 +411,27 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
       |  public static Object call(String identity, Object context, Object[] args) {
       |    return null;
       |  }
+      |
+      |  public static Object callSugar(String identity, Object context, Object[] args, int rank, int map) {
+      |    return null;
+      |  }
+      |}
+      |""".stripMargin
+
+  private val sugarSource =
+    """package polyregion.javalang;
+      |
+      |import java.lang.annotation.ElementType;
+      |import java.lang.annotation.Retention;
+      |import java.lang.annotation.RetentionPolicy;
+      |import java.lang.annotation.Target;
+      |
+      |@Retention(RetentionPolicy.CLASS)
+      |@Target(ElementType.METHOD)
+      |public @interface LaunchSugar {
+      |  String value();
+      |  int rank();
+      |  int map();
       |}
       |""".stripMargin
 
@@ -499,8 +520,9 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
         |""".stripMargin
     val errors = javac(
       Map(
-        "polyregion/javalang/Interface.java" -> annotationSource,
-        "polyregion/javalang/Launch.java"    -> launchSource,
+        "polyregion/javalang/Interface.java"   -> annotationSource,
+        "polyregion/javalang/Launch.java"      -> launchSource,
+        "polyregion/javalang/LaunchSugar.java" -> sugarSource,
         "example/bindings/ExampleInterface.java" -> InterfaceCodeGen
           .javaClass(interfaceDef.copy(declarations = List(fold)), jvm),
         "example/bindings/Caller.java" -> caller
@@ -540,8 +562,9 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
         |""".stripMargin
     val errors = javac(
       Map(
-        "polyregion/javalang/Interface.java" -> annotationSource,
-        "polyregion/javalang/Launch.java"    -> launchSource,
+        "polyregion/javalang/Interface.java"   -> annotationSource,
+        "polyregion/javalang/Launch.java"      -> launchSource,
+        "polyregion/javalang/LaunchSugar.java" -> sugarSource,
         "example/bindings/ExampleInterface.java" -> InterfaceCodeGen
           .javaClass(interfaceDef.copy(declarations = List(mix)), jvm),
         "example/bindings/Caller.java" -> caller
@@ -584,6 +607,7 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
       Map(
         "polyregion/javalang/Interface.java"     -> annotationSource,
         "polyregion/javalang/Launch.java"        -> launchSource,
+        "polyregion/javalang/LaunchSugar.java"   -> sugarSource,
         "example/bindings/ExampleInterface.java" -> InterfaceCodeGen.javaClass(withScalar, jvm),
         "example/bindings/Caller.java"           -> caller
       )
@@ -631,6 +655,7 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
       Map(
         "polyregion/javalang/Interface.java"     -> annotationSource,
         "polyregion/javalang/Launch.java"        -> launchSource,
+        "polyregion/javalang/LaunchSugar.java"   -> sugarSource,
         "example/bindings/ExampleInterface.java" -> source,
         "example/bindings/Caller.java"           -> caller
       )
@@ -846,11 +871,12 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
         |""".stripMargin
     val errors = javac(
       Map(
-        "polyregion/javalang/Interface.java"  -> annotationSource,
-        "polyregion/javalang/Launch.java"     -> launchSource,
-        "polyregion/jvm/runtime/Context.java" -> contextSource,
-        "polyregion/Offload.java"             -> InterfaceCodeGen.javaClass(Core.interfaceDef, regionJava),
-        "polyregion/Caller.java"              -> caller,
+        "polyregion/javalang/Interface.java"   -> annotationSource,
+        "polyregion/javalang/Launch.java"      -> launchSource,
+        "polyregion/javalang/LaunchSugar.java" -> sugarSource,
+        "polyregion/jvm/runtime/Context.java"  -> contextSource,
+        "polyregion/Offload.java"              -> InterfaceCodeGen.javaClass(Core.interfaceDef, regionJava),
+        "polyregion/Caller.java"               -> caller,
         "polyregion/OffloadSurface.java" -> InterfaceCodeGen.javaSurface(
           Core.interfaceDef,
           regionJava,
@@ -950,5 +976,58 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
           .contains(name)
       )
     }
+  }
+
+  test("Java region sugar carries identities and compiles for rank two, three and tasks") {
+    val source = InterfaceCodeGen.javaClass(Core.interfaceDef, regionJava)
+    assert(
+      source.contains(
+        "@FunctionalInterface\n  public interface FnJJ_V extends java.io.Serializable {\n    void apply(long arg0, long arg1);\n  }"
+      )
+    )
+    assert(
+      source.contains(
+        "@FunctionalInterface\n  public interface FnJJJ_J extends java.io.Serializable {\n    long apply(long arg0, long arg1, long arg2);\n  }"
+      )
+    )
+    assert(source.contains("@LaunchSugar(\"polyregion.core:polyregion.core.for_each\", rank = 2, map = 0)"))
+    assert(source.contains("@LaunchSugar(\"polyregion.core:polyregion.core.transform_reduce\", rank = 3, map = 1)"))
+    assert(source.contains("public static void task(Fn_V body)"))
+    assert(source.contains("public static void task(polyregion.jvm.runtime.Context context, Fn_V body)"))
+    assert(
+      source.contains(
+        "Launch.callSugar(\"polyregion.core:polyregion.core.for_each\", null, new Object[] {n0, n1, body}, 2, 0);"
+      )
+    )
+
+    val caller =
+      """package polyregion;
+        |
+        |import polyregion.jvm.runtime.Context;
+        |
+        |public final class SugarCaller {
+        |  public static long run(Context ctx) {
+        |    int[] out = new int[24];
+        |    Offload.for_each(2L, 3L, (i, j) -> out[(int) (i * 3 + j)] = 0);
+        |    Offload.for_each(2L, 3L, 4L, (i, j, k) -> out[(int) ((i * 3 + j) * 4 + k)] = 0);
+        |    long a = Offload.transform_reduce(2L, 3L, 0L, (i, j) -> i * 3 + j, (l, r) -> l + r);
+        |    double b = Offload.transform_reduce(ctx, 2L, 3L, 4L, 0.0, (i, j, k) -> i + j + k, (l, r) -> l + r);
+        |    Offload.task(() -> out[0] = 1);
+        |    Offload.task(ctx, () -> out[1] = 1);
+        |    return a + (long) b;
+        |  }
+        |}
+        |""".stripMargin
+    val errors = javac(
+      Map(
+        "polyregion/javalang/Interface.java"   -> annotationSource,
+        "polyregion/javalang/Launch.java"      -> launchSource,
+        "polyregion/javalang/LaunchSugar.java" -> sugarSource,
+        "polyregion/jvm/runtime/Context.java"  -> contextSource,
+        "polyregion/Offload.java"              -> source,
+        "polyregion/SugarCaller.java"          -> caller
+      )
+    )
+    assertEquals(errors, "")
   }
 }
