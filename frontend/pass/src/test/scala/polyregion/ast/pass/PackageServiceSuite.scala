@@ -769,7 +769,7 @@ class PackageServiceSuite extends munit.FunSuite {
     assert(!entry.body.exists(_.isInstanceOf[p.Stmt.Try]))
   }
 
-  test("result-bounded outputs declare their full capacity as the extent") {
+  test("result-bounded outputs download the returned count into the caller's buffer") {
     val name    = p.Sym("library.filter")
     val pointer = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global)
     val public = p.FunctionDecl(
@@ -830,23 +830,37 @@ class PackageServiceSuite extends munit.FunSuite {
     assert(linked.isRight, linked)
     val entry = (linked.toOption.get.entry.toList ::: linked.toOption.get.functions).find(_.name == root.name).get
     val specs = entry.body.flatMap(_.collectAll[p.Expr]).collect { case p.Expr.SpecOp(value) => value }
-    assertEquals(specs.count(_.isInstanceOf[p.Spec.RemoteMemcpy]), 0)
-    val extents = specs.collect { case value: p.Spec.RemoteExtent => value }
-    assertEquals(extents.size, 2)
+    assertEquals(specs.collect { case value: p.Spec.RemoteExtent => value }.size, 1)
+    val copies    = specs.collect { case p.Spec.RemoteMemcpy(_, _, _, count, direction) => (direction, count) }
+    val uploads   = copies.collect { case (p.Direction.LocalToRemote, count) => count }
+    val downloads = copies.collect { case (p.Direction.RemoteToLocal, count) => count }
+    assertEquals(uploads.size, 0)
+    assertEquals(downloads.size, 1)
     val definitions = entry.body
       .flatMap(_.collectAll[p.Stmt])
       .collect { case p.Stmt.Var(named, Some(expr), _) =>
         named.symbol -> expr
       }
       .toMap
-    assert(!definitions.keys.exists(_.startsWith("returned")))
-    val outBytes = extents.last.bytes match {
-      case p.Term.Select(named, Nil, _) => definitions(named.symbol)
-      case other                        => fail(s"unexpected extent $other")
+    val downloadCount = downloads.head match {
+      case p.Term.Select(named, Nil, _) => named.symbol
+      case other                        => fail(s"unexpected download count $other")
     }
-    assert(outBytes match {
-      case p.Expr.IntrOp(p.Intr.Mul(_, p.Term.IntU64Const(4), _)) => true
-      case _                                                      => false
+    assert(downloadCount.startsWith("downloadBytes"), downloadCount)
+    val clamped = definitions(downloadCount) match {
+      case p.Expr.IntrOp(p.Intr.Mul(p.Term.Select(named, Nil, _), p.Term.IntU64Const(4), _)) => named.symbol
+      case other => fail(s"unexpected download scaling $other")
+    }
+    assert(clamped.startsWith("returnedBound"), clamped)
+    assert(definitions(clamped) match {
+      case p.Expr.IntrOp(p.Intr.Min(_, _, p.Type.IntU64)) => true
+      case _                                              => false
+    })
+    assert(definitions.exists { (symbol, expr) =>
+      symbol.startsWith("returned") && (expr match {
+        case p.Expr.Index(p.Term.Select(p.Named("result", _, _), Nil, _), _, _) => true
+        case _                                                                  => false
+      })
     })
   }
 
