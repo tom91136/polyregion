@@ -1340,6 +1340,369 @@ static void bypassWideDivision(llvm::Function &F) {
     llvm::bypassSlowDivision(&BB, widths);
 }
 
+// Recover a typed scalar access for a punned pointer; logical SPIR-V cannot type the original pointer.
+static llvm::Type *realPointeeOf(llvm::Value *p) {
+  if (auto *gep = llvm::dyn_cast<llvm::GEPOperator>(p)) return gep->getResultElementType();
+  if (auto *gv = llvm::dyn_cast<llvm::GlobalVariable>(p)) return gv->getValueType();
+  if (auto *a = llvm::dyn_cast<llvm::AllocaInst>(p)) return a->getAllocatedType();
+  return nullptr;
+}
+
+static bool punnedScalarPair(llvm::Type *pointee, llvm::Type *value, const llvm::DataLayout &dl) {
+  if (!pointee || pointee == value || pointee->isAggregateType() || value->isAggregateType()) return false;
+  if (dl.getTypeAllocSize(pointee) != dl.getTypeAllocSize(value)) return false;
+  return llvm::CastInst::isBitCastable(pointee, value);
+}
+
+static bool normaliseTypePunnedAccesses(llvm::Function &F, const llvm::DataLayout &dl) {
+  bool changed = false;
+  for (llvm::Instruction &I : llvm::make_early_inc_range(llvm::instructions(F))) {
+    if (auto *load = llvm::dyn_cast<llvm::LoadInst>(&I)) {
+      if (load->isAtomic()) continue;
+      auto *pointee = realPointeeOf(load->getPointerOperand());
+      if (!punnedScalarPair(pointee, load->getType(), dl)) continue;
+      llvm::IRBuilder<> B(load);
+      auto *typed = B.CreateLoad(pointee, load->getPointerOperand(), load->isVolatile(), load->getName());
+      typed->setAlignment(load->getAlign());
+      auto *value = B.CreateBitCast(typed, load->getType(), load->getName() + ".bc");
+      load->replaceAllUsesWith(value);
+      load->eraseFromParent();
+      changed = true;
+    } else if (auto *store = llvm::dyn_cast<llvm::StoreInst>(&I)) {
+      if (store->isAtomic()) continue;
+      auto *pointee = realPointeeOf(store->getPointerOperand());
+      if (!punnedScalarPair(pointee, store->getValueOperand()->getType(), dl)) continue;
+      llvm::IRBuilder<> B(store);
+      auto *value = B.CreateBitCast(store->getValueOperand(), pointee);
+      auto *typed = B.CreateStore(value, store->getPointerOperand(), store->isVolatile());
+      typed->setAlignment(store->getAlign());
+      store->eraseFromParent();
+      changed = true;
+    } else if (auto *mc = llvm::dyn_cast<llvm::MemCpyInst>(&I)) {
+      auto *length = llvm::dyn_cast<llvm::ConstantInt>(mc->getLength());
+      if (!length || mc->isVolatile()) continue;
+      const uint64_t size = length->getZExtValue();
+      auto *srcTy = realPointeeOf(mc->getSource());
+      auto *dstTy = realPointeeOf(mc->getDest());
+      if (!srcTy || !dstTy || srcTy == dstTy) continue;
+      if (srcTy->isAggregateType() || dstTy->isAggregateType()) continue;
+      if (dl.getTypeAllocSize(srcTy) != size || dl.getTypeAllocSize(dstTy) != size) continue;
+      if (!llvm::CastInst::isBitCastable(srcTy, dstTy)) continue;
+      llvm::IRBuilder<> B(mc);
+      auto *loaded = B.CreateLoad(srcTy, mc->getSource());
+      auto *value = B.CreateBitCast(loaded, dstTy);
+      B.CreateStore(value, mc->getDest());
+      mc->eraseFromParent();
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+// Rebuild byte-offset reads of constants as typed access chains before translation.
+static llvm::Value *rootValueOf(llvm::Value *v) {
+  while (true) {
+    if (auto *gep = llvm::dyn_cast<llvm::GEPOperator>(v)) v = gep->getPointerOperand();
+    else if (auto *cast = llvm::dyn_cast<llvm::AddrSpaceCastInst>(v)) v = cast->getOperand(0);
+    else break;
+  }
+  return v;
+}
+
+static llvm::GlobalVariable *rootGlobalOf(llvm::Value *v) { return llvm::dyn_cast<llvm::GlobalVariable>(rootValueOf(v)); }
+
+using FlatConstants = llvm::DenseMap<llvm::GlobalVariable *, llvm::GlobalVariable *>;
+
+static llvm::GlobalVariable *flatConstantOf(llvm::Module &M, llvm::GlobalVariable *g, FlatConstants &clones) {
+  if (g->getAddressSpace() == 0) return g;
+  if (auto it = clones.find(g); it != clones.end()) return it->second;
+  auto *flat = new llvm::GlobalVariable(M, g->getValueType(), g->isConstant(), g->getLinkage(), g->getInitializer(), g->getName() + ".flat",
+                                        nullptr, llvm::GlobalValue::NotThreadLocal, 0);
+  flat->setUnnamedAddr(g->getUnnamedAddr());
+  flat->setAlignment(g->getAlign());
+  clones[g] = flat;
+  return flat;
+}
+
+static bool descendPath(llvm::Type *type, const llvm::DataLayout &dl, uint64_t offset, llvm::SmallVectorImpl<llvm::Value *> &idxs,
+                        llvm::Type *&leaf);
+static bool descendPathFloor(llvm::Type *type, const llvm::DataLayout &dl, uint64_t offset, llvm::SmallVectorImpl<llvm::Value *> &idxs,
+                             llvm::Type *&leaf);
+
+static llvm::Type *pointeeOf(llvm::Value *v) {
+  if (const auto *gep = llvm::dyn_cast<llvm::GEPOperator>(v)) return gep->getResultElementType();
+  if (const auto *g = llvm::dyn_cast<llvm::GlobalVariable>(v)) return g->getValueType();
+  if (const auto *a = llvm::dyn_cast<llvm::AllocaInst>(v)) return a->getAllocatedType();
+  return nullptr;
+}
+
+static llvm::Value *respaceChain(llvm::Value *p, llvm::Value *from, llvm::Value *to, llvm::IRBuilder<> &B, const llvm::DataLayout &dl) {
+  if (p == from) return to;
+  if (auto *gep = llvm::dyn_cast<llvm::GEPOperator>(p)) {
+    auto *base = respaceChain(gep->getPointerOperand(), from, to, B, dl);
+    if (!base) return nullptr;
+    llvm::Type *src = gep->getSourceElementType();
+    const bool byteArray = llvm::isa<llvm::ArrayType>(src) && llvm::cast<llvm::ArrayType>(src)->getElementType()->isIntegerTy(8);
+    if (src->isIntegerTy(8) || byteArray) {
+      llvm::Type *baseTy = pointeeOf(base);
+      if (!baseTy || gep->getNumIndices() != 1) return nullptr;
+      const uint64_t scale = byteArray ? llvm::cast<llvm::ArrayType>(src)->getNumElements() : 1;
+      llvm::SmallVector<llvm::Value *> idxs{llvm::ConstantInt::get(llvm::Type::getInt32Ty(p->getContext()), 0)};
+      if (auto *ci = llvm::dyn_cast<llvm::ConstantInt>(gep->getOperand(1))) {
+        llvm::Type *leaf = nullptr;
+        if (!descendPath(baseTy, dl, ci->getZExtValue() * scale, idxs, leaf)
+            && !descendPathFloor(baseTy, dl, ci->getZExtValue() * scale, idxs, leaf))
+          return nullptr;
+      } else {
+        llvm::Type *walk = baseTy;
+        uint64_t inner = 0;
+        while (auto *st = llvm::dyn_cast<llvm::StructType>(walk)) {
+          const auto *layout = dl.getStructLayout(st);
+          const unsigned field = layout->getElementContainingOffset(inner);
+          inner -= layout->getElementOffset(field);
+          idxs.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(p->getContext()), field));
+          walk = st->getElementType(field);
+        }
+        const auto *arr = llvm::dyn_cast<llvm::ArrayType>(walk);
+        if (!arr || dl.getTypeAllocSize(arr->getElementType()).getFixedValue() != scale) return nullptr;
+        idxs.push_back(gep->getOperand(1));
+      }
+      return gep->isInBounds() ? B.CreateInBoundsGEP(baseTy, base, idxs, gep->getName()) : B.CreateGEP(baseTy, base, idxs, gep->getName());
+    }
+    const auto indices = llvm::SmallVector<llvm::Value *>(gep->indices().begin(), gep->indices().end());
+    return gep->isInBounds() ? B.CreateInBoundsGEP(src, base, indices, gep->getName()) : B.CreateGEP(src, base, indices, gep->getName());
+  }
+  if (auto *cast = llvm::dyn_cast<llvm::AddrSpaceCastInst>(p)) {
+    auto *base = respaceChain(cast->getOperand(0), from, to, B, dl);
+    return base ? B.CreateAddrSpaceCast(base, cast->getType(), cast->getName()) : nullptr;
+  }
+  return nullptr;
+}
+
+static llvm::Value *typedBaseOf(llvm::Value *p, llvm::Type *&type, uint64_t &offset) {
+  offset = 0;
+  while (true) {
+    if (auto *gep = llvm::dyn_cast<llvm::GEPOperator>(p); gep && gep->getSourceElementType()->isIntegerTy(8) && gep->getNumIndices() == 1) {
+      auto *ci = llvm::dyn_cast<llvm::ConstantInt>(gep->getOperand(1));
+      if (!ci) break;
+      offset += ci->getZExtValue();
+      p = gep->getPointerOperand();
+      continue;
+    }
+    if (auto *cast = llvm::dyn_cast<llvm::AddrSpaceCastInst>(p)) {
+      p = cast->getOperand(0);
+      continue;
+    }
+    break;
+  }
+  if (const auto *gep = llvm::dyn_cast<llvm::GEPOperator>(p)) type = gep->getResultElementType();
+  else if (const auto *g = llvm::dyn_cast<llvm::GlobalVariable>(p)) type = g->getValueType();
+  else if (const auto *a = llvm::dyn_cast<llvm::AllocaInst>(p)) type = a->getAllocatedType();
+  return p;
+}
+
+static bool descendPathFloor(llvm::Type *type, const llvm::DataLayout &dl, uint64_t offset, llvm::SmallVectorImpl<llvm::Value *> &idxs,
+                             llvm::Type *&leaf) {
+  if (!type->isAggregateType()) {
+    leaf = type;
+    return true;
+  }
+  if (const uint64_t size = dl.getTypeAllocSize(type).getFixedValue(); offset >= size) return false;
+  if (auto *arr = llvm::dyn_cast<llvm::ArrayType>(type)) {
+    auto *elem = arr->getElementType();
+    const uint64_t elemSize = dl.getTypeAllocSize(elem).getFixedValue();
+    if (elemSize == 0 || arr->getNumElements() == 0 || offset / elemSize >= arr->getNumElements()) return false;
+    idxs.push_back(llvm::ConstantInt::get(llvm::Type::getInt64Ty(type->getContext()), offset / elemSize));
+    return descendPathFloor(elem, dl, offset % elemSize, idxs, leaf);
+  }
+  if (auto *st = llvm::dyn_cast<llvm::StructType>(type); st && st->getNumElements() > 0) {
+    const auto *layout = dl.getStructLayout(st);
+    const unsigned field = layout->getElementContainingOffset(offset);
+    idxs.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(type->getContext()), field));
+    return descendPathFloor(st->getElementType(field), dl, offset - layout->getElementOffset(field), idxs, leaf);
+  }
+  return false;
+}
+
+static bool descendPath(llvm::Type *type, const llvm::DataLayout &dl, uint64_t offset, llvm::SmallVectorImpl<llvm::Value *> &idxs,
+                        llvm::Type *&leaf) {
+  if (!type->isAggregateType()) {
+    leaf = type;
+    return offset == 0;
+  }
+  if (auto *arr = llvm::dyn_cast<llvm::ArrayType>(type)) {
+    auto *elem = arr->getElementType();
+    const uint64_t size = dl.getTypeAllocSize(elem).getFixedValue();
+    if (size == 0 || offset >= size * arr->getNumElements()) return false;
+    idxs.push_back(llvm::ConstantInt::get(llvm::Type::getInt64Ty(type->getContext()), offset / size));
+    return descendPath(elem, dl, offset % size, idxs, leaf);
+  }
+  if (auto *st = llvm::dyn_cast<llvm::StructType>(type)) {
+    const auto *layout = dl.getStructLayout(st);
+    const unsigned field = layout->getElementContainingOffset(offset);
+    const uint64_t inner = offset - layout->getElementOffset(field);
+    if (inner >= dl.getTypeAllocSize(st->getElementType(field)).getFixedValue()) return false;
+    idxs.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(type->getContext()), field));
+    return descendPath(st->getElementType(field), dl, inner, idxs, leaf);
+  }
+  return false;
+}
+
+static bool pathToSubobject(llvm::Type *type, const llvm::DataLayout &dl, uint64_t offset, llvm::Type *target,
+                            llvm::SmallVectorImpl<llvm::Value *> &idxs) {
+  llvm::Type *leaf = nullptr;
+  return descendPath(type, dl, offset, idxs, leaf) && leaf == target;
+}
+
+struct AggregateLeaf {
+  uint64_t offset;
+  llvm::Type *type;
+  llvm::SmallVector<llvm::Value *> idxs;
+};
+
+static void collectScalarLeaves(llvm::Type *type, const llvm::DataLayout &dl, uint64_t base, uint64_t begin, uint64_t end,
+                                llvm::SmallVectorImpl<llvm::Value *> &idxs, llvm::SmallVectorImpl<AggregateLeaf> &leaves) {
+  const uint64_t size = dl.getTypeAllocSize(type).getFixedValue();
+  if (base >= end || base + size <= begin) return;
+  if (!type->isAggregateType()) {
+    if (base >= begin && base + size <= end) leaves.push_back({base, type, llvm::SmallVector<llvm::Value *>(idxs.begin(), idxs.end())});
+    return;
+  }
+  if (auto *arr = llvm::dyn_cast<llvm::ArrayType>(type)) {
+    auto *elem = arr->getElementType();
+    const uint64_t stride = dl.getTypeAllocSize(elem).getFixedValue();
+    const uint64_t first = begin > base ? (begin - base) / stride : 0;
+    for (uint64_t i = first; i < arr->getNumElements() && base + i * stride < end; ++i) {
+      idxs.push_back(llvm::ConstantInt::get(llvm::Type::getInt64Ty(type->getContext()), i));
+      collectScalarLeaves(elem, dl, base + i * stride, begin, end, idxs, leaves);
+      idxs.pop_back();
+    }
+  } else if (auto *st = llvm::dyn_cast<llvm::StructType>(type)) {
+    const auto *layout = dl.getStructLayout(st);
+    for (unsigned i = 0; i < st->getNumElements(); ++i) {
+      const uint64_t fieldOffset = base + layout->getElementOffset(i);
+      if (fieldOffset >= end) break;
+      idxs.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(type->getContext()), i));
+      collectScalarLeaves(st->getElementType(i), dl, fieldOffset, begin, end, idxs, leaves);
+      idxs.pop_back();
+    }
+  }
+}
+
+static bool rewriteByteGepsToTyped(llvm::Function &F, llvm::Module &module, const llvm::DataLayout &dl, FlatConstants &clones) {
+  bool changed = false;
+  for (llvm::Instruction &I : llvm::make_early_inc_range(llvm::instructions(F))) {
+    auto *gep = llvm::dyn_cast<llvm::GetElementPtrInst>(&I);
+    if (!gep) continue;
+    llvm::Type *src = gep->getSourceElementType();
+    const bool byteArray = llvm::isa<llvm::ArrayType>(src) && llvm::cast<llvm::ArrayType>(src)->getElementType()->isIntegerTy(8);
+    if (!src->isIntegerTy(8) && !byteArray) continue;
+    auto *root = rootValueOf(gep);
+    llvm::Type *rootTy = pointeeOf(root);
+    if (!rootTy || !rootTy->isAggregateType()) continue;
+    llvm::Value *to = root;
+    if (auto *g = llvm::dyn_cast<llvm::GlobalVariable>(root); g && g->isConstant()) to = flatConstantOf(module, g, clones);
+    llvm::IRBuilder<> B(gep);
+    auto *replacement = respaceChain(gep, root, to, B, dl);
+    if (!replacement) continue;
+    gep->replaceAllUsesWith(replacement);
+    gep->eraseFromParent();
+    changed = true;
+  }
+  return changed;
+}
+
+static bool normaliseConstantAggregateAccesses(llvm::Function &F, const llvm::DataLayout &dl) {
+  bool changed = false;
+  auto &ctx = F.getContext();
+  auto &module = *F.getParent();
+  auto *i32 = llvm::Type::getInt32Ty(ctx);
+  auto *i64 = llvm::Type::getInt64Ty(ctx);
+  FlatConstants clones;
+
+  for (llvm::Instruction &I : llvm::make_early_inc_range(llvm::instructions(F))) {
+    auto *load = llvm::dyn_cast<llvm::LoadInst>(&I);
+    if (!load || load->isAtomic()) continue;
+    llvm::Type *baseTy = nullptr;
+    uint64_t offset = 0;
+    llvm::Value *base = typedBaseOf(load->getPointerOperand(), baseTy, offset);
+    if (!baseTy || !baseTy->isAggregateType() || offset == 0) continue;
+    auto *g = rootGlobalOf(base);
+    if (!g || !g->isConstant()) continue;
+    llvm::SmallVector<llvm::Value *> idxs{llvm::ConstantInt::get(i32, 0)};
+    if (!pathToSubobject(baseTy, dl, offset, load->getType(), idxs)) continue;
+    llvm::IRBuilder<> B(load);
+    auto *flatBase = respaceChain(base, g, flatConstantOf(module, g, clones), B, dl);
+    if (!flatBase) continue;
+    auto *value = B.CreateLoad(load->getType(), B.CreateInBoundsGEP(baseTy, flatBase, idxs), load->isVolatile(), load->getName());
+    value->setAlignment(load->getAlign());
+    load->replaceAllUsesWith(value);
+    load->eraseFromParent();
+    changed = true;
+  }
+
+  for (llvm::Instruction &I : llvm::make_early_inc_range(llvm::instructions(F))) {
+    auto *mc = llvm::dyn_cast<llvm::MemCpyInst>(&I);
+    if (!mc) continue;
+    auto *lengthValue = llvm::dyn_cast<llvm::ConstantInt>(mc->getLength());
+    if (!lengthValue) continue;
+    const uint64_t length = lengthValue->getZExtValue();
+    llvm::Type *srcTy = nullptr;
+    uint64_t offset = 0;
+    llvm::Value *srcBase = typedBaseOf(mc->getSource(), srcTy, offset);
+    auto *g = rootGlobalOf(mc->getSource());
+    if (!srcTy || !srcTy->isAggregateType() || !g || !g->isConstant() || length == 0) continue;
+    llvm::SmallVector<AggregateLeaf> leaves;
+    llvm::SmallVector<llvm::Value *> path;
+    collectScalarLeaves(srcTy, dl, 0, offset, offset + length, path, leaves);
+    llvm::IRBuilder<> B(mc);
+    if (leaves.empty()) {
+      // a run entirely inside a constant's padding has no typed field; its bytes are zero
+      for (uint64_t i = 0; i < length; ++i) {
+        auto *byte = B.CreateGEP(B.getInt8Ty(), mc->getDest(), llvm::ConstantInt::get(i64, i));
+        B.CreateStore(llvm::ConstantInt::get(B.getInt8Ty(), 0), byte)->setAlignment(llvm::Align(1));
+      }
+      mc->eraseFromParent();
+      changed = true;
+      continue;
+    }
+    auto *flatBase = respaceChain(srcBase, g, flatConstantOf(module, g, clones), B, dl);
+    if (!flatBase) continue;
+    for (const auto &leaf : leaves) {
+      llvm::SmallVector<llvm::Value *> idxs{llvm::ConstantInt::get(i32, 0)};
+      idxs.append(leaf.idxs.begin(), leaf.idxs.end());
+      auto *srcPtr = B.CreateInBoundsGEP(srcTy, flatBase, idxs);
+      auto *value = B.CreateLoad(leaf.type, srcPtr);
+      value->setAlignment(llvm::Align(1));
+      llvm::Value *dstPtr = mc->getDest();
+      if (const uint64_t delta = leaf.offset - offset; delta != 0)
+        dstPtr = B.CreateGEP(B.getInt8Ty(), dstPtr, llvm::ConstantInt::get(i64, delta));
+      B.CreateStore(value, dstPtr)->setAlignment(llvm::Align(1));
+    }
+    mc->eraseFromParent();
+    changed = true;
+  }
+
+  changed |= rewriteByteGepsToTyped(F, module, dl, clones);
+
+  llvm::SmallVector<llvm::GlobalVariable *> obsolete;
+  for (auto &[g, flat] : clones)
+    if (flat != g && g->use_empty()) obsolete.push_back(g);
+  for (auto *g : obsolete)
+    g->eraseFromParent();
+  return changed;
+}
+
+void llvmc::normaliseTypePunnedForTest(llvm::Module &M) {
+  for (llvm::Function &F : M)
+    if (!F.isDeclaration() && !F.getEntryBlock().empty()) normaliseTypePunnedAccesses(F, M.getDataLayout());
+}
+
+void llvmc::normaliseConstantAggregateForTest(llvm::Module &M) {
+  for (llvm::Function &F : M)
+    if (!F.isDeclaration() && !F.getEntryBlock().empty()) normaliseConstantAggregateAccesses(F, M.getDataLayout());
+}
+
 static void scalariseForSpirv(llvm::TargetMachine &TM, llvm::Module &M, const bool logical) {
   llvm::PassBuilder PB(&TM);
   llvm::LoopAnalysisManager LAM;
@@ -1352,6 +1715,25 @@ static void scalariseForSpirv(llvm::TargetMachine &TM, llvm::Module &M, const bo
   PB.registerLoopAnalyses(LAM);
   PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
   FAM.registerPass([&] { return TM.getTargetIRAnalysis(); });
+
+  llvm::ModulePassManager inlineLinked;
+  inlineLinked.addPass(llvm::AlwaysInlinerPass());
+  inlineLinked.run(M, MAM);
+  // Drop unreachable inlined definitions before per-function passes; they still translate.
+  bool dropped = true;
+  while (dropped) {
+    dropped = false;
+    for (auto &F : llvm::make_early_inc_range(M))
+      if (!F.isDeclaration() && F.hasFnAttribute(llvm::Attribute::AlwaysInline) && F.use_empty()) {
+        F.eraseFromParent();
+        dropped = true;
+      }
+    for (auto &G : llvm::make_early_inc_range(M.globals()))
+      if (G.isConstant() && !G.isDeclaration() && G.use_empty()) {
+        G.eraseFromParent();
+        dropped = true;
+      }
+  }
 
   // O0 emits spill-everything IR and we lean on the device driver to optimise, but rusticl's Mesa nir_opt_cse runs
   // away (20GB+) on the load/store-heavy std::string-capture blob -- SROA/mem2reg the locals to SSA to defuse it
@@ -1377,6 +1759,10 @@ static void scalariseForSpirv(llvm::TargetMachine &TM, llvm::Module &M, const bo
   cleanup.addPass(llvm::DCEPass());
   for (llvm::Function &F : M)
     if (!F.isDeclaration() && !F.getEntryBlock().empty()) {
+      if (logical) {
+        normaliseConstantAggregateAccesses(F, M.getDataLayout());
+        normaliseTypePunnedAccesses(F, M.getDataLayout());
+      }
       FPM.run(F, FAM);
       if (logical) {
         foldNonNullPointerChecks(F);
@@ -1412,6 +1798,10 @@ static void scalariseForSpirv(llvm::TargetMachine &TM, llvm::Module &M, const bo
         bypassWideDivision(F);
       }
     }
+  if (logical) {
+    for (auto &G : llvm::make_early_inc_range(M.globals()))
+      if (G.isConstant() && G.getAddressSpace() != 0 && G.use_empty()) G.eraseFromParent();
+  }
 }
 
 // See

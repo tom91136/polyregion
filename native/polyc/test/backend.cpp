@@ -14,9 +14,11 @@
 #include "llvm/IR/Operator.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/Error.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Regex.h"
 #include "llvm/Support/SourceMgr.h"
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/TargetParser/Host.h"
 #include "llvm/TargetParser/Triple.h"
 
@@ -5379,4 +5381,178 @@ TEST_CASE("a widening struct-to-struct cast is rejected", "[backend]") {
   opts.pipelineSpec = "FullOpt(level=0)";
   REQUIRE_THROWS_WITH(polyregion::compiler::compile(p, opts, OptLevel::O0),
                       Catch::Matchers::ContainsSubstring("would read past the source allocation"));
+}
+
+namespace {
+static polyregion::polyast::CompileResult compileRawVulkanModule(const std::string &ir, OptLevel opt) {
+  polyregion::compiler::initialise();
+  llvm::LLVMContext ctx;
+  llvm::SMDiagnostic diagnostic;
+  auto module = llvm::parseAssemblyString(ir, diagnostic, ctx);
+  REQUIRE(module);
+  const llvm::Triple triple("spirv-unknown-vulkan-compute");
+  polyregion::backend::llvmc::TargetInfo info{
+      .triple = triple,
+      .layout = {},
+      .target = polyregion::backend::llvmc::targetFromTriple(triple),
+      .cpu = {},
+  };
+  return polyregion::backend::llvmc::compileModule(info, opt, false, *module);
+}
+
+static int validateSpirvBytes(const polyregion::polyast::CompileResult &result, const char *prefix) {
+  llvm::SmallString<128> module, report;
+  if (llvm::sys::fs::createTemporaryFile(prefix, "spv", module) || llvm::sys::fs::createTemporaryFile(prefix, "txt", report))
+    FAIL("temp file");
+  {
+    std::error_code ec;
+    llvm::raw_fd_ostream out(module, ec, llvm::sys::fs::OF_None);
+    REQUIRE_FALSE(ec);
+    out.write(reinterpret_cast<const char *>(result.binary->data()), result.binary->size());
+  }
+  const int status =
+      std::system(("spirv-val --target-env vulkan1.3 " + std::string(module) + " > " + std::string(report) + " 2>&1").c_str());
+  const auto text = llvm::MemoryBuffer::getFile(report);
+  if (status != 0) llvm::errs() << "spirv-val: " << (text ? (*text)->getBuffer().str() : std::string()) << "\n";
+  llvm::sys::fs::remove(module);
+  llvm::sys::fs::remove(report);
+  return status;
+}
+} // namespace
+
+TEST_CASE("Vulkan lowers a constant aggregate table copy through typed fields", "[backend][spirv][vulkan][aggregate]") {
+  const auto compiled = compileRawVulkanModule(R"(
+%triple = type { double, double, double }
+@idx = internal global i32 2
+@out = internal global double 0.0
+@table = internal addrspace(1) constant [4 x %triple] [
+  %triple {double 1.0, double 2.0, double 3.0},
+  %triple {double 4.0, double 5.0, double 6.0},
+  %triple {double 7.0, double 8.0, double 9.0},
+  %triple {double 10.0, double 11.0, double 12.0}]
+declare void @llvm.memcpy.p0.p1.i64(ptr, ptr addrspace(1), i64, i1)
+define void @k() #0 {
+entry:
+  %i = load i32, ptr @idx, align 4
+  %elem = getelementptr inbounds [4 x %triple], ptr addrspace(1) @table, i64 0, i32 %i
+  %local = alloca %triple, align 8
+  call void @llvm.memcpy.p0.p1.i64(ptr %local, ptr addrspace(1) %elem, i64 24, i1 false)
+  %f = getelementptr inbounds %triple, ptr %local, i32 0, i32 1
+  %v = load double, ptr %f, align 8
+  store double %v, ptr @out, align 8
+  ret void
+}
+attributes #0 = { "hlsl.shader"="compute" "hlsl.numthreads"="256,1,1" }
+)",
+                                               OptLevel::O0);
+  REQUIRE(compiled.binary.has_value());
+  CHECK(validateSpirvBytes(compiled, "polyc_const_table") == 0);
+}
+
+TEST_CASE("Vulkan lowers a type-punned scalar load through a typed field", "[backend][spirv][vulkan][typepun]") {
+  const auto compiled = compileRawVulkanModule(R"(
+@table = internal constant [4 x double] [double 1.0, double 2.0, double 3.0, double 4.0]
+@idx = internal global i32 2
+@out = internal global i64 0
+define void @k() #0 {
+entry:
+  %i = load i32, ptr @idx, align 4
+  %j = zext i32 %i to i64
+  %p = getelementptr inbounds [4 x double], ptr @table, i64 0, i64 %j
+  %bits = load i64, ptr %p, align 8
+  store i64 %bits, ptr @out, align 8
+  ret void
+}
+attributes #0 = { "hlsl.shader"="compute" "hlsl.numthreads"="256,1,1" }
+)",
+                                               OptLevel::O0);
+  REQUIRE(compiled.binary.has_value());
+  CHECK(validateSpirvBytes(compiled, "polyc_type_pun") == 0);
+}
+
+TEST_CASE("Vulkan lowers a type-punned scalar store through a typed field", "[backend][spirv][vulkan][typepun]") {
+  const auto compiled = compileRawVulkanModule(R"(
+@table = internal global [4 x double] zeroinitializer
+@bits = internal global i64 4616189618054758400
+define void @k() #0 {
+entry:
+  %p = getelementptr inbounds [4 x double], ptr @table, i64 0, i64 1
+  %v = load i64, ptr @bits, align 8
+  store i64 %v, ptr %p, align 8
+  ret void
+}
+attributes #0 = { "hlsl.shader"="compute" "hlsl.numthreads"="256,1,1" }
+)",
+                                               OptLevel::O0);
+  REQUIRE(compiled.binary.has_value());
+  CHECK(validateSpirvBytes(compiled, "polyc_type_pun_store") == 0);
+}
+
+TEST_CASE("Vulkan lowers a type-punned memcpy through a typed field", "[backend][spirv][vulkan][typepun]") {
+  const auto compiled = compileRawVulkanModule(R"(
+@table = internal constant [4 x double] [double 1.0, double 2.0, double 3.0, double 4.0]
+@out = internal global i64 0
+declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)
+define void @k() #0 {
+entry:
+  %p = getelementptr inbounds [4 x double], ptr @table, i64 0, i64 2
+  call void @llvm.memcpy.p0.p0.i64(ptr @out, ptr %p, i64 8, i1 false)
+  ret void
+}
+attributes #0 = { "hlsl.shader"="compute" "hlsl.numthreads"="256,1,1" }
+)",
+                                               OptLevel::O0);
+  REQUIRE(compiled.binary.has_value());
+  CHECK(validateSpirvBytes(compiled, "polyc_type_pun_memcpy") == 0);
+}
+
+TEST_CASE("Vulkan leaves atomic accesses untouched", "[backend][spirv][vulkan][typepun][atomic]") {
+  llvm::LLVMContext context;
+  llvm::SMDiagnostic diagnostic;
+  const auto module = llvm::parseAssemblyString(R"(
+@v = internal global [2 x double] zeroinitializer
+@o = internal global [2 x double] zeroinitializer
+define void @k() #0 {
+entry:
+  %p = getelementptr inbounds [2 x double], ptr @v, i64 0, i64 1
+  %q = getelementptr inbounds [2 x double], ptr @o, i64 0, i64 1
+  %a = load atomic i64, ptr %p acquire, align 8
+  store atomic i64 %a, ptr %q release, align 8
+  ret void
+}
+attributes #0 = { "hlsl.shader"="compute" "hlsl.numthreads"="256,1,1" }
+)",
+                                                diagnostic, context);
+  REQUIRE(module);
+  polyregion::backend::llvmc::normaliseTypePunnedForTest(*module);
+  std::string ir;
+  llvm::raw_string_ostream out(ir);
+  module->print(out, nullptr);
+  CHECK(ir.find("load atomic i64") != std::string::npos);
+  CHECK(ir.find("store atomic i64") != std::string::npos);
+}
+
+TEST_CASE("Vulkan refuses out-of-range constant byte offsets", "[backend][spirv][vulkan][aggregate]") {
+  llvm::LLVMContext context;
+  llvm::SMDiagnostic diagnostic;
+  const auto module = llvm::parseAssemblyString(R"(
+@t = internal constant [4 x double] [double 1.0, double 2.0, double 3.0, double 4.0]
+@o = internal global double 0.0
+define void @k() #0 {
+entry:
+  %p = getelementptr inbounds i8, ptr @t, i64 32
+  %v = load double, ptr %p, align 8
+  store double %v, ptr @o, align 8
+  ret void
+}
+attributes #0 = { "hlsl.shader"="compute" "hlsl.numthreads"="256,1,1" }
+)",
+                                                diagnostic, context);
+  REQUIRE(module);
+  polyregion::backend::llvmc::normaliseConstantAggregateForTest(*module);
+  std::string ir;
+  llvm::raw_string_ostream out(ir);
+  module->print(out, nullptr);
+  CHECK(ir.find("getelementptr inbounds i8, ptr @t, i64 32") != std::string::npos);
+  CHECK(ir.find("[4 x double], ptr @t, i32 0, i64 3") == std::string::npos);
 }
