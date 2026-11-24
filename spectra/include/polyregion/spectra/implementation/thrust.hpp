@@ -10,6 +10,7 @@
 #endif
 
 #include <cstdint>
+#include <new>
 
 #include <thrust/adjacent_difference.h>
 #include <thrust/binary_search.h>
@@ -107,9 +108,16 @@ template <class T> __device__ T shuffle_down(T value, std::int32_t offset) {
 #endif
 }
 
+template <class T> struct shared_totals {
+  alignas(T) unsigned char bytes[ordered_warps * sizeof(T)];
+
+  __device__ void store(std::int32_t index, const T &value) { new (bytes + index * sizeof(T)) T(value); }
+  __device__ const T &load(std::int32_t index) const { return *reinterpret_cast<const T *>(bytes + index * sizeof(T)); }
+};
+
 template <class T, class Element, class Op, bool Final>
 __global__ void ordered_reduce_kernel(Element element_at, std::int64_t n, std::int32_t rows, Op op, T init, T *out) {
-  __shared__ T totals[ordered_warps];
+  __shared__ shared_totals<T> totals;
   const std::int32_t lane = threadIdx.x % ordered_warp;
   const std::int32_t warp = threadIdx.x / ordered_warp;
   const std::int64_t span = std::int64_t(ordered_warp) * rows;
@@ -144,14 +152,14 @@ __global__ void ordered_reduce_kernel(Element element_at, std::int64_t n, std::i
       current = next;
     }
   }
-  if (lane == 0) totals[warp] = acc;
+  if (lane == 0) totals.store(warp, acc);
   __syncthreads();
   if (threadIdx.x == 0) {
     const std::int64_t left = n - std::int64_t(blockIdx.x) * tile;
     const std::int32_t warps = left >= tile ? ordered_warps : std::int32_t((left + span - 1) / span);
-    T total = totals[0];
+    T total = totals.load(0);
     for (std::int32_t i = 1; i < warps; ++i)
-      total = op(total, totals[i]);
+      total = op(total, totals.load(i));
     if (Final) total = op(init, total);
     out[blockIdx.x] = total;
   }
