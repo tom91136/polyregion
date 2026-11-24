@@ -1105,6 +1105,7 @@ object ArenaView extends ProgramPass {
 
       // ForRange bounds / Cond conditions hold terms inline (not in a visited leaf); hoist any stepped Select
       // into a preceding Var. bounds are loop-invariant so hoisting once is sound; While conds are plain vars
+      val retypedI64 = scala.collection.mutable.Set.empty[String]
       val body =
         mapStmtsRec(hoistInlineTerms(simplifyStablePointerGuards(f.body)))(
           rewriteLeaf(
@@ -1121,7 +1122,8 @@ object ArenaView extends ProgramPass {
                 case p.Stmt.Mut(p.Term.Select(root, _, _), _)       => root
                 case p.Stmt.Update(p.Term.Select(root, _, _), _, _) => root
               }
-              .toSet
+              .toSet,
+            retypedI64
           )
         )
       // neutralise view binding slots to an i8 view so the slot stays aligned, so we can avoid dragging unused types in
@@ -1164,7 +1166,8 @@ object ArenaView extends ProgramPass {
       views: List[p.Named],
       rootOffset: p.Named,
       isArena: p.Named => Boolean,
-      mutatedRoots: Set[p.Named]
+      mutatedRoots: Set[p.Named],
+      retypedI64: scala.collection.mutable.Set[String]
   )(leaf: p.Stmt): List[p.Stmt] = {
     val Layout(analysis, encodedFields, fieldAliases, identityFields, members, unions) = layout
     val pre                                                                            = ListBuffer.empty[p.Stmt]
@@ -1389,6 +1392,7 @@ object ArenaView extends ProgramPass {
     def rwTerm(t: p.Term): p.Term = t match {
       case p.Term.Select(root, Nil, _) if root == capN                     => sel(rootOffset)
       case p.Term.Select(root, Nil, _) if isArena(root) && isPtr(root.tpe) => sel(i64Var(root))
+      case p.Term.Select(root, Nil, _) if retypedI64(root.symbol)          => sel(i64Var(root))
       case p.Term.Select(root, Nil, _) if fieldAliases.get(root).exists(x => identityFields(x._1)) =>
         rwTerm(fieldAliases(root)._2)
       case p.Term.Select(root, steps, resultT) if steps.nonEmpty =>
@@ -1513,7 +1517,11 @@ object ArenaView extends ProgramPass {
         p.Expr.Alias(add(off0, idx.fold(i64(0))(i => mulBytes(rwTerm(i), comp))))
       case p.Expr.RefTo(base, idx, comp, sp, r) => p.Expr.RefTo(rwTerm(base), idx.map(rwTerm), comp, sp, r)
       case p.Expr.Index(base, idx, comp) =>
-        derefOffset(base) match {
+        val retyped = base match {
+          case p.Term.Select(root, Nil, _) if retypedI64(root.symbol) => Some(sel(i64Var(root)))
+          case _                                                      => None
+        }
+        retyped.orElse(derefOffset(base)) match {
           case Some(off0) => p.Expr.Alias(loadAt(add(off0, mulBytes(rwTerm(idx), comp)), comp))
           case None       => p.Expr.Index(rwTerm(base), rwTerm(idx), i64ify(comp))
         }
@@ -1558,10 +1566,13 @@ object ArenaView extends ProgramPass {
     }
 
     def rwInit(n: p.Named, e: p.Expr): (p.Named, p.Expr) =
-      if (isArena(n) && isPtr(n.tpe)) i64Var(n) -> rwArenaPointer(e)
-      else {
+      if (isArena(n) && isPtr(n.tpe)) {
+        retypedI64 += n.symbol
+        i64Var(n) -> rwArenaPointer(e)
+      } else {
         val rewritten = rwExpr(e)
-        (if (isPtr(n.tpe) && rewritten.tpe == I64) i64Var(n) else n) -> rewritten
+        if (isPtr(n.tpe) && rewritten.tpe == I64) retypedI64 += n.symbol
+        (if (retypedI64(n.symbol)) i64Var(n) else n) -> rewritten
       }
 
     val out = leaf match {
@@ -1570,7 +1581,10 @@ object ArenaView extends ProgramPass {
           case Nil     => val (nn, ne) = rwInit(n, e); List(p.Stmt.Var(nn, Some(ne), m))
           case aliases => aliases
         }
-      case p.Stmt.Var(n, None, m) => List(p.Stmt.Var(if (isArena(n) && isPtr(n.tpe)) i64Var(n) else n, None, m))
+      case p.Stmt.Var(n, None, m) =>
+        val retyped = isArena(n) && isPtr(n.tpe)
+        if (retyped) retypedI64 += n.symbol
+        List(p.Stmt.Var(if (retyped) i64Var(n) else n, None, m))
       case p.Stmt.Mut(p.Term.Select(n, Nil, t), e) =>
         if (isArena(n) && isPtr(n.tpe)) List(p.Stmt.Mut(p.Term.Select(i64Var(n), Nil, I64), rwArenaPointer(e)))
         else List(p.Stmt.Mut(p.Term.Select(n, Nil, t), rwExpr(e)))

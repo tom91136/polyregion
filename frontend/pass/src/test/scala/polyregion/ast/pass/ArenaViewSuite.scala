@@ -226,6 +226,51 @@ class ArenaViewSuite extends munit.FunSuite {
     assertEquals(loadedVar.flatMap(_.expr).map(_.tpe), Some(privatePtr))
   }
 
+  test("a local pointer retyped to an arena offset keeps its later dereferences well-typed") {
+    val ptrTpe  = p.Type.Ptr(p.Type.IntS64, p.Type.Space.Global)
+    val field   = named("ptr", ptrTpe)
+    val carrier = named("carrier", p.Type.IntS64)
+    val local   = named("local", ptrTpe)
+    val value   = named("value", p.Type.IntS64)
+    val cap     = arg(p.Conventions.CaptureArg, p.Type.Ptr(capTpe, p.Type.Space.Global))
+    val program = PassTest.program(
+      entry(
+        args = List(cap),
+        body = List(
+          p.Stmt.Var(
+            carrier,
+            Some(p.Expr.Cast(p.Term.Select(cap.named, List(p.PathStep.Field("ptr")), ptrTpe), p.Type.IntS64)),
+            isMutable = false
+          ),
+          p.Stmt.Var(
+            local,
+            Some(p.Expr.RefTo(selectT(carrier), None, p.Type.IntS64, p.Type.Space.Global, p.Region.Opaque)),
+            isMutable = false
+          ),
+          p.Stmt.Var(
+            value,
+            Some(p.Expr.Index(selectT(local), p.Term.IntS64Const(0), p.Type.IntS64)),
+            isMutable = false
+          ),
+          p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+        )
+      ),
+      Nil,
+      List(p.StructDef(capSym, Nil, List(field), Nil))
+    )
+
+    val result = ArenaView(program, NoopLog)
+    val body   = result.entry.body.map(_.repr).mkString("\n")
+    val stale = result.entry.collectAll[p.Term].collect {
+      case s @ p.Term.Select(root, Nil, tpe) if root.symbol == local.symbol && tpe != p.Type.IntS64 => s
+    }
+    assertEquals(stale, Nil, body)
+    val loads = result.entry.collectAll[p.Expr].collect {
+      case e @ p.Expr.Index(p.Term.Select(root, Nil, _), _, _) if root.symbol == local.symbol => e
+    }
+    assertEquals(loads, Nil, body)
+  }
+
   test("a pointer cast from stack array storage keeps identity through a pointer field") {
     val selfSym    = p.Sym("SelfPointer")
     val selfTpe    = p.Type.Struct(selfSym, Nil)
