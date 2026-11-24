@@ -430,7 +430,7 @@ public final class Marshal implements AutoCloseable {
     if (!staged.isEmpty())
       for (Staged s : staged)
         try {
-          if (shared()) Context.releaseHost(s.buffer);
+          if (shared()) Context.current().releaseHost(s.buffer);
           else queue.release(s.buffer);
         } catch (RuntimeException e) {
           if (failure == null) failure = e;

@@ -193,6 +193,8 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_context_destroy(void *contex
 
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_context_current();
 POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_stats(void *context, PolyrtStats *stats) noexcept;
+// waits for all device work queued on the context before its caller frees device memory
+POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_context_wait(void *context) noexcept;
 POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_context_available(void *context, const char *site) noexcept;
 // True means success. A failed status call leaves a thread-local diagnostic until the next status call on that thread.
 POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_context_acquire(void *context) noexcept;

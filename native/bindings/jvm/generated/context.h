@@ -27,7 +27,7 @@ namespace polyregion::generated::registry::Context {
 [[maybe_unused]] jlongArray platformInfo0(JNIEnv *env, jclass, jint platform);
 [[maybe_unused]] jstring platformName0(JNIEnv *env, jclass, jint platform);
 [[maybe_unused]] void recordHost0(JNIEnv *env, jclass, jlong address, jlong bytes);
-[[maybe_unused]] void releaseHost0(JNIEnv *env, jclass, jlong address);
+[[maybe_unused]] void releaseHost0(JNIEnv *env, jclass, jlong context, jlong address);
 [[maybe_unused]] jint select0(JNIEnv *env, jclass, jlong context, jobjectArray imageNames, jbyteArray imageTargets,
                               jobjectArray imageFeatures, jobjectArray images);
 [[maybe_unused]] jboolean sharedAddressSpace0(JNIEnv *env, jclass, jlong context);
@@ -101,7 +101,7 @@ static void unregisterMethods(JNIEnv *env) {
        .signature = const_cast<char *>("(JJ)V"),
        .fnPtr = reinterpret_cast<void *>(&recordHost0)},
       {.name = const_cast<char *>("releaseHost0"),
-       .signature = const_cast<char *>("(J)V"),
+       .signature = const_cast<char *>("(JJ)V"),
        .fnPtr = reinterpret_cast<void *>(&releaseHost0)},
       {.name = const_cast<char *>("select0"),
        .signature = const_cast<char *>("(J[Ljava/lang/String;[B[[Ljava/lang/String;[[B)I"),

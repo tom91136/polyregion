@@ -578,6 +578,14 @@ POLYREGION_EXPORT extern "C" bool polyrt_stats(void *context, PolyrtStats *stats
   return true;
 }
 
+POLYREGION_EXPORT extern "C" bool polyrt_context_wait(void *context) noexcept {
+  return runtimeStatus(__func__, [&] {
+    auto &execution = requireContext(context, __func__);
+    const std::scoped_lock lock(execution.transaction);
+    execution.wait();
+  });
+}
+
 polyregion::polyrt::ExecutionContext::~ExecutionContext() {
   {
     const std::unique_lock registry(contextRegistryMutex());

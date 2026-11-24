@@ -40,9 +40,14 @@ static JavaVM *CurrentVM = nullptr;
 
 namespace {
 
+struct HostBlock {
+  size_t bytes;
+  size_t records;
+};
+
 struct HostBlocks {
   std::mutex mutex;
-  std::map<uintptr_t, size_t> blocks;
+  std::map<uintptr_t, HostBlock> blocks;
 };
 
 HostBlocks &hostBlocks() {
@@ -50,14 +55,18 @@ HostBlocks &hostBlocks() {
   return *blocks;
 }
 
+std::atomic<uint64_t> hostForgets{0};
+std::atomic<uint64_t> hostReleaseWaits{0};
+
 const auto localReflect = [](const void *ptr) -> polyrt::PtrQuery {
   auto &host = hostBlocks();
   const std::scoped_lock lock(host.mutex);
   const auto address = reinterpret_cast<uintptr_t>(ptr);
   const auto upper = host.blocks.upper_bound(address);
   if (upper == host.blocks.begin()) return {0, 0};
-  const auto &[base, size] = *std::prev(upper);
-  return address - base <= size ? polyrt::PtrQuery{.sizeInBytes = size, .offsetInBytes = address - base} : polyrt::PtrQuery{0, 0};
+  const auto &[base, block] = *std::prev(upper);
+  return address - base <= block.bytes ? polyrt::PtrQuery{.sizeInBytes = block.bytes, .offsetInBytes = address - base}
+                                       : polyrt::PtrQuery{0, 0};
 };
 
 std::unique_ptr<polyrt::sma::CaptureMarshal> hostMarshalFactory(polyrt::ExecutionContext &context) {
@@ -466,19 +475,31 @@ void Context::recordHost0(JNIEnv *env, jclass, jlong address, jlong bytes) {
   wrapException(env, EX, [&] {
     auto &host = hostBlocks();
     const std::scoped_lock lock(host.mutex);
-    host.blocks[static_cast<uintptr_t>(address)] = static_cast<size_t>(bytes);
+    auto &block = host.blocks[static_cast<uintptr_t>(address)];
+    block.bytes = static_cast<size_t>(bytes);
+    block.records++;
   });
 }
 
-void Context::releaseHost0(JNIEnv *env, jclass, jlong address) {
+void Context::releaseHost0(JNIEnv *env, jclass, jlong context, jlong address) {
   wrapException(env, EX, [&] {
+    check(polyrt_context_wait(toHandle(context)));
+    hostReleaseWaits.fetch_add(1, std::memory_order_relaxed);
+    size_t released = 0;
     {
       auto &host = hostBlocks();
       const std::scoped_lock lock(host.mutex);
-      host.blocks.erase(static_cast<uintptr_t>(address));
+      const auto found = host.blocks.find(static_cast<uintptr_t>(address));
+      if (found == host.blocks.end()) throw std::runtime_error("releaseHost: buffer was not recorded");
+      if (--found->second.records == 0) {
+        released = found->second.bytes;
+        host.blocks.erase(found);
+      }
     }
-    polyrt::sma::forEachMarshal(
-        [&](auto &marshal) { marshal.disassociate(reinterpret_cast<const void *>(address), /*releaseRemote*/ true); });
+    if (released != 0) {
+      hostForgets.fetch_add(1, std::memory_order_relaxed);
+      polyrt::sma::forEachMarshal([&](auto &marshal) { marshal.forget(reinterpret_cast<const void *>(address), released); });
+    }
   });
 }
 
@@ -490,14 +511,26 @@ jlongArray Context::stats0(JNIEnv *env, jclass, jlong context) {
   return wrapException(env, EX, [&] {
     PolyrtStats stats{};
     check(polyrt_stats(toHandle(context), &stats));
+    size_t blocks = 0, records = 0;
+    {
+      auto &host = hostBlocks();
+      const std::scoped_lock lock(host.mutex);
+      blocks = host.blocks.size();
+      for (const auto &[address, block] : host.blocks)
+        records += block.records;
+    }
     const jlong values[] = {static_cast<jlong>(stats.launches),
                             static_cast<jlong>(stats.h2dCopies),
                             static_cast<jlong>(stats.d2hCopies),
                             static_cast<jlong>(stats.remoteMallocs),
                             static_cast<jlong>(stats.remoteAllocationsLive),
-                            static_cast<jlong>(stats.mirrorAllocationsLive)};
-    auto *array = env->NewLongArray(6);
-    env->SetLongArrayRegion(array, 0, 6, values);
+                            static_cast<jlong>(stats.mirrorAllocationsLive),
+                            static_cast<jlong>(hostReleaseWaits.load(std::memory_order_relaxed)),
+                            static_cast<jlong>(blocks),
+                            static_cast<jlong>(records),
+                            static_cast<jlong>(hostForgets.load(std::memory_order_relaxed))};
+    auto *array = env->NewLongArray(10);
+    env->SetLongArrayRegion(array, 0, 10, values);
     return array;
   });
 }

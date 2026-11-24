@@ -50,7 +50,7 @@ public final class Context implements AutoCloseable {
 
   static native void recordHost0(long address, long bytes);
 
-  static native void releaseHost0(long address);
+  static native void releaseHost0(long context, long address);
 
   static native boolean sharedAddressSpace0(long context);
 
@@ -107,15 +107,30 @@ public final class Context implements AutoCloseable {
   }
 
   public static final class Stats {
-    public final long launches, hostToDevice, deviceToHost, remoteMallocs, remoteAllocations, mirrorAllocations;
+    public final long launches, hostToDevice, deviceToHost, remoteMallocs, remoteAllocations;
+    public final long mirrorAllocations, hostReleaseWaits, hostBlocks, hostRecords, hostForgets;
 
-    Stats(long launches, long hostToDevice, long deviceToHost, long remoteMallocs, long remoteAllocations, long mirrorAllocations) {
+    Stats(
+        long launches,
+        long hostToDevice,
+        long deviceToHost,
+        long remoteMallocs,
+        long remoteAllocations,
+        long mirrorAllocations,
+        long hostReleaseWaits,
+        long hostBlocks,
+        long hostRecords,
+        long hostForgets) {
       this.launches = launches;
       this.hostToDevice = hostToDevice;
       this.deviceToHost = deviceToHost;
       this.remoteMallocs = remoteMallocs;
       this.remoteAllocations = remoteAllocations;
       this.mirrorAllocations = mirrorAllocations;
+      this.hostReleaseWaits = hostReleaseWaits;
+      this.hostBlocks = hostBlocks;
+      this.hostRecords = hostRecords;
+      this.hostForgets = hostForgets;
     }
   }
 
@@ -234,10 +249,11 @@ public final class Context implements AutoCloseable {
     recordHost0(address0(buffer), buffer.capacity());
   }
 
-  /** Forgets a buffer recorded with {@link #recordHost}. */
-  public static void releaseHost(ByteBuffer buffer) {
+  /** Waits for this context's device work, then forgets one recording of {@link #recordHost}. */
+  public void releaseHost(ByteBuffer buffer) {
     ensureLoaded();
-    releaseHost0(address0(buffer));
+    requireOpen();
+    releaseHost0(handle, address0(buffer));
   }
 
   void requireOpen() {
@@ -356,7 +372,7 @@ public final class Context implements AutoCloseable {
   public Stats stats() {
     requireOpen();
     long[] values = stats0(handle);
-    return new Stats(values[0], values[1], values[2], values[3], values[4], values[5]);
+    return new Stats(values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7], values[8], values[9]);
   }
 
   /**
