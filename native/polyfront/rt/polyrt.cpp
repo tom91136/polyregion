@@ -380,14 +380,15 @@ public:
   static bool heldByThisThread() { return depth > 0; }
 };
 
+// XXX leaked: static destructors call _rt_release through the interposed operator delete after these would be destroyed.
 RegistryMutex &contextRegistryMutex() {
-  static RegistryMutex mutex;
-  return mutex;
+  static RegistryMutex *const mutex = new RegistryMutex();
+  return *mutex;
 }
 
 std::vector<polyregion::polyrt::ExecutionContext *> &contextRegistry() {
-  static std::vector<polyregion::polyrt::ExecutionContext *> contexts;
-  return contexts;
+  static auto *const contexts = new std::vector<polyregion::polyrt::ExecutionContext *>();
+  return *contexts;
 }
 
 constexpr uintptr_t createdHandleTag = 1;
