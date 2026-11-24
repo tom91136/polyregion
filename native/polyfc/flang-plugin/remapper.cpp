@@ -774,11 +774,19 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
             return;
           }
           case mlir::arith::CmpFPredicate::ORD: {
-            witness(x.getResult(), Expr::Any(Expr::Alias(dsl::integral(Type::Bool1(), true))));
+            const auto l = newVar(handleValueAsScalar(x.getLhs()));
+            const auto r = newVar(handleValueAsScalar(x.getRhs()));
+            const auto lOrdered = newVar(Expr::IntrOp(Intr::LogicEq(l, l)).widen());
+            const auto rOrdered = newVar(Expr::IntrOp(Intr::LogicEq(r, r)).widen());
+            witness(x.getResult(), Expr::IntrOp(Intr::LogicAnd(lOrdered, rOrdered)).widen());
             return;
           }
           case mlir::arith::CmpFPredicate::UNO: {
-            witness(x.getResult(), Expr::Any(Expr::Alias(dsl::integral(Type::Bool1(), false))));
+            const auto l = newVar(handleValueAsScalar(x.getLhs()));
+            const auto r = newVar(handleValueAsScalar(x.getRhs()));
+            const auto lNan = newVar(Expr::IntrOp(Intr::LogicNeq(l, l)).widen());
+            const auto rNan = newVar(Expr::IntrOp(Intr::LogicNeq(r, r)).widen());
+            witness(x.getResult(), Expr::IntrOp(Intr::LogicOr(lNan, rNan)).widen());
             return;
           }
         }
