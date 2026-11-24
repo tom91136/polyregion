@@ -114,11 +114,6 @@ set(POLYINVOKE_PRIVATE_LIBS
         CACHE INTERNAL "")
 set(POLYINVOKE_LIBS ${POLYINVOKE_PUBLIC_LIBS} ${POLYINVOKE_PRIVATE_LIBS} CACHE INTERNAL "")
 
-if (POLYREGION_ASAN)
-    # libLLVM and lld are uninstrumented; an instrumented BumpPtrAllocator::AllocateSlow here would win the link and poison their slabs
-    set_source_files_properties(object_platform.cpp PROPERTIES COMPILE_OPTIONS -fno-sanitize=address)
-endif ()
-
 add_library(polyinvoke SHARED)
 add_library(polyinvoke-obj OBJECT)
 if (POLYREGION_SHARED_LIB)

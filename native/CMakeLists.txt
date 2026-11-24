@@ -436,6 +436,8 @@ set(POLYREGION_LLVM_SRC_DIR "${LLVM_BUILD_PREFIX}/llvm-project-${LLVM_SRC_VERSIO
 set(_DIST_SUFFIX "")
 if (POLYREGION_ASAN)
     set(_DIST_SUFFIX "-asan")
+    # Make our allocator definitions agree with the uninstrumented LLVM libraries, whatever TU includes them.
+    include_directories(BEFORE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/llvm-asan-compat")
 endif ()
 set(LLVM_DIST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/out/polyregion-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}-${LLVM_VARIANT}${_DIST_SUFFIX}-dist")
 set(LLVM_DIR "${LLVM_DIST_DIR}/lib/cmake/llvm")
