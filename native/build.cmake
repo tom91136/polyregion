@@ -312,7 +312,25 @@ elseif (ACTION STREQUAL "DEVICE_LIBS")
     endforeach ()
     file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/cmake/prepare_cuda_dist.cmake" _cuda_script_hash)
     file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/cmake/prepare_amdgpu_dist.cmake" _amdgpu_script_hash)
-    set(DEVICE_LIBS_TAG "cuda=${_cuda_versions};rocm=${POLYREGION_ROCM_TAG};scripts=${_cuda_script_hash},${_amdgpu_script_hash}")
+    file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/cmake/prepare_spirv_libm_dist.cmake" _spirv_libm_script_hash)
+    set(_spirv_inputs "${_spirv_libm_script_hash};source=${LLVM_SOURCE_SHA256}")
+    foreach (_dir IN LISTS LLVM_PATCH_DIRS)
+        file(GLOB _patches LIST_DIRECTORIES false "${_dir}/*.patch")
+        foreach (_patch IN LISTS _patches)
+            file(SHA256 "${_patch}" _patch_hash)
+            string(APPEND _spirv_inputs ";${_patch_hash}")
+        endforeach ()
+    endforeach ()
+    find_program(_spirv_clang NAMES clang++ clang++-23 clang++-22 HINTS "${LLVM_DIST_DIR}/bin" NO_DEFAULT_PATH)
+    if (NOT _spirv_clang)
+        find_program(_spirv_clang NAMES clang++ clang++-23 clang++-22)
+    endif ()
+    if (_spirv_clang)
+        execute_process(COMMAND "${_spirv_clang}" --version OUTPUT_VARIABLE _spirv_compiler_version OUTPUT_QUIET ERROR_QUIET)
+        string(SHA256 _spirv_compiler_hash "${_spirv_clang}|${_spirv_compiler_version}")
+        string(APPEND _spirv_inputs ";${_spirv_compiler_hash}")
+    endif ()
+    set(DEVICE_LIBS_TAG "cuda=${_cuda_versions};rocm=${POLYREGION_ROCM_TAG};llvm=${LLVM_SRC_VERSION};spirv=${_spirv_inputs};scripts=${_cuda_script_hash},${_amdgpu_script_hash}")
     set(_existing_tag "")
     if (EXISTS "${DEVICE_LIBS_MARKER}")
         file(READ "${DEVICE_LIBS_MARKER}" _existing_tag)
@@ -344,6 +362,15 @@ elseif (ACTION STREQUAL "DEVICE_LIBS")
                 COMMAND_ECHO STDERR
                 RESULT_VARIABLE SUCCESS)
         check_process_return(${SUCCESS} "AMDGPU device-libs prep")
+        execute_process(
+                COMMAND ${CMAKE_COMMAND}
+                -DOUT_DIR=${POLYREGION_DEVICE_LIBS_DIR}
+                -DLLVM_SRC_DIR=${LLVM_BUILD_DIR}/llvm-project-${LLVM_SRC_VERSION}.src
+                -DPOLYREGION_LLVM_BIN_HINT=${LLVM_DIST_DIR}/bin
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/prepare_spirv_libm_dist.cmake
+                COMMAND_ECHO STDERR
+                RESULT_VARIABLE SUCCESS)
+        check_process_return(${SUCCESS} "LLVM libc SPIRV prep")
         file(WRITE "${DEVICE_LIBS_MARKER}" "${DEVICE_LIBS_TAG}")
         file(REMOVE_RECURSE "${POLYREGION_DEVICE_LIBS_DIR}/.staging")
         message(STATUS "Device libs staged at ${POLYREGION_DEVICE_LIBS_DIR}")

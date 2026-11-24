@@ -1,5 +1,6 @@
 #include "llvmc.h"
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstddef>
@@ -78,6 +79,7 @@ extern "C" bool SPIRVTranslate(Module *M, std::string &SpirvObj, std::string &Er
 #include "llvm/TargetParser/Triple.h"
 #include "llvm/Transforms/IPO.h"
 #include "llvm/Transforms/IPO/AlwaysInliner.h"
+#include "llvm/Transforms/IPO/GlobalDCE.h"
 #include "llvm/Transforms/InstCombine/InstCombine.h"
 #include "llvm/Transforms/Scalar/DCE.h"
 #include "llvm/Transforms/Scalar/EarlyCSE.h"
@@ -737,12 +739,19 @@ bool llvmc::linkVendorBitcodeFile(llvm::Module &M, llvm::StringRef path) {
   (*mod)->setTargetTriple(M.getTargetTriple());
   (*mod)->setDataLayout(M.getDataLayout());
   // XXX strip vendor's pinned gfx9/sm_<N> attrs; setFunctionAttributes re-applies the kernel target post-link.
+  llvm::SmallVector<std::string> defined;
   for (auto &F : **mod) {
     F.removeFnAttr("target-cpu");
     F.removeFnAttr("target-features");
+    if (!F.isDeclaration()) defined.push_back(F.getName().str());
   }
   llvm::Linker linker(M);
-  return !linker.linkInModule(std::move(*mod), llvm::Linker::LinkOnlyNeeded);
+  const bool linked = !linker.linkInModule(std::move(*mod), llvm::Linker::LinkOnlyNeeded);
+  // logical SPIR-V keeps one kernel body: inline the linked device-lib functions into their callers
+  if (linked && M.getTargetTriple().isSPIRV())
+    for (const auto &name : defined)
+      if (auto *F = M.getFunction(name); F && !F->isDeclaration()) F->addFnAttr(llvm::Attribute::AlwaysInline);
+  return linked;
 }
 
 // Newest-first; older variants fall through for arches the newer libdevice has dropped.
@@ -761,6 +770,7 @@ static void linkVendorDeviceLibs(llvm::Module &M, const llvm::Triple &triple, ll
   const auto link = [&](const llvm::Twine &name) {
     if (const auto p = llvmc::findVendorBitcode(name.str()); !p.empty()) llvmc::linkVendorBitcodeFile(M, p);
   };
+  if (triple.isSPIRV() && triple.getOS() == llvm::Triple::Vulkan) link("spirv-libm.bc");
   if (triple.isNVPTX()) {
     unsigned arch = 0;
     auto suffix = cpu;

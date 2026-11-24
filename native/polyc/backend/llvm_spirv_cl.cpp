@@ -808,6 +808,7 @@ ValPtr SPIRVVulkanTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::Math
       {"rint", llvm::Intrinsic::rint},   {"fabs", llvm::Intrinsic::fabs}};
   static const std::unordered_map<std::string_view, llvm::Intrinsic::ID> bIntr = {{"pow", llvm::Intrinsic::pow}};
   const auto vkUnary = [&](const char *name, const AnyType &rtn, const AnyTerm &arg) -> ValPtr {
+    if (std::string_view(name) == "exp" && rtn.is<polyregion::polyast::Type::Float64>()) return cg.extFn1("__polyregion_exp_f64", rtn, arg);
     if (const auto id = uIntr ^ get_maybe(std::string_view(name))) return cg.intr1(*id, rtn, arg);
     if (const auto fn = uCompose ^ get_maybe(std::string_view(name))) {
       requireF32(name, rtn);
