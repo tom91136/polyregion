@@ -179,6 +179,19 @@ TEST_CASE("spirv64 minimal", "[compiler]") {
   CHECK(c.binary.has_value());
 }
 
+TEST_CASE("spirv64 kernel heap alloc lowers its address space", "[compiler][spirv]") {
+  compiler::initialise();
+  auto fn = function("alloc_kernel", {}, Unit, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), CallConvention::OffloadEntry())({
+      let("xs") = Alloc(SInt, Term::IntS64Const(4), Global, Region::Opaque()),
+      ret() //
+  });
+  auto p = program({}, {fn});
+  CAPTURE(repr(p));
+  // The kernel allocator is absent from the vendor bitcode, so the only expected failure is the symbol check.
+  CHECK_THROWS_WITH(compiler::compile(p, compiler::Options{Target::Object_LLVM_SPIRV64_Kernel, "1_1"}, OptLevel::O3),
+                    ContainsSubstring("unresolved kernel-side symbols") && !ContainsSubstring("invalid cast"));
+}
+
 TEST_CASE("recursive struct", "[compiler]") {
   compiler::initialise();
   const auto tpe = GENERATE(from_range(PrimitiveTypesNoUnit));

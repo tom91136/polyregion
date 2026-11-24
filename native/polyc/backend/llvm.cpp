@@ -1175,11 +1175,11 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
       [&](const Expr::Index &x) -> ValPtr { return ptrModel->indexVal(*this, x, key); },
       [&](const Expr::RefTo &x) -> ValPtr { return ptrModel->refToVal(*this, x, key); },
       [&](const Expr::Alloc &x) -> ValPtr { //
-        auto *const componentTpe = B.getPtrTy(0);
+        auto *const componentTpe = resolveType(x.tpe);
         auto *const size = mkTermVal(x.size);
         auto *const elemSize = C.sizeOf(B, componentTpe);
         auto *const ptr = invokeMalloc(B.CreateMul(B.CreateIntCast(size, resolveType(Type::IntS64()), true), elemSize));
-        return B.CreateBitCast(ptr, componentTpe);
+        return ptr->getType() == componentTpe ? ptr : B.CreateAddrSpaceCast(ptr, componentTpe);
       });
 }
 
