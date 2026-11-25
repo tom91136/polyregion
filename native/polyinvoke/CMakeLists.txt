@@ -96,6 +96,7 @@ set(POLYINVOKE_SRC
 if (APPLE)
     # XXX a -fno-rtti TU's weak std typeinfo copies capture the -frtti TUs' references within the image, so it must not throw
     set_source_files_properties(coff_plugin.cpp PROPERTIES COMPILE_OPTIONS "-fno-rtti;-fno-exceptions")
+    set_source_files_properties(${POLYINVOKE_WRANGLER_SRCS} PROPERTIES COMPILE_OPTIONS "-fno-common")
 endif ()
 
 set(POLYINVOKE_PUBLIC_LIBS
