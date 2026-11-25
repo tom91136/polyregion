@@ -6,7 +6,10 @@
 
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Object/ObjectFile.h"
+#include "llvm/Support/Error.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
 
 #include "aspartame/all.hpp"
@@ -74,6 +77,37 @@ inline std::vector<std::string> appleDistLibcxxStatic(const std::string &distLib
 #else
   (void)distLibDir;
   return {};
+#endif
+}
+
+inline bool distLibcxxExportsAbi(const std::string &distLibDir) {
+#ifdef __APPLE__
+  auto buffer = llvm::MemoryBuffer::getFile(joinPath(distLibDir, "libc++.dylib"));
+  if (!buffer) return false;
+  auto object = llvm::object::ObjectFile::createObjectFile((*buffer)->getMemBufferRef());
+  if (!object) {
+    llvm::consumeError(object.takeError());
+    return false;
+  }
+  for (const auto &symbol : (*object)->symbols()) {
+    auto name = symbol.getName();
+    if (!name) {
+      llvm::consumeError(name.takeError());
+      continue;
+    }
+    auto flags = symbol.getFlags();
+    if (!flags) {
+      llvm::consumeError(flags.takeError());
+      continue;
+    }
+    if (*name == "___cxa_throw" && !(*flags & llvm::object::SymbolRef::SF_Undefined)
+        && ((*flags & llvm::object::SymbolRef::SF_Exported) || (*flags & llvm::object::SymbolRef::SF_Indirect)))
+      return true;
+  }
+  return false;
+#else
+  (void)distLibDir;
+  return false;
 #endif
 }
 
@@ -424,6 +458,9 @@ inline std::vector<std::string> jitCompilerLinkFlags(StdParOptions::LinkKind jit
 #endif
       out ^= append(joinPath(libsPath, staticLibraryName("polyc-jit-static")));
       out ^= concat(staticArchiveLinkFlags(llvmLibPath, needsCxxRuntime));
+#ifdef __APPLE__
+      if (!distLibcxxExportsAbi(llvmLibPath)) out ^= concat(std::vector<std::string>{"-lc++abi"});
+#endif
       break;
     }
     case StdParOptions::LinkKind::Disabled: break;
