@@ -171,7 +171,9 @@ void throwJvmException(JNIEnv *env, const std::string &raised) {
     if (env->ExceptionCheck()) env->ExceptionClear();
   }
   auto *throwable = env->FindClass("java/lang/Throwable");
-  if (exClass && throwable && env->IsAssignableFrom(exClass, throwable) && env->ThrowNew(exClass, message.c_str()) == JNI_OK) return;
+  if (exClass && throwable && env->IsAssignableFrom(exClass, throwable)
+      && env->ThrowNew(exClass, toModifiedUtf8(message).c_str()) == JNI_OK)
+    return;
   if (env->ExceptionCheck()) env->ExceptionClear();
   throwGeneric(env, EX, "Device raised " + raised);
 }

@@ -476,11 +476,9 @@ class ContextSuite extends munit.FunSuite {
   test("any other kernel assert code raises a runtime exception naming the code and message") {
     val ctx = rt.Context.create(hostDevice)
     try {
-      val e = intercept[rt.PolyregionRuntimeException](
-        launchAssert(ctx, p.Enums.AssertCode.Exception, "java.lang.ArithmeticException: / by zero")
-      )
+      val e = intercept[rt.PolyregionRuntimeException](launchAssert(ctx, p.Enums.AssertCode.Exception, "plain failure"))
       assert(e.getMessage.contains("EXCP"), e.getMessage)
-      assert(e.getMessage.contains("java.lang.ArithmeticException: / by zero"), e.getMessage)
+      assert(e.getMessage.contains("plain failure"), e.getMessage)
     } finally ctx.close()
   }
 

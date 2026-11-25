@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -60,9 +61,38 @@ static std::vector<jlong> fromJni(JNIEnv *env, jlongArray xs) {
   return ys;
 }
 
+static std::string toModifiedUtf8(const std::string &s) {
+  std::string out;
+  out.reserve(s.size());
+  for (size_t i = 0; i < s.size();) {
+    const auto c = static_cast<unsigned char>(s[i]);
+    if (c == 0) {
+      out += "\xc0\x80";
+      ++i;
+      continue;
+    }
+    if (c >= 0xf0 && c <= 0xf4 && i + 3 < s.size()) {
+      const auto b1 = static_cast<unsigned char>(s[i + 1]);
+      const auto b2 = static_cast<unsigned char>(s[i + 2]);
+      const auto b3 = static_cast<unsigned char>(s[i + 3]);
+      uint32_t cp = ((c & 0x07) << 18) | ((b1 & 0x3f) << 12) | ((b2 & 0x3f) << 6) | (b3 & 0x3f);
+      cp -= 0x10000;
+      for (const uint32_t u : {0xd800u + (cp >> 10), 0xdc00u + (cp & 0x3ffu)}) {
+        out += static_cast<char>(0xe0 | (u >> 12));
+        out += static_cast<char>(0x80 | ((u >> 6) & 0x3f));
+        out += static_cast<char>(0x80 | (u & 0x3f));
+      }
+      i += 4;
+      continue;
+    }
+    out += s[i++];
+  }
+  return out;
+}
+
 template <typename T = std::nullptr_t> static T throwGeneric(JNIEnv *env, const std::string &exceptionClass, const std::string &message) {
   if (auto *exClass = env->FindClass(exceptionClass.c_str()); exClass) {
-    if (env->ThrowNew(exClass, message.c_str()) != JNI_OK) {
+    if (env->ThrowNew(exClass, toModifiedUtf8(message).c_str()) != JNI_OK) {
       throw std::logic_error("Cannot throw exception of class " + exceptionClass + ", message was: " + message);
     } else {
       return T();
