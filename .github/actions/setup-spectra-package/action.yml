@@ -1,0 +1,17 @@
+name: Setup Spectra package
+description: Stage the Spectra package artifact and expose it to the Scala launch macros on every platform.
+
+runs:
+  using: composite
+  steps:
+    - name: Download the package
+      if: ${{ !env.ACT }}
+      uses: actions/download-artifact@v8
+      with:
+        name: spectra-package
+        path: package
+
+    - name: Export the package root
+      if: ${{ !env.ACT }}
+      shell: bash
+      run: echo "POLYFRONT_LIBRARY_PATH=$GITHUB_WORKSPACE/package" >> "$GITHUB_ENV"

@@ -47,7 +47,7 @@ jobs:
     uses: ./.github/workflows/macos-emulators.yaml
 
   macos-test:
-    needs: macos-build
+    needs: [macos-build, linux-build]
     if: ${{ !cancelled() }}
     uses: ./.github/workflows/macos-test.yaml
     with:
@@ -69,7 +69,7 @@ jobs:
     uses: ./.github/workflows/windows-emulators.yaml
 
   windows-test:
-    needs: windows-build
+    needs: [windows-build, linux-build]
     if: ${{ !cancelled() }}
     uses: ./.github/workflows/windows-test.yaml
     with:

@@ -119,6 +119,8 @@ jobs:
           name: polyregion-linux-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
 
+      - uses: ./.github/actions/setup-spectra-package
+
       - name: Run munit suite
         env:
           POLYREGION_NATIVE_LIB_DIR: ${{ github.workspace }}/native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist/lib
