@@ -13,6 +13,8 @@ set "VKL_REF=v1.3.280"
 set "GLSLANG_REF=vulkan-sdk-1.4.350.0"
 set "SWIFTSHADER_REF=2843cbcc714fe111e1083127c048a18002bc10ed"
 set "WFB_URL=https://github.com/lexxmark/winflexbison/releases/download/v2.5.25/win_flex_bison-2.5.25.zip"
+for /f "usebackq delims=" %%r in ("%DIR%spirv-tools.ref") do set "SPIRV_TOOLS_REF=%%r"
+if not defined SPIRV_TOOLS_REF (echo no spirv-tools ref & exit /b 1)
 set "GPUOCELOT_COMMIT=b16039dc"
 set "BOOST_VER=1.86.0"
 set "BOOST_U=1_86_0"
@@ -87,6 +89,24 @@ cmake -S "%WORK%\llvm-project\llvm" -B "%WORK%\build-llvm" -G Ninja -DCMAKE_BUIL
   -DLLVM_ENABLE_BINDINGS=OFF -DCMAKE_INSTALL_PREFIX="%WORK%\llvm" || exit /b 1
 ninja -C "%WORK%\build-llvm" install || (echo LLVM-FAIL & exit /b 1)
 :llvm_done
+
+rem SPIRV-Tools: spirv-val is used by polyc-tests, built at the shared pinned ref
+set "SPIRV_STAMP="
+if exist "%WORK%\spirv-prefix\.ref" for /f "usebackq delims=" %%r in ("%WORK%\spirv-prefix\.ref") do set "SPIRV_STAMP=%%r"
+if /i "%SPIRV_STAMP%"=="%SPIRV_TOOLS_REF%" if exist "%WORK%\spirv-prefix\bin\spirv-val.exe" goto :spirv_done
+rmdir /s /q "%WORK%\build-spirv-tools" 2>nul
+rmdir /s /q "%WORK%\spirv-prefix" 2>nul
+rmdir /s /q "%WORK%\spirv-tools" 2>nul
+git clone -b %SPIRV_TOOLS_REF% --depth 1 https://github.com/KhronosGroup/SPIRV-Tools "%WORK%\spirv-tools" || exit /b 1
+pushd "%WORK%\spirv-tools"
+"%PY%" utils\git-sync-deps || (popd & echo SPIRV-DEPS-FAIL & exit /b 1)
+popd
+cmake -S "%WORK%\spirv-tools" -B "%WORK%\build-spirv-tools" -G Ninja -DCMAKE_BUILD_TYPE=Release %MT_CMAKE% ^
+  -DBUILD_SHARED_LIBS=OFF -DSPIRV_SKIP_TESTS=ON -DSPIRV_WERROR=OFF ^
+  -DCMAKE_INSTALL_PREFIX="%WORK%\spirv-prefix" || exit /b 1
+ninja -C "%WORK%\build-spirv-tools" install || (echo SPIRV-TOOLS-FAIL & exit /b 1)
+> "%WORK%\spirv-prefix\.ref" echo %SPIRV_TOOLS_REF%
+:spirv_done
 
 rem glslang (build tool for lavapipe; invoked as a subprocess, so CRT is irrelevant)
 if not exist "%WORK%\glslang-src\.git" git clone -b %GLSLANG_REF% --depth 1 https://github.com/KhronosGroup/glslang "%WORK%\glslang-src" || exit /b 1
@@ -215,6 +235,7 @@ copy /y "%WORK%\mesa-prefix\bin\vulkan_lvp.dll" "%OUT%\bin\" >nul
 copy /y "%WORK%\mesa-prefix\share\vulkan\icd.d\lvp_icd.%ICDARCH%.json" "%OUT%\share\vulkan\icd.d\" >nul
 copy /y "%WORK%\vkinstall\bin\vulkan-1.dll" "%OUT%\bin\" >nul
 copy /y "%WORK%\pocl-prefix\bin\OpenCL.dll" "%OUT%\bin\" >nul
+copy /y "%WORK%\spirv-prefix\bin\spirv-val.exe" "%OUT%\bin\" >nul
 rem gpuocelot is loaded by polyregion as nvcuda.dll (self-contained: static LLVM + boost + CRT)
 if exist "%WORK%\gpuocelot\ocelot\build\gpuocelot.dll" copy /y "%WORK%\gpuocelot\ocelot\build\gpuocelot.dll" "%OUT%\bin\nvcuda.dll" >nul
 if defined SS (

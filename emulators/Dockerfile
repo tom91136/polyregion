@@ -1,6 +1,5 @@
 ARG LLVM_REF=llvmorg-21.1.8
 ARG SPIRV_TRANSLATOR_REF=llvm_release_210
-ARG SPIRV_TOOLS_REF=vulkan-sdk-1.4.350.0
 ARG BOOST_VERSION=1.66.0
 ARG MESA_REF=mesa-26.2.4
 ARG GLSLANG_REF=vulkan-sdk-1.4.350.0
@@ -64,8 +63,8 @@ RUN cmake -S /src/llvm/libclc -B /src/libclc-build -G Ninja -DCMAKE_BUILD_TYPE=R
  && ninja -C /src/libclc-build install \
  && rm -rf /src/llvm /src/libclc-build
 
-ARG SPIRV_TOOLS_REF
-RUN git clone -b ${SPIRV_TOOLS_REF} --depth 1 https://github.com/KhronosGroup/SPIRV-Tools /src/spirv-tools \
+COPY spirv-tools.ref /src/spirv-tools.ref
+RUN git clone -b "$(cat /src/spirv-tools.ref)" --depth 1 https://github.com/KhronosGroup/SPIRV-Tools /src/spirv-tools \
  && python3.11 /src/spirv-tools/utils/git-sync-deps \
  && cmake -S /src/spirv-tools -B /src/spirv-tools/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
       -DBUILD_SHARED_LIBS=ON -DSPIRV_SKIP_TESTS=ON \

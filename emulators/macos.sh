@@ -43,6 +43,17 @@ deps() {
   "$WORK/venv/bin/pip" install -q meson mako pyyaml packaging
 }
 
+# spirv-val for polyc-tests, built at the shared pinned ref
+spirv_tools() {
+  local ref; ref="$(cat "$DIR/spirv-tools.ref")"
+  clone_pinned "$WORK/spirv-tools" "$ref" https://github.com/KhronosGroup/SPIRV-Tools
+  "$WORK/venv/bin/python" "$WORK/spirv-tools/utils/git-sync-deps"
+  rm -rf "$WORK/build-spirv-tools" "$WORK/spirv-prefix"
+  cmake -S "$WORK/spirv-tools" -B "$WORK/build-spirv-tools" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+    -DBUILD_SHARED_LIBS=OFF -DSPIRV_SKIP_TESTS=ON -DCMAKE_INSTALL_PREFIX="$WORK/spirv-prefix"
+  ninja -C "$WORK/build-spirv-tools" install
+}
+
 # llvm-spirv matching llvm@21, for pocl's SPIR-V
 xlat() {
   clone_pinned "$WORK/spirv-xlat" "$XLAT_REF" https://github.com/KhronosGroup/SPIRV-LLVM-Translator
@@ -131,7 +142,9 @@ relocate() {
 
 collect() {
   local OUT="$1"; BUNDLE="$OUT"
-  rm -rf "$OUT"; mkdir -p "$OUT/loader" "$OUT/lib" "$OUT/share/vulkan/icd.d"
+  rm -rf "$OUT"; mkdir -p "$OUT/bin" "$OUT/loader" "$OUT/lib" "$OUT/share/vulkan/icd.d"
+  cp "$WORK/spirv-prefix/bin/spirv-val" "$OUT/bin/"
+  codesign -f -s - "$OUT/bin/spirv-val" 2>/dev/null || true
   # loader/ on DYLD (dlopened by name); lib/ off it via @loader_path so bundled libLLVM can't shadow host clang
   cp "$WORK/mesa-prefix/lib/libvulkan_lvp.dylib" "$OUT/lib/"
   cp "$WORK/mesa-prefix/share/vulkan/icd.d/"lvp_icd.*.json "$OUT/share/vulkan/icd.d/"
@@ -159,6 +172,7 @@ for p in glob.glob(sys.argv[1]+"/*.json"):
 PY
   cat > "$OUT/env.sh" <<'EOS'
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+export PATH="$HERE/bin${PATH:+:$PATH}"
 export DYLD_LIBRARY_PATH="$HERE/loader${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
 export VK_DRIVER_FILES="$(ls "$HERE"/share/vulkan/icd.d/*.json | paste -sd: -)"
 export VK_ICD_FILENAMES="$VK_DRIVER_FILES"
@@ -167,7 +181,7 @@ export POLYINVOKE_OPENCL_LIB="$(ls "$HERE"/loader/libOpenCL*.dylib 2>/dev/null |
 export POLYINVOKE_OPENCL_CPU="${POLYINVOKE_OPENCL_CPU:-1}"
 export SDKROOT="${SDKROOT:-$(xcrun --show-sdk-path 2>/dev/null)}"  # pocl links kernels with clang -> needs the SDK
 export LIBRARY_PATH="$SDKROOT/usr/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"  # pocl kernel link (ld -lSystem) on x86_64 mac
-echo "emulators active: lavapipe+swiftshader(Vulkan) pocl(OpenCL+SPIR-V) via $HERE"
+echo "emulators active: spirv-val lavapipe+swiftshader(Vulkan) pocl(OpenCL+SPIR-V) via $HERE"
 EOS
   echo "=== bundle staged at $OUT ==="
   du -sh "$OUT" "$OUT/loader" "$OUT/lib"
@@ -195,5 +209,5 @@ check() {
 case "${1:-}" in
   --check)   check "${2:-$DIR/out}";;
   --collect) collect "${2:-$DIR/out}"; check "${2:-$DIR/out}";;
-  *) OUT="${1:-$DIR/out}"; deps; xlat; pocl; mesa; swiftshader; collect "$OUT"; check "$OUT";;
+  *) OUT="${1:-$DIR/out}"; deps; spirv_tools; xlat; pocl; mesa; swiftshader; collect "$OUT"; check "$OUT";;
 esac
