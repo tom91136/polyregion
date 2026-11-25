@@ -86,7 +86,7 @@ extern \"C\" double __polyregion_exp_f64(double x) { return LIBC_NAMESPACE::exp(
 ")
 
 set(COMMON_FLAGS
-  --target=spirv64-unknown-unknown -std=c++17 -O2 -emit-llvm -c
+  --target=spirv64-unknown-unknown -nostdlibinc -std=c++17 -O2 -emit-llvm -c
   -I "${LIBC_ROOT}" -DLIBC_NAMESPACE=__llvm_libc -DLIBC_FULL_BUILD
   "-DLIBC_MATH=(LIBC_MATH_NO_ERRNO | LIBC_MATH_NO_EXCEPT)"
   -DLIBC_MATH_HAS_SKIP_ACCURATE_PASS -DLIBC_MATH_HAS_ASSUME_ROUND_NEAREST_ONLY)
