@@ -84,6 +84,8 @@ constexpr std::int32_t ordered_warps = ordered_block / ordered_warp;
 constexpr std::int64_t ordered_tile_bytes = 65536;
 constexpr std::int64_t ordered_target_blocks = 1024;
 
+constexpr std::int32_t ordered_elements(int width) { return width == 8 ? 8 : 1; }
+
 inline void synchronise_device() {
 #if defined(__HIP__)
   hipDeviceSynchronize();
@@ -92,11 +94,12 @@ inline void synchronise_device() {
 #endif
 }
 
-template <class T> std::int32_t ordered_rows(std::int64_t n) {
-  constexpr std::int64_t max_rows = sizeof(T) * ordered_block < ordered_tile_bytes ? ordered_tile_bytes / (sizeof(T) * ordered_block) : 1;
-  const std::int64_t single = (n + ordered_block - 1) / ordered_block;
+template <class T, std::int32_t Elements> std::int32_t ordered_rows(std::int64_t n) {
+  constexpr std::int64_t block_elements = std::int64_t(ordered_block) * Elements;
+  constexpr std::int64_t max_rows = sizeof(T) * block_elements < ordered_tile_bytes ? ordered_tile_bytes / (sizeof(T) * block_elements) : 1;
+  const std::int64_t single = (n + block_elements - 1) / block_elements;
   if (single <= max_rows) return static_cast<std::int32_t>(single);
-  const std::int64_t spread = (n + ordered_block * ordered_target_blocks - 1) / (ordered_block * ordered_target_blocks);
+  const std::int64_t spread = (n + block_elements * ordered_target_blocks - 1) / (block_elements * ordered_target_blocks);
   return static_cast<std::int32_t>(spread < max_rows ? spread : max_rows);
 }
 
@@ -115,41 +118,50 @@ template <class T> struct shared_totals {
   __device__ const T &load(std::int32_t index) const { return *reinterpret_cast<const T *>(bytes + index * sizeof(T)); }
 };
 
-template <class T, class Element, class Op, bool Final>
+template <class T, class Element, class Op, bool Final, std::int32_t Elements>
 __global__ void ordered_reduce_kernel(Element element_at, std::int64_t n, std::int32_t rows, Op op, T init, T *out) {
   __shared__ shared_totals<T> totals;
   const std::int32_t lane = threadIdx.x % ordered_warp;
   const std::int32_t warp = threadIdx.x / ordered_warp;
-  const std::int64_t span = std::int64_t(ordered_warp) * rows;
+  constexpr std::int64_t stride = std::int64_t(ordered_warp) * Elements;
+  const std::int64_t span = stride * rows;
   const std::int64_t tile = std::int64_t(ordered_warps) * span;
   const std::int64_t begin = std::int64_t(blockIdx.x) * tile + std::int64_t(warp) * span;
   const std::int64_t remaining = n - begin;
-  const std::int32_t row_count = remaining <= 0      ? 0
-                                 : remaining >= span ? rows
-                                                     : std::int32_t((remaining + ordered_warp - 1) / ordered_warp);
+  const std::int32_t row_count = remaining <= 0 ? 0 : remaining >= span ? rows : std::int32_t((remaining + stride - 1) / stride);
+  const auto load = [&](std::int32_t row, std::int32_t j) {
+    return element_at(begin + std::int64_t(row) * stride + std::int64_t(lane) * Elements + j);
+  };
   T acc{};
-  if (row_count > 0) {
-    const auto load = [&](std::int32_t row) {
-      const std::int64_t left = remaining - std::int64_t(row) * ordered_warp;
-      const std::int32_t count = left < ordered_warp ? std::int32_t(left) : ordered_warp;
-      return element_at(begin + std::int64_t(row) * ordered_warp + (lane < count ? lane : count - 1));
-    };
-    T current = load(0);
-    for (std::int32_t row = 0; row < row_count; ++row) {
-      const std::int64_t left = remaining - std::int64_t(row) * ordered_warp;
-      const std::int32_t count = left < ordered_warp ? std::int32_t(left) : ordered_warp;
-      T next = current;
-      if (row + 1 < row_count) next = load(row + 1);
-      T folded = current;
-      for (std::int32_t offset = 1; offset < ordered_warp; offset <<= 1) {
-        const T other = shuffle_down(folded, offset);
-        if (lane + offset < count) folded = op(folded, other);
+  bool have = false;
+  for (std::int32_t row = 0; row < row_count; ++row) {
+    const std::int64_t left = remaining - std::int64_t(row) * stride;
+    const std::int32_t lanes = left >= stride ? ordered_warp : std::int32_t((left + Elements - 1) / Elements);
+    T folded{};
+    if (lane < lanes) {
+      bool have_value = false;
+      for (std::int32_t j = 0; j < Elements; ++j) {
+        if (left - std::int64_t(lane) * Elements - j <= 0) break;
+        const T value = load(row, j);
+        if (!have_value) {
+          folded = value;
+          have_value = true;
+        } else {
+          folded = op(folded, value);
+        }
       }
-      if (lane == 0) {
-        if (row == 0) acc = folded;
-        else acc = op(acc, folded);
+    }
+    for (std::int32_t offset = 1; offset < ordered_warp; offset <<= 1) {
+      const T other = shuffle_down(folded, offset);
+      if (lane % (offset << 1) == 0 && lane + offset < lanes) folded = op(folded, other);
+    }
+    if (lane == 0) {
+      if (!have) {
+        acc = folded;
+        have = true;
+      } else {
+        acc = op(acc, folded);
       }
-      current = next;
     }
   }
   if (lane == 0) totals.store(warp, acc);
@@ -169,21 +181,23 @@ template <class T> T *device_buffer(std::int64_t count) {
   return static_cast<T *>(thrust::raw_pointer_cast(thrust::malloc(thrust::device, static_cast<std::size_t>(count) * sizeof(T))));
 }
 
-template <class T, class Element, class Op> T ordered_reduce(std::int64_t n, T init, Element element_at, Op op) {
+template <class T, class Element, class Op, std::int32_t Elements = ordered_elements(sizeof(T))>
+T ordered_reduce(std::int64_t n, T init, Element element_at, Op op) {
   if (n <= 0) return init;
-  const std::int32_t rows = ordered_rows<T>(n);
-  const std::int64_t tile = std::int64_t(ordered_block) * rows;
+  const std::int32_t rows = ordered_rows<T, Elements>(n);
+  const std::int64_t tile = std::int64_t(ordered_block) * Elements * rows;
   const std::int64_t blocks = (n + tile - 1) / tile;
   T *partial = device_buffer<T>(blocks);
   if (blocks == 1) {
-    ordered_reduce_kernel<T, Element, Op, true><<<1, ordered_block>>>(element_at, n, rows, op, init, partial);
+    ordered_reduce_kernel<T, Element, Op, true, Elements><<<1, ordered_block>>>(element_at, n, rows, op, init, partial);
     synchronise_device();
     const T result = *thrust::device_ptr<T>(partial);
     thrust::free(thrust::device, partial);
     return result;
   }
-  ordered_reduce_kernel<T, Element, Op, false><<<static_cast<unsigned>(blocks), ordered_block>>>(element_at, n, rows, op, init, partial);
-  const T result = ordered_reduce(blocks, init, source_element<T, const T *>{partial}, op);
+  ordered_reduce_kernel<T, Element, Op, false, Elements>
+      <<<static_cast<unsigned>(blocks), ordered_block>>>(element_at, n, rows, op, init, partial);
+  const T result = ordered_reduce<T, source_element<T, const T *>, Op, Elements>(blocks, init, source_element<T, const T *>{partial}, op);
   thrust::free(thrust::device, partial);
   return result;
 }
