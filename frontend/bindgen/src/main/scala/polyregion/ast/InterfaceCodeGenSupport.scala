@@ -87,20 +87,18 @@ private[ast] object InterfaceCodeGenSupport {
     case _                             => false
   })
 
-  def extents(rank: Int): List[String] = List.tabulate(rank)(axis => s"n$axis")
+  def extents(rank: Int): List[String] = RegionIndices.extents(rank)
 
-  def linearisedIndices(rank: Int, linear: String): List[String] = {
-    val dims = extents(rank)
-    dims.indices.toList.map { axis =>
-      val stride = dims.drop(axis + 1)
-      val quot = stride match {
+  def linearisedIndices(rank: Int, linear: String): List[String] =
+    RegionIndices.axes(rank).map { axis =>
+      val divisor = axis.quotient.map(index => s"n$index")
+      val quot = divisor match {
         case Nil        => linear
         case List(only) => s"$linear / $only"
         case several    => s"$linear / (${several.mkString(" * ")})"
       }
-      if (axis == 0) quot else s"$quot % ${dims(axis)}"
+      axis.modulus.fold(quot)(index => s"$quot % n$index")
     }
-  }
 
   val FallbackMarker = "polyregion_interface_fallback"
   val ContextMarker  = "polyregion_interface_context"

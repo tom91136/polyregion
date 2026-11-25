@@ -77,6 +77,13 @@ public class RegionNdLaunchTest {
   }
 
   @Test
+  public void aHelperInAnotherSourceFileLaunchesRankTwo() {
+    int[] out = new int[6];
+    NdHelper.fill(2L, 3L, out);
+    assertArrayEquals(new int[] {0, 1, 2, 100, 101, 102}, out);
+  }
+
+  @Test
   public void extentsAreCapturesSoOneKernelServesTwoShapes() {
     int[] first = new int[6];
     int[] second = new int[6];

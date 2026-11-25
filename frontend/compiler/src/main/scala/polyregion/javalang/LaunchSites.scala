@@ -362,20 +362,16 @@ object LaunchSites {
             tree
           }
           val index = ident(params.size - 1)
-          val indices = rank match {
-            case 0 => Nil
-            case 2 =>
-              val n1 = ident(captured + 1)
-              List(binary(JCTree.Tag.DIV, index, n1), binary(JCTree.Tag.MOD, index, n1))
-            case 3 =>
-              val n1 = ident(captured + 1)
-              val n2 = ident(captured + 2)
-              List(
-                binary(JCTree.Tag.DIV, index, binary(JCTree.Tag.MUL, n1, n2)),
-                binary(JCTree.Tag.MOD, binary(JCTree.Tag.DIV, index, n2), n1),
-                binary(JCTree.Tag.MOD, index, n2)
-              )
-            case other => throw IllegalArgumentException(s"unsupported sugar rank $other")
+          val indices = RegionIndices.axes(rank).map { axis =>
+            val quot = axis.quotient match {
+              case Nil => index
+              case extents =>
+                val divisor = extents
+                  .map(extent => ident(captured + extent))
+                  .reduceLeft((left, right) => binary(JCTree.Tag.MUL, left, right))
+                binary(JCTree.Tag.DIV, index, divisor)
+            }
+            axis.modulus.fold(quot)(extent => binary(JCTree.Tag.MOD, quot, ident(captured + extent)))
           }
           val arguments = params.indices.take(captured).map(ident).toList ++ indices
           val call      = make.App(make.QualIdent(impl), JList.from(arguments.asJava))
