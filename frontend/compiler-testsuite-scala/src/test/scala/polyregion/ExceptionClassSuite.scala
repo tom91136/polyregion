@@ -29,6 +29,32 @@ class ExceptionClassSuite extends RangeSuiteBase {
     if (x % 2 == 1) intrinsics.raise[IllegalArgumentException]("odd")
   }
 
+  raisesInstance[java.lang.IllegalStateException]("throw-new-illegal-state", "x") {
+    throw new java.lang.IllegalStateException("x")
+    ()
+  }
+  raisesInstance[java.lang.ArrayIndexOutOfBoundsException]("throw-new-index", "idx") {
+    throw new java.lang.ArrayIndexOutOfBoundsException("idx")
+    ()
+  }
+  raisesInstance[java.lang.ArithmeticException]("divide-by-zero", "/ by zero") {
+    val zero    = 0
+    val one     = 1
+    val ignored = one / zero
+    ()
+  }
+  raisesInstance[java.lang.IllegalStateException]("throw-as-call-argument", "arg")(
+    throw new java.lang.IllegalStateException("arg")
+  )
+  raisesInstance[java.lang.IllegalStateException]("bmp-message", "caf\u00e9 \u2603") {
+    throw new java.lang.IllegalStateException("caf\u00e9 \u2603")
+    ()
+  }
+  raisesInstance[java.lang.IllegalStateException]("non-bmp-message", "smile \uD83D\uDE00") {
+    throw new java.lang.IllegalStateException("smile \uD83D\uDE00")
+    ()
+  }
+
   test("a type that is not a Throwable is refused") {
     val errors = compileErrors("intrinsics.raise[String](\"x\")")
     assert(errors.contains("Throwable"), errors)
@@ -69,5 +95,27 @@ class ExceptionClassSuite extends RangeSuiteBase {
       compiletime.offload0(blocking.Host.context, _ => ())(intrinsics.raise[Local]("x"))
     """)
     assert(errors.contains("Local"), errors)
+  }
+
+  test("a throw of a variable is refused") {
+    val errors = compileErrors("""
+      val e = new java.lang.IllegalStateException("x")
+      compiletime.offload0(blocking.Host.context, _ => ()) { throw e }
+    """)
+    assert(errors.contains("Unsupported `throw`"), errors)
+  }
+
+  test("a throw of a class without a message is refused") {
+    val errors = compileErrors("""
+      compiletime.offload0(blocking.Host.context, _ => ()) { throw new java.lang.IllegalStateException() }
+    """)
+    assert(errors.contains("Unsupported `throw`"), errors)
+  }
+
+  test("a throw with a null message is refused") {
+    val errors = compileErrors("""
+      compiletime.offload0(blocking.Host.context, _ => ()) { throw new java.lang.IllegalStateException(null: String) }
+    """)
+    assert(errors.contains("Unsupported `throw`"), errors)
   }
 }

@@ -207,6 +207,36 @@ object TreeRemapper {
       s"Unsupported `AssertionError` detail `${xs.mkString(", ")}`; only a literal travels to the device".fail
   }
 
+  private def namedRaiseCall(name: String, message: String): p.Expr = {
+    val module    = p.Sym("polyregion" :: "scalalang" :: "intrinsics$" :: Nil)
+    val moduleTpe = p.Type.Struct(module, Nil)
+    val receiver  = p.Term.Select(p.Named("$intrinsics", moduleTpe), Nil, moduleTpe)
+    p.Expr.Invoke(
+      p.Type.FnRef(p.Sym("polyregion" :: "scalalang" :: "intrinsics$" :: "raiseNamed" :: Nil)),
+      Nil,
+      Some(receiver),
+      List(p.Term.StringConst(name), p.Term.StringConst(message)),
+      p.Type.Unit0
+    )
+  }
+
+  private def namedRaise(scope: Scope, nc: NewClassTree): Result[p.Expr] = {
+    val throwable = scope.deps.elements.getTypeElement("java.lang.Throwable")
+    val isThrowable = Option(jcType(nc)).exists { tpe =>
+      Option(throwable).exists { cls =>
+        scope.deps.types.isSubtype(scope.deps.types.erasure(tpe), scope.deps.types.erasure(cls.asType))
+      }
+    }
+    val binaryName = Option(jcType(nc))
+      .collect { case d: DeclaredType => d.asElement }
+      .collect { case c: TypeElement => scope.deps.elements.getBinaryName(c).toString }
+    (isThrowable, binaryName, nc.getArguments.asScala.toList) match {
+      case (true, Some(name), (l: LiteralTree) :: Nil) if l.getKind == Tree.Kind.STRING_LITERAL =>
+        namedRaiseCall(name, l.getValue.toString).success
+      case _ => "Unsupported `throw`; PolyRegion kernels cannot throw".fail
+    }
+  }
+
   private def symOf(t: Tree): Option[JSymbol] = t match {
     case i: JCTree.JCIdent        => Option(i.sym)
     case f: JCTree.JCFieldAccess  => Option(f.sym)
@@ -638,6 +668,20 @@ object TreeRemapper {
           )
     }
 
+  private def guardArrayAccess(
+      scope: Scope,
+      buf: mutable.ListBuffer[p.Stmt],
+      array: ExpressionTree,
+      index: p.Term
+  ): Result[Unit] =
+    (arrayLength(scope, buf, array), index) match {
+      case (Right(p.Term.IntS32Const(len)), p.Term.IntS32Const(idx)) if idx < 0 || idx >= len =>
+        val raised = namedRaiseCall("java.lang.ArrayIndexOutOfBoundsException", "array index out of bounds")
+        buf += p.Stmt.Var(scope.fresh(p.Type.Unit0), Some(raised))
+        ().success
+      case _ => ().success
+    }
+
   private def mapExpr(scope: Scope, buf: mutable.ListBuffer[p.Stmt], t: ExpressionTree): Result[p.Expr] = t match {
     case l: LiteralTree         => literal(l)
     case par: ParenthesizedTree => mapExpr(scope, buf, par.getExpression)
@@ -657,6 +701,7 @@ object TreeRemapper {
       for {
         arr  <- mapExpr(scope, buf, aa.getExpression).map(bind(scope, buf, _))
         idx  <- mapExpr(scope, buf, aa.getIndex).map(bind(scope, buf, _))
+        _    <- guardArrayAccess(scope, buf, aa.getExpression, idx)
         comp <- JavaTyper.typer(jcType(aa))
       } yield p.Expr.Index(arr, idx, comp)
     case u: UnaryTree => unary(scope, buf, u)
@@ -1915,6 +1960,10 @@ object TreeRemapper {
               )
             )
             ()
+          }
+        case nc: NewClassTree =>
+          namedRaise(scope, nc).map { raised =>
+            bind(scope, buf, raised); ()
           }
         case _ => "Unsupported `throw`; PolyRegion kernels cannot throw".fail
       }

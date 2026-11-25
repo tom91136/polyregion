@@ -130,6 +130,14 @@ object Remapper {
   private def isMethod(using q: Quoted)(sym: q.Symbol, owner: String, name: String): Boolean =
     sym.name == name && sym.owner.fullName.stripSuffix("$") == owner
 
+  @tailrec private def isStringLiteral(using q: Quoted)(term: q.Term): Boolean = term match {
+    case q.Literal(q.StringConstant(_)) => true
+    case q.Inlined(_, _, x)             => isStringLiteral(x)
+    case q.Typed(x, _)                  => isStringLiteral(x)
+    case q.Block(Nil, x)                => isStringLiteral(x)
+    case _                              => false
+  }
+
   @tailrec private def constantMessage(using q: Quoted)(term: q.Term): Option[String] = term match {
     case q.Literal(constant) => Some(String.valueOf(constant.value))
     case q.Inlined(_, _, x)  => constantMessage(x)
@@ -216,8 +224,9 @@ object Remapper {
           (tss.flatten, ess.flatten) match {
             case (ts, es) if ts.size == es.size =>
               ts.zip(es).traverse {
-                case (t, e) if t == e      => t.success // same type
-                case (t, p.Type.Var(_, _)) => t.success // applied type
+                case (p.Type.Nothing, p.Type.Unit0) => p.Type.Unit0.success
+                case (t, e) if t == e               => t.success // same type
+                case (t, p.Type.Var(_, _))          => t.success // applied type
                 case (p.Type.Struct(termSym, termArgs), p.Type.Struct(execSym, execArgs)) =>
                   if (termSym == execSym) {
                     if (termArgs.size != execArgs.size)
@@ -919,6 +928,38 @@ object Remapper {
             c1.down(term).mapTerm(expr).map { case (value, c) =>
               (p.Expr.Alias(p.Term.Poison(p.Type.Nothing)), c ::= p.Stmt.Return(value))
             }
+        case (Nil, Nil, q.Apply(fn, raised :: Nil)) if fn.symbol.name == "throw" =>
+          raised match {
+            case q.Apply(q.Select(q.New(tpt), _), message :: Nil) =>
+              exceptionClassName(tpt.tpe) match {
+                case Left(error) => error.fail
+                case Right(name) =>
+                  (constantMessage(message), isStringLiteral(message)) match {
+                    case (Some(_), true) =>
+                      val raise = q.Select.unique(
+                        q.Ref(q.Symbol.requiredModule("polyregion.scalalang.intrinsics")),
+                        "raiseNamed"
+                      )
+                      for {
+                        (args, cArgs) <- c1.down(term).mapTerms(message :: Nil)
+                        (expr, cExpr) <- (cArgs !! term).mapTerm(
+                          raise,
+                          termArgss = (p.Expr.Alias(p.Term.StringConst(name)) :: args) :: Nil
+                        )
+                        (varName, cFinal) = cExpr.mkName(fn.symbol)
+                      } yield (
+                        p.Expr.Alias(p.Term.Unit0Const),
+                        cFinal ::= p.Stmt.Var(p.Named(varName, p.Type.Unit0), Some(expr))
+                      )
+                    case _ => "Unsupported `throw`; PolyRegion kernels cannot throw".fail
+                  }
+              }
+            case q.Apply(q.Select(q.New(_), _), _) => "Unsupported `throw`; PolyRegion kernels cannot throw".fail
+            case _: q.Ref                          => "Unsupported `throw`; PolyRegion kernels cannot throw".fail
+            case q.Apply(fn, _) if fn.symbol.fullName.startsWith("scala.") || fn.symbol.fullName.startsWith("java.") =>
+              (p.Expr.Alias(p.Term.Poison(p.Type.Nothing)), c1).success
+            case _ => "Unsupported `throw`; PolyRegion kernels cannot throw".fail
+          }
         case (Nil, Nil, q.NamedArg(name, rhs)) => (c1 !! term).mapTerm(rhs) // named argument: `$name = $rhs`
         case (ta, ts, q.Typed(x, _)) =>
           (c1 !! term).mapTerm(x, tpeArgs = ta, termArgss = ts) // type ascription: `value : T`
