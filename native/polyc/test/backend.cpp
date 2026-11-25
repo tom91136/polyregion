@@ -37,6 +37,7 @@
 #include "generated/polyast.h"
 #include "generated/polyast_codec.h"
 #include "scoped_env.h"
+#include "spirv_val.h"
 
 using namespace aspartame;
 using namespace polyregion::polyast;
@@ -5400,24 +5401,6 @@ static polyregion::polyast::CompileResult compileRawVulkanModule(const std::stri
   return polyregion::backend::llvmc::compileModule(info, opt, false, *module);
 }
 
-static int validateSpirvBytes(const polyregion::polyast::CompileResult &result, const char *prefix) {
-  llvm::SmallString<128> module, report;
-  if (llvm::sys::fs::createTemporaryFile(prefix, "spv", module) || llvm::sys::fs::createTemporaryFile(prefix, "txt", report))
-    FAIL("temp file");
-  {
-    std::error_code ec;
-    llvm::raw_fd_ostream out(module, ec, llvm::sys::fs::OF_None);
-    REQUIRE_FALSE(ec);
-    out.write(reinterpret_cast<const char *>(result.binary->data()), result.binary->size());
-  }
-  const int status =
-      std::system(("spirv-val --target-env vulkan1.3 " + std::string(module) + " > " + std::string(report) + " 2>&1").c_str());
-  const auto text = llvm::MemoryBuffer::getFile(report);
-  if (status != 0) llvm::errs() << "spirv-val: " << (text ? (*text)->getBuffer().str() : std::string()) << "\n";
-  llvm::sys::fs::remove(module);
-  llvm::sys::fs::remove(report);
-  return status;
-}
 } // namespace
 
 TEST_CASE("Vulkan lowers a constant aggregate table copy through typed fields", "[backend][spirv][vulkan][aggregate]") {
@@ -5446,7 +5429,7 @@ attributes #0 = { "hlsl.shader"="compute" "hlsl.numthreads"="256,1,1" }
 )",
                                                OptLevel::O0);
   REQUIRE(compiled.binary.has_value());
-  CHECK(validateSpirvBytes(compiled, "polyc_const_table") == 0);
+  polyregion::test::validateSpirvBytes(*compiled.binary, "polyc_const_table");
 }
 
 TEST_CASE("Vulkan lowers a type-punned scalar load through a typed field", "[backend][spirv][vulkan][typepun]") {
@@ -5467,7 +5450,7 @@ attributes #0 = { "hlsl.shader"="compute" "hlsl.numthreads"="256,1,1" }
 )",
                                                OptLevel::O0);
   REQUIRE(compiled.binary.has_value());
-  CHECK(validateSpirvBytes(compiled, "polyc_type_pun") == 0);
+  polyregion::test::validateSpirvBytes(*compiled.binary, "polyc_type_pun");
 }
 
 TEST_CASE("Vulkan lowers a type-punned scalar store through a typed field", "[backend][spirv][vulkan][typepun]") {
@@ -5485,7 +5468,7 @@ attributes #0 = { "hlsl.shader"="compute" "hlsl.numthreads"="256,1,1" }
 )",
                                                OptLevel::O0);
   REQUIRE(compiled.binary.has_value());
-  CHECK(validateSpirvBytes(compiled, "polyc_type_pun_store") == 0);
+  polyregion::test::validateSpirvBytes(*compiled.binary, "polyc_type_pun_store");
 }
 
 TEST_CASE("Vulkan lowers a type-punned memcpy through a typed field", "[backend][spirv][vulkan][typepun]") {
@@ -5503,7 +5486,7 @@ attributes #0 = { "hlsl.shader"="compute" "hlsl.numthreads"="256,1,1" }
 )",
                                                OptLevel::O0);
   REQUIRE(compiled.binary.has_value());
-  CHECK(validateSpirvBytes(compiled, "polyc_type_pun_memcpy") == 0);
+  polyregion::test::validateSpirvBytes(*compiled.binary, "polyc_type_pun_memcpy");
 }
 
 TEST_CASE("Vulkan leaves atomic accesses untouched", "[backend][spirv][vulkan][typepun][atomic]") {
@@ -5580,5 +5563,5 @@ attributes #0 = { "hlsl.shader"="compute" "hlsl.numthreads"="256,1,1" }
   CHECK_FALSE(has([](const auto &x) {
     return (x[0] & 0xFFFFu) == spv::OpExecutionMode && x[2] == spv::ExecutionModeSignedZeroInfNanPreserve && x[3] == 32;
   }));
-  CHECK(validateSpirvBytes(compiled, "polyc_float_controls") == 0);
+  polyregion::test::validateSpirvBytes(*compiled.binary, "polyc_float_controls");
 }
