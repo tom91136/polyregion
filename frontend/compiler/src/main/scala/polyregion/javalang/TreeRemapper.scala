@@ -2,7 +2,7 @@ package polyregion.javalang
 
 import cats.syntax.all.*
 import com.sun.source.tree.*
-import com.sun.source.util.Trees
+import com.sun.source.util.{TreeScanner, Trees}
 import com.sun.tools.javac.code.Symbol as JSymbol
 import com.sun.tools.javac.processing.JavacProcessingEnvironment
 import com.sun.tools.javac.tree.JCTree
@@ -1720,7 +1720,7 @@ object TreeRemapper {
         "its body is not available to lower into the call site").fail
   }
 
-  // an object element must stay an lvalue path into its array: Index would copy it before the callee can take its address
+  // keep an object element as an lvalue path: Index would copy it before the callee takes its address
   private def callArg(scope: Scope, buf: mutable.ListBuffer[p.Stmt], a: ExpressionTree): Result[p.Expr] =
     a match {
       case par: ParenthesizedTree => callArg(scope, buf, par.getExpression)
@@ -1731,6 +1731,23 @@ object TreeRemapper {
         }
       case _ => mapExpr(scope, buf, a)
     }
+
+  private def objectElementArg(a: ExpressionTree): Boolean = a match {
+    case par: ParenthesizedTree => objectElementArg(par.getExpression)
+    case aa: ArrayAccessTree    => JavaTyper.typer(jcType(aa)).exists(_.isInstanceOf[p.Type.Struct])
+    case _                      => false
+  }
+
+  private def hasInvocation(t: Tree): Boolean = {
+    var found = false
+    new TreeScanner[Void, Void] {
+      override def visitMethodInvocation(node: MethodInvocationTree, p: Void): Void = {
+        found = true
+        super.visitMethodInvocation(node, p)
+      }
+    }.scan(t, null)
+    found
+  }
 
   private def directCall(
       scope: Scope,
@@ -1743,6 +1760,14 @@ object TreeRemapper {
     for {
       paramTpes <- sym.asType.getParameterTypes.asScala.toList.traverse(JavaTyper.typer)
       argTrees = mi.getArguments.asScala.toList
+      _ <-
+        if (
+          argTrees.zipWithIndex.exists { case (a, i) =>
+            hasInvocation(a) && argTrees.take(i).exists(objectElementArg)
+          }
+        )
+          "an object element followed by a call argument would change the element before it is passed".fail
+        else ().success
       lowered <- argTrees.traverse { a =>
         callArg(scope, buf, a).map { e =>
           val len = symOf(a)

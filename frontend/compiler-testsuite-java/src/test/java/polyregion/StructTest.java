@@ -252,6 +252,22 @@ public class StructTest extends BaseSuite {
     assertEquals(7, ps[1].y);
   }
 
+  @Test
+  public void helperWritesThroughEveryArrayElement() {
+    Point[] ps = {new Point(1, 1), new Point(7, 7), new Point(20, 20)};
+    OffloadRunnable r =
+        () -> {
+          for (int i = 0; i < 3; i++) bump(ps[i]);
+        };
+    polyregion.javalang.Runtime.offload(r);
+    assertEquals(2, ps[0].x);
+    assertEquals(3, ps[0].y);
+    assertEquals(8, ps[1].x);
+    assertEquals(9, ps[1].y);
+    assertEquals(21, ps[2].x);
+    assertEquals(22, ps[2].y);
+  }
+
   static void bumpTwice(Point p) {
     bump(p);
     bump(p);
@@ -283,6 +299,26 @@ public class StructTest extends BaseSuite {
     polyregion.javalang.Runtime.offload(r);
     assertEquals(4909, out[0]);
     assertEquals(9, ps[0].x);
+  }
+
+  static void bumpBy(Point p, int by) {
+    p.x += by;
+  }
+
+  static int reassignFirst(Point[] ps) {
+    ps[0] = new Point(100, 100);
+    return 1;
+  }
+
+  @Test
+  public void refusesEvaluationOrderThatReassignsAnObjectElement() {
+    Point[] ps = {new Point(1, 1)};
+    assertRejected(
+        "an object element followed by a call argument",
+        () -> {
+          bumpBy(ps[0], reassignFirst(ps));
+          return 0;
+        });
   }
 
   static void overwritePrimitive(int x) {
