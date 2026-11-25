@@ -49,6 +49,8 @@ extern "C" bool SPIRVTranslate(Module *M, std::string &SpirvObj, std::string &Er
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/InstIterator.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/IntrinsicsSPIRV.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/LLVMRemarkStreamer.h"
@@ -1660,6 +1662,7 @@ static bool rewriteByteGepsToTyped(llvm::Function &F, llvm::Module &module, cons
     llvm::IRBuilder<> B(gep);
     auto *replacement = respaceChain(gep, root, to, B, dl);
     if (!replacement) continue;
+    if (replacement->getType() != gep->getType()) replacement = B.CreateAddrSpaceCast(replacement, gep->getType());
     gep->replaceAllUsesWith(replacement);
     gep->eraseFromParent();
     changed = true;
@@ -1748,6 +1751,69 @@ static bool normaliseConstantAggregateAccesses(llvm::Function &F, const llvm::Da
   return changed;
 }
 
+static llvm::Value *lowerCttz64(llvm::CallInst *call, llvm::IRBuilder<> &B) {
+  llvm::Type *i64 = call->getType();
+  llvm::Value *original = call->getArgOperand(0);
+  llvm::Value *x = original;
+  llvm::Value *n = llvm::ConstantInt::get(i64, 0);
+  const uint64_t masks[] = {0xffffffffULL, 0xffffULL, 0xffULL, 0xfULL, 0x3ULL, 0x1ULL};
+  const uint64_t shifts[] = {32, 16, 8, 4, 2, 1};
+  for (unsigned i = 0; i < 6; ++i) {
+    llvm::Value *zero = B.CreateICmpEQ(B.CreateAnd(x, llvm::ConstantInt::get(i64, masks[i])), llvm::ConstantInt::get(i64, 0));
+    n = B.CreateAdd(n, B.CreateSelect(zero, llvm::ConstantInt::get(i64, shifts[i]), llvm::ConstantInt::get(i64, 0)));
+    x = B.CreateSelect(zero, B.CreateLShr(x, llvm::ConstantInt::get(i64, shifts[i])), x);
+  }
+  if (const auto *flag = llvm::dyn_cast<llvm::ConstantInt>(call->getArgOperand(1)); flag && !flag->isOne())
+    return B.CreateSelect(B.CreateICmpEQ(original, llvm::ConstantInt::get(i64, 0)), llvm::ConstantInt::get(i64, 64), n);
+  return n;
+}
+
+static void normaliseVulkanIntrinsics(llvm::Function &F) {
+  llvm::SmallVector<llvm::CallInst *, 16> calls;
+  for (auto &BB : F)
+    for (auto &I : BB)
+      if (auto *call = llvm::dyn_cast<llvm::CallInst>(&I); call) {
+        switch (call->getIntrinsicID()) {
+          case llvm::Intrinsic::copysign:
+          case llvm::Intrinsic::cttz:
+          case llvm::Intrinsic::umin:
+          case llvm::Intrinsic::umax: calls.push_back(call); break;
+          default: break;
+        }
+      }
+  for (auto *call : calls) {
+    const auto id = call->getIntrinsicID();
+    llvm::Type *ty = call->getType();
+    if (id == llvm::Intrinsic::copysign && !ty->isDoubleTy()) continue;
+    if (id != llvm::Intrinsic::copysign && !ty->isIntegerTy(64)) continue;
+    llvm::IRBuilder<> B(call);
+    llvm::Value *result = nullptr;
+    if (id == llvm::Intrinsic::copysign) {
+      auto *intTy = llvm::IntegerType::get(F.getContext(), 64);
+      llvm::APInt signBit(64, 1);
+      signBit <<= 63;
+      llvm::Value *magBits = B.CreateBitCast(call->getArgOperand(0), intTy);
+      llvm::Value *signBits = B.CreateBitCast(call->getArgOperand(1), intTy);
+      llvm::Value *mag = B.CreateAnd(magBits, llvm::ConstantInt::get(intTy, ~signBit));
+      llvm::Value *sign = B.CreateAnd(signBits, llvm::ConstantInt::get(intTy, signBit));
+      result = B.CreateBitCast(B.CreateOr(mag, sign), ty);
+    } else if (id == llvm::Intrinsic::cttz) {
+      result = lowerCttz64(call, B);
+    } else {
+      llvm::Value *a = call->getArgOperand(0), *b = call->getArgOperand(1);
+      const auto pred = id == llvm::Intrinsic::umin ? llvm::ICmpInst::ICMP_ULT : llvm::ICmpInst::ICMP_UGT;
+      result = B.CreateSelect(B.CreateICmp(pred, a, b), a, b);
+    }
+    call->replaceAllUsesWith(result);
+    call->eraseFromParent();
+  }
+}
+
+void llvmc::normaliseVulkanIntrinsicsForTest(llvm::Module &M) {
+  for (llvm::Function &F : M)
+    if (!F.isDeclaration() && !F.getEntryBlock().empty()) normaliseVulkanIntrinsics(F);
+}
+
 void llvmc::normaliseTypePunnedForTest(llvm::Module &M) {
   for (llvm::Function &F : M)
     if (!F.isDeclaration() && !F.getEntryBlock().empty()) normaliseTypePunnedAccesses(F, M.getDataLayout());
@@ -1817,6 +1883,7 @@ static void scalariseForSpirv(llvm::TargetMachine &TM, llvm::Module &M, const bo
       if (logical) {
         normaliseConstantAggregateAccesses(F, M.getDataLayout());
         normaliseTypePunnedAccesses(F, M.getDataLayout());
+        normaliseVulkanIntrinsics(F);
       }
       FPM.run(F, FAM);
       if (logical) {

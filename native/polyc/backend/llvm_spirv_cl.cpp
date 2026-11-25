@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -787,40 +788,90 @@ struct VulkanF32Math {
 
 } // namespace
 
+using VulkanUnary = llvm::Value *(VulkanF32Math::*)(llvm::Value *) const;
+using VulkanBinary = llvm::Value *(VulkanF32Math::*)(llvm::Value *, llvm::Value *) const;
+
+struct VulkanMathRoute {
+  bool libm64 = false;
+  llvm::Intrinsic::ID intrinsic = llvm::Intrinsic::not_intrinsic;
+  VulkanUnary unary = nullptr;
+  VulkanBinary binary = nullptr;
+};
+
+static const char *spirvLibmFn(std::string_view name, unsigned arity) {
+#define POLYREGION_LIBM_FN(N, A, K, F)                                                                                                     \
+  if (name == #N && arity == A) return "__polyregion_" #N "_f64";
+#include "spirv_libm.def"
+#undef POLYREGION_LIBM_FN
+  return nullptr;
+}
+
+static const auto &vulkanMathRoutes() {
+  static const std::map<std::pair<std::string_view, unsigned>, VulkanMathRoute> routes = [] {
+    std::map<std::pair<std::string_view, unsigned>, VulkanMathRoute> r;
+#define POLYREGION_LIBM_FN(N, A, K, F) r[{#N, A}].libm64 = true;
+#include "spirv_libm.def"
+#undef POLYREGION_LIBM_FN
+    const auto add = [&](const char *name, unsigned arity, llvm::Intrinsic::ID id) { r[{name, arity}].intrinsic = id; };
+    add("sin", 1, llvm::Intrinsic::sin);
+    add("cos", 1, llvm::Intrinsic::cos);
+    add("tan", 1, llvm::Intrinsic::tan);
+    add("asin", 1, llvm::Intrinsic::asin);
+    add("acos", 1, llvm::Intrinsic::acos);
+    add("atan", 1, llvm::Intrinsic::atan);
+    add("sinh", 1, llvm::Intrinsic::sinh);
+    add("cosh", 1, llvm::Intrinsic::cosh);
+    add("tanh", 1, llvm::Intrinsic::tanh);
+    add("sqrt", 1, llvm::Intrinsic::sqrt);
+    add("exp", 1, llvm::Intrinsic::exp);
+    add("exp2", 1, llvm::Intrinsic::exp2);
+    add("log", 1, llvm::Intrinsic::log);
+    add("log2", 1, llvm::Intrinsic::log2);
+    add("log10", 1, llvm::Intrinsic::log10);
+    add("floor", 1, llvm::Intrinsic::floor);
+    add("ceil", 1, llvm::Intrinsic::ceil);
+    add("round", 1, llvm::Intrinsic::round);
+    add("rint", 1, llvm::Intrinsic::rint);
+    add("fabs", 1, llvm::Intrinsic::fabs);
+    add("pow", 2, llvm::Intrinsic::pow);
+    r[{"cbrt", 1}].unary = &VulkanF32Math::cbrt;
+    r[{"expm1", 1}].unary = &VulkanF32Math::expm1;
+    r[{"log1p", 1}].unary = &VulkanF32Math::log1p;
+    r[{"hypot", 2}].binary = &VulkanF32Math::hypot;
+    r[{"atan2", 2}].binary = &VulkanF32Math::atan2;
+    return r;
+  }();
+  return routes;
+}
+
 ValPtr SPIRVVulkanTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::MathOp &expr) {
-  using Unary = llvm::Value *(VulkanF32Math::*)(llvm::Value *) const;
-  using Binary = llvm::Value *(VulkanF32Math::*)(llvm::Value *, llvm::Value *) const;
-  static const std::unordered_map<std::string_view, Unary> uCompose = {
-      {"cbrt", &VulkanF32Math::cbrt}, {"expm1", &VulkanF32Math::expm1}, {"log1p", &VulkanF32Math::log1p}};
-  static const std::unordered_map<std::string_view, Binary> bCompose = {{"hypot", &VulkanF32Math::hypot}, {"atan2", &VulkanF32Math::atan2}};
   const auto requireF32 = [](const char *name, const AnyType &rtn) {
     if (!rtn.is<polyregion::polyast::Type::Float32>())
       throw BackendException(std::string("Vulkan has no ") + (rtn.is<polyregion::polyast::Type::Float64>() ? "64" : "16")
                              + "-bit float form of " + name);
   };
-  static const std::unordered_map<std::string_view, llvm::Intrinsic::ID> uIntr = {
-      {"sin", llvm::Intrinsic::sin},     {"cos", llvm::Intrinsic::cos},   {"tan", llvm::Intrinsic::tan},
-      {"asin", llvm::Intrinsic::asin},   {"acos", llvm::Intrinsic::acos}, {"atan", llvm::Intrinsic::atan},
-      {"sinh", llvm::Intrinsic::sinh},   {"cosh", llvm::Intrinsic::cosh}, {"tanh", llvm::Intrinsic::tanh},
-      {"sqrt", llvm::Intrinsic::sqrt},   {"exp", llvm::Intrinsic::exp},   {"exp2", llvm::Intrinsic::exp2},
-      {"log", llvm::Intrinsic::log},     {"log2", llvm::Intrinsic::log2}, {"log10", llvm::Intrinsic::log10},
-      {"floor", llvm::Intrinsic::floor}, {"ceil", llvm::Intrinsic::ceil}, {"round", llvm::Intrinsic::round},
-      {"rint", llvm::Intrinsic::rint},   {"fabs", llvm::Intrinsic::fabs}};
-  static const std::unordered_map<std::string_view, llvm::Intrinsic::ID> bIntr = {{"pow", llvm::Intrinsic::pow}};
+  const auto routeOf = [](std::string_view name, unsigned arity) -> const VulkanMathRoute * {
+    const auto &routes = vulkanMathRoutes();
+    const auto it = routes.find({name, arity});
+    return it == routes.end() ? nullptr : &it->second;
+  };
   const auto vkUnary = [&](const char *name, const AnyType &rtn, const AnyTerm &arg) -> ValPtr {
-    if (std::string_view(name) == "exp" && rtn.is<polyregion::polyast::Type::Float64>()) return cg.extFn1("__polyregion_exp_f64", rtn, arg);
-    if (const auto id = uIntr ^ get_maybe(std::string_view(name))) return cg.intr1(*id, rtn, arg);
-    if (const auto fn = uCompose ^ get_maybe(std::string_view(name))) {
+    const auto *route = routeOf(name, 1);
+    if (rtn.is<polyregion::polyast::Type::Float64>() && route && route->libm64) return cg.extFn1(spirvLibmFn(name, 1), rtn, arg);
+    if (route && route->intrinsic != llvm::Intrinsic::not_intrinsic) return cg.intr1(route->intrinsic, rtn, arg);
+    if (route && route->unary) {
       requireF32(name, rtn);
-      return (VulkanF32Math{cg}.*(*fn))(cg.mkTermVal(arg));
+      return (VulkanF32Math{cg}.*(route->unary))(cg.mkTermVal(arg));
     }
     throw BackendException(std::string("Vulkan has no lowering for math function ") + name);
   };
   const auto vkBinary = [&](const char *name, const AnyType &rtn, const AnyTerm &lhs, const AnyTerm &rhs) -> ValPtr {
-    if (const auto id = bIntr ^ get_maybe(std::string_view(name))) return cg.intr2(*id, rtn, lhs, rhs);
-    if (const auto fn = bCompose ^ get_maybe(std::string_view(name))) {
+    const auto *route = routeOf(name, 2);
+    if (rtn.is<polyregion::polyast::Type::Float64>() && route && route->libm64) return cg.extFn2(spirvLibmFn(name, 2), rtn, lhs, rhs);
+    if (route && route->intrinsic != llvm::Intrinsic::not_intrinsic) return cg.intr2(route->intrinsic, rtn, lhs, rhs);
+    if (route && route->binary) {
       requireF32(name, rtn);
-      return (VulkanF32Math{cg}.*(*fn))(cg.mkTermVal(lhs), cg.mkTermVal(rhs));
+      return (VulkanF32Math{cg}.*(route->binary))(cg.mkTermVal(lhs), cg.mkTermVal(rhs));
     }
     throw BackendException(std::string("Vulkan has no lowering for math function ") + name);
   };

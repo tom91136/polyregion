@@ -50,7 +50,7 @@ if (NOT EXISTS "${LIBC_ROOT}/src/math/generic/exp.cpp")
         set(DOWNLOAD_LLVM TRUE)
     endif ()
     if (DOWNLOAD_LLVM)
-        message(STATUS "Downloading LLVM source for libc exp from ${LLVM_SOURCE_URL}")
+        message(STATUS "Downloading LLVM source for libc maths from ${LLVM_SOURCE_URL}")
         file(DOWNLOAD "${LLVM_SOURCE_URL}" "${LLVM_TARBALL}"
                 EXPECTED_HASH SHA256=${LLVM_SOURCE_SHA256}
                 STATUS DOWNLOAD_STATUS)
@@ -78,39 +78,150 @@ if (NOT EXISTS "${LIBC_ROOT}/src/math/generic/exp.cpp")
     set(LIBC_ROOT "${EXTRACT_DIR}/llvm-project-${LLVM_SRC_VERSION}.src/libc")
     set(LICENSE_SRC "${EXTRACT_DIR}/llvm-project-${LLVM_SRC_VERSION}.src/LICENSE.TXT")
 endif ()
-set(ENTRY "${OUT_DIR}/.staging/spirv_libm_entry.cpp")
+
+set(FUNC_DEF "${CMAKE_CURRENT_LIST_DIR}/../polyc/backend/spirv_libm.def")
+if (NOT EXISTS "${FUNC_DEF}")
+  message(FATAL_ERROR "function list missing at ${FUNC_DEF}; f64 maths cannot be staged")
+endif ()
+file(STRINGS "${FUNC_DEF}" _def_lines REGEX "^POLYREGION_LIBM_FN\\(")
+set(FUNCS)
+set(ARITIES)
+set(KINDS)
+set(FLAGS)
+foreach(_line IN LISTS _def_lines)
+  if(NOT _line MATCHES "POLYREGION_LIBM_FN\\(([a-z0-9]+), ([12]), ([a-z]+), (skip|accurate)\\)")
+    message(FATAL_ERROR "malformed function list entry: ${_line}")
+  endif()
+  list(APPEND FUNCS "${CMAKE_MATCH_1}")
+  list(APPEND ARITIES "${CMAKE_MATCH_2}")
+  list(APPEND KINDS "${CMAKE_MATCH_3}")
+  list(APPEND FLAGS "${CMAKE_MATCH_4}")
+endforeach()
+list(LENGTH FUNCS _count)
+if(_count EQUAL 0)
+  message(FATAL_ERROR "empty function list")
+endif()
+
 file(MAKE_DIRECTORY "${OUT_DIR}/.staging")
-file(WRITE "${ENTRY}"
-"#include \"src/math/exp.h\"
-extern \"C\" double __polyregion_exp_f64(double x) { return LIBC_NAMESPACE::exp(x); }
-")
+
+set(COMPOSED_SINH [=[
+#include "src/math/exp.h"
+#include "src/math/expm1.h"
+namespace LIBC_NAMESPACE_DECL {
+double sinh(double x) {
+  const double ax = __builtin_fabs(x);
+  if (ax > 710.4758600739439) {
+    const unsigned long long ux = __builtin_bit_cast(unsigned long long, x);
+    return __builtin_bit_cast(double, 0x7ff0000000000000ULL | (ux & 0x8000000000000000ULL));
+  }
+  double r;
+  if (ax > 709.78) {
+    const double h = exp(0.5 * ax);
+    const unsigned long long uh = __builtin_bit_cast(unsigned long long, h);
+    r = __builtin_bit_cast(double, uh - 0x0010000000000000ULL) * h;
+  } else {
+    r = (expm1(x) - expm1(-x)) * 0.5;
+  }
+  const unsigned long long ux = __builtin_bit_cast(unsigned long long, x);
+  const unsigned long long ur = __builtin_bit_cast(unsigned long long, r);
+  return __builtin_bit_cast(double, (ur & 0x7fffffffffffffffULL) | (ux & 0x8000000000000000ULL));
+}
+}
+]=])
+set(COMPOSED_COSH [=[
+#include "src/math/exp.h"
+#include "src/math/expm1.h"
+namespace LIBC_NAMESPACE_DECL {
+double cosh(double x) {
+  const double ax = __builtin_fabs(x);
+  if (ax > 710.4758600739439) return __builtin_bit_cast(double, 0x7ff0000000000000ULL);
+  if (ax > 709.78) {
+    const double h = exp(0.5 * ax);
+    const unsigned long long uh = __builtin_bit_cast(unsigned long long, h);
+    return __builtin_bit_cast(double, uh - 0x0010000000000000ULL) * h;
+  }
+  return 1.0 + (expm1(x) + expm1(-x)) * 0.5;
+}
+}
+]=])
+set(COMPOSED_TANH [=[
+#include "src/math/expm1.h"
+namespace LIBC_NAMESPACE_DECL {
+double tanh(double x) {
+  if (__builtin_fabs(x) > 20.0) {
+    const unsigned long long ux = __builtin_bit_cast(unsigned long long, x);
+    return __builtin_bit_cast(double, 0x3ff0000000000000ULL | (ux & 0x8000000000000000ULL));
+  }
+  const double t = expm1(2.0 * x);
+  return t / (t + 2.0);
+}
+}
+]=])
 
 set(COMMON_FLAGS
   --target=spirv64-unknown-unknown -nostdlibinc -std=c++17 -O2 -emit-llvm -c
   -I "${LIBC_ROOT}" -DLIBC_NAMESPACE=__llvm_libc -DLIBC_FULL_BUILD
   "-DLIBC_MATH=(LIBC_MATH_NO_ERRNO | LIBC_MATH_NO_EXCEPT)"
-  -DLIBC_MATH_HAS_SKIP_ACCURATE_PASS -DLIBC_MATH_HAS_ASSUME_ROUND_NEAREST_ONLY)
+  -DLIBC_MATH_HAS_ASSUME_ROUND_NEAREST_ONLY)
+
+set(OBJECTS)
+math(EXPR _last "${_count} - 1")
+foreach(_i RANGE ${_last})
+  list(GET FUNCS ${_i} _fn)
+  list(GET ARITIES ${_i} _arity)
+  list(GET KINDS ${_i} _kind)
+  list(GET FLAGS ${_i} _flags)
+  if(_kind STREQUAL "libc")
+    set(_src_file "${LIBC_ROOT}/src/math/generic/${_fn}.cpp")
+  else()
+    set(_src_file "${OUT_DIR}/.staging/${_fn}_composed.cpp")
+    if(_kind STREQUAL "sinh")
+      file(WRITE "${_src_file}" "${COMPOSED_SINH}")
+    elseif(_kind STREQUAL "cosh")
+      file(WRITE "${_src_file}" "${COMPOSED_COSH}")
+    elseif(_kind STREQUAL "tanh")
+      file(WRITE "${_src_file}" "${COMPOSED_TANH}")
+    else()
+      message(FATAL_ERROR "no composed source for kind ${_kind}")
+    endif()
+  endif()
+  set(_flags_now ${COMMON_FLAGS})
+  if(_flags STREQUAL "skip")
+    list(APPEND _flags_now -DLIBC_MATH_HAS_SKIP_ACCURATE_PASS)
+  endif()
+  set(_entry "${OUT_DIR}/.staging/${_fn}_entry.cpp")
+  file(WRITE "${_entry}"
+    "#include \"src/math/${_fn}.h\"\n"
+    "extern \"C\" double __polyregion_${_fn}_f64(double x")
+  if(_arity EQUAL 2)
+    file(APPEND "${_entry}" ", double y")
+  endif()
+  file(APPEND "${_entry}" ") { return LIBC_NAMESPACE::${_fn}(x")
+  if(_arity EQUAL 2)
+    file(APPEND "${_entry}" ", y")
+  endif()
+  file(APPEND "${_entry}" "); }\n")
+  execute_process(
+    COMMAND "${CLANGXX_BIN}" ${_flags_now} "${_src_file}" -o "${OUT_DIR}/.staging/${_fn}.bc"
+    COMMAND_ECHO STDERR RESULT_VARIABLE SUCCESS)
+  if(NOT SUCCESS EQUAL 0)
+    message(FATAL_ERROR "failed to compile LLVM libc ${_fn} source for SPIR-V")
+  endif()
+  execute_process(
+    COMMAND "${CLANGXX_BIN}" ${_flags_now} "${_entry}" -o "${OUT_DIR}/.staging/${_fn}_entry.bc"
+    COMMAND_ECHO STDERR RESULT_VARIABLE SUCCESS)
+  if(NOT SUCCESS EQUAL 0)
+    message(FATAL_ERROR "failed to compile the LLVM libc ${_fn} entry adapter")
+  endif()
+  list(APPEND OBJECTS "${OUT_DIR}/.staging/${_fn}.bc" "${OUT_DIR}/.staging/${_fn}_entry.bc")
+endforeach()
 
 execute_process(
-  COMMAND "${CLANGXX_BIN}" ${COMMON_FLAGS} "${LIBC_ROOT}/src/math/generic/exp.cpp"
-          -o "${OUT_DIR}/.staging/exp.bc"
-  COMMAND_ECHO STDERR RESULT_VARIABLE SUCCESS)
-if(NOT SUCCESS EQUAL 0)
-  message(FATAL_ERROR "failed to compile LLVM libc exp.cpp for SPIR-V")
-endif()
-execute_process(
-  COMMAND "${CLANGXX_BIN}" ${COMMON_FLAGS} "${ENTRY}" -o "${OUT_DIR}/.staging/entry.bc"
-  COMMAND_ECHO STDERR RESULT_VARIABLE SUCCESS)
-if(NOT SUCCESS EQUAL 0)
-  message(FATAL_ERROR "failed to compile the LLVM libc exp entry adapter")
-endif()
-execute_process(
-  COMMAND "${LLVM_LINK_BIN}" "${OUT_DIR}/.staging/exp.bc" "${OUT_DIR}/.staging/entry.bc"
-          -o "${OUT_DIR}/spirv-libm.bc"
+  COMMAND "${LLVM_LINK_BIN}" ${OBJECTS} -o "${OUT_DIR}/spirv-libm.bc"
   COMMAND_ECHO STDERR RESULT_VARIABLE SUCCESS)
 if(NOT SUCCESS EQUAL 0)
   message(FATAL_ERROR "failed to link the LLVM libc SPIR-V bitcode")
 endif()
 configure_file("${LICENSE_SRC}" "${OUT_DIR}/spirv-libm.bc.LICENSE" COPYONLY)
 file(SIZE "${OUT_DIR}/spirv-libm.bc" bc_size)
-message(STATUS "spirv-libm.bc (LLVM libc exp): ${bc_size} bytes")
+message(STATUS "spirv-libm.bc (LLVM libc f64 maths, ${_count} functions): ${bc_size} bytes")

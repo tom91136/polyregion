@@ -40,6 +40,7 @@ void restoreLeafGeps(llvm::Function &F);
 // Internal normalisation seams kept visible for focused static-library tests.
 void normaliseTypePunnedForTest(llvm::Module &M);
 void normaliseConstantAggregateForTest(llvm::Module &M);
+void normaliseVulkanIntrinsicsForTest(llvm::Module &M);
 // module metadata naming the first binding of a logical kernel's arena views
 inline constexpr auto ArenaViewStartMetadata = "polyregion.arena_view_start";
 POLYREGION_EXPORT polyast::CompileResult compileModule(const TargetInfo &info, const compiletime::OptLevel &opt, bool emitDisassembly,

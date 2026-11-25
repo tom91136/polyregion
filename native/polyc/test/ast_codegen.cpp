@@ -1069,34 +1069,61 @@ TEST_CASE("math ops compile across targets", "[compiler][math]") {
   }
 }
 
-TEST_CASE("Vulkan f32 maths passes spirv-val", "[compiler][math][vulkan]") {
+TEST_CASE("Vulkan maths passes spirv-val", "[compiler][math][vulkan]") {
   compiler::initialise();
   const auto c = compiler::compile(program({}, {mkMathKernel(Float)}), {Target::Object_LLVM_SPIRV_GLCompute, ""}, OptLevel::O3);
   REQUIRE(c.binary.has_value());
   polyregion::test::validateSpirvBytes(*c.binary, "polyc_vulkan_math");
 }
 
-TEST_CASE("Vulkan refuses 64-bit maths that has no 64-bit form", "[compiler][math][vulkan]") {
+static Expr::Any mkDefMath(const std::string &name, const Term::Select &x, const Type::Any &t) {
+  if (name == "exp") return call(Exp(x, t));
+  if (name == "cos") return call(Cos(x, t));
+  if (name == "acos") return call(Acos(x, t));
+  if (name == "asin") return call(Asin(x, t));
+  if (name == "sin") return call(Sin(x, t));
+  if (name == "tan") return call(Tan(x, t));
+  if (name == "atan") return call(Atan(x, t));
+  if (name == "sinh") return call(Sinh(x, t));
+  if (name == "cosh") return call(Cosh(x, t));
+  if (name == "tanh") return call(Tanh(x, t));
+  if (name == "expm1") return call(Expm1(x, t));
+  if (name == "log1p") return call(Log1p(x, t));
+  if (name == "hypot") return call(Hypot(x, x, t));
+  throw std::logic_error("no test node for " + name);
+}
+
+static const std::vector<std::string> libmDefNames = {
+#define POLYREGION_LIBM_FN(N, A, K, F) #N,
+#include "../backend/spirv_libm.def"
+#undef POLYREGION_LIBM_FN
+};
+
+TEST_CASE("Vulkan lowers every listed f64 maths function", "[compiler][math][vulkan]") {
+  compiler::initialise();
+  const auto name = GENERATE(from_range(libmDefNames));
+  const Type::Any tpe = Double;
+  const Term::Select in = "in"_(tpe);
+  const auto fn =
+      function("k", {"out"_(Ptr(tpe))(), "in"_(tpe)()}, Unit, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(),
+               CallConvention::OffloadEntry())({let("r") = mkDefMath(name, in, tpe), "out"_(Ptr(tpe))[0_(SInt)] = "r"_(tpe), ret()});
+  DYNAMIC_SECTION(name) {
+    const auto c = compiler::compile(program({}, {fn}), {Target::Object_LLVM_SPIRV_GLCompute, ""}, OptLevel::O3);
+    CHECK(c.messages == "");
+    REQUIRE(c.binary.has_value());
+    polyregion::test::validateSpirvBytes(*c.binary, "polyc_vulkan_math");
+  }
+}
+
+TEST_CASE("Vulkan refuses f64 maths with no legalizable lowering", "[compiler][math][vulkan]") {
   compiler::initialise();
   using MathFn = std::function<Expr::Any(const Term::Select &, const Type::Any &)>;
-  const auto [name, mk] = GENERATE(table<std::string, MathFn>({
-      {"sin", [](const auto &x, const auto &t) { return call(Sin(x, t)); }},
-      {"cos", [](const auto &x, const auto &t) { return call(Cos(x, t)); }},
-      {"tan", [](const auto &x, const auto &t) { return call(Tan(x, t)); }},
-      {"asin", [](const auto &x, const auto &t) { return call(Asin(x, t)); }},
-      {"acos", [](const auto &x, const auto &t) { return call(Acos(x, t)); }},
-      {"atan", [](const auto &x, const auto &t) { return call(Atan(x, t)); }},
-      {"sinh", [](const auto &x, const auto &t) { return call(Sinh(x, t)); }},
-      {"cosh", [](const auto &x, const auto &t) { return call(Cosh(x, t)); }},
-      {"tanh", [](const auto &x, const auto &t) { return call(Tanh(x, t)); }},
-      {"log", [](const auto &x, const auto &t) { return call(Log(x, t)); }},
-      {"log10", [](const auto &x, const auto &t) { return call(Log10(x, t)); }},
-      {"pow", [](const auto &x, const auto &t) { return call(Pow(x, x, t)); }},
-      {"atan2", [](const auto &x, const auto &t) { return call(Atan2(x, x, t)); }},
-      {"cbrt", [](const auto &x, const auto &t) { return call(Cbrt(x, t)); }},
-      {"expm1", [](const auto &x, const auto &t) { return call(Expm1(x, t)); }},
-      {"log1p", [](const auto &x, const auto &t) { return call(Log1p(x, t)); }},
-      {"hypot", [](const auto &x, const auto &t) { return call(Hypot(x, x, t)); }},
+  const auto [name, mk, message] = GENERATE(table<std::string, MathFn, std::string>({
+      {"log", [](const auto &x, const auto &t) { return call(Log(x, t)); }, "Vulkan has no 64-bit float form of GLSL.std.450 Log"},
+      {"log10", [](const auto &x, const auto &t) { return call(Log10(x, t)); }, "Vulkan has no 64-bit float form of GLSL.std.450 Log2"},
+      {"pow", [](const auto &x, const auto &t) { return call(Pow(x, x, t)); }, "Vulkan has no 64-bit float form of GLSL.std.450 Pow"},
+      {"cbrt", [](const auto &x, const auto &t) { return call(Cbrt(x, t)); }, "Vulkan has no 64-bit float form of cbrt"},
+      {"atan2", [](const auto &x, const auto &t) { return call(Atan2(x, x, t)); }, "Vulkan has no 64-bit float form of atan2"},
   }));
   const Type::Any tpe = Double;
   const Term::Select in = "in"_(tpe);
@@ -1104,7 +1131,7 @@ TEST_CASE("Vulkan refuses 64-bit maths that has no 64-bit form", "[compiler][mat
                            CallConvention::OffloadEntry())({let("r") = mk(in, tpe), "out"_(Ptr(tpe))[0_(SInt)] = "r"_(tpe), ret()});
   DYNAMIC_SECTION(name) {
     CHECK_THROWS_WITH(compiler::compile(program({}, {fn}), {Target::Object_LLVM_SPIRV_GLCompute, ""}, OptLevel::O3),
-                      ContainsSubstring("Vulkan has no 64-bit float form of"));
+                      ContainsSubstring(message));
   }
 }
 

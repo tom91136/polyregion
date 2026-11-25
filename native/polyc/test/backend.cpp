@@ -5540,6 +5540,61 @@ attributes #0 = { "hlsl.shader"="compute" "hlsl.numthreads"="256,1,1" }
   CHECK(ir.find("[4 x double], ptr @t, i32 0, i64 3") == std::string::npos);
 }
 
+TEST_CASE("Vulkan rewrites f64 copysign without G_FCOPYSIGN", "[backend][spirv][vulkan][intrinsics]") {
+  llvm::LLVMContext context;
+  llvm::SMDiagnostic diagnostic;
+  const auto module = llvm::parseAssemblyString(R"(
+declare double @llvm.copysign.f64(double, double)
+declare i64 @llvm.cttz.i64(i64, i1 immarg)
+declare i64 @llvm.umin.i64(i64, i64)
+define void @k(double %x, ptr %out) #0 {
+entry:
+  %r = call double @llvm.copysign.f64(double 1.0, double %x)
+  store double %r, ptr %out, align 8
+  %t = call i64 @llvm.cttz.i64(i64 1024, i1 true)
+  store i64 %t, ptr %out, align 8
+  %m = call i64 @llvm.umin.i64(i64 3, i64 4)
+  store i64 %m, ptr %out, align 8
+  ret void
+}
+attributes #0 = { "hlsl.shader"="compute" "hlsl.numthreads"="256,1,1" }
+)",
+                                                diagnostic, context);
+  REQUIRE(module);
+  polyregion::backend::llvmc::normaliseVulkanIntrinsicsForTest(*module);
+  std::string ir;
+  llvm::raw_string_ostream out(ir);
+  module->print(out, nullptr);
+  CHECK(ir.find("call double @llvm.copysign.f64") == std::string::npos);
+  CHECK(ir.find("call i64 @llvm.cttz.i64") == std::string::npos);
+  CHECK(ir.find("call i64 @llvm.umin.i64") == std::string::npos);
+  CHECK(ir.find("bitcast i64") != std::string::npos);
+}
+
+TEST_CASE("Vulkan cttz of zero returns the bit width when zero is not poison", "[backend][spirv][vulkan][intrinsics]") {
+  llvm::LLVMContext context;
+  llvm::SMDiagnostic diagnostic;
+  const auto module = llvm::parseAssemblyString(R"(
+declare i64 @llvm.cttz.i64(i64, i1 immarg)
+define void @k(ptr %out) #0 {
+entry:
+  %n = call i64 @llvm.cttz.i64(i64 0, i1 false)
+  store i64 %n, ptr %out, align 8
+  ret void
+}
+attributes #0 = { "hlsl.shader"="compute" "hlsl.numthreads"="256,1,1" }
+)",
+                                                diagnostic, context);
+  REQUIRE(module);
+  polyregion::backend::llvmc::normaliseVulkanIntrinsicsForTest(*module);
+  std::string ir;
+  llvm::raw_string_ostream out(ir);
+  module->print(out, nullptr);
+  CAPTURE(ir);
+  CHECK(ir.find("call i64 @llvm.cttz.i64") == std::string::npos);
+  CHECK(ir.find("i64 64") != std::string::npos);
+}
+
 TEST_CASE("Vulkan f64 modules preserve signed zero inf and nan", "[backend][spirv][vulkan][floatcontrols]") {
   const auto compiled = compileRawVulkanModule(R"(
 @out = internal global double 0.0
